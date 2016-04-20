@@ -107,6 +107,7 @@
             'installer/util/beacons_unittest.cc',
             'installer/util/callback_work_item_unittest.cc',
             'installer/util/channel_info_unittest.cc',
+            'installer/util/conditional_work_item_list_unittest.cc',
             'installer/util/copy_tree_work_item_unittest.cc',
             'installer/util/create_dir_work_item_unittest.cc',
             'installer/util/create_reg_key_work_item_unittest.cc',
@@ -147,6 +148,8 @@
             'installer/util/uninstall_metrics_unittest.cc',
             'installer/util/wmi_unittest.cc',
             'installer/util/work_item_list_unittest.cc',
+            'installer/util/work_item_mocks.cc',
+            'installer/util/work_item_mocks.h',
           ],
           'msvs_settings': {
             'VCManifestTool': {
@@ -220,7 +223,7 @@
             'installer_util_strings',
             '../base/base.gyp:base',
             '../chrome/common_constants.gyp:version_header',
-            '../components/components.gyp:crash_component_breakpad_to_be_deleted',
+            '../components/components.gyp:crash_component',
           ],
           'include_dirs': [
             '..',
@@ -239,6 +242,8 @@
             'installer/setup/installer_crash_reporter_client.h',
             'installer/setup/installer_crash_reporting.cc',
             'installer/setup/installer_crash_reporting.h',
+            'installer/setup/installer_metrics.cc',
+            'installer/setup/installer_metrics.h',
             'installer/setup/setup_constants.cc',
             'installer/setup/setup_constants.h',
             'installer/setup/setup_util.cc',
@@ -256,8 +261,12 @@
             '../chrome/common_constants.gyp:common_constants',
             '../chrome/common_constants.gyp:version_header',
             '../chrome_elf/chrome_elf.gyp:chrome_elf_constants',
+            '../components/components.gyp:crash_component',
             '../rlz/rlz.gyp:rlz_lib',
             '../third_party/zlib/zlib.gyp:zlib',
+          ],
+          'defines': [
+            'COMPILE_CONTENT_STATICALLY',
           ],
           'include_dirs': [
             '..',
@@ -266,6 +275,7 @@
           ],
           'sources': [
             '<(SHARED_INTERMEDIATE_DIR)/chrome/installer/util/installer_util_strings.rc',
+            '../content/public/common/content_switches.cc',
             'installer/setup/setup.ico',
             'installer/setup/setup.rc',
             'installer/setup/setup_exe_version.rc.version',
@@ -322,11 +332,6 @@
                 },
               },
             }],
-            ['win_use_allocator_shim==1', {
-              'dependencies': [
-                '<(allocator_target)',
-              ],
-            }],
           ],
         },
         {
@@ -369,13 +374,6 @@
             'installer/setup/setup_util_unittest.cc',
             'installer/setup/setup_util_unittest.h',
             'installer/setup/update_active_setup_version_work_item_unittest.cc',
-          ],
-          'conditions': [
-            ['win_use_allocator_shim==1', {
-              'dependencies': [
-                '<(allocator_target)',
-              ],
-            }],
           ],
           # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
           'msvs_disabled_warnings': [ 4267, ],

@@ -2,15 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_RENDERER_MEDIA_WEBMEDIAPLAYER_MS_COMPOSITOR_H
-#define CONTENT_RENDERER_MEDIA_WEBMEDIAPLAYER_MS_COMPOSITOR_H
+#ifndef CONTENT_RENDERER_MEDIA_WEBMEDIAPLAYER_MS_COMPOSITOR_H_
+#define CONTENT_RENDERER_MEDIA_WEBMEDIAPLAYER_MS_COMPOSITOR_H_
 
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <vector>
 
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/lock.h"
@@ -23,7 +23,7 @@ class SingleThreadTaskRunner;
 }
 
 namespace blink {
-class WebURL;
+class WebMediaStream;
 }
 
 namespace gfx {
@@ -56,7 +56,7 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
   // we enable algorithm or not.
   WebMediaPlayerMSCompositor(
       const scoped_refptr<base::SingleThreadTaskRunner>& compositor_task_runner,
-      const blink::WebURL& url,
+      const blink::WebMediaStream& web_stream,
       const base::WeakPtr<WebMediaPlayerMS>& player);
 
   ~WebMediaPlayerMSCompositor() override;
@@ -125,7 +125,7 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
 
   // |rendering_frame_buffer_| stores the incoming frames, and provides a frame
   // selection method which returns the best frame for the render interval.
-  scoped_ptr<media::VideoRendererAlgorithm> rendering_frame_buffer_;
+  std::unique_ptr<media::VideoRendererAlgorithm> rendering_frame_buffer_;
 
   // |current_frame_used_by_compositor_| is updated on compositor thread only.
   // It's used to track whether |current_frame_| was painted for detecting
@@ -154,6 +154,6 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerMSCompositor);
 };
-}
+}  // namespace content
 
-#endif  // CONTENT_RENDERER_MEDIA_WEBMEDIAPLAYER_MS_COMPOSITOR_H
+#endif  // CONTENT_RENDERER_MEDIA_WEBMEDIAPLAYER_MS_COMPOSITOR_H_

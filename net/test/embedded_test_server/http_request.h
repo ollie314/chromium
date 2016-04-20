@@ -8,10 +8,10 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "url/gurl.h"
@@ -32,6 +32,7 @@ enum HttpMethod {
   METHOD_DELETE,
   METHOD_PATCH,
   METHOD_CONNECT,
+  METHOD_OPTIONS,
 };
 
 // Represents a HTTP request. Since it can be big, use scoped_ptr to pass it
@@ -48,6 +49,7 @@ struct HttpRequest {
       std::map<std::string, std::string, CaseInsensitiveStringComparator>;
 
   HttpRequest();
+  HttpRequest(const HttpRequest& other);
   ~HttpRequest();
 
   // Returns a GURL as a convenience to extract the path and query strings.
@@ -71,7 +73,7 @@ struct HttpRequest {
 // void OnDataChunkReceived(Socket* socket, const char* data, int size) {
 //   parser.ProcessChunk(std::string(data, size));
 //   if (parser.ParseRequest() == HttpRequestParser::ACCEPTED) {
-//     scoped_ptr<HttpRequest> request = parser.GetRequest();
+//     std::unique_ptr<HttpRequest> request = parser.GetRequest();
 //     (... process the request ...)
 //   }
 class HttpRequestParser {
@@ -104,7 +106,7 @@ class HttpRequestParser {
   // Retrieves parsed request. Can be only called, when the parser is in
   // STATE_ACCEPTED state. After calling it, the parser is ready to parse
   // another request.
-  scoped_ptr<HttpRequest> GetRequest();
+  std::unique_ptr<HttpRequest> GetRequest();
 
  private:
   HttpMethod GetMethodType(const std::string& token) const;
@@ -122,14 +124,14 @@ class HttpRequestParser {
   // no line available.
   std::string ShiftLine();
 
-  scoped_ptr<HttpRequest> http_request_;
+  std::unique_ptr<HttpRequest> http_request_;
   std::string buffer_;
   size_t buffer_position_;  // Current position in the internal buffer.
   State state_;
   // Content length of the request currently being parsed.
   size_t declared_content_length_;
 
-  scoped_ptr<HttpChunkedDecoder> chunked_decoder_;
+  std::unique_ptr<HttpChunkedDecoder> chunked_decoder_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpRequestParser);
 };

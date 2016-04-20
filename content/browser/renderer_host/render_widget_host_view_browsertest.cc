@@ -43,7 +43,6 @@
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
-#include "ui/gfx/win/dpi.h"
 #endif
 
 namespace content {
@@ -276,9 +275,8 @@ class FakeFrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
   DeliverFrameCallback callback_;
 };
 
-// Disable tests for Android and IOS as these platforms have incomplete
-// implementation.
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+// Disable tests for Android as it has an incomplete implementation.
+#if !defined(OS_ANDROID)
 
 // The CopyFromBackingStore() API should work on all platforms when compositing
 // is enabled.
@@ -344,7 +342,7 @@ IN_PROC_BROWSER_TEST_P(CompositingRenderWidgetHostViewBrowserTest,
   RenderWidgetHostViewBase* const view = GetRenderWidgetHostView();
 
   base::RunLoop run_loop;
-  scoped_ptr<RenderWidgetHostViewFrameSubscriber> subscriber(
+  std::unique_ptr<RenderWidgetHostViewFrameSubscriber> subscriber(
       new FakeFrameSubscriber(base::Bind(
           &RenderWidgetHostViewBrowserTest::FrameDelivered,
           base::Unretained(this), base::ThreadTaskRunnerHandle::Get(),
@@ -1005,7 +1003,7 @@ INSTANTIATE_TEST_CASE_P(
     CompositingRenderWidgetHostViewBrowserTestTabCaptureHighDPI,
     kTestCompositingModes);
 
-#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
+#endif  // !defined(OS_ANDROID)
 
 }  // namespace
 }  // namespace content

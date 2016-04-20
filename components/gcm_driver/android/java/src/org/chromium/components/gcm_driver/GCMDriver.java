@@ -118,7 +118,10 @@ public class GCMDriver {
         }.execute();
     }
 
-    public static void onMessageReceived(Context context, final String appId, final Bundle extras) {
+    // The caller of this function is responsible for setting the PathUtils Private Data Directory
+    // Suffix before calling onMessageReceived().
+    public static void onMessageReceived(
+            Context context, final String appId, final String senderId, final Bundle extras) {
         // TODO(johnme): Store message and redeliver later if Chrome is killed before delivery.
         ThreadUtils.assertOnUiThread();
         launchNativeThen(context, new Runnable() {
@@ -129,7 +132,6 @@ public class GCMDriver {
                 final String bundleRawData = "rawData";
                 final String bundleGcmplex = "com.google.ipc.invalidation.gcmmplex.";
 
-                String senderId = extras.getString(bundleSenderId);
                 String collapseKey = extras.getString(bundleCollapseKey);  // May be null.
                 byte[] rawData = extras.getByteArray(bundleRawData);  // May be null.
 
@@ -151,16 +153,6 @@ public class GCMDriver {
         });
     }
 
-    static void onMessagesDeleted(Context context, final String appId) {
-        // TODO(johnme): Store event and redeliver later if Chrome is killed before delivery.
-        ThreadUtils.assertOnUiThread();
-        launchNativeThen(context, new Runnable() {
-            @Override public void run() {
-                sInstance.nativeOnMessagesDeleted(sInstance.mNativeGCMDriverAndroid, appId);
-            }
-        });
-    }
-
     @VisibleForTesting
     public static void overrideSubscriberForTesting(GoogleCloudMessagingSubscriber subscriber) {
         assert sInstance != null;
@@ -174,7 +166,6 @@ public class GCMDriver {
             boolean success);
     private native void nativeOnMessageReceived(long nativeGCMDriverAndroid, String appId,
             String senderId, String collapseKey, byte[] rawData, String[] dataKeysAndValues);
-    private native void nativeOnMessagesDeleted(long nativeGCMDriverAndroid, String appId);
 
     private static void launchNativeThen(Context context, Runnable task) {
         if (sInstance != null) {

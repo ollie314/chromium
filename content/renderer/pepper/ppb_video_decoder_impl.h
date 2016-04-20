@@ -45,6 +45,7 @@ class PPB_VideoDecoder_Impl : public ppapi::PPB_VideoDecoder_Shared,
 
   // media::VideoDecodeAccelerator::Client implementation.
   void ProvidePictureBuffers(uint32_t requested_num_of_buffers,
+                             uint32_t textures_per_buffer,
                              const gfx::Size& dimensions,
                              uint32_t texture_target) override;
   void DismissPictureBuffer(int32_t picture_buffer_id) override;
@@ -69,7 +70,7 @@ class PPB_VideoDecoder_Impl : public ppapi::PPB_VideoDecoder_Shared,
 
   // This is NULL before initialization, and after destruction.
   // Holds a GpuVideoDecodeAcceleratorHost.
-  scoped_ptr<media::VideoDecodeAccelerator> decoder_;
+  std::unique_ptr<media::VideoDecodeAccelerator> decoder_;
 
   // The interface to use when making calls on the plugin. For the most part,
   // methods should not use this directly but should call GetPPP() instead.

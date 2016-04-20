@@ -50,7 +50,7 @@ namespace blink {
 
 static Position createPosition(Node* node, int offset)
 {
-    ASSERT(offset >= 0);
+    DCHECK_GE(offset, 0);
     if (!node)
         return Position();
     return Position(node, offset);
@@ -81,7 +81,7 @@ void DOMSelection::clearTreeScope()
 
 const VisibleSelection& DOMSelection::visibleSelection() const
 {
-    ASSERT(m_frame);
+    DCHECK(m_frame);
     return m_frame->selection().selection();
 }
 
@@ -220,14 +220,14 @@ void DOMSelection::collapse(Node* node, int offset, ExceptionState& exceptionSta
 
     if (!isValidForPosition(node))
         return;
-    RefPtrWillBeRawPtr<Range> range = Range::create(node->document());
+    Range* range = Range::create(node->document());
     range->setStart(node, offset, exceptionState);
     if (exceptionState.hadException())
         return;
     range->setEnd(node, offset, exceptionState);
     if (exceptionState.hadException())
         return;
-    m_frame->selection().setSelectedRange(range.get(), TextAffinity::Downstream, m_frame->selection().isDirectional() ? SelectionDirectionalMode::Directional : SelectionDirectionalMode::NonDirectional);
+    m_frame->selection().setSelectedRange(range, TextAffinity::Downstream, m_frame->selection().isDirectional() ? SelectionDirectionalMode::Directional : SelectionDirectionalMode::NonDirectional);
 }
 
 void DOMSelection::collapseToEnd(ExceptionState& exceptionState)
@@ -346,7 +346,7 @@ void DOMSelection::modify(const String& alterString, const String& directionStri
 
 void DOMSelection::extend(Node* node, int offset, ExceptionState& exceptionState)
 {
-    ASSERT(node);
+    DCHECK(node);
 
     if (!m_frame)
         return;
@@ -366,7 +366,7 @@ void DOMSelection::extend(Node* node, int offset, ExceptionState& exceptionState
     m_frame->selection().setExtent(createVisiblePosition(createPosition(node, offset)));
 }
 
-PassRefPtrWillBeRawPtr<Range> DOMSelection::getRangeAt(int index, ExceptionState& exceptionState)
+Range* DOMSelection::getRangeAt(int index, ExceptionState& exceptionState)
 {
     if (!m_frame)
         return nullptr;
@@ -377,15 +377,18 @@ PassRefPtrWillBeRawPtr<Range> DOMSelection::getRangeAt(int index, ExceptionState
     }
 
     // If you're hitting this, you've added broken multi-range selection support
-    ASSERT(rangeCount() == 1);
+    DCHECK_EQ(rangeCount(), 1);
 
     Position anchor = anchorPosition(visibleSelection());
     if (!anchor.anchorNode()->isInShadowTree())
         return m_frame->selection().firstRange();
 
+    Node* node = shadowAdjustedNode(anchor);
+    if (!node) // crbug.com/595100
+        return nullptr;
     if (!visibleSelection().isBaseFirst())
-        return Range::create(*anchor.document(), focusNode(), focusOffset(), shadowAdjustedNode(anchor), anchorOffset());
-    return Range::create(*anchor.document(), shadowAdjustedNode(anchor), anchorOffset(), focusNode(), focusOffset());
+        return Range::create(*anchor.document(), focusNode(), focusOffset(), node, anchorOffset());
+    return Range::create(*anchor.document(), node, anchorOffset(), focusNode(), focusOffset());
 }
 
 void DOMSelection::removeAllRanges()
@@ -397,12 +400,12 @@ void DOMSelection::removeAllRanges()
 
 void DOMSelection::addRange(Range* newRange)
 {
-    ASSERT(newRange);
+    DCHECK(newRange);
 
     if (!m_frame)
         return;
 
-    if (!newRange->inDocument()) {
+    if (!newRange->inShadowIncludingDocument()) {
         addConsoleError("The given range isn't in document.");
         return;
     }
@@ -414,7 +417,7 @@ void DOMSelection::addRange(Range* newRange)
         return;
     }
 
-    RefPtrWillBeRawPtr<Range> originalRange = selection.firstRange();
+    Range* originalRange = selection.firstRange();
 
     if (originalRange->startContainer()->document() != newRange->startContainer()->document()) {
         addConsoleError("The given range does not belong to the current selection's document.");
@@ -426,7 +429,7 @@ void DOMSelection::addRange(Range* newRange)
     }
 
     if (originalRange->compareBoundaryPoints(Range::START_TO_END, newRange, ASSERT_NO_EXCEPTION) < 0
-        || newRange->compareBoundaryPoints(Range::START_TO_END, originalRange.get(), ASSERT_NO_EXCEPTION) < 0) {
+        || newRange->compareBoundaryPoints(Range::START_TO_END, originalRange, ASSERT_NO_EXCEPTION) < 0) {
         addConsoleError("Discontiguous selection is not supported.");
         return;
     }
@@ -436,11 +439,11 @@ void DOMSelection::addRange(Range* newRange)
     // do the same, since we don't support discontiguous selection. Further discussions at
     // <https://code.google.com/p/chromium/issues/detail?id=353069>.
 
-    Range* start = originalRange->compareBoundaryPoints(Range::START_TO_START, newRange, ASSERT_NO_EXCEPTION) < 0 ? originalRange.get() : newRange;
-    Range* end = originalRange->compareBoundaryPoints(Range::END_TO_END, newRange, ASSERT_NO_EXCEPTION) < 0 ? newRange : originalRange.get();
-    RefPtrWillBeRawPtr<Range> merged = Range::create(originalRange->startContainer()->document(), start->startContainer(), start->startOffset(), end->endContainer(), end->endOffset());
+    Range* start = originalRange->compareBoundaryPoints(Range::START_TO_START, newRange, ASSERT_NO_EXCEPTION) < 0 ? originalRange : newRange;
+    Range* end = originalRange->compareBoundaryPoints(Range::END_TO_END, newRange, ASSERT_NO_EXCEPTION) < 0 ? newRange : originalRange;
+    Range* merged = Range::create(originalRange->startContainer()->document(), start->startContainer(), start->startOffset(), end->endContainer(), end->endOffset());
     TextAffinity affinity = selection.selection().affinity();
-    selection.setSelectedRange(merged.get(), affinity);
+    selection.setSelectedRange(merged, affinity);
 }
 
 void DOMSelection::deleteFromDocument()
@@ -453,7 +456,7 @@ void DOMSelection::deleteFromDocument()
     if (selection.isNone())
         return;
 
-    RefPtrWillBeRawPtr<Range> selectedRange = createRange(selection.selection().toNormalizedEphemeralRange());
+    Range* selectedRange = createRange(selection.selection().toNormalizedEphemeralRange());
     if (!selectedRange)
         return;
 
@@ -464,7 +467,7 @@ void DOMSelection::deleteFromDocument()
 
 bool DOMSelection::containsNode(const Node* n, bool allowPartial) const
 {
-    ASSERT(n);
+    DCHECK(n);
 
     if (!m_frame)
         return false;
@@ -493,7 +496,7 @@ bool DOMSelection::containsNode(const Node* n, bool allowPartial) const
 
     bool nodeFullyUnselected = (Range::compareBoundaryPoints(parentNode, nodeIndex, endPosition.computeContainerNode(), endPosition.offsetInContainerNode(), exceptionState) > 0 && !exceptionState.hadException())
         || (Range::compareBoundaryPoints(parentNode, nodeIndex + 1, startPosition.computeContainerNode(), startPosition.offsetInContainerNode(), exceptionState) < 0 && !exceptionState.hadException());
-    ASSERT(!exceptionState.hadException());
+    DCHECK(!exceptionState.hadException());
     if (nodeFullyUnselected)
         return false;
 
@@ -502,7 +505,7 @@ bool DOMSelection::containsNode(const Node* n, bool allowPartial) const
 
 void DOMSelection::selectAllChildren(Node* n, ExceptionState& exceptionState)
 {
-    ASSERT(n);
+    DCHECK(n);
 
     // This doesn't (and shouldn't) select text node characters.
     setBaseAndExtent(n, 0, n, n->countChildren(), exceptionState);
@@ -531,7 +534,7 @@ Node* DOMSelection::shadowAdjustedNode(const Position& position) const
     if (containerNode == adjustedNode)
         return containerNode;
 
-    ASSERT(!adjustedNode->isShadowRoot());
+    DCHECK(!adjustedNode->isShadowRoot()) << adjustedNode;
     return adjustedNode->parentOrShadowHostNode();
 }
 
@@ -554,7 +557,7 @@ int DOMSelection::shadowAdjustedOffset(const Position& position) const
 
 bool DOMSelection::isValidForPosition(Node* node) const
 {
-    ASSERT(m_frame);
+    DCHECK(m_frame);
     if (!node)
         return true;
     return node->document() == m_frame->document();

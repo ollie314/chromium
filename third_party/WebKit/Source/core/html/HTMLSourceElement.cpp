@@ -42,8 +42,8 @@ using namespace HTMLNames;
 
 static SourceEventSender& sourceErrorEventSender()
 {
-    DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<SourceEventSender>, sharedErrorEventSender, (SourceEventSender::create(EventTypeNames::error)));
-    return *sharedErrorEventSender;
+    DEFINE_STATIC_LOCAL(SourceEventSender, sharedErrorEventSender, (SourceEventSender::create(EventTypeNames::error)));
+    return sharedErrorEventSender;
 }
 
 class HTMLSourceElement::Listener final : public MediaQueryListListener {
@@ -62,12 +62,12 @@ public:
         MediaQueryListListener::trace(visitor);
     }
 private:
-    RawPtrWillBeMember<HTMLSourceElement> m_element;
+    Member<HTMLSourceElement> m_element;
 };
 
 inline HTMLSourceElement::HTMLSourceElement(Document& document)
     : HTMLElement(sourceTag, document)
-    , m_listener(adoptRefWillBeNoop(new Listener(this)))
+    , m_listener(new Listener(this))
 {
     WTF_LOG(Media, "HTMLSourceElement::HTMLSourceElement - %p", this);
 }
@@ -76,10 +76,6 @@ DEFINE_NODE_FACTORY(HTMLSourceElement)
 
 HTMLSourceElement::~HTMLSourceElement()
 {
-#if !ENABLE(OILPAN)
-    sourceErrorEventSender().cancelEvent(this);
-    m_listener->clearElement();
-#endif
 }
 
 void HTMLSourceElement::createMediaQueryList(const AtomicString& media)
@@ -89,8 +85,8 @@ void HTMLSourceElement::createMediaQueryList(const AtomicString& media)
 
     if (m_mediaQueryList)
         m_mediaQueryList->removeListener(m_listener);
-    RefPtrWillBeRawPtr<MediaQuerySet> set = MediaQuerySet::create(media);
-    m_mediaQueryList = MediaQueryList::create(&document(), &document().mediaQueryMatcher(), set.release());
+    MediaQuerySet* set = MediaQuerySet::create(media);
+    m_mediaQueryList = MediaQueryList::create(&document(), &document().mediaQueryMatcher(), set);
     m_mediaQueryList->addListener(m_listener);
 }
 
@@ -196,4 +192,4 @@ DEFINE_TRACE(HTMLSourceElement)
     HTMLElement::trace(visitor);
 }
 
-}
+} // namespace blink

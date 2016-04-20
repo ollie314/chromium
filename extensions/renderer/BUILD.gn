@@ -26,9 +26,19 @@ source_set("renderer") {
     "//content:resources",
     "//extensions:extensions_resources",
     "//gin",
+    "//mojo/edk/js",
     "//mojo/public/js",
     "//skia",
     "//third_party/WebKit/public:blink",
-    "//third_party/mojo/src/mojo/edk/js",
   ]
+
+  if (enable_wifi_display) {
+    wifi_display_sources = rebase_path(
+            extensions_gypi_values.extensions_renderer_sources_wifi_display,
+            ".",
+            "//extensions")
+    sources += wifi_display_sources
+
+    deps += [ "//third_party/wds:libwds" ]
+  }
 }

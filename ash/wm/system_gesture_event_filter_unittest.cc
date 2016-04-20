@@ -16,9 +16,11 @@
 #include "ash/test/display_manager_test_api.h"
 #include "ash/test/shell_test_api.h"
 #include "ash/test/test_shelf_delegate.h"
+#include "ash/wm/aura/wm_window_aura.h"
+#include "ash/wm/common/window_positioning_utils.h"
 #include "ash/wm/gestures/long_press_affordance_handler.h"
 #include "ash/wm/window_state.h"
-#include "ash/wm/window_util.h"
+#include "ash/wm/window_state_aura.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "ui/aura/env.h"
@@ -171,13 +173,13 @@ TEST_F(SystemGestureEventFilterTest, LongPressAffordanceStateOnCaptureLoss) {
   aura::Window* root_window = Shell::GetPrimaryRootWindow();
 
   aura::test::TestWindowDelegate delegate;
-  scoped_ptr<aura::Window> window0(
+  std::unique_ptr<aura::Window> window0(
       aura::test::CreateTestWindowWithDelegate(
           &delegate, 9, gfx::Rect(0, 0, 100, 100), root_window));
-  scoped_ptr<aura::Window> window1(
+  std::unique_ptr<aura::Window> window1(
       aura::test::CreateTestWindowWithDelegate(
           &delegate, 10, gfx::Rect(0, 0, 100, 50), window0.get()));
-  scoped_ptr<aura::Window> window2(
+  std::unique_ptr<aura::Window> window2(
       aura::test::CreateTestWindowWithDelegate(
           &delegate, 11, gfx::Rect(0, 50, 100, 50), window0.get()));
 
@@ -477,14 +479,16 @@ TEST_F(SystemGestureEventFilterTest, DragLeftNearEdgeSnaps) {
   ui::test::EventGenerator generator(root_window, toplevel_window);
 
   // Check that dragging left snaps before reaching the screen edge.
-  gfx::Rect work_area =
-      Shell::GetScreen()->GetDisplayNearestWindow(root_window).work_area();
+  gfx::Rect work_area = gfx::Screen::GetScreen()
+                            ->GetDisplayNearestWindow(root_window)
+                            .work_area();
   int drag_x = work_area.x() + 20 - points[0].x();
   generator.GestureMultiFingerScroll(
       kTouchPoints, points, 120, kSteps, drag_x, 0);
 
-  EXPECT_EQ(wm::GetDefaultLeftSnappedWindowBoundsInParent(
-                toplevel_window).ToString(),
+  EXPECT_EQ(ash::wm::GetDefaultLeftSnappedWindowBoundsInParent(
+                ash::wm::WmWindowAura::Get(toplevel_window))
+                .ToString(),
             toplevel_window->bounds().ToString());
 }
 
@@ -505,13 +509,15 @@ TEST_F(SystemGestureEventFilterTest, DragRightNearEdgeSnaps) {
   ui::test::EventGenerator generator(root_window, toplevel_window);
 
   // Check that dragging right snaps before reaching the screen edge.
-  gfx::Rect work_area =
-      Shell::GetScreen()->GetDisplayNearestWindow(root_window).work_area();
+  gfx::Rect work_area = gfx::Screen::GetScreen()
+                            ->GetDisplayNearestWindow(root_window)
+                            .work_area();
   int drag_x = work_area.right() - 20 - points[0].x();
   generator.GestureMultiFingerScroll(
       kTouchPoints, points, 120, kSteps, drag_x, 0);
   EXPECT_EQ(wm::GetDefaultRightSnappedWindowBoundsInParent(
-                toplevel_window).ToString(),
+                wm::WmWindowAura::Get(toplevel_window))
+                .ToString(),
             toplevel_window->bounds().ToString());
 }
 
@@ -520,12 +526,12 @@ TEST_F(SystemGestureEventFilterTest, DragRightNearEdgeSnaps) {
 // contents are often (but not always) of type WINDOW_TYPE_CONTROL.
 TEST_F(SystemGestureEventFilterTest,
        ControlWindowGetsMultiFingerGestureEvents) {
-  scoped_ptr<aura::Window> parent(
+  std::unique_ptr<aura::Window> parent(
       CreateTestWindowInShellWithBounds(gfx::Rect(100, 100)));
 
   aura::test::EventCountDelegate delegate;
   delegate.set_window_component(HTCLIENT);
-  scoped_ptr<aura::Window> child(new aura::Window(&delegate));
+  std::unique_ptr<aura::Window> child(new aura::Window(&delegate));
   child->SetType(ui::wm::WINDOW_TYPE_CONTROL);
   child->Init(ui::LAYER_TEXTURED);
   parent->AddChild(child.get());

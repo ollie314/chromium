@@ -57,6 +57,8 @@ public:
 
     enum LigaturesState { NormalLigaturesState, DisabledLigaturesState, EnabledLigaturesState };
 
+    enum FontVariantCaps { CapsNormal, SmallCaps, AllSmallCaps, PetiteCaps, AllPetiteCaps, Unicase, TitlingCaps };
+
     FontDescription()
         : m_specifiedSize(0)
         , m_computedSize(0)
@@ -71,6 +73,7 @@ public:
         m_fields.m_widthVariant = RegularWidth;
         m_fields.m_style = FontStyleNormal;
         m_fields.m_variant = FontVariantNormal;
+        m_fields.m_variantCaps = CapsNormal;
         m_fields.m_isAbsoluteSize = false;
         m_fields.m_weight = FontWeightNormal;
         m_fields.m_stretch = FontStretchNormal;
@@ -135,9 +138,9 @@ public:
     };
 
     const FontFamily& family() const { return m_familyList; }
-    FamilyDescription familyDescription() const { return FamilyDescription(genericFamily(), family()); }
+    FamilyDescription getFamilyDescription() const { return FamilyDescription(genericFamily(), family()); }
     FontFamily& firstFamily() { return m_familyList; }
-    Size size() const { return Size(keywordSize(), specifiedSize(), isAbsoluteSize()); }
+    Size getSize() const { return Size(keywordSize(), specifiedSize(), isAbsoluteSize()); }
     float specifiedSize() const { return m_specifiedSize; }
     float computedSize() const { return m_computedSize; }
     float adjustedSize() const { return m_adjustedSize; }
@@ -146,6 +149,7 @@ public:
     FontStyle style() const { return static_cast<FontStyle>(m_fields.m_style); }
     int computedPixelSize() const { return int(m_computedSize + 0.5f); }
     FontVariant variant() const { return static_cast<FontVariant>(m_fields.m_variant); }
+    FontVariantCaps variantCaps() const { return static_cast<FontVariantCaps>(m_fields.m_variantCaps); }
     bool isAbsoluteSize() const { return m_fields.m_isAbsoluteSize; }
     FontWeight weight() const { return static_cast<FontWeight>(m_fields.m_weight); }
     FontStretch stretch() const { return static_cast<FontStretch>(m_fields.m_stretch); }
@@ -160,8 +164,8 @@ public:
     {
         return genericFamily() == MonospaceFamily && !family().next() && family().family() == FontFamilyNames::webkit_monospace;
     }
-    Kerning kerning() const { return static_cast<Kerning>(m_fields.m_kerning); }
-    VariantLigatures variantLigatures() const;
+    Kerning getKerning() const { return static_cast<Kerning>(m_fields.m_kerning); }
+    VariantLigatures getVariantLigatures() const;
     LigaturesState commonLigaturesState() const { return static_cast<LigaturesState>(m_fields.m_commonLigaturesState); }
     LigaturesState discretionaryLigaturesState() const { return static_cast<LigaturesState>(m_fields.m_discretionaryLigaturesState); }
     LigaturesState historicalLigaturesState() const { return static_cast<LigaturesState>(m_fields.m_historicalLigaturesState); }
@@ -196,6 +200,7 @@ public:
     void setSizeAdjust(float aspect) { m_sizeAdjust = clampTo<float>(aspect); }
     void setStyle(FontStyle i) { m_fields.m_style = i; }
     void setVariant(FontVariant c) { m_fields.m_variant = c; }
+    void setVariantCaps(FontVariantCaps variantCaps) { m_fields.m_variantCaps = variantCaps; }
     void setVariantLigatures(const VariantLigatures&);
     void setIsAbsoluteSize(bool s) { m_fields.m_isAbsoluteSize = s; }
     void setWeight(FontWeight w) { m_fields.m_weight = w; }
@@ -219,7 +224,7 @@ public:
     void setWordSpacing(float s) { m_wordSpacing = s; }
     void setLetterSpacing(float s) { m_letterSpacing = s; updateTypesettingFeatures(); }
 
-    TypesettingFeatures typesettingFeatures() const { return static_cast<TypesettingFeatures>(m_fields.m_typesettingFeatures); }
+    TypesettingFeatures getTypesettingFeatures() const { return static_cast<TypesettingFeatures>(m_fields.m_typesettingFeatures); }
 
     static void setSubpixelPositioning(bool b) { s_useSubpixelTextPositioning = b; }
     static bool subpixelPositioning() { return s_useSubpixelTextPositioning; }
@@ -261,6 +266,7 @@ private:
 
         unsigned m_style : 2; // FontStyle
         unsigned m_variant : 1; // FontVariant
+        unsigned m_variantCaps : 3; // FontVariantCaps
         unsigned m_isAbsoluteSize : 1; // Whether or not CSS specified an explicit size
         // (logical sizes like "medium" don't count).
         unsigned m_weight : 4; // FontWeight
@@ -308,7 +314,7 @@ inline bool FontDescription::operator==(const FontDescription& other) const
         && m_wordSpacing == other.m_wordSpacing
         && m_fieldsAsUnsigned[0] == other.m_fieldsAsUnsigned[0]
         && m_fieldsAsUnsigned[1] == other.m_fieldsAsUnsigned[1]
-        && m_featureSettings == other.m_featureSettings;
+        && (m_featureSettings == other.m_featureSettings || (m_featureSettings && other.m_featureSettings && *m_featureSettings == *other.m_featureSettings));
 }
 
 } // namespace blink

@@ -9,11 +9,11 @@
 #include <algorithm>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/debug/traced_value.h"
-#include "cc/raster/raster_buffer.h"
 #include "cc/resources/platform_color.h"
 #include "cc/resources/resource.h"
 #include "ui/gfx/buffer_format_util.h"
@@ -29,12 +29,13 @@ class RasterBufferImpl : public RasterBuffer {
       : lock_(resource_provider, resource->id()), resource_(resource) {}
 
   // Overridden from RasterBuffer:
-  void Playback(const DisplayListRasterSource* raster_source,
-                const gfx::Rect& raster_full_rect,
-                const gfx::Rect& raster_dirty_rect,
-                uint64_t new_content_id,
-                float scale,
-                bool include_images) override {
+  void Playback(
+      const RasterSource* raster_source,
+      const gfx::Rect& raster_full_rect,
+      const gfx::Rect& raster_dirty_rect,
+      uint64_t new_content_id,
+      float scale,
+      const RasterSource::PlaybackSettings& playback_settings) override {
     gfx::GpuMemoryBuffer* buffer = lock_.GetGpuMemoryBuffer();
     if (!buffer)
       return;
@@ -50,7 +51,7 @@ class RasterBufferImpl : public RasterBuffer {
     TileTaskWorkerPool::PlaybackToMemory(
         buffer->memory(0), resource_->format(), resource_->size(),
         buffer->stride(0), raster_source, raster_full_rect, raster_full_rect,
-        scale, include_images);
+        scale, playback_settings);
     buffer->Unmap();
   }
 
@@ -64,26 +65,26 @@ class RasterBufferImpl : public RasterBuffer {
 }  // namespace
 
 // static
-scoped_ptr<TileTaskWorkerPool> ZeroCopyTileTaskWorkerPool::Create(
+std::unique_ptr<TileTaskWorkerPool> ZeroCopyTileTaskWorkerPool::Create(
     base::SequencedTaskRunner* task_runner,
     TaskGraphRunner* task_graph_runner,
     ResourceProvider* resource_provider,
-    bool use_rgba_4444_texture_format) {
-  return make_scoped_ptr<TileTaskWorkerPool>(new ZeroCopyTileTaskWorkerPool(
-      task_runner, task_graph_runner, resource_provider,
-      use_rgba_4444_texture_format));
+    ResourceFormat preferred_tile_format) {
+  return base::WrapUnique<TileTaskWorkerPool>(
+      new ZeroCopyTileTaskWorkerPool(task_runner, task_graph_runner,
+                                     resource_provider, preferred_tile_format));
 }
 
 ZeroCopyTileTaskWorkerPool::ZeroCopyTileTaskWorkerPool(
     base::SequencedTaskRunner* task_runner,
     TaskGraphRunner* task_graph_runner,
     ResourceProvider* resource_provider,
-    bool use_rgba_4444_texture_format)
+    ResourceFormat preferred_tile_format)
     : task_runner_(task_runner),
       task_graph_runner_(task_graph_runner),
       namespace_token_(task_graph_runner->GetNamespaceToken()),
       resource_provider_(resource_provider),
-      use_rgba_4444_texture_format_(use_rgba_4444_texture_format) {}
+      preferred_tile_format_(preferred_tile_format) {}
 
 ZeroCopyTileTaskWorkerPool::~ZeroCopyTileTaskWorkerPool() {
 }
@@ -125,27 +126,35 @@ void ZeroCopyTileTaskWorkerPool::CheckForCompletedTasks() {
 
 ResourceFormat ZeroCopyTileTaskWorkerPool::GetResourceFormat(
     bool must_support_alpha) const {
-  return use_rgba_4444_texture_format_
-             ? RGBA_4444
-             : resource_provider_->best_texture_format();
+  if (resource_provider_->IsResourceFormatSupported(preferred_tile_format_) &&
+      (DoesResourceFormatSupportAlpha(preferred_tile_format_) ||
+       !must_support_alpha)) {
+    return preferred_tile_format_;
+  }
+
+  return resource_provider_->best_texture_format();
 }
 
 bool ZeroCopyTileTaskWorkerPool::GetResourceRequiresSwizzle(
     bool must_support_alpha) const {
-  return !PlatformColor::SameComponentOrder(
-      GetResourceFormat(must_support_alpha));
+  return ResourceFormatRequiresSwizzle(GetResourceFormat(must_support_alpha));
 }
 
-scoped_ptr<RasterBuffer> ZeroCopyTileTaskWorkerPool::AcquireBufferForRaster(
+RasterBufferProvider* ZeroCopyTileTaskWorkerPool::AsRasterBufferProvider() {
+  return this;
+}
+
+std::unique_ptr<RasterBuffer>
+ZeroCopyTileTaskWorkerPool::AcquireBufferForRaster(
     const Resource* resource,
     uint64_t resource_content_id,
     uint64_t previous_content_id) {
-  return make_scoped_ptr<RasterBuffer>(
+  return base::WrapUnique<RasterBuffer>(
       new RasterBufferImpl(resource_provider_, resource));
 }
 
 void ZeroCopyTileTaskWorkerPool::ReleaseBufferForRaster(
-    scoped_ptr<RasterBuffer> buffer) {
+    std::unique_ptr<RasterBuffer> buffer) {
   // Nothing to do here. RasterBufferImpl destructor cleans up after itself.
 }
 

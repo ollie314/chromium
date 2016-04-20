@@ -11,7 +11,6 @@
 #include "ui/views/bubble/bubble_delegate.h"
 
 namespace ash {
-class ShelfLayoutManager;
 class ShelfView;
 
 namespace test {
@@ -51,8 +50,6 @@ class ASH_EXPORT OverflowBubbleView : public views::BubbleDelegateView {
 
   // ui::EventHandler overrides:
   void OnScrollEvent(ui::ScrollEvent* event) override;
-
-  ShelfLayoutManager* GetShelfLayoutManager() const;
 
   ShelfView* shelf_view_;  // Owned by views hierarchy.
   gfx::Vector2d scroll_offset_;

@@ -41,12 +41,12 @@ inline ClearButtonElement::ClearButtonElement(Document& document, ClearButtonOwn
 {
 }
 
-PassRefPtrWillBeRawPtr<ClearButtonElement> ClearButtonElement::create(Document& document, ClearButtonOwner& clearButtonOwner)
+ClearButtonElement* ClearButtonElement::create(Document& document, ClearButtonOwner& clearButtonOwner)
 {
-    RefPtrWillBeRawPtr<ClearButtonElement> element = adoptRefWillBeNoop(new ClearButtonElement(document, clearButtonOwner));
-    element->setShadowPseudoId(AtomicString("-webkit-clear-button", AtomicString::ConstructFromLiteral));
+    ClearButtonElement* element = new ClearButtonElement(document, clearButtonOwner);
+    element->setShadowPseudoId(AtomicString("-webkit-clear-button"));
     element->setAttribute(idAttr, ShadowElementNames::clearButton());
-    return element.release();
+    return element;
 }
 
 void ClearButtonElement::detach(const AttachContext& context)
@@ -91,4 +91,4 @@ DEFINE_TRACE(ClearButtonElement)
     HTMLDivElement::trace(visitor);
 }
 
-}
+} // namespace blink

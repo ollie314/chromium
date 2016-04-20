@@ -4,6 +4,7 @@
 
 #include "chrome/renderer/media/cast_receiver_session_delegate.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -20,7 +21,7 @@ void CastReceiverSessionDelegate::Start(
     const media::cast::FrameReceiverConfig& video_config,
     const net::IPEndPoint& local_endpoint,
     const net::IPEndPoint& remote_endpoint,
-    scoped_ptr<base::DictionaryValue> options,
+    std::unique_ptr<base::DictionaryValue> options,
     const media::VideoCaptureFormat& format,
     const ErrorCallback& error_callback) {
   format_ = format;
@@ -40,7 +41,7 @@ void CastReceiverSessionDelegate::Start(
 }
 
 void CastReceiverSessionDelegate::ReceivePacket(
-    scoped_ptr<media::cast::Packet> packet) {
+    std::unique_ptr<media::cast::Packet> packet) {
   cast_receiver_->ReceivePacket(std::move(packet));
 }
 
@@ -52,7 +53,7 @@ void CastReceiverSessionDelegate::StartAudio(
 }
 
 void CastReceiverSessionDelegate::OnDecodedAudioFrame(
-    scoped_ptr<media::AudioBus> audio_bus,
+    std::unique_ptr<media::AudioBus> audio_bus,
     const base::TimeTicks& playout_time,
     bool is_continous) {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
@@ -63,16 +64,10 @@ void CastReceiverSessionDelegate::OnDecodedAudioFrame(
   // operations. Since we don't know what the Capture callback
   // will do exactly, we need to jump to a different thread.
   // Let's re-use the audio decoder thread.
-  base::TimeTicks now = cast_environment_->Clock()->NowTicks();
   cast_environment_->PostTask(
-      media::cast::CastEnvironment::AUDIO,
-      FROM_HERE,
-      base::Bind(&CastReceiverAudioValve::Capture,
-                 audio_valve_,
-                 base::Owned(audio_bus.release()),
-                 (playout_time - now).InMilliseconds(),
-                 1.0,
-                 false));
+      media::cast::CastEnvironment::AUDIO, FROM_HERE,
+      base::Bind(&CastReceiverAudioValve::DeliverDecodedAudio, audio_valve_,
+                 base::Owned(audio_bus.release()), playout_time));
   cast_receiver_->RequestDecodedAudioFrame(on_audio_decoded_cb_);
 }
 

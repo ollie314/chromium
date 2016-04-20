@@ -7,10 +7,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/histogram_tester.h"
 #include "base/time/tick_clock.h"
@@ -146,8 +146,8 @@ class TabDataUseEntryTest : public testing::Test {
   // Pointer to the clock used for spoofing time, owned by |tab_model_|.
   SimpleOffsetTestTickClock* tick_clock_;
 
-  scoped_ptr<DataUseTabModel> tab_model_;
-  scoped_ptr<TabDataUseEntry> tab_entry_;
+  std::unique_ptr<DataUseTabModel> tab_model_;
+  std::unique_ptr<TabDataUseEntry> tab_entry_;
 
   DISALLOW_COPY_AND_ASSIGN(TabDataUseEntryTest);
 };
@@ -488,7 +488,7 @@ TEST_F(TabDataUseEntryTest, CompactTabSessionHistory) {
 
 TEST_F(TabDataUseEntryTest, TrackingSessionLifetimeHistogram) {
   const char kUMATrackingSessionLifetimeSecondsHistogram[] =
-      "DataUse.TabModel.TrackingSessionLifetime";
+      "DataUsage.TabModel.TrackingSessionLifetime";
   base::HistogramTester histogram_tester;
 
   // Tracking session from time=20 to time=30, lifetime of 10 seconds.
@@ -518,7 +518,7 @@ TEST_F(TabDataUseEntryTest, TrackingSessionLifetimeHistogram) {
 
 TEST_F(TabDataUseEntryTest, OldInactiveSessionRemovaltimeHistogram) {
   const char kUMAOldInactiveSessionRemovalDurationSecondsHistogram[] =
-      "DataUse.TabModel.OldInactiveSessionRemovalDuration";
+      "DataUsage.TabModel.OldInactiveSessionRemovalDuration";
   base::HistogramTester histogram_tester;
   const size_t max_sessions_per_tab = GetMaxSessionsPerTab();
 

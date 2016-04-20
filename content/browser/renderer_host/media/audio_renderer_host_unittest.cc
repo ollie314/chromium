@@ -2,18 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "content/browser/renderer_host/media/audio_renderer_host.h"
+
 #include <stdint.h>
+
+#include <memory>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
 #include "base/sync_socket.h"
 #include "content/browser/media/capture/audio_mirroring_manager.h"
 #include "content/browser/media/media_internals.h"
 #include "content/browser/renderer_host/media/audio_input_device_manager.h"
-#include "content/browser/renderer_host/media/audio_renderer_host.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/common/media/audio_messages.h"
 #include "content/public/common/content_switches.h"
@@ -74,10 +76,11 @@ class MockAudioRendererHost : public AudioRendererHost {
         shared_memory_length_(0) {}
 
   // A list of mock methods.
-  MOCK_METHOD3(OnDeviceAuthorized,
+  MOCK_METHOD4(OnDeviceAuthorized,
                void(int stream_id,
                     media::OutputDeviceStatus device_status,
-                    const media::AudioParameters& output_params));
+                    const media::AudioParameters& output_params,
+                    const std::string& matched_device_id));
   MOCK_METHOD2(OnStreamCreated, void(int stream_id, int length));
   MOCK_METHOD1(OnStreamPlaying, void(int stream_id));
   MOCK_METHOD1(OnStreamPaused, void(int stream_id));
@@ -115,8 +118,10 @@ class MockAudioRendererHost : public AudioRendererHost {
 
   void OnNotifyDeviceAuthorized(int stream_id,
                                 media::OutputDeviceStatus device_status,
-                                const media::AudioParameters& output_params) {
-    OnDeviceAuthorized(stream_id, device_status, output_params);
+                                const media::AudioParameters& output_params,
+                                const std::string& matched_device_id) {
+    OnDeviceAuthorized(stream_id, device_status, output_params,
+                       matched_device_id);
   }
 
   void OnNotifyStreamCreated(
@@ -157,8 +162,8 @@ class MockAudioRendererHost : public AudioRendererHost {
     }
   }
 
-  scoped_ptr<base::SharedMemory> shared_memory_;
-  scoped_ptr<base::SyncSocket> sync_socket_;
+  std::unique_ptr<base::SharedMemory> shared_memory_;
+  std::unique_ptr<base::SyncSocket> sync_socket_;
   uint32_t shared_memory_length_;
 
   DISALLOW_COPY_AND_ASSIGN(MockAudioRendererHost);
@@ -182,7 +187,8 @@ void WaitForEnumeration(base::RunLoop* loop,
 class AudioRendererHostTest : public testing::Test {
  public:
   AudioRendererHostTest() {
-    audio_manager_.reset(media::AudioManager::CreateForTesting());
+    audio_manager_ = media::AudioManager::CreateForTesting(
+        base::ThreadTaskRunnerHandle::Get());
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kUseFakeDeviceForMediaStream);
     media_stream_manager_.reset(new MediaStreamManager(audio_manager_.get()));
@@ -217,7 +223,9 @@ class AudioRendererHostTest : public testing::Test {
   }
 
  protected:
-  void Create() { Create(false, kDefaultDeviceId, url::Origin()); }
+  void Create() {
+    Create(false, kDefaultDeviceId, url::Origin(GURL(kSecurityOrigin)));
+  }
 
   void Create(bool unified_stream,
               const std::string& device_id,
@@ -230,7 +238,7 @@ class AudioRendererHostTest : public testing::Test {
                   : media::OUTPUT_DEVICE_STATUS_ERROR_NOT_FOUND;
 
     EXPECT_CALL(*host_.get(),
-                OnDeviceAuthorized(kStreamId, expected_device_status, _));
+                OnDeviceAuthorized(kStreamId, expected_device_status, _, _));
 
     if (expected_device_status == media::OUTPUT_DEVICE_STATUS_OK) {
       EXPECT_CALL(*host_.get(), OnStreamCreated(kStreamId, _));
@@ -319,9 +327,9 @@ class AudioRendererHostTest : public testing::Test {
  private:
   // MediaStreamManager uses a DestructionObserver, so it must outlive the
   // TestBrowserThreadBundle.
-  scoped_ptr<MediaStreamManager> media_stream_manager_;
+  std::unique_ptr<MediaStreamManager> media_stream_manager_;
   TestBrowserThreadBundle thread_bundle_;
-  scoped_ptr<media::AudioManager> audio_manager_;
+  media::ScopedAudioManagerPtr audio_manager_;
   MockAudioMirroringManager mirroring_manager_;
   scoped_refptr<MockAudioRendererHost> host_;
 
@@ -389,7 +397,7 @@ TEST_F(AudioRendererHostTest, SimulateErrorAndClose) {
 }
 
 TEST_F(AudioRendererHostTest, CreateUnifiedStreamAndClose) {
-  Create(true, kDefaultDeviceId, url::Origin());
+  Create(true, kDefaultDeviceId, url::Origin(GURL(kSecurityOrigin)));
   Close();
 }
 

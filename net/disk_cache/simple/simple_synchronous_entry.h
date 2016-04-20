@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,7 +17,6 @@
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "net/base/cache_type.h"
 #include "net/base/net_export.h"
@@ -132,6 +132,13 @@ class SimpleSynchronousEntry {
   // executed through that instance). Returns a net error code.
   static int DoomEntry(const base::FilePath& path, uint64_t entry_hash);
 
+  // Like |DoomEntry()| above, except that it truncates the entry files rather
+  // than deleting them. Used when dooming entries after the backend has
+  // shutdown. See implementation of |SimpleEntryImpl::DoomEntryInternal()| for
+  // more.
+  static int TruncateEntryFiles(const base::FilePath& path,
+                                uint64_t entry_hash);
+
   // Like |DoomEntry()| above. Deletes all entries corresponding to the
   // |key_hashes|. Succeeds only when all entries are deleted. Returns a net
   // error code.
@@ -169,7 +176,7 @@ class SimpleSynchronousEntry {
   // Close all streams, and add write EOF records to streams indicated by the
   // CRCRecord entries in |crc32s_to_write|.
   void Close(const SimpleEntryStat& entry_stat,
-             scoped_ptr<std::vector<CRCRecord> > crc32s_to_write,
+             std::unique_ptr<std::vector<CRCRecord>> crc32s_to_write,
              net::GrowableIOBuffer* stream_0_data);
 
   const base::FilePath& path() const { return path_; }
@@ -299,6 +306,8 @@ class SimpleSynchronousEntry {
                                      int file_index);
   static bool DeleteFilesForEntryHash(const base::FilePath& path,
                                       uint64_t entry_hash);
+  static bool TruncateFilesForEntryHash(const base::FilePath& path,
+                                        uint64_t entry_hash);
 
   void RecordSyncCreateResult(CreateEntryResult result, bool had_index);
 

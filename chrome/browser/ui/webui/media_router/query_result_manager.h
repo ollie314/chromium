@@ -6,12 +6,12 @@
 #define CHROME_BROWSER_UI_WEBUI_MEDIA_ROUTER_QUERY_RESULT_MANAGER_H_
 
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
 #include "chrome/browser/media/router/media_routes_observer.h"
@@ -35,13 +35,14 @@ struct SinksQueryResult;
 //
 // Typical use:
 //
+//   GURL origin("https://origin.com");
 //   QueryResultManager::Observer* observer = ...;
 //   QueryResultManager result_manager(router);
 //   result_manager.AddObserver(observer);
 //   result_manager.StartSinksQuery(MediaCastMode::DEFAULT,
-//       MediaSourceForPresentationUrl("http://google.com"));
+//       MediaSourceForPresentationUrl("http://google.com"), origin);
 //   result_manager.StartSinksQuery(MediaCastMode::TAB_MIRROR,
-//       MediaSourceForTab(123));
+//       MediaSourceForTab(123), origin);
 //   ...
 //   [Updates will be received by observer via OnResultsUpdated()]
 //   ...
@@ -75,7 +76,8 @@ class QueryResultManager {
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
-  // Requests a list of MediaSinks compatible with |source| for |cast_mode|.
+  // Requests a list of MediaSinks compatible with |source| for |cast_mode|
+  // from |origin|.
   // Results are sent to all observers registered with AddObserver().
   //
   // May start a new query in the Media Router for the registered source if
@@ -83,7 +85,9 @@ class QueryResultManager {
   // |cast_mode|, it is stopped.
   //
   // If |source| is empty, no new queries are begun.
-  void StartSinksQuery(MediaCastMode cast_mode, const MediaSource& source);
+  void StartSinksQuery(MediaCastMode cast_mode,
+                       const MediaSource& source,
+                       const GURL& origin);
 
   // Stops notifying observers for |cast_mode|.
   void StopSinksQuery(MediaCastMode cast_mode);
@@ -124,7 +128,7 @@ class QueryResultManager {
   // MediaSinksObservers that listens for compatible MediaSink updates.
   // Each observer is associated with a MediaCastMode. Results received by
   // observers are propagated back to this class.
-  std::map<MediaCastMode, scoped_ptr<MediaSinksObserver>> sinks_observers_;
+  std::map<MediaCastMode, std::unique_ptr<MediaSinksObserver>> sinks_observers_;
 
   // Holds registrations of MediaSources for cast modes.
   std::map<MediaCastMode, MediaSource> cast_mode_sources_;

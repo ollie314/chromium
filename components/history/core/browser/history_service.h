@@ -73,7 +73,6 @@ struct KeywordSearchTermVisit;
 class PageUsageData;
 class URLDatabase;
 class VisitDelegate;
-class VisitFilter;
 class WebHistoryService;
 
 // The history service records page titles, and visit times, as well as
@@ -100,11 +99,9 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
 
   // Initializes the history service, returning true on success. On false, do
   // not call any other functions. The given directory will be used for storing
-  // the history files. |languages| is a comma-separated list of languages to
-  // use when interpreting URLs, it must not be empty (except during testing).
-  bool Init(const std::string& languages,
-            const HistoryDatabaseParams& history_database_params) {
-    return Init(false, languages, history_database_params);
+  // the history files.
+  bool Init(const HistoryDatabaseParams& history_database_params) {
+    return Init(false, history_database_params);
   }
 
   // Triggers the backend to load if it hasn't already, and then returns whether
@@ -150,14 +147,15 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   // Returns a pointer to the TypedUrlSyncableService owned by HistoryBackend.
   // This method should only be called from the history thread, because the
   // returned service is intended to be accessed only via the history thread.
-  virtual TypedUrlSyncableService* GetTypedUrlSyncableService() const;
+  TypedUrlSyncableService* GetTypedUrlSyncableService() const;
 
   // KeyedService:
   void Shutdown() override;
 
-  // Callback for value asynchronously returned by GetCountsForOrigins().
-  typedef base::Callback<void(const OriginCountMap&)>
-      GetCountsForOriginsCallback;
+  // Callback for value asynchronously returned by
+  // GetCountsAndLastVisitForOrigins().
+  typedef base::Callback<void(const OriginCountAndLastVisitMap&)>
+      GetCountsAndLastVisitForOriginsCallback;
 
   // Computes the |num_hosts| most-visited hostnames in the past 30 days and
   // returns a list of those hosts paired with their visit counts. The following
@@ -174,9 +172,11 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   virtual void TopHosts(size_t num_hosts,
                         const TopHostsCallback& callback) const;
 
-  // Gets the counts of URLs that belong to |origins| in the history database.
-  void GetCountsForOrigins(const std::set<GURL>& origins,
-                           const GetCountsForOriginsCallback& callback) const;
+  // Gets the counts and most recent visit date of URLs that belong to |origins|
+  // in the history database.
+  void GetCountsAndLastVisitForOrigins(
+      const std::set<GURL>& origins,
+      const GetCountsAndLastVisitForOriginsCallback& callback) const;
 
   // Returns, for the given URL, a 0-based index into the list produced by
   // TopHosts(), corresponding to that URL's host. If TopHosts() has not
@@ -336,22 +336,6 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
       int result_count,
       int days_back,
       const QueryMostVisitedURLsCallback& callback,
-      base::CancelableTaskTracker* tracker);
-
-  // Request the |result_count| URLs filtered and sorted based on the |filter|.
-  // If |extended_info| is true, additional data will be provided in the
-  // results. Computing this additional data is expensive, likely to become
-  // more expensive as additional data points are added in future changes, and
-  // not useful in most cases. Set |extended_info| to true only if you
-  // explicitly require the additional data.
-  typedef base::Callback<void(const FilteredURLList*)>
-      QueryFilteredURLsCallback;
-
-  base::CancelableTaskTracker::TaskId QueryFilteredURLs(
-      int result_count,
-      const VisitFilter& filter,
-      bool extended_info,
-      const QueryFilteredURLsCallback& callback,
       base::CancelableTaskTracker* tracker);
 
   // Statistics ----------------------------------------------------------------
@@ -581,10 +565,11 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   friend class ::HistoryQuickProviderTest;
   friend class HistoryServiceTest;
   friend class ::HistoryURLProvider;
-  friend class ::HistoryURLProviderTest;
   friend class ::InMemoryURLIndexTest;
   friend class ::SyncBookmarkDataTypeControllerTest;
   friend class ::TestingProfile;
+  friend scoped_ptr<HistoryService> CreateHistoryService(
+      const base::FilePath& history_dir, bool create_db);
 
   // Called on shutdown, this will tell the history backend to complete and
   // will release pointers to it. No other functions should be called once
@@ -599,9 +584,7 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
 
   // Low-level Init().  Same as the public version, but adds a |no_db| parameter
   // that is only set by unittests which causes the backend to not init its DB.
-  bool Init(bool no_db,
-            const std::string& languages,
-            const HistoryDatabaseParams& history_database_params);
+  bool Init(bool no_db, const HistoryDatabaseParams& history_database_params);
 
   // Called by the HistoryURLProvider class to schedule an autocomplete, it
   // will be called back on the internal history thread with the history

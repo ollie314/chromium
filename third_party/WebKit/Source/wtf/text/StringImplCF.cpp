@@ -22,11 +22,10 @@
 
 #if OS(MACOSX)
 
-#include "wtf/MainThread.h"
-#include "wtf/Partitions.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RetainPtr.h"
 #include "wtf/Threading.h"
+#include "wtf/allocator/Partitions.h"
 #include <CoreFoundation/CoreFoundation.h>
 
 namespace WTF {
@@ -122,7 +121,7 @@ static CFAllocatorRef allocator()
     return allocator;
 }
 
-}
+} // namespace StringWrapperCFAllocator
 
 RetainPtr<CFStringRef> StringImpl::createCFString()
 {
@@ -157,6 +156,6 @@ RetainPtr<CFStringRef> StringImpl::createCFString()
 // more calls to createCFString than calls to the create functions with the appropriate
 // allocator, so it's probably not urgent optimize that case.
 
-}
+} // namespace WTF
 
 #endif // OS(MACOSX)

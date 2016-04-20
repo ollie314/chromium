@@ -6,10 +6,11 @@
 
 #include <dwmapi.h>
 
+#include <memory>
+
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/trace_event/trace_event.h"
 #include "base/win/windows_version.h"
 #include "ui/gfx/native_widget_types.h"
@@ -36,7 +37,7 @@ class NativeViewGLSurfaceOSMesa : public GLSurfaceOSMesa {
   explicit NativeViewGLSurfaceOSMesa(gfx::AcceleratedWidget window);
 
   // Implement subset of GLSurface.
-  bool Initialize() override;
+  bool Initialize(GLSurface::Format format) override;
   void Destroy() override;
   bool IsOffscreen() override;
   gfx::SwapResult SwapBuffers() override;
@@ -55,6 +56,8 @@ class NativeViewGLSurfaceOSMesa : public GLSurfaceOSMesa {
 // Helper routine that does one-off initialization like determining the
 // pixel format.
 bool GLSurface::InitializeOneOffInternal() {
+  VSyncProviderWin::InitializeOneOff();
+
   switch (GetGLImplementation()) {
     case kGLImplementationDesktopGL:
       if (!GLSurfaceWGL::InitializeOneOff()) {
@@ -81,7 +84,7 @@ bool GLSurface::InitializeOneOffInternal() {
 
 NativeViewGLSurfaceOSMesa::NativeViewGLSurfaceOSMesa(
     gfx::AcceleratedWidget window)
-    : GLSurfaceOSMesa(OSMesaSurfaceFormatRGBA, gfx::Size(1, 1)),
+    : GLSurfaceOSMesa(SURFACE_OSMESA_RGBA, gfx::Size(1, 1)),
       window_(window),
       device_context_(NULL) {
   DCHECK(window);
@@ -91,8 +94,8 @@ NativeViewGLSurfaceOSMesa::~NativeViewGLSurfaceOSMesa() {
   Destroy();
 }
 
-bool NativeViewGLSurfaceOSMesa::Initialize() {
-  if (!GLSurfaceOSMesa::Initialize())
+bool NativeViewGLSurfaceOSMesa::Initialize(GLSurface::Format format) {
+  if (!GLSurfaceOSMesa::Initialize(format))
     return false;
 
   device_context_ = GetDC(window_);
@@ -207,7 +210,7 @@ scoped_refptr<GLSurface> GLSurface::CreateViewGLSurface(
       DCHECK(window != gfx::kNullAcceleratedWidget);
       scoped_refptr<NativeViewGLSurfaceEGL> surface(
           new NativeViewGLSurfaceEGL(window));
-      scoped_ptr<VSyncProvider> sync_provider;
+      std::unique_ptr<VSyncProvider> sync_provider;
       sync_provider.reset(new VSyncProviderWin(window));
       if (!surface->Initialize(std::move(sync_provider)))
         return NULL;
@@ -236,7 +239,7 @@ scoped_refptr<GLSurface> GLSurface::CreateOffscreenGLSurface(
   switch (GetGLImplementation()) {
     case kGLImplementationOSMesaGL: {
       scoped_refptr<GLSurface> surface(
-          new GLSurfaceOSMesa(OSMesaSurfaceFormatRGBA, size));
+          new GLSurfaceOSMesa(SURFACE_OSMESA_RGBA, size));
       if (!surface->Initialize())
         return NULL;
 

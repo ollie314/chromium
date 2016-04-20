@@ -19,6 +19,8 @@
 #include "cc/layers/layer.h"
 #include "cc/layers/solid_color_layer.h"
 #include "cc/output/begin_frame_args.h"
+#include "cc/output/viewport_selection_bound.h"
+#include "content/browser/accessibility/browser_accessibility_manager_android.h"
 #include "content/browser/accessibility/browser_accessibility_state_impl.h"
 #include "content/browser/android/gesture_event_type.h"
 #include "content/browser/android/interstitial_page_delegate_android.h"
@@ -55,6 +57,7 @@
 #include "ui/android/view_android.h"
 #include "ui/android/window_android.h"
 #include "ui/events/android/motion_event_android.h"
+#include "ui/events/blink/blink_event_util.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/size_conversions.h"
@@ -212,7 +215,7 @@ ContentViewCoreImpl::ContentViewCoreImpl(
     : WebContentsObserver(web_contents),
       java_ref_(env, obj),
       web_contents_(static_cast<WebContentsImpl*>(web_contents)),
-      root_layer_(cc::SolidColorLayer::Create(Compositor::LayerSettings())),
+      root_layer_(cc::SolidColorLayer::Create()),
       page_scale_(1),
       dpi_scale_(ui::GetScaleFactorForNativeView(this)),
       window_android_(window_android),
@@ -247,8 +250,22 @@ ContentViewCoreImpl::ContentViewCoreImpl(
   InitWebContents();
 }
 
+void ContentViewCoreImpl::AddObserver(
+    ContentViewCoreImplObserver* observer) {
+  observer_list_.AddObserver(observer);
+}
+
+void ContentViewCoreImpl::RemoveObserver(
+    ContentViewCoreImplObserver* observer) {
+  observer_list_.RemoveObserver(observer);
+}
+
 ContentViewCoreImpl::~ContentViewCoreImpl() {
   root_layer_->RemoveFromParent();
+  FOR_EACH_OBSERVER(ContentViewCoreImplObserver,
+                    observer_list_,
+                    OnContentViewCoreDestroyed());
+  observer_list_.Clear();
 
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
@@ -256,6 +273,24 @@ ContentViewCoreImpl::~ContentViewCoreImpl() {
   if (!j_obj.is_null()) {
     Java_ContentViewCore_onNativeContentViewCoreDestroyed(
         env, j_obj.obj(), reinterpret_cast<intptr_t>(this));
+  }
+}
+
+void ContentViewCoreImpl::UpdateWindowAndroid(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj,
+    jlong window_android) {
+  if (window_android) {
+    DCHECK(!window_android_);
+    window_android_ = reinterpret_cast<ui::WindowAndroid*>(window_android);
+    FOR_EACH_OBSERVER(ContentViewCoreImplObserver,
+                      observer_list_,
+                      OnAttachedToWindow());
+  } else {
+    FOR_EACH_OBSERVER(ContentViewCoreImplObserver,
+                      observer_list_,
+                      OnDetachedFromWindow());
+    window_android_ = NULL;
   }
 }
 
@@ -387,16 +422,29 @@ void ContentViewCoreImpl::UpdateFrameInfo(
     const gfx::SizeF& viewport_size,
     const gfx::Vector2dF& controls_offset,
     const gfx::Vector2dF& content_offset,
-    bool is_mobile_optimized_hint) {
+    bool is_mobile_optimized_hint,
+    const cc::ViewportSelectionBound& selection_start) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (obj.is_null())
+  if (obj.is_null() || !window_android_)
     return;
 
   window_android_->set_content_offset(
       gfx::ScaleVector2d(content_offset, dpi_scale_));
 
   page_scale_ = page_scale_factor;
+
+  // The CursorAnchorInfo API in Android only supports zero width selection
+  // bounds.
+  const jboolean has_insertion_marker =
+      selection_start.type == cc::SELECTION_BOUND_CENTER;
+  const jboolean is_insertion_marker_visible = selection_start.visible;
+  const jfloat insertion_marker_horizontal =
+      has_insertion_marker ? selection_start.edge_top.x() : 0.0f;
+  const jfloat insertion_marker_top =
+      has_insertion_marker ? selection_start.edge_top.y() : 0.0f;
+  const jfloat insertion_marker_bottom =
+      has_insertion_marker ? selection_start.edge_bottom.y() : 0.0f;
 
   Java_ContentViewCore_updateFrameInfo(
       env, obj.obj(),
@@ -411,7 +459,12 @@ void ContentViewCoreImpl::UpdateFrameInfo(
       viewport_size.height(),
       controls_offset.y(),
       content_offset.y(),
-      is_mobile_optimized_hint);
+      is_mobile_optimized_hint,
+      has_insertion_marker,
+      is_insertion_marker_visible,
+      insertion_marker_horizontal,
+      insertion_marker_top,
+      insertion_marker_bottom);
 }
 
 void ContentViewCoreImpl::SetTitle(const base::string16& title) {
@@ -453,7 +506,7 @@ void ContentViewCoreImpl::ShowSelectPopupMenu(
   // given |selected_item| as is.
   ScopedJavaLocalRef<jintArray> selected_array;
   if (multiple) {
-    scoped_ptr<jint[]> native_selected_array(new jint[items.size()]);
+    std::unique_ptr<jint[]> native_selected_array(new jint[items.size()]);
     size_t selected_count = 0;
     for (size_t i = 0; i < items.size(); ++i) {
       if (items[i].checked)
@@ -629,21 +682,6 @@ bool ContentViewCoreImpl::ShowPastePopup(int x_dip, int y_dip) {
       static_cast<jint>(y_dip * dpi_scale()));
 }
 
-void ContentViewCoreImpl::GetScaledContentBitmap(
-    float scale,
-    SkColorType preferred_color_type,
-    const gfx::Rect& src_subrect,
-    const ReadbackRequestCallback& result_callback) {
-  RenderWidgetHostViewAndroid* view = GetRenderWidgetHostViewAndroid();
-  if (!view || preferred_color_type == kUnknown_SkColorType) {
-    result_callback.Run(SkBitmap(), READBACK_FAILED);
-    return;
-  }
-
-  view->GetScaledContentBitmap(scale, preferred_color_type, src_subrect,
-                               result_callback);
-}
-
 void ContentViewCoreImpl::StartContentIntent(const GURL& content_url,
                                              bool is_main_frame) {
   JNIEnv* env = AttachCurrentThread();
@@ -716,6 +754,22 @@ ScopedJavaLocalRef<jobject> ContentViewCoreImpl::GetContext() const {
     return ScopedJavaLocalRef<jobject>();
 
   return Java_ContentViewCore_getContext(env, obj.obj());
+}
+
+gfx::Size ContentViewCoreImpl::GetViewSizeWithOSKHidden() const {
+  gfx::Size size_pix;
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
+  if (j_obj.is_null())
+    return size_pix = gfx::Size();
+  size_pix = gfx::Size(
+      Java_ContentViewCore_getViewportWidthPix(env, j_obj.obj()),
+      Java_ContentViewCore_getViewportHeightWithOSKHiddenPix(env, j_obj.obj()));
+
+  gfx::Size size_dip = gfx::ScaleToCeiledSize(size_pix, 1.0f / dpi_scale());
+  if (DoTopControlsShrinkBlinkSize())
+    size_dip.Enlarge(0, -GetTopControlsHeightDip());
+  return size_dip;
 }
 
 gfx::Size ContentViewCoreImpl::GetViewSize() const {
@@ -949,7 +1003,8 @@ jboolean ContentViewCoreImpl::SendMouseMoveEvent(
     const JavaParamRef<jobject>& obj,
     jlong time_ms,
     jfloat x,
-    jfloat y) {
+    jfloat y,
+    jint tool_type) {
   RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
   if (!rwhv)
     return false;
@@ -957,7 +1012,8 @@ jboolean ContentViewCoreImpl::SendMouseMoveEvent(
   blink::WebMouseEvent event = WebMouseEventBuilder::Build(
       WebInputEvent::MouseMove,
       blink::WebMouseEvent::ButtonNone,
-      time_ms / 1000.0, x / dpi_scale(), y / dpi_scale(), 0, 1);
+      time_ms / 1000.0, x / dpi_scale(), y / dpi_scale(), 0, 1,
+      ui::ToWebPointerType(static_cast<ui::MotionEvent::ToolType>(tool_type)));
 
   rwhv->SendMouseEvent(event);
   return true;
@@ -1154,15 +1210,6 @@ void ContentViewCoreImpl::SelectBetweenCoordinates(
                            gfx::PointF(x2 / dpi_scale(), y2 / dpi_scale()));
 }
 
-void ContentViewCoreImpl::MoveCaret(JNIEnv* env,
-                                    const JavaParamRef<jobject>& obj,
-                                    jfloat x,
-                                    jfloat y) {
-  RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
-  if (rwhv)
-    rwhv->MoveCaret(gfx::Point(x / dpi_scale_, y / dpi_scale_));
-}
-
 void ContentViewCoreImpl::DismissTextHandles(JNIEnv* env,
                                              const JavaParamRef<jobject>& obj) {
   RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
@@ -1239,9 +1286,7 @@ void ContentViewCoreImpl::WasResized(JNIEnv* env,
   root_layer_->SetBounds(physical_size);
 
   if (view) {
-    RenderWidgetHostImpl* host = RenderWidgetHostImpl::From(
-        view->GetRenderWidgetHost());
-    host->SendScreenRects();
+    web_contents_->SendScreenRects();
     view->WasResized();
   }
 }
@@ -1345,10 +1390,22 @@ void ContentViewCoreImpl::SetAccessibilityEnabledInternal(bool enabled) {
   BrowserAccessibilityStateImpl* accessibility_state =
       BrowserAccessibilityStateImpl::GetInstance();
   if (enabled) {
-    // This enables accessibility globally unless it was explicitly disallowed
-    // by a command-line flag.
+    // First check if we already have a BrowserAccessibilityManager that
+    // just needs to be connected to the ContentViewCore.
+    if (web_contents_) {
+      BrowserAccessibilityManagerAndroid* manager =
+          static_cast<BrowserAccessibilityManagerAndroid*>(
+              web_contents_->GetRootBrowserAccessibilityManager());
+      if (manager) {
+        manager->SetContentViewCore(GetJavaObject());
+        return;
+      }
+    }
+
+    // Otherwise, enable accessibility globally unless it was
+    // explicitly disallowed by a command-line flag, then enable it for
+    // this WebContents if that succeeded.
     accessibility_state->OnScreenReaderDetected();
-    // If it was actually enabled globally, enable it for this RenderWidget now.
     if (accessibility_state->IsAccessibleBrowser() && web_contents_)
       web_contents_->AddAccessibilityMode(AccessibilityModeComplete);
   } else {

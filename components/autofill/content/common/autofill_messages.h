@@ -25,6 +25,7 @@
 #include "third_party/WebKit/public/web/WebFormElement.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
+#include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
 #include "url/gurl.h"
 
 #define IPC_MESSAGE_START AutofillMsgStart
@@ -45,6 +46,7 @@ IPC_STRUCT_TRAITS_BEGIN(autofill::FormFieldData)
   IPC_STRUCT_TRAITS_MEMBER(value)
   IPC_STRUCT_TRAITS_MEMBER(form_control_type)
   IPC_STRUCT_TRAITS_MEMBER(autocomplete_attribute)
+  IPC_STRUCT_TRAITS_MEMBER(placeholder)
   IPC_STRUCT_TRAITS_MEMBER(role)
   IPC_STRUCT_TRAITS_MEMBER(max_length)
   IPC_STRUCT_TRAITS_MEMBER(is_autofilled)
@@ -63,6 +65,7 @@ IPC_STRUCT_TRAITS_BEGIN(autofill::FormFieldDataPredictions)
   IPC_STRUCT_TRAITS_MEMBER(heuristic_type)
   IPC_STRUCT_TRAITS_MEMBER(server_type)
   IPC_STRUCT_TRAITS_MEMBER(overall_type)
+  IPC_STRUCT_TRAITS_MEMBER(parseable_name)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(autofill::FormDataPredictions)
@@ -188,6 +191,11 @@ IPC_MESSAGE_ROUTED2(AutofillMsg_PreviewPasswordSuggestion,
 // Renderer is expected to respond with the message
 // |AutofillHostMsg_FocusedPasswordFormFound|.
 IPC_MESSAGE_ROUTED0(AutofillMsg_FindFocusedPasswordForm)
+
+// Tells the renderer to find a focused element, and if it is a password field
+// eligible for generation then to trigger generation by responding to the
+// browser with the message |AutofillHostMsg_ShowPasswordGenerationPopup|.
+IPC_MESSAGE_ROUTED0(AutofillMsg_UserTriggeredGeneratePassword)
 
 // Tells the renderer that this password form is not blacklisted.  A form can
 // be blacklisted if a user chooses "never save passwords for this site".
@@ -316,9 +324,11 @@ IPC_MESSAGE_ROUTED1(AutofillHostMsg_GenerationAvailableForForm,
 // Instructs the browser to show the password generation popup at the
 // specified location. This location should be specified in the renderers
 // coordinate system. Form is the form associated with the password field.
-IPC_MESSAGE_ROUTED3(AutofillHostMsg_ShowPasswordGenerationPopup,
+IPC_MESSAGE_ROUTED5(AutofillHostMsg_ShowPasswordGenerationPopup,
                     gfx::RectF /* source location */,
                     int /* max length of the password */,
+                    base::string16, /* password field */
+                    bool,           /* is manually triggered */
                     autofill::PasswordForm)
 
 // Instructs the browser to show the popup for editing a generated password.
@@ -331,7 +341,12 @@ IPC_MESSAGE_ROUTED2(AutofillHostMsg_ShowPasswordEditingPopup,
 // Instructs the browser to hide any password generation popups.
 IPC_MESSAGE_ROUTED0(AutofillHostMsg_HidePasswordGenerationPopup)
 
-// Instructs the browsr that form no longer contains a generated password.
+// Instructs the browser to presave the form with generated password.
+IPC_MESSAGE_ROUTED1(AutofillHostMsg_PresaveGeneratedPassword,
+                    autofill::PasswordForm)
+
+// Instructs the browser that form no longer contains a generated password and
+// the presaved form should be removed.
 IPC_MESSAGE_ROUTED1(AutofillHostMsg_PasswordNoLongerGenerated,
                     autofill::PasswordForm)
 

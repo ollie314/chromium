@@ -12,15 +12,13 @@
  *      <settings-people-page prefs="{{prefs}}"></settings-people-page>
  *      ... other pages ...
  *    </iron-animated-pages>
- *
- * @group Chrome Settings Elements
- * @element settings-people-page
  */
 Polymer({
   is: 'settings-people-page',
 
   behaviors: [
     I18nBehavior,
+    WebUIListenerBehavior,
   ],
 
   properties: {
@@ -48,33 +46,87 @@ Polymer({
 
     /**
      * The currently selected profile icon URL. May be a data URL.
-     * @private {string}
      */
     profileIconUrl_: String,
 
     /**
      * The current profile name.
-     * @private {string}
      */
     profileName_: String,
+
+<if expr="chromeos">
+    /** @private {!settings.EasyUnlockBrowserProxyImpl} */
+    easyUnlockBrowserProxy_: {
+      type: Object,
+      value: function() {
+        return settings.EasyUnlockBrowserProxyImpl.getInstance();
+      },
+    },
+
+    /**
+     * True if Easy Unlock is allowed on this machine.
+     */
+    easyUnlockAllowed_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('easyUnlockAllowed');
+      },
+      readOnly: true,
+    },
+
+    /**
+     * True if Easy Unlock is enabled.
+     */
+    easyUnlockEnabled_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('easyUnlockEnabled');
+      },
+    },
+
+    /**
+     * True if Easy Unlock's proximity detection feature is allowed.
+     */
+    easyUnlockProximityDetectionAllowed_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('easyUnlockAllowed') &&
+            loadTimeData.getBoolean('easyUnlockProximityDetectionAllowed');
+      },
+      readOnly: true,
+    },
+</if>
   },
 
   /** @override */
-  created: function() {
-    settings.SyncPrivateApi.getProfileInfo(this.handleProfileInfo_.bind(this));
+  attached: function() {
+    settings.ProfileInfoBrowserProxyImpl.getInstance().getProfileInfo().then(
+        this.handleProfileInfo_.bind(this));
+    this.addWebUIListener('profile-info-changed',
+                          this.handleProfileInfo_.bind(this));
+
     settings.SyncPrivateApi.getSyncStatus(
         this.handleSyncStatusFetched_.bind(this));
+
+<if expr="chromeos">
+    if (this.easyUnlockAllowed_) {
+      this.addWebUIListener(
+          'easy-unlock-enabled-status',
+          this.handleEasyUnlockEnabledStatusChanged_.bind(this));
+      this.easyUnlockBrowserProxy_.getEnabledStatus().then(
+          this.handleEasyUnlockEnabledStatusChanged_.bind(this));
+    }
+</if>
   },
 
   /**
    * Handler for when the profile's icon and name is updated.
    * @private
-   * @param {!string} name
-   * @param {!string} iconUrl
+   * @param {!settings.ProfileInfo} info
    */
-  handleProfileInfo_: function(name, iconUrl) {
-    this.profileName_ = name;
-    this.profileIconUrl_ = iconUrl;
+  handleProfileInfo_: function(info) {
+    this.profileName_ = info.name;
+    this.profileIconUrl_ = info.iconUrl;
   },
 
   /**
@@ -88,6 +140,16 @@ Polymer({
     // code to not include HTML in the status messages.
     this.$.syncStatusText.innerHTML = syncStatus.statusText;
   },
+
+<if expr="chromeos">
+  /**
+   * Handler for when the Easy Unlock enabled status has changed.
+   * @private
+   */
+  handleEasyUnlockEnabledStatusChanged_: function(easyUnlockEnabled) {
+    this.easyUnlockEnabled_ = easyUnlockEnabled;
+  },
+</if>
 
   /** @private */
   onActionLinkTap_: function() {
@@ -133,6 +195,18 @@ Polymer({
   onSyncTap_: function() {
     this.$.pages.setSubpageChain(['sync']);
   },
+
+<if expr="chromeos">
+  /** @private */
+  onEasyUnlockSetupTap_: function() {
+    this.easyUnlockBrowserProxy_.startTurnOnFlow();
+  },
+
+  /** @private */
+  onEasyUnlockTurnOffTap_: function() {
+    this.$$('#easyUnlockTurnOffDialog').open();
+  },
+</if>
 
   /** @private */
   onManageOtherPeople_: function() {

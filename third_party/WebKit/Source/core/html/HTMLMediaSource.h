@@ -42,15 +42,10 @@ class WebMediaSource;
 class HTMLMediaElement;
 class TimeRanges;
 
-class CORE_EXPORT HTMLMediaSource : public URLRegistrable, public WillBeGarbageCollectedMixin {
+class CORE_EXPORT HTMLMediaSource : public URLRegistrable, public GarbageCollectedMixin {
 public:
     static void setRegistry(URLRegistry*);
     static HTMLMediaSource* lookup(const String& url) { return s_registry ? static_cast<HTMLMediaSource*>(s_registry->lookup(url)) : 0; }
-
-#if !ENABLE(OILPAN)
-    void ref() { refHTMLMediaSource(); }
-    void deref() { derefHTMLMediaSource(); }
-#endif
 
     // Called when an HTMLMediaElement is attempting to attach to this object,
     // and helps enforce attachment to at most one element at a time.
@@ -66,10 +61,6 @@ public:
     virtual double duration() const = 0;
     virtual TimeRanges* buffered() const = 0;
     virtual TimeRanges* seekable() const = 0;
-#if !ENABLE(OILPAN)
-    virtual void refHTMLMediaSource() = 0;
-    virtual void derefHTMLMediaSource() = 0;
-#endif
 
     // URLRegistrable
     URLRegistry& registry() const override { return *s_registry; }
@@ -78,6 +69,6 @@ private:
     static URLRegistry* s_registry;
 };
 
-}
+} // namespace blink
 
 #endif

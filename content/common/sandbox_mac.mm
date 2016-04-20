@@ -9,9 +9,6 @@
 #include <stdint.h>
 
 #include <CoreFoundation/CFTimeZone.h>
-extern "C" {
-#include <sandbox.h>
-}
 #include <signal.h>
 #include <sys/param.h>
 
@@ -39,6 +36,7 @@ extern "C" {
 #include "content/grit/content_resources.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
+#include "sandbox/mac/seatbelt.h"
 #include "third_party/icu/source/common/unicode/uchar.h"
 #include "ui/base/layout.h"
 #include "ui/gl/gl_surface.h"
@@ -46,15 +44,6 @@ extern "C" {
 extern "C" {
 void CGSSetDenyWindowServerConnections(bool);
 void CGSShutdownServerConnections();
-
-void* sandbox_create_params();
-int sandbox_set_param(void* params, const char* key, const char* value);
-void* sandbox_compile_string(const char* profile_str,
-                             void* params,
-                             char** error);
-int sandbox_apply(void* profile);
-void sandbox_free_params(void* params);
-void sandbox_free_profile(void* profile);
 };
 
 namespace content {
@@ -66,14 +55,6 @@ bool gSandboxIsActive = false;
 struct SandboxTypeToResourceIDMapping {
   SandboxType sandbox_type;
   int sandbox_profile_resource_id;
-};
-
-// This is the internal definition of the structure used by sandbox parameters
-// on OS X 10.6.
-struct SandboxParams {
-  void* buf;
-  size_t count;
-  size_t size;
 };
 
 // Mapping from sandbox process types to resource IDs containing the sandbox
@@ -153,58 +134,24 @@ bool SandboxCompiler::InsertStringParam(const std::string& key,
   return params_map_.insert(std::make_pair(key, value)).second;
 }
 
-void SandboxCompiler::FreeSandboxResources(void* profile,
-                                           void* params,
-                                           char* error) {
-  if (error)
-    sandbox_free_error(error);
-  if (params)
-    sandbox_free_params(params);
-  if (profile)
-    sandbox_free_profile(profile);
-}
-
 bool SandboxCompiler::CompileAndApplyProfile(std::string* error) {
   char* error_internal = nullptr;
-  void* profile = nullptr;
-  void* params = nullptr;
+  std::vector<const char*> params;
 
-  if (!params_map_.empty()) {
-    if (base::mac::IsOSSnowLeopard()) {
-      // This is a workaround for 10.6, see crbug.com/509114.
-      // Check that there is no integer overflow.
-      base::CheckedNumeric<size_t> checked_size = params_map_.size();
-      checked_size *= 2;
-      if (!checked_size.IsValid())
-        return false;
-
-      SandboxParams* internal_params =
-          static_cast<SandboxParams*>(malloc(sizeof(SandboxParams)));
-      internal_params->buf = calloc(checked_size.ValueOrDie(), sizeof(void*));
-      internal_params->count = 0;
-      internal_params->size = checked_size.ValueOrDie();
-      params = internal_params;
-    } else {
-      params = sandbox_create_params();
-      if (!params)
-        return false;
-    }
-
-    for (const auto& kv : params_map_)
-      sandbox_set_param(params, kv.first.c_str(), kv.second.c_str());
+  for (const auto& kv : params_map_) {
+    params.push_back(kv.first.c_str());
+    params.push_back(kv.second.c_str());
   }
+  // The parameters array must be null terminated.
+  params.push_back(static_cast<const char*>(0));
 
-  profile =
-      sandbox_compile_string(profile_str_.c_str(), params, &error_internal);
-  if (!profile) {
+  if (sandbox::Seatbelt::InitWithParams(profile_str_.c_str(), 0, params.data(),
+                                        &error_internal)) {
     error->assign(error_internal);
-    FreeSandboxResources(profile, params, error_internal);
+    sandbox::Seatbelt::FreeError(error_internal);
     return false;
   }
-
-  int result = sandbox_apply(profile);
-  FreeSandboxResources(profile, params, error_internal);
-  return result == 0;
+  return true;
 }
 
 // static
@@ -533,16 +480,6 @@ bool Sandbox::EnableSandbox(int sandbox_type,
   bool elcap_or_later = base::mac::IsOSElCapitanOrLater();
   if (!compiler.InsertBooleanParam("ELCAP_OR_LATER", elcap_or_later))
     return false;
-
-#if defined(COMPONENT_BUILD)
-  // dlopen() fails without file-read-metadata access if the executable image
-  // contains LC_RPATH load commands. The components build uses those.
-  // See http://crbug.com/127465
-  if (base::mac::IsOSSnowLeopard()) {
-    if (!compiler.InsertBooleanParam("COMPONENT_BUILD_WORKAROUND", true))
-      return false;
-  }
-#endif
 
   // Initialize sandbox.
   std::string error_str;

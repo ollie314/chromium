@@ -70,7 +70,9 @@ DomainReliabilityContext::~DomainReliabilityContext() {
 void DomainReliabilityContext::OnBeacon(
     scoped_ptr<DomainReliabilityBeacon> beacon) {
   bool success = (beacon->status == "ok");
-  double sample_rate = config().GetSampleRate(success);
+  double sample_rate = beacon->details.quic_port_migration_detected
+                           ? 1.0
+                           : config().GetSampleRate(success);
   bool should_report = base::RandDouble() < sample_rate;
   UMA_HISTOGRAM_BOOLEAN("DomainReliability.BeaconReported", should_report);
   if (!should_report) {
@@ -89,7 +91,7 @@ void DomainReliabilityContext::OnBeacon(
         "DomainReliability.ReportedBeaconError_HasServerIP",
         -beacon->chrome_error);
   }
-  // TODO(ttuttle): Histogram HTTP response code?
+  // TODO(juliatuttle): Histogram HTTP response code?
 
   // Allow beacons about reports, but don't schedule an upload for more than
   // one layer of recursion, to avoid infinite report loops.

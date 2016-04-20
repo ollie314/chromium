@@ -23,21 +23,6 @@ namespace {
 // Service Worker when a notificationclick event has been dispatched.
 void OnEventDispatchComplete(PersistentNotificationStatus status) {}
 
-blink::WebNotificationPermission ToWebNotificationPermission(
-    PermissionStatus status) {
-  switch (status) {
-    case PERMISSION_STATUS_GRANTED:
-      return blink::WebNotificationPermissionAllowed;
-    case PERMISSION_STATUS_DENIED:
-      return blink::WebNotificationPermissionDenied;
-    case PERMISSION_STATUS_ASK:
-      return blink::WebNotificationPermissionDefault;
-  }
-
-  NOTREACHED();
-  return blink::WebNotificationPermissionLast;
-}
-
 }  // namespace
 
 LayoutTestNotificationManager::LayoutTestNotificationManager()
@@ -48,9 +33,9 @@ LayoutTestNotificationManager::~LayoutTestNotificationManager() {}
 void LayoutTestNotificationManager::DisplayNotification(
     BrowserContext* browser_context,
     const GURL& origin,
-    const SkBitmap& icon,
     const PlatformNotificationData& notification_data,
-    scoped_ptr<DesktopNotificationDelegate> delegate,
+    const NotificationResources& notification_resources,
+    std::unique_ptr<DesktopNotificationDelegate> delegate,
     base::Closure* cancel_callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   std::string title = base::UTF16ToUTF8(notification_data.title);
@@ -70,8 +55,8 @@ void LayoutTestNotificationManager::DisplayPersistentNotification(
     BrowserContext* browser_context,
     int64_t persistent_notification_id,
     const GURL& origin,
-    const SkBitmap& icon,
-    const PlatformNotificationData& notification_data) {
+    const PlatformNotificationData& notification_data,
+    const NotificationResources& notification_resources) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   std::string title = base::UTF16ToUTF8(notification_data.title);
 
@@ -134,7 +119,25 @@ void LayoutTestNotificationManager::SimulateClick(const std::string& title,
           base::Bind(&OnEventDispatchComplete));
 }
 
-blink::WebNotificationPermission
+void LayoutTestNotificationManager::SimulateClose(const std::string& title,
+                                                  bool by_user) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  const auto& persistent_iterator = persistent_notifications_.find(title);
+  if (persistent_iterator == persistent_notifications_.end())
+    return;
+
+  const PersistentNotification& notification = persistent_iterator->second;
+  content::NotificationEventDispatcher::GetInstance()
+      ->DispatchNotificationCloseEvent(
+          notification.browser_context,
+          notification.persistent_id,
+          notification.origin,
+          by_user,
+          base::Bind(&OnEventDispatchComplete));
+}
+
+blink::mojom::PermissionStatus
 LayoutTestNotificationManager::CheckPermissionOnUIThread(
     BrowserContext* browser_context,
     const GURL& origin,
@@ -143,7 +146,7 @@ LayoutTestNotificationManager::CheckPermissionOnUIThread(
   return CheckPermission(origin);
 }
 
-blink::WebNotificationPermission
+blink::mojom::PermissionStatus
 LayoutTestNotificationManager::CheckPermissionOnIOThread(
     ResourceContext* resource_context,
     const GURL& origin,
@@ -192,14 +195,14 @@ void LayoutTestNotificationManager::ReplaceNotificationIfNeeded(
   replacements_[tag] = base::UTF16ToUTF8(notification_data.title);
 }
 
-blink::WebNotificationPermission
+blink::mojom::PermissionStatus
 LayoutTestNotificationManager::CheckPermission(const GURL& origin) {
-  return ToWebNotificationPermission(LayoutTestContentBrowserClient::Get()
+  return LayoutTestContentBrowserClient::Get()
       ->GetLayoutTestBrowserContext()
       ->GetLayoutTestPermissionManager()
       ->GetPermissionStatus(PermissionType::NOTIFICATIONS,
                             origin,
-                            origin));
+                            origin);
 }
 
 }  // namespace content

@@ -13,9 +13,9 @@
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
+#include "components/drive/chromeos/file_system_interface.h"
 #include "components/drive/drive.pb.h"
 #include "components/drive/file_errors.h"
-#include "components/drive/file_system_interface.h"
 #include "components/drive/resource_entry_conversion.h"
 #include "content/public/browser/browser_thread.h"
 #include "storage/browser/fileapi/file_system_url.h"
@@ -57,7 +57,7 @@ void RunStatusCallbackByFileError(const StatusCallback& callback,
 // Runs |callback| with arguments converted from |error| and |entry|.
 void RunGetFileInfoCallback(const GetFileInfoCallback& callback,
                             FileError error,
-                            scoped_ptr<ResourceEntry> entry) {
+                            std::unique_ptr<ResourceEntry> entry) {
   if (error != FILE_ERROR_OK) {
     callback.Run(FileErrorToBaseFileError(error), base::File::Info());
     return;
@@ -72,7 +72,7 @@ void RunGetFileInfoCallback(const GetFileInfoCallback& callback,
 // Runs |callback| with entries.
 void RunReadDirectoryCallbackWithEntries(
     const ReadDirectoryCallback& callback,
-    scoped_ptr<ResourceEntryVector> resource_entries) {
+    std::unique_ptr<ResourceEntryVector> resource_entries) {
   DCHECK(resource_entries);
 
   std::vector<storage::DirectoryEntry> entries;
@@ -103,7 +103,7 @@ void RunReadDirectoryCallbackOnCompletion(const ReadDirectoryCallback& callback,
 void RunCreateSnapshotFileCallback(const CreateSnapshotFileCallback& callback,
                                    FileError error,
                                    const base::FilePath& local_path,
-                                   scoped_ptr<ResourceEntry> entry) {
+                                   std::unique_ptr<ResourceEntry> entry) {
   if (error != FILE_ERROR_OK) {
     callback.Run(FileErrorToBaseFileError(error),
                  base::File::Info(),

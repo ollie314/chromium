@@ -26,6 +26,8 @@ SpdyWriteQueue::PendingWrite::PendingWrite(
       stream(stream),
       has_stream(stream.get() != NULL) {}
 
+SpdyWriteQueue::PendingWrite::PendingWrite(const PendingWrite& other) = default;
+
 SpdyWriteQueue::PendingWrite::~PendingWrite() {}
 
 SpdyWriteQueue::SpdyWriteQueue() : removing_writes_(false) {}
@@ -44,7 +46,7 @@ bool SpdyWriteQueue::IsEmpty() const {
 
 void SpdyWriteQueue::Enqueue(RequestPriority priority,
                              SpdyFrameType frame_type,
-                             scoped_ptr<SpdyBufferProducer> frame_producer,
+                             std::unique_ptr<SpdyBufferProducer> frame_producer,
                              const base::WeakPtr<SpdyStream>& stream) {
   CHECK(!removing_writes_);
   CHECK_GE(priority, MINIMUM_PRIORITY);
@@ -55,9 +57,10 @@ void SpdyWriteQueue::Enqueue(RequestPriority priority,
       PendingWrite(frame_type, frame_producer.release(), stream));
 }
 
-bool SpdyWriteQueue::Dequeue(SpdyFrameType* frame_type,
-                             scoped_ptr<SpdyBufferProducer>* frame_producer,
-                             base::WeakPtr<SpdyStream>* stream) {
+bool SpdyWriteQueue::Dequeue(
+    SpdyFrameType* frame_type,
+    std::unique_ptr<SpdyBufferProducer>* frame_producer,
+    base::WeakPtr<SpdyStream>* stream) {
   CHECK(!removing_writes_);
   for (int i = MAXIMUM_PRIORITY; i >= MINIMUM_PRIORITY; --i) {
     if (!queue_[i].empty()) {

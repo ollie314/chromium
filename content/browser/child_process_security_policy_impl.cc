@@ -14,7 +14,6 @@
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
-#include "content/browser/plugin_process_host.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/common/site_isolation_policy.h"
 #include "content/public/browser/child_process_data.h"
@@ -602,7 +601,7 @@ bool ChildProcessSecurityPolicyImpl::CanRequestURL(
     if (base::LowerCaseEqualsASCII(url.spec(), url::kAboutBlankURL))
       return true;  // Every child process can request <about:blank>.
 
-    // URLs like <about:memory> and <about:crash> shouldn't be requestable by
+    // URLs like <about:version> and <about:crash> shouldn't be requestable by
     // any child process.  Also, this case covers <javascript:...>, which should
     // be handled internally by the process and not kicked up to the browser.
     return false;

@@ -53,7 +53,7 @@ void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
                         const GURL& url,
                         ui::PageTransition transition_type);
 
-// TestRenderViewHostView ------------------------------------------------------
+// TestRenderWidgetHostView ----------------------------------------------------
 
 // Subclass the RenderViewHost's view so that we can call Show(), etc.,
 // without having side-effects.
@@ -82,24 +82,21 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   gfx::Rect GetViewBounds() const override;
 #if defined(OS_MACOSX)
   void SetActive(bool active) override;
-  void SetWindowVisibility(bool visible) override {}
-  void WindowFrameChanged() override {}
   void ShowDefinitionForSelection() override {}
   bool SupportsSpeech() const override;
   void SpeakSelection() override;
   bool IsSpeaking() const override;
   void StopSpeaking() override;
 #endif  // defined(OS_MACOSX)
-  void OnSwapCompositorFrame(uint32_t output_surface_id,
-                             scoped_ptr<cc::CompositorFrame> frame) override;
+  void OnSwapCompositorFrame(
+      uint32_t output_surface_id,
+      std::unique_ptr<cc::CompositorFrame> frame) override;
   void ClearCompositorFrame() override {}
 
   // RenderWidgetHostViewBase implementation.
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
                    const gfx::Rect& bounds) override {}
   void InitAsFullscreen(RenderWidgetHostView* reference_host_view) override {}
-  void MovePluginWindows(const std::vector<WebPluginGeometry>& moves) override {
-  }
   void Focus() override {}
   void SetIsLoading(bool is_loading) override {}
   void UpdateCursor(const WebCursor& cursor) override {}
@@ -126,10 +123,6 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
       const base::Callback<void(const gfx::Rect&, bool)>& callback) override;
   bool CanCopyToVideoFrame() const override;
   bool HasAcceleratedSurface(const gfx::Size& desired_size) override;
-#if defined(OS_MACOSX)
-  bool PostProcessEventForPluginIme(
-      const NativeWebKeyboardEvent& event) override;
-#endif
   void LockCompositingSurface() override {}
   void UnlockCompositingSurface() override {}
   void GetScreenInfo(blink::WebScreenInfo* results) override {}
@@ -137,11 +130,6 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   gfx::Rect GetBoundsInRootWindow() override;
   bool LockMouse() override;
   void UnlockMouse() override;
-#if defined(OS_WIN)
-  void SetParentNativeViewAccessible(
-      gfx::NativeViewAccessible accessible_parent) override;
-  gfx::NativeViewId GetParentForWindowlessPlugin() const override;
-#endif
 
   bool is_showing() const { return is_showing_; }
   bool is_occluded() const { return is_occluded_; }
@@ -203,7 +191,7 @@ class TestRenderViewHost
       public RenderViewHostTester {
  public:
   TestRenderViewHost(SiteInstance* instance,
-                     scoped_ptr<RenderWidgetHostImpl> widget,
+                     std::unique_ptr<RenderWidgetHostImpl> widget,
                      RenderViewHostDelegate* delegate,
                      int32_t main_frame_routing_id,
                      bool swapped_out);
@@ -318,7 +306,7 @@ class RenderViewHostImplTestHarness : public RenderViewHostTestHarness {
   TestRenderFrameHost* main_test_rfh();
 
  private:
-  typedef scoped_ptr<ui::test::ScopedSetSupportedScaleFactors>
+  typedef std::unique_ptr<ui::test::ScopedSetSupportedScaleFactors>
       ScopedSetSupportedScaleFactors;
   ScopedSetSupportedScaleFactors scoped_set_supported_scale_factors_;
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostImplTestHarness);

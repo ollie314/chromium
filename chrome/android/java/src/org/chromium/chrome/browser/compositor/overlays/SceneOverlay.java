@@ -49,12 +49,33 @@ public interface SceneOverlay {
     void getVirtualViews(List<VirtualView> views);
 
     /**
+     * @return True if the overlay requires the Android top controls view to be hidden.
+     */
+    boolean shouldHideAndroidTopControls();
+
+    /**
      * Helper-specific updates. Cascades the values updated by the animations and flings.
      * @param time The current time of the app in ms.
      * @param dt   The delta time between update frames in ms.
      * @return     Whether the updating is done.
      */
     boolean updateOverlay(long time, long dt);
+
+    /**
+     * Notification that the system back button was pressed.
+     * @return True if system back button press was consumed by this overlay.
+     */
+    boolean onBackPressed();
+
+    /**
+     * A notification to the overlay that the containing layout is being hidden.
+     */
+    void onHideLayout();
+
+    /**
+     * @return True if this overlay handles tab creation.
+     */
+    boolean handlesTabCreating();
 
     /**
      * Notify the a title has changed.

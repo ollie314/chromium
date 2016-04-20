@@ -69,7 +69,7 @@ bool handleSelectionBoundary<EditingStrategy>(const Node&)
 }
 
 template<>
-bool handleSelectionBoundary<EditingInComposedTreeStrategy>(const Node& node)
+bool handleSelectionBoundary<EditingInFlatTreeStrategy>(const Node& node)
 {
     if (!node.isElementNode())
         return false;
@@ -92,21 +92,21 @@ public:
     StyledMarkupTraverser(StyledMarkupAccumulator*, Node*);
 
     Node* traverse(Node*, Node*);
-    void wrapWithNode(ContainerNode&, PassRefPtrWillBeRawPtr<EditingStyle>);
-    RefPtrWillBeRawPtr<EditingStyle> createInlineStyleIfNeeded(Node&);
+    void wrapWithNode(ContainerNode&, EditingStyle*);
+    EditingStyle* createInlineStyleIfNeeded(Node&);
 
 private:
     bool shouldAnnotate() const;
     bool convertBlocksToInlines() const;
     void appendStartMarkup(Node&);
     void appendEndMarkup(Node&);
-    RefPtrWillBeRawPtr<EditingStyle> createInlineStyle(Element&);
+    EditingStyle* createInlineStyle(Element&);
     bool needsInlineStyle(const Element&);
     bool shouldApplyWrappingStyle(const Node&) const;
 
     StyledMarkupAccumulator* m_accumulator;
-    RefPtrWillBeMember<Node> m_lastClosed;
-    RefPtrWillBeMember<EditingStyle> m_wrappingStyle;
+    Member<Node> m_lastClosed;
+    Member<EditingStyle> m_wrappingStyle;
 };
 
 template<typename Strategy>
@@ -152,18 +152,18 @@ static bool needInterchangeNewlineAt(const VisiblePositionTemplate<Strategy>& v)
 template<typename Strategy>
 static bool areSameRanges(Node* node, const PositionTemplate<Strategy>& startPosition, const PositionTemplate<Strategy>& endPosition)
 {
-    ASSERT(node);
+    DCHECK(node);
     const EphemeralRange range = VisibleSelection::selectionFromContentsOfNode(node).toNormalizedEphemeralRange();
     return toPositionInDOMTree(startPosition) == range.startPosition() && toPositionInDOMTree(endPosition) == range.endPosition();
 }
 
-static PassRefPtrWillBeRawPtr<EditingStyle> styleFromMatchedRulesAndInlineDecl(const HTMLElement* element)
+static EditingStyle* styleFromMatchedRulesAndInlineDecl(const HTMLElement* element)
 {
-    RefPtrWillBeRawPtr<EditingStyle> style = EditingStyle::create(element->inlineStyle());
+    EditingStyle* style = EditingStyle::create(element->inlineStyle());
     // FIXME: Having to const_cast here is ugly, but it is quite a bit of work to untangle
     // the non-const-ness of styleFromMatchedRulesForElement.
     style->mergeStyleFromRules(const_cast<HTMLElement*>(element));
-    return style.release();
+    return style;
 }
 
 template<typename Strategy>
@@ -197,7 +197,7 @@ String StyledMarkupSerializer<Strategy>::createMarkup()
     if (m_highestNodeToBeSerialized && lastClosed) {
         // TODO(hajimehoshi): This is calculated at createMarkupInternal too.
         Node* commonAncestor = Strategy::commonAncestor(*m_start.computeContainerNode(), *m_end.computeContainerNode());
-        ASSERT(commonAncestor);
+        DCHECK(commonAncestor);
         HTMLBodyElement* body = toHTMLBodyElement(enclosingElementWithTag(firstPositionInNode(commonAncestor), bodyTag));
         HTMLBodyElement* fullySelectedRoot = nullptr;
         // FIXME: Do this for all fully selected blocks, not just the body.
@@ -208,7 +208,7 @@ String StyledMarkupSerializer<Strategy>::createMarkup()
         // FIXME: What is ancestor?
         for (ContainerNode* ancestor = Strategy::parent(*lastClosed); ancestor; ancestor = Strategy::parent(*ancestor)) {
             if (ancestor == fullySelectedRoot && !markupAccumulator.convertBlocksToInlines()) {
-                RefPtrWillBeRawPtr<EditingStyle> fullySelectedRootStyle = styleFromMatchedRulesAndInlineDecl(fullySelectedRoot);
+                EditingStyle* fullySelectedRootStyle = styleFromMatchedRulesAndInlineDecl(fullySelectedRoot);
 
                 // Bring the background attribute over, but not as an attribute because a background attribute on a div
                 // appears to have no effect.
@@ -227,7 +227,7 @@ String StyledMarkupSerializer<Strategy>::createMarkup()
                     markupAccumulator.wrapWithStyleNode(fullySelectedRootStyle->style());
                 }
             } else {
-                RefPtrWillBeRawPtr<EditingStyle> style = traverser.createInlineStyleIfNeeded(*ancestor);
+                EditingStyle* style = traverser.createInlineStyleIfNeeded(*ancestor);
                 // Since this node and all the other ancestors are not in the selection we want
                 // styles that affect the exterior of the node not to be not included.
                 // If the node is not fully selected by the range, then we don't want to keep styles that affect its relationship to the nodes around it
@@ -262,7 +262,7 @@ StyledMarkupTraverser<Strategy>::StyledMarkupTraverser(StyledMarkupAccumulator* 
     , m_wrappingStyle(nullptr)
 {
     if (!m_accumulator) {
-        ASSERT(!m_lastClosed);
+        DCHECK_EQ(m_lastClosed, static_cast<decltype(m_lastClosed)>(nullptr));
         return;
     }
     if (!m_lastClosed)
@@ -280,15 +280,15 @@ StyledMarkupTraverser<Strategy>::StyledMarkupTraverser(StyledMarkupAccumulator* 
 template<typename Strategy>
 Node* StyledMarkupTraverser<Strategy>::traverse(Node* startNode, Node* pastEnd)
 {
-    WillBeHeapVector<RawPtrWillBeMember<ContainerNode>> ancestorsToClose;
+    HeapVector<Member<ContainerNode>> ancestorsToClose;
     Node* next;
     Node* lastClosed = nullptr;
     for (Node* n = startNode; n && n != pastEnd; n = next) {
         // If |n| is a selection boundary such as <input>, traverse the child
-        // nodes in the DOM tree instead of the composed tree.
+        // nodes in the DOM tree instead of the flat tree.
         if (handleSelectionBoundary<Strategy>(*n)) {
             lastClosed = StyledMarkupTraverser<EditingStrategy>(m_accumulator, m_lastClosed.get()).traverse(n, EditingStrategy::nextSkippingChildren(*n));
-            next = EditingInComposedTreeStrategy::nextSkippingChildren(*n);
+            next = EditingInFlatTreeStrategy::nextSkippingChildren(*n);
         } else {
             next = Strategy::next(*n);
             if (isEnclosingBlock(n) && canHaveChildrenForEditing(n) && next == pastEnd) {
@@ -323,7 +323,7 @@ Node* StyledMarkupTraverser<Strategy>::traverse(Node* startNode, Node* pastEnd)
         // Close up the ancestors.
         while (!ancestorsToClose.isEmpty()) {
             ContainerNode* ancestor = ancestorsToClose.last();
-            ASSERT(ancestor);
+            DCHECK(ancestor);
             if (next && next != pastEnd && Strategy::isDescendantOf(*next, *ancestor))
                 break;
             // Not at the end of the range, close ancestors up to sibling of next node.
@@ -337,16 +337,16 @@ Node* StyledMarkupTraverser<Strategy>::traverse(Node* startNode, Node* pastEnd)
         if (next == pastEnd || n == nextParent)
             continue;
 
-        ASSERT(n);
+        DCHECK(n);
         Node* lastAncestorClosedOrSelf = (lastClosed && Strategy::isDescendantOf(*n, *lastClosed)) ? lastClosed : n;
         for (ContainerNode* parent = Strategy::parent(*lastAncestorClosedOrSelf); parent && parent != nextParent; parent = Strategy::parent(*parent)) {
             // All ancestors that aren't in the ancestorsToClose list should either be a) unrendered:
             if (!parent->layoutObject())
                 continue;
             // or b) ancestors that we never encountered during a pre-order traversal starting at startNode:
-            ASSERT(startNode);
-            ASSERT(Strategy::isDescendantOf(*startNode, *parent));
-            RefPtrWillBeRawPtr<EditingStyle> style = createInlineStyleIfNeeded(*parent);
+            DCHECK(startNode);
+            DCHECK(Strategy::isDescendantOf(*startNode, *parent));
+            EditingStyle* style = createInlineStyleIfNeeded(*parent);
             wrapWithNode(*parent, style);
             lastClosed = parent;
         }
@@ -366,7 +366,7 @@ bool StyledMarkupTraverser<Strategy>::needsInlineStyle(const Element& element)
 }
 
 template<typename Strategy>
-void StyledMarkupTraverser<Strategy>::wrapWithNode(ContainerNode& node, PassRefPtrWillBeRawPtr<EditingStyle> style)
+void StyledMarkupTraverser<Strategy>::wrapWithNode(ContainerNode& node, EditingStyle* style)
 {
     if (!m_accumulator)
         return;
@@ -388,13 +388,13 @@ void StyledMarkupTraverser<Strategy>::wrapWithNode(ContainerNode& node, PassRefP
 }
 
 template<typename Strategy>
-RefPtrWillBeRawPtr<EditingStyle> StyledMarkupTraverser<Strategy>::createInlineStyleIfNeeded(Node& node)
+EditingStyle* StyledMarkupTraverser<Strategy>::createInlineStyleIfNeeded(Node& node)
 {
     if (!m_accumulator)
         return nullptr;
     if (!node.isElementNode())
         return nullptr;
-    RefPtrWillBeRawPtr<EditingStyle> inlineStyle = createInlineStyle(toElement(node));
+    EditingStyle* inlineStyle = createInlineStyle(toElement(node));
     if (convertBlocksToInlines() && isEnclosingBlock(&node))
         inlineStyle->forceInline();
     return inlineStyle;
@@ -405,14 +405,14 @@ void StyledMarkupTraverser<Strategy>::appendStartMarkup(Node& node)
 {
     if (!m_accumulator)
         return;
-    switch (node.nodeType()) {
+    switch (node.getNodeType()) {
     case Node::TEXT_NODE: {
         Text& text = toText(node);
         if (text.parentElement() && isHTMLTextAreaElement(text.parentElement())) {
             m_accumulator->appendText(text);
             break;
         }
-        RefPtrWillBeRawPtr<EditingStyle> inlineStyle = nullptr;
+        EditingStyle* inlineStyle = nullptr;
         if (shouldApplyWrappingStyle(text)) {
             inlineStyle = m_wrappingStyle->copy();
             // FIXME: <rdar://problem/5371536> Style rules that match pasted content can change it's appearance
@@ -427,7 +427,7 @@ void StyledMarkupTraverser<Strategy>::appendStartMarkup(Node& node)
     case Node::ELEMENT_NODE: {
         Element& element = toElement(node);
         if ((element.isHTMLElement() && shouldAnnotate()) || shouldApplyWrappingStyle(element)) {
-            RefPtrWillBeRawPtr<EditingStyle> inlineStyle = createInlineStyle(element);
+            EditingStyle* inlineStyle = createInlineStyle(element);
             m_accumulator->appendElementWithInlineStyle(element, inlineStyle);
             break;
         }
@@ -456,9 +456,9 @@ bool StyledMarkupTraverser<Strategy>::shouldApplyWrappingStyle(const Node& node)
 }
 
 template<typename Strategy>
-RefPtrWillBeRawPtr<EditingStyle> StyledMarkupTraverser<Strategy>::createInlineStyle(Element& element)
+EditingStyle* StyledMarkupTraverser<Strategy>::createInlineStyle(Element& element)
 {
-    RefPtrWillBeRawPtr<EditingStyle> inlineStyle = nullptr;
+    EditingStyle* inlineStyle = nullptr;
 
     if (shouldApplyWrappingStyle(element)) {
         inlineStyle = m_wrappingStyle->copy();
@@ -478,6 +478,6 @@ RefPtrWillBeRawPtr<EditingStyle> StyledMarkupTraverser<Strategy>::createInlineSt
 }
 
 template class StyledMarkupSerializer<EditingStrategy>;
-template class StyledMarkupSerializer<EditingInComposedTreeStrategy>;
+template class StyledMarkupSerializer<EditingInFlatTreeStrategy>;
 
 } // namespace blink

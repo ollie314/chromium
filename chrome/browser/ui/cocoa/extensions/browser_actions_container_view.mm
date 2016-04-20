@@ -20,8 +20,6 @@ NSString* const kBrowserActionGrippyDragFinishedNotification =
     @"BrowserActionGrippyDragFinishedNotification";
 NSString* const kBrowserActionsContainerWillAnimate =
     @"BrowserActionsContainerWillAnimate";
-NSString* const kBrowserActionsContainerMouseEntered =
-    @"BrowserActionsContainerMouseEntered";
 NSString* const kBrowserActionsContainerAnimationEnded =
     @"BrowserActionsContainerAnimationEnded";
 NSString* const kTranslationWithDelta =
@@ -75,12 +73,6 @@ const CGFloat kMinimumContainerWidth = 3.0;
   return self;
 }
 
-- (void)dealloc {
-  if (trackingArea_.get())
-    [self removeTrackingArea:trackingArea_.get()];
-  [super dealloc];
-}
-
 - (void)drawRect:(NSRect)rect {
   [super drawRect:rect];
   if (highlight_) {
@@ -102,23 +94,6 @@ const CGFloat kMinimumContainerWidth = 3.0;
     // highlighted item).
     // Since this seems to have the right behavior, use it.
     [[self window] makeFirstResponder:self];
-  }
-}
-
-- (void)setTrackingEnabled:(BOOL)enabled {
-  if (enabled) {
-    trackingArea_.reset(
-        [[CrTrackingArea alloc] initWithRect:NSZeroRect
-                                     options:NSTrackingMouseEnteredAndExited |
-                                             NSTrackingActiveInActiveApp |
-                                             NSTrackingInVisibleRect
-                                       owner:self
-                                    userInfo:nil]);
-    [self addTrackingArea:trackingArea_.get()];
-  } else if (trackingArea_.get()) {
-    [self removeTrackingArea:trackingArea_.get()];
-    [trackingArea_.get() clearOwner];
-    trackingArea_.reset(nil);
   }
 }
 
@@ -166,13 +141,17 @@ const CGFloat kMinimumContainerWidth = 3.0;
   [super keyDown:theEvent];
 }
 
-- (void)setHighlight:(scoped_ptr<ui::NinePartImageIds>)highlight {
+- (void)setHighlight:(std::unique_ptr<ui::NinePartImageIds>)highlight {
   if (highlight || highlight_) {
     highlight_ = std::move(highlight);
     // We don't allow resizing when the container is highlighting.
     resizable_ = highlight.get() == nullptr;
     [self setNeedsDisplay:YES];
   }
+}
+
+- (BOOL)isHighlighting {
+  return highlight_.get() != nullptr;
 }
 
 - (void)setIsOverflow:(BOOL)isOverflow {
@@ -188,13 +167,10 @@ const CGFloat kMinimumContainerWidth = 3.0;
 }
 
 - (BOOL)acceptsFirstResponder {
-  return YES;
-}
-
-- (void)mouseEntered:(NSEvent*)theEvent {
-  [[NSNotificationCenter defaultCenter]
-      postNotificationName:kBrowserActionsContainerMouseEntered
-                    object:self];
+  // The overflow container needs to receive key events to handle in-item
+  // navigation. The top-level container should not become first responder,
+  // allowing focus travel to proceed to the first action.
+  return isOverflow_;
 }
 
 - (void)mouseDown:(NSEvent*)theEvent {

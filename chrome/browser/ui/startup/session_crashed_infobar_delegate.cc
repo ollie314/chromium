@@ -16,6 +16,9 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
+#include "components/strings/grit/components_chromium_strings.h"
+#include "components/strings/grit/components_google_chrome_strings.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "grit/theme_resources.h"
@@ -36,8 +39,8 @@ void SessionCrashedInfoBarDelegate::Create(Browser* browser) {
 
   InfoBarService* infobar_service =
       InfoBarService::FromWebContents(web_contents);
-  infobar_service->AddInfoBar(
-      infobar_service->CreateConfirmInfoBar(scoped_ptr<ConfirmInfoBarDelegate>(
+  infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
+      std::unique_ptr<ConfirmInfoBarDelegate>(
           new SessionCrashedInfoBarDelegate(profile))));
 }
 

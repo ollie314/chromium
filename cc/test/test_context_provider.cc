@@ -16,7 +16,7 @@
 #include "cc/test/test_gles2_interface.h"
 #include "cc/test/test_web_graphics_context_3d.h"
 #include "third_party/skia/include/gpu/GrContext.h"
-#include "third_party/skia/include/gpu/gl/SkNullGLContext.h"
+#include "third_party/skia/include/gpu/gl/GrGLInterface.h"
 
 namespace cc {
 
@@ -40,14 +40,14 @@ scoped_refptr<TestContextProvider> TestContextProvider::CreateWorker() {
 
 // static
 scoped_refptr<TestContextProvider> TestContextProvider::Create(
-    scoped_ptr<TestWebGraphicsContext3D> context) {
+    std::unique_ptr<TestWebGraphicsContext3D> context) {
   if (!context)
     return NULL;
   return new TestContextProvider(std::move(context));
 }
 
 TestContextProvider::TestContextProvider(
-    scoped_ptr<TestWebGraphicsContext3D> context)
+    std::unique_ptr<TestWebGraphicsContext3D> context)
     : context3d_(std::move(context)),
       context_gl_(new TestGLES2Interface(context3d_.get())),
       bound_(false),
@@ -112,10 +112,11 @@ class GrContext* TestContextProvider::GrContext() {
   if (gr_context_)
     return gr_context_.get();
 
-  scoped_ptr<class SkGLContext> gl_context(SkNullGLContext::Create());
-  gl_context->makeCurrent();
+  skia::RefPtr<const GrGLInterface> gl_interface =
+      skia::AdoptRef(GrGLCreateNullInterface());
   gr_context_ = skia::AdoptRef(GrContext::Create(
-      kOpenGL_GrBackend, reinterpret_cast<GrBackendContext>(gl_context->gl())));
+      kOpenGL_GrBackend,
+      reinterpret_cast<GrBackendContext>(gl_interface.get())));
 
   // If GlContext is already lost, also abandon the new GrContext.
   if (ContextGL()->GetGraphicsResetStatusKHR() != GL_NO_ERROR)
@@ -145,7 +146,7 @@ void TestContextProvider::DeleteCachedResources() {
 void TestContextProvider::OnLostContext() {
   DCHECK(context_thread_checker_.CalledOnValidThread());
   if (!lost_context_callback_.is_null())
-    base::ResetAndReturn(&lost_context_callback_).Run();
+    lost_context_callback_.Run();
   if (gr_context_)
     gr_context_->abandonContext();
 }

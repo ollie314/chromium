@@ -12,6 +12,7 @@
 #include "build/build_config.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/resource_context.h"
+#include "content/public/browser/storage_partition.h"
 #include "extensions/browser/api/dns/host_resolver_wrapper.h"
 #include "extensions/browser/api/socket/socket.h"
 #include "extensions/browser/api/socket/tcp_socket.h"
@@ -25,8 +26,8 @@
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/base/network_interfaces.h"
+#include "net/base/url_util.h"
 #include "net/log/net_log.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -792,17 +793,14 @@ void SocketGetNetworkListFunction::SendResponseOnUIThread(
     const net::NetworkInterfaceList& interface_list) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  std::vector<linked_ptr<api::socket::NetworkInterface>> create_arg;
+  std::vector<api::socket::NetworkInterface> create_arg;
   create_arg.reserve(interface_list.size());
-  for (net::NetworkInterfaceList::const_iterator i = interface_list.begin();
-       i != interface_list.end();
-       ++i) {
-    linked_ptr<api::socket::NetworkInterface> info =
-        make_linked_ptr(new api::socket::NetworkInterface);
-    info->name = i->name;
-    info->address = net::IPAddressToString(i->address);
-    info->prefix_length = i->prefix_length;
-    create_arg.push_back(info);
+  for (const net::NetworkInterface& interface : interface_list) {
+    api::socket::NetworkInterface info;
+    info.name = interface.name;
+    info.address = interface.address.ToString();
+    info.prefix_length = interface.prefix_length;
+    create_arg.push_back(std::move(info));
   }
 
   results_ = api::socket::GetNetworkList::Results::Create(create_arg);
@@ -1013,7 +1011,8 @@ bool SocketSecureFunction::Prepare() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   params_ = api::socket::Secure::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params_.get());
-  url_request_getter_ = browser_context()->GetRequestContext();
+  url_request_getter_ = content::BrowserContext::GetDefaultStoragePartition(
+      browser_context())->GetURLRequestContext();
   return true;
 }
 

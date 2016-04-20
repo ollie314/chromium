@@ -56,7 +56,7 @@ public:
     {
     }
 
-    bool isValid() const { return m_content; }
+    bool isValid() const { return m_content.get(); }
 
     SharedBuffer* content() const { return m_content.get(); }
     const AtomicString& mimeType() const { return m_mimeType; }
@@ -72,7 +72,7 @@ private:
     SubstituteDataLoadPolicy m_substituteDataLoadPolicy;
 };
 
-}
+} // namespace blink
 
 #endif // SubstituteData_h
 

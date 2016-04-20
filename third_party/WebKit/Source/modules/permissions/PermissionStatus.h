@@ -5,6 +5,7 @@
 #ifndef PermissionStatus_h
 #define PermissionStatus_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/events/EventTarget.h"
 #include "platform/heap/Handle.h"
@@ -22,11 +23,11 @@ class ScriptPromiseResolver;
 // Expose the status of a given WebPermissionType for the current
 // ExecutionContext.
 class PermissionStatus final
-    : public RefCountedGarbageCollectedEventTargetWithInlineData<PermissionStatus>
+    : public EventTargetWithInlineData
+    , public ActiveScriptWrappable
     , public ActiveDOMObject
     , public WebPermissionObserver {
-    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(PermissionStatus);
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(PermissionStatus);
+    USING_GARBAGE_COLLECTED_MIXIN(PermissionStatus);
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PermissionStatus* take(ScriptPromiseResolver*, WebPermissionStatus, WebPermissionType);
@@ -36,13 +37,15 @@ public:
 
     // EventTarget implementation.
     const AtomicString& interfaceName() const override;
-    ExecutionContext* executionContext() const override;
+    ExecutionContext* getExecutionContext() const override;
 
     // WebPermissionObserver implementation.
     void permissionChanged(WebPermissionType, WebPermissionStatus) override;
 
+    // ActiveScriptWrappable implementation.
+    bool hasPendingActivity() const final;
+
     // ActiveDOMObject implementation.
-    bool hasPendingActivity() const override;
     void suspend() override;
     void resume() override;
     void stop() override;

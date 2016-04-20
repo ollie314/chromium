@@ -2,12 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "cc/raster/tile_task_worker_pool.h"
-
 #include <stddef.h>
 #include <stdint.h>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/time/time.h"
 #include "cc/debug/lap_timer.h"
@@ -16,9 +15,9 @@
 #include "cc/raster/gpu_rasterizer.h"
 #include "cc/raster/gpu_tile_task_worker_pool.h"
 #include "cc/raster/one_copy_tile_task_worker_pool.h"
-#include "cc/raster/raster_buffer.h"
 #include "cc/raster/synchronous_task_graph_runner.h"
 #include "cc/raster/tile_task_runner.h"
+#include "cc/raster/tile_task_worker_pool.h"
 #include "cc/raster/zero_copy_tile_task_worker_pool.h"
 #include "cc/resources/resource_pool.h"
 #include "cc/resources/resource_provider.h"
@@ -107,7 +106,7 @@ class PerfContextProvider : public ContextProvider {
  private:
   ~PerfContextProvider() override {}
 
-  scoped_ptr<PerfGLES2Interface> context_gl_;
+  std::unique_ptr<PerfGLES2Interface> context_gl_;
   skia::RefPtr<class GrContext> gr_context_;
   TestContextSupport support_;
   base::Lock context_lock_;
@@ -124,16 +123,18 @@ static const int kTimeLimitMillis = 2000;
 static const int kWarmupRuns = 5;
 static const int kTimeCheckInterval = 10;
 
-class PerfImageDecodeTaskImpl : public ImageDecodeTask {
+class PerfImageDecodeTaskImpl : public TileTask {
  public:
-  PerfImageDecodeTaskImpl() {}
+  PerfImageDecodeTaskImpl() : TileTask(true) {}
 
   // Overridden from Task:
   void RunOnWorkerThread() override {}
 
   // Overridden from TileTask:
-  void ScheduleOnOriginThread(TileTaskClient* client) override {}
-  void CompleteOnOriginThread(TileTaskClient* client) override { Reset(); }
+  void ScheduleOnOriginThread(RasterBufferProvider* provider) override {}
+  void CompleteOnOriginThread(RasterBufferProvider* provider) override {
+    Reset();
+  }
 
   void Reset() {
     did_run_ = false;
@@ -147,22 +148,22 @@ class PerfImageDecodeTaskImpl : public ImageDecodeTask {
   DISALLOW_COPY_AND_ASSIGN(PerfImageDecodeTaskImpl);
 };
 
-class PerfRasterTaskImpl : public RasterTask {
+class PerfRasterTaskImpl : public TileTask {
  public:
-  PerfRasterTaskImpl(scoped_ptr<ScopedResource> resource,
-                     ImageDecodeTask::Vector* dependencies)
-      : RasterTask(dependencies), resource_(std::move(resource)) {}
+  PerfRasterTaskImpl(std::unique_ptr<ScopedResource> resource,
+                     TileTask::Vector* dependencies)
+      : TileTask(true, dependencies), resource_(std::move(resource)) {}
 
   // Overridden from Task:
   void RunOnWorkerThread() override {}
 
   // Overridden from TileTask:
-  void ScheduleOnOriginThread(TileTaskClient* client) override {
+  void ScheduleOnOriginThread(RasterBufferProvider* provider) override {
     // No tile ids are given to support partial updates.
-    raster_buffer_ = client->AcquireBufferForRaster(resource_.get(), 0, 0);
+    raster_buffer_ = provider->AcquireBufferForRaster(resource_.get(), 0, 0);
   }
-  void CompleteOnOriginThread(TileTaskClient* client) override {
-    client->ReleaseBufferForRaster(std::move(raster_buffer_));
+  void CompleteOnOriginThread(RasterBufferProvider* provider) override {
+    provider->ReleaseBufferForRaster(std::move(raster_buffer_));
     Reset();
   }
 
@@ -175,15 +176,15 @@ class PerfRasterTaskImpl : public RasterTask {
   ~PerfRasterTaskImpl() override {}
 
  private:
-  scoped_ptr<ScopedResource> resource_;
-  scoped_ptr<RasterBuffer> raster_buffer_;
+  std::unique_ptr<ScopedResource> resource_;
+  std::unique_ptr<RasterBuffer> raster_buffer_;
 
   DISALLOW_COPY_AND_ASSIGN(PerfRasterTaskImpl);
 };
 
 class TileTaskWorkerPoolPerfTestBase {
  public:
-  typedef std::vector<scoped_refptr<RasterTask>> RasterTaskVector;
+  typedef std::vector<scoped_refptr<TileTask>> RasterTaskVector;
 
   enum NamedTaskSet { REQUIRED_FOR_ACTIVATION, REQUIRED_FOR_DRAW, ALL };
 
@@ -196,23 +197,23 @@ class TileTaskWorkerPoolPerfTestBase {
                kTimeCheckInterval) {}
 
   void CreateImageDecodeTasks(unsigned num_image_decode_tasks,
-                              ImageDecodeTask::Vector* image_decode_tasks) {
+                              TileTask::Vector* image_decode_tasks) {
     for (unsigned i = 0; i < num_image_decode_tasks; ++i)
       image_decode_tasks->push_back(new PerfImageDecodeTaskImpl);
   }
 
   void CreateRasterTasks(unsigned num_raster_tasks,
-                         const ImageDecodeTask::Vector& image_decode_tasks,
+                         const TileTask::Vector& image_decode_tasks,
                          RasterTaskVector* raster_tasks) {
     const gfx::Size size(1, 1);
 
     for (unsigned i = 0; i < num_raster_tasks; ++i) {
-      scoped_ptr<ScopedResource> resource(
+      std::unique_ptr<ScopedResource> resource(
           ScopedResource::Create(resource_provider_.get()));
       resource->Allocate(size, ResourceProvider::TEXTURE_HINT_IMMUTABLE,
                          RGBA_8888);
 
-      ImageDecodeTask::Vector dependencies = image_decode_tasks;
+      TileTask::Vector dependencies = image_decode_tasks;
       raster_tasks->push_back(
           new PerfRasterTaskImpl(std::move(resource), &dependencies));
     }
@@ -241,10 +242,10 @@ class TileTaskWorkerPoolPerfTestBase {
  protected:
   scoped_refptr<ContextProvider> context_provider_;
   FakeOutputSurfaceClient output_surface_client_;
-  scoped_ptr<FakeOutputSurface> output_surface_;
-  scoped_ptr<ResourceProvider> resource_provider_;
+  std::unique_ptr<FakeOutputSurface> output_surface_;
+  std::unique_ptr<ResourceProvider> resource_provider_;
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
-  scoped_ptr<SynchronousTaskGraphRunner> task_graph_runner_;
+  std::unique_ptr<SynchronousTaskGraphRunner> task_graph_runner_;
   LapTimer timer_;
 };
 
@@ -259,7 +260,7 @@ class TileTaskWorkerPoolPerfTest
         Create3dOutputSurfaceAndResourceProvider();
         tile_task_worker_pool_ = ZeroCopyTileTaskWorkerPool::Create(
             task_runner_.get(), task_graph_runner_.get(),
-            resource_provider_.get(), false);
+            resource_provider_.get(), PlatformColor::BestTextureFormat());
         break;
       case TILE_TASK_WORKER_POOL_TYPE_ONE_COPY:
         Create3dOutputSurfaceAndResourceProvider();
@@ -267,7 +268,8 @@ class TileTaskWorkerPoolPerfTest
             task_runner_.get(), task_graph_runner_.get(),
             context_provider_.get(), resource_provider_.get(),
             std::numeric_limits<int>::max(), false,
-            std::numeric_limits<int>::max(), false);
+            std::numeric_limits<int>::max(),
+            PlatformColor::BestTextureFormat());
         break;
       case TILE_TASK_WORKER_POOL_TYPE_GPU:
         Create3dOutputSurfaceAndResourceProvider();
@@ -298,7 +300,7 @@ class TileTaskWorkerPoolPerfTest
   void RunScheduleTasksTest(const std::string& test_name,
                             unsigned num_raster_tasks,
                             unsigned num_image_decode_tasks) {
-    ImageDecodeTask::Vector image_decode_tasks;
+    TileTask::Vector image_decode_tasks;
     RasterTaskVector raster_tasks;
     CreateImageDecodeTasks(num_image_decode_tasks, &image_decode_tasks);
     CreateRasterTasks(num_raster_tasks, image_decode_tasks, &raster_tasks);
@@ -327,7 +329,7 @@ class TileTaskWorkerPoolPerfTest
                                      unsigned num_raster_tasks,
                                      unsigned num_image_decode_tasks) {
     const size_t kNumVersions = 2;
-    ImageDecodeTask::Vector image_decode_tasks[kNumVersions];
+    TileTask::Vector image_decode_tasks[kNumVersions];
     RasterTaskVector raster_tasks[kNumVersions];
     for (size_t i = 0; i < kNumVersions; ++i) {
       CreateImageDecodeTasks(num_image_decode_tasks, &image_decode_tasks[i]);
@@ -360,7 +362,7 @@ class TileTaskWorkerPoolPerfTest
   void RunScheduleAndExecuteTasksTest(const std::string& test_name,
                                       unsigned num_raster_tasks,
                                       unsigned num_image_decode_tasks) {
-    ImageDecodeTask::Vector image_decode_tasks;
+    TileTask::Vector image_decode_tasks;
     RasterTaskVector raster_tasks;
     CreateImageDecodeTasks(num_image_decode_tasks, &image_decode_tasks);
     CreateRasterTasks(num_raster_tasks, image_decode_tasks, &raster_tasks);
@@ -395,7 +397,7 @@ class TileTaskWorkerPoolPerfTest
 
   void CreateSoftwareOutputSurfaceAndResourceProvider() {
     output_surface_ = FakeOutputSurface::CreateSoftware(
-        make_scoped_ptr(new SoftwareOutputDevice));
+        base::WrapUnique(new SoftwareOutputDevice));
     CHECK(output_surface_->BindToClient(&output_surface_client_));
     resource_provider_ = FakeResourceProvider::Create(
         output_surface_.get(), &shared_bitmap_manager_, nullptr);
@@ -416,7 +418,7 @@ class TileTaskWorkerPoolPerfTest
     return std::string();
   }
 
-  scoped_ptr<TileTaskWorkerPool> tile_task_worker_pool_;
+  std::unique_ptr<TileTaskWorkerPool> tile_task_worker_pool_;
   TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
   TestSharedBitmapManager shared_bitmap_manager_;
 };
@@ -469,7 +471,7 @@ class TileTaskWorkerPoolCommonPerfTest : public TileTaskWorkerPoolPerfTestBase,
   void RunBuildTileTaskGraphTest(const std::string& test_name,
                                  unsigned num_raster_tasks,
                                  unsigned num_image_decode_tasks) {
-    ImageDecodeTask::Vector image_decode_tasks;
+    TileTask::Vector image_decode_tasks;
     RasterTaskVector raster_tasks;
     CreateImageDecodeTasks(num_image_decode_tasks, &image_decode_tasks);
     CreateRasterTasks(num_raster_tasks, image_decode_tasks, &raster_tasks);

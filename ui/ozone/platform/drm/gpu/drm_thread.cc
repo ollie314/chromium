@@ -8,6 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "ui/ozone/platform/drm/gpu/drm_buffer.h"
 #include "ui/ozone/platform/drm/gpu/drm_device_generator.h"
@@ -76,7 +77,10 @@ DrmThread::~DrmThread() {
 }
 
 void DrmThread::Start() {
-  if (!StartWithOptions(base::Thread::Options(base::MessageLoop::TYPE_IO, 0)))
+  base::Thread::Options thread_options;
+  thread_options.message_loop_type = base::MessageLoop::TYPE_IO;
+  thread_options.priority = base::ThreadPriority::DISPLAY;
+  if (!StartWithOptions(thread_options))
     LOG(FATAL) << "Failed to create DRM thread";
 }
 
@@ -87,7 +91,7 @@ void DrmThread::Init() {
 #endif
 
   device_manager_.reset(new DrmDeviceManager(
-      make_scoped_ptr(new GbmDeviceGenerator(use_atomic))));
+      base::WrapUnique(new GbmDeviceGenerator(use_atomic))));
   buffer_generator_.reset(new GbmBufferGenerator());
   screen_manager_.reset(new ScreenManager(buffer_generator_.get()));
 
@@ -104,6 +108,24 @@ void DrmThread::CreateBuffer(gfx::AcceleratedWidget widget,
       static_cast<GbmDevice*>(device_manager_->GetDrmDevice(widget).get());
   DCHECK(gbm);
   *buffer = GbmBuffer::CreateBuffer(gbm, format, size, usage);
+}
+
+void DrmThread::CreateBufferFromFD(const gfx::Size& size,
+                                   gfx::BufferFormat format,
+                                   base::ScopedFD fd,
+                                   int32_t stride,
+                                   scoped_refptr<GbmBuffer>* buffer) {
+  scoped_refptr<GbmDevice> gbm =
+      static_cast<GbmDevice*>(device_manager_->GetPrimaryDrmDevice().get());
+  DCHECK(gbm);
+  *buffer =
+      GbmBuffer::CreateBufferFromFD(gbm, format, size, std::move(fd), stride);
+}
+
+void DrmThread::GetScanoutFormats(
+    gfx::AcceleratedWidget widget,
+    std::vector<gfx::BufferFormat>* scanout_formats) {
+  display_manager_->GetScanoutFormats(widget, scanout_formats);
 }
 
 void DrmThread::SchedulePageFlip(gfx::AcceleratedWidget widget,
@@ -128,14 +150,14 @@ void DrmThread::GetVSyncParameters(
 }
 
 void DrmThread::CreateWindow(gfx::AcceleratedWidget widget) {
-  scoped_ptr<DrmWindow> window(
+  std::unique_ptr<DrmWindow> window(
       new DrmWindow(widget, device_manager_.get(), screen_manager_.get()));
   window->Initialize(buffer_generator_.get());
   screen_manager_->AddWindow(widget, std::move(window));
 }
 
 void DrmThread::DestroyWindow(gfx::AcceleratedWidget widget) {
-  scoped_ptr<DrmWindow> window = screen_manager_->RemoveWindow(widget);
+  std::unique_ptr<DrmWindow> window = screen_manager_->RemoveWindow(widget);
   window->Shutdown();
 }
 
@@ -221,9 +243,13 @@ void DrmThread::SetHDCPState(
   callback.Run(display_id, display_manager_->SetHDCPState(display_id, state));
 }
 
-void DrmThread::SetGammaRamp(int64_t id,
-                             const std::vector<GammaRampRGBEntry>& lut) {
-  display_manager_->SetGammaRamp(id, lut);
+void DrmThread::SetColorCorrection(
+    int64_t display_id,
+    const std::vector<GammaRampRGBEntry>& degamma_lut,
+    const std::vector<GammaRampRGBEntry>& gamma_lut,
+    const std::vector<float>& correction_matrix) {
+  display_manager_->SetColorCorrection(display_id, degamma_lut, gamma_lut,
+                                       correction_matrix);
 }
 
 }  // namespace ui

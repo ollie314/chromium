@@ -5,6 +5,7 @@
 #include "chrome/browser/notifications/message_center_settings_controller.h"
 
 #include <algorithm>
+#include <string>
 #include <utility>
 
 #include "base/command_line.h"
@@ -16,13 +17,14 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
-#include "chrome/browser/extensions/app_icon_loader_impl.h"
+#include "chrome/browser/extensions/extension_app_icon_loader.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
 #include "chrome/browser/notifications/notifier_state_tracker.h"
 #include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/extensions/api/notifications.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -59,12 +61,10 @@ class ProfileNotifierGroup : public message_center::NotifierGroup {
   ProfileNotifierGroup(const gfx::Image& icon,
                        const base::string16& display_name,
                        const base::string16& login_info,
-                       size_t index,
                        const base::FilePath& profile_path);
   ProfileNotifierGroup(const gfx::Image& icon,
                        const base::string16& display_name,
                        const base::string16& login_info,
-                       size_t index,
                        Profile* profile);
   virtual ~ProfileNotifierGroup() {}
 
@@ -77,9 +77,8 @@ class ProfileNotifierGroup : public message_center::NotifierGroup {
 ProfileNotifierGroup::ProfileNotifierGroup(const gfx::Image& icon,
                                            const base::string16& display_name,
                                            const base::string16& login_info,
-                                           size_t index,
                                            const base::FilePath& profile_path)
-    : message_center::NotifierGroup(icon, display_name, login_info, index),
+    : message_center::NotifierGroup(icon, display_name, login_info),
       profile_(NULL) {
   // Try to get the profile
   profile_ =
@@ -89,9 +88,8 @@ ProfileNotifierGroup::ProfileNotifierGroup(const gfx::Image& icon,
 ProfileNotifierGroup::ProfileNotifierGroup(const gfx::Image& icon,
                                            const base::string16& display_name,
                                            const base::string16& login_info,
-                                           size_t index,
                                            Profile* profile)
-    : message_center::NotifierGroup(icon, display_name, login_info, index),
+    : message_center::NotifierGroup(icon, display_name, login_info),
       profile_(profile) {
 }
 
@@ -120,11 +118,10 @@ class NotifierComparator {
 }  // namespace
 
 MessageCenterSettingsController::MessageCenterSettingsController(
-    ProfileInfoCache* profile_info_cache)
+    ProfileAttributesStorage& profile_attributes_storage)
     : current_notifier_group_(0),
-      profile_info_cache_(profile_info_cache),
+      profile_attributes_storage_(profile_attributes_storage),
       weak_factory_(this) {
-  DCHECK(profile_info_cache_);
   // The following events all represent changes that may need to be reflected in
   // the profile selector context menu, so listen for them all.  We'll just
   // rebuild the list when we get any of them.
@@ -137,7 +134,7 @@ MessageCenterSettingsController::MessageCenterSettingsController(
   registrar_.Add(this,
                  chrome::NOTIFICATION_PROFILE_DESTROYED,
                  content::NotificationService::AllBrowserContextsAndSources());
-  g_browser_process->profile_manager()->GetProfileInfoCache().AddObserver(this);
+  profile_attributes_storage_.AddObserver(this);
   RebuildNotifierGroups(false);
 
 #if defined(OS_CHROMEOS)
@@ -148,8 +145,7 @@ MessageCenterSettingsController::MessageCenterSettingsController(
 }
 
 MessageCenterSettingsController::~MessageCenterSettingsController() {
-  g_browser_process->profile_manager()->
-      GetProfileInfoCache().RemoveObserver(this);
+  profile_attributes_storage_.RemoveObserver(this);
 #if defined(OS_CHROMEOS)
   // UserManager may not exist in some tests.
   if (user_manager::UserManager::IsInitialized())
@@ -218,7 +214,7 @@ void MessageCenterSettingsController::GetNotifierList(
   // back to the default icon. The fetched icon will be resized in the settings
   // dialog. See chrome/browser/extensions/extension_icon_image.cc and
   // crbug.com/222931
-  app_icon_loader_.reset(new extensions::AppIconLoaderImpl(
+  app_icon_loader_.reset(new extensions::ExtensionAppIconLoader(
       profile, extension_misc::EXTENSION_ICON_SMALL, this));
   for (extensions::ExtensionSet::const_iterator iter = extension_set.begin();
        iter != extension_set.end();
@@ -296,8 +292,8 @@ void MessageCenterSettingsController::GetNotifierList(
 #endif
 
   UErrorCode error = U_ZERO_ERROR;
-  scoped_ptr<icu::Collator> collator(icu::Collator::createInstance(error));
-  scoped_ptr<NotifierComparator> comparator(
+  std::unique_ptr<icu::Collator> collator(icu::Collator::createInstance(error));
+  std::unique_ptr<NotifierComparator> comparator(
       new NotifierComparator(U_SUCCESS(error) ? collator.get() : NULL));
 
   std::sort(notifiers->begin(), notifiers->end(), *comparator);
@@ -354,8 +350,17 @@ void MessageCenterSettingsController::SetNotifierEnabled(
                    << notifier.notifier_id.url.spec();
       }
 
-      if (pattern.IsValid())
-        DesktopNotificationProfileUtil::ClearSetting(profile, pattern);
+      if (pattern.IsValid()) {
+        // Note that we don't use DesktopNotificationProfileUtil::ClearSetting()
+        // here because pattern might be from user manual input and not match
+        // the default one used by ClearSetting().
+        HostContentSettingsMapFactory::GetForProfile(profile)
+            ->SetContentSettingCustomScope(
+                pattern, ContentSettingsPattern::Wildcard(),
+                CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+                content_settings::ResourceIdentifier(),
+                CONTENT_SETTING_DEFAULT);
+      }
     }
   } else {
     NotifierStateTrackerFactory::GetForProfile(profile)
@@ -406,9 +411,9 @@ void MessageCenterSettingsController::OnNotifierAdvancedSettingsRequested(
   Profile* profile = notifier_groups_[current_notifier_group_]->profile();
 
   extensions::EventRouter* event_router = extensions::EventRouter::Get(profile);
-  scoped_ptr<base::ListValue> args(new base::ListValue());
+  std::unique_ptr<base::ListValue> args(new base::ListValue());
 
-  scoped_ptr<extensions::Event> event(new extensions::Event(
+  std::unique_ptr<extensions::Event> event(new extensions::Event(
       extensions::events::NOTIFICATIONS_ON_SHOW_SETTINGS,
       extensions::api::notifications::OnShowSettings::kEventName,
       std::move(args)));
@@ -431,8 +436,8 @@ void MessageCenterSettingsController::ActiveUserChanged(
 }
 #endif
 
-void MessageCenterSettingsController::SetAppImage(const std::string& id,
-                                                  const gfx::ImageSkia& image) {
+void MessageCenterSettingsController::OnAppImageUpdated(
+    const std::string& id, const gfx::ImageSkia& image) {
   FOR_EACH_OBSERVER(message_center::NotifierSettingsObserver,
                     observers_,
                     UpdateIconImage(NotifierId(NotifierId::APPLICATION, id),
@@ -488,12 +493,10 @@ void MessageCenterSettingsController::CreateNotifierGroupForGuestLogin() {
       chromeos::ProfileHelper::Get()->GetProfileByUserUnsafe(user);
   DCHECK(profile);
 
-  scoped_ptr<message_center::ProfileNotifierGroup> group(
-      new message_center::ProfileNotifierGroup(gfx::Image(user->GetImage()),
-                                               user->GetDisplayName(),
-                                               user->GetDisplayName(),
-                                               0,
-                                               profile));
+  std::unique_ptr<message_center::ProfileNotifierGroup> group(
+      new message_center::ProfileNotifierGroup(
+          gfx::Image(user->GetImage()), user->GetDisplayName(),
+          user->GetDisplayName(), profile));
 
   notifier_groups_.push_back(std::move(group));
 
@@ -507,15 +510,13 @@ void MessageCenterSettingsController::RebuildNotifierGroups(bool notify) {
   notifier_groups_.clear();
   current_notifier_group_ = 0;
 
-  const size_t count = profile_info_cache_->GetNumberOfProfiles();
-  for (size_t i = 0; i < count; ++i) {
-    scoped_ptr<message_center::ProfileNotifierGroup> group(
+  std::vector<ProfileAttributesEntry*> entries =
+      profile_attributes_storage_.GetAllProfilesAttributes();
+  for (const auto entry : entries) {
+    std::unique_ptr<message_center::ProfileNotifierGroup> group(
         new message_center::ProfileNotifierGroup(
-            profile_info_cache_->GetAvatarIconOfProfileAtIndex(i),
-            profile_info_cache_->GetNameOfProfileAtIndex(i),
-            profile_info_cache_->GetUserNameOfProfileAtIndex(i),
-            i,
-            profile_info_cache_->GetPathOfProfileAtIndex(i)));
+            entry->GetAvatarIcon(), entry->GetName(), entry->GetUserName(),
+            entry->GetPath()));
     if (group->profile() == NULL)
       continue;
 

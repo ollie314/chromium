@@ -6,18 +6,19 @@
 #define CHROME_TEST_BASE_TESTING_PROFILE_MANAGER_H_
 
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_profile.h"
 
 class ProfileInfoCache;
+class ProfileAttributesStorage;
 class ProfileManager;
 class TestingBrowserProcess;
 class TestingProfile;
@@ -55,7 +56,7 @@ class TestingProfileManager {
   // |factories| contains BCKSs to use with the newly created profile.
   TestingProfile* CreateTestingProfile(
       const std::string& profile_name,
-      scoped_ptr<syncable_prefs::PrefServiceSyncable> prefs,
+      std::unique_ptr<syncable_prefs::PrefServiceSyncable> prefs,
       const base::string16& user_name,
       int avatar_id,
       const std::string& supervised_user_id,
@@ -105,6 +106,7 @@ class TestingProfileManager {
   const base::FilePath& profiles_dir();
   ProfileManager* profile_manager();
   ProfileInfoCache* profile_info_cache();
+  ProfileAttributesStorage* profile_attributes_storage();
 
  private:
   typedef std::map<std::string, TestingProfile*> TestingProfilesMap;

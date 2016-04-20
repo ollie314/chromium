@@ -4,10 +4,10 @@
 
 #include "cc/test/animation_timelines_test_common.h"
 
+#include "base/memory/ptr_util.h"
 #include "cc/animation/animation_events.h"
 #include "cc/animation/animation_id_provider.h"
 #include "cc/animation/animation_player.h"
-#include "cc/animation/animation_registrar.h"
 #include "cc/animation/animation_timeline.h"
 #include "cc/animation/element_animations.h"
 #include "cc/output/filter_operation.h"
@@ -16,8 +16,8 @@
 
 namespace cc {
 
-scoped_ptr<TestLayer> TestLayer::Create() {
-  return make_scoped_ptr(new TestLayer());
+std::unique_ptr<TestLayer> TestLayer::Create() {
+  return base::WrapUnique(new TestLayer());
 }
 
 TestLayer::TestLayer() {
@@ -31,7 +31,7 @@ void TestLayer::ClearMutatedProperties() {
   opacity_ = 0;
   brightness_ = 0;
 
-  for (int i = 0; i <= Animation::LAST_TARGET_PROPERTY; ++i)
+  for (int i = 0; i <= TargetProperty::LAST_TARGET_PROPERTY; ++i)
     mutated_properties_[i] = false;
 }
 
@@ -111,7 +111,7 @@ void TestHostClient::RegisterLayer(int layer_id, LayerTreeType tree_type) {
                                            ? layers_in_active_tree_
                                            : layers_in_pending_tree_;
   DCHECK(layers_in_tree.find(layer_id) == layers_in_tree.end());
-  layers_in_tree.add(layer_id, TestLayer::Create());
+  layers_in_tree[layer_id] = TestLayer::Create();
 
   DCHECK(host_);
   host_->RegisterLayer(layer_id, tree_type);
@@ -129,10 +129,9 @@ void TestHostClient::UnregisterLayer(int layer_id, LayerTreeType tree_type) {
   layers_in_tree.erase(kv);
 }
 
-bool TestHostClient::IsPropertyMutated(
-    int layer_id,
-    LayerTreeType tree_type,
-    Animation::TargetProperty property) const {
+bool TestHostClient::IsPropertyMutated(int layer_id,
+                                       LayerTreeType tree_type,
+                                       TargetProperty::Type property) const {
   TestLayer* layer = FindTestLayer(layer_id, tree_type);
   return layer->is_property_mutated(property);
 }
@@ -141,7 +140,7 @@ void TestHostClient::ExpectFilterPropertyMutated(int layer_id,
                                                  LayerTreeType tree_type,
                                                  float brightness) const {
   TestLayer* layer = FindTestLayer(layer_id, tree_type);
-  EXPECT_TRUE(layer->is_property_mutated(Animation::OPACITY));
+  EXPECT_TRUE(layer->is_property_mutated(TargetProperty::OPACITY));
   EXPECT_EQ(brightness, layer->brightness());
 }
 
@@ -149,7 +148,7 @@ void TestHostClient::ExpectOpacityPropertyMutated(int layer_id,
                                                   LayerTreeType tree_type,
                                                   float opacity) const {
   TestLayer* layer = FindTestLayer(layer_id, tree_type);
-  EXPECT_TRUE(layer->is_property_mutated(Animation::OPACITY));
+  EXPECT_TRUE(layer->is_property_mutated(TargetProperty::OPACITY));
   EXPECT_EQ(opacity, layer->opacity());
 }
 
@@ -158,7 +157,7 @@ void TestHostClient::ExpectTransformPropertyMutated(int layer_id,
                                                     int transform_x,
                                                     int transform_y) const {
   TestLayer* layer = FindTestLayer(layer_id, tree_type);
-  EXPECT_TRUE(layer->is_property_mutated(Animation::OPACITY));
+  EXPECT_TRUE(layer->is_property_mutated(TargetProperty::OPACITY));
   EXPECT_EQ(transform_x, layer->transform_x());
   EXPECT_EQ(transform_y, layer->transform_y());
 }
@@ -171,7 +170,7 @@ TestLayer* TestHostClient::FindTestLayer(int layer_id,
   auto kv = layers_in_tree.find(layer_id);
   DCHECK(kv != layers_in_tree.end());
   DCHECK(kv->second);
-  return kv->second;
+  return kv->second.get();
 }
 
 TestAnimationDelegate::TestAnimationDelegate()
@@ -180,13 +179,13 @@ TestAnimationDelegate::TestAnimationDelegate()
 
 void TestAnimationDelegate::NotifyAnimationStarted(
     base::TimeTicks monotonic_time,
-    Animation::TargetProperty target_property,
+    TargetProperty::Type target_property,
     int group) {
   started_ = true;
 }
 void TestAnimationDelegate::NotifyAnimationFinished(
     base::TimeTicks monotonic_time,
-    Animation::TargetProperty target_property,
+    TargetProperty::Type target_property,
     int group) {
   finished_ = true;
 }
@@ -235,27 +234,26 @@ void AnimationTimelinesTest::ReleaseRefPtrs() {
 void AnimationTimelinesTest::AnimateLayersTransferEvents(
     base::TimeTicks time,
     unsigned expect_events) {
-  scoped_ptr<AnimationEvents> events =
-      host_->animation_registrar()->CreateEvents();
+  std::unique_ptr<AnimationEvents> events = host_->CreateEvents();
 
-  host_impl_->animation_registrar()->AnimateLayers(time);
-  host_impl_->animation_registrar()->UpdateAnimationState(true, events.get());
+  host_impl_->AnimateLayers(time);
+  host_impl_->UpdateAnimationState(true, events.get());
   EXPECT_EQ(expect_events, events->events_.size());
 
-  host_->animation_registrar()->AnimateLayers(time);
-  host_->animation_registrar()->UpdateAnimationState(true, nullptr);
-  host_->animation_registrar()->SetAnimationEvents(std::move(events));
+  host_->AnimateLayers(time);
+  host_->UpdateAnimationState(true, nullptr);
+  host_->SetAnimationEvents(std::move(events));
 }
 
 AnimationPlayer* AnimationTimelinesTest::GetPlayerForLayerId(int layer_id) {
-  const ElementAnimations* element_animations =
+  const scoped_refptr<ElementAnimations> element_animations =
       host_->GetElementAnimationsForLayerId(layer_id);
   return element_animations ? element_animations->players_list().head()->value()
                             : nullptr;
 }
 
 AnimationPlayer* AnimationTimelinesTest::GetImplPlayerForLayerId(int layer_id) {
-  const ElementAnimations* element_animations =
+  const scoped_refptr<ElementAnimations> element_animations =
       host_impl_->GetElementAnimationsForLayerId(layer_id);
   return element_animations ? element_animations->players_list().head()->value()
                             : nullptr;

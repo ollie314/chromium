@@ -79,7 +79,7 @@ bool IsAutoUpdateDisabled() {
 // the appropriate status.
 bool EnsureCanUpdate(const VersionUpdater::StatusCallback& callback) {
   if (IsAutoUpdateDisabled()) {
-    callback.Run(VersionUpdater::FAILED, 0,
+    callback.Run(VersionUpdater::DISABLED_BY_ADMIN, 0,
                  l10n_util::GetStringUTF16(IDS_UPGRADE_DISABLED_BY_POLICY));
     return false;
   }
@@ -129,7 +129,8 @@ void VersionUpdaterCros::GetUpdateStatus(const StatusCallback& callback) {
       DBusThreadManager::Get()->GetUpdateEngineClient()->GetLastStatus());
 }
 
-void VersionUpdaterCros::CheckForUpdate(const StatusCallback& callback) {
+void VersionUpdaterCros::CheckForUpdate(const StatusCallback& callback,
+                                        const PromoteCallback&) {
   callback_ = callback;
 
   if (!EnsureCanUpdate(callback))
@@ -248,7 +249,7 @@ void VersionUpdaterCros::UpdateStatusChanged(
 
   if (check_for_update_when_idle_ &&
       status.status == UpdateEngineClient::UPDATE_STATUS_IDLE) {
-    CheckForUpdate(callback_);
+    CheckForUpdate(callback_, VersionUpdater::PromoteCallback());
   }
 }
 

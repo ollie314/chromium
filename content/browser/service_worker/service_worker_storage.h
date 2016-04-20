@@ -48,7 +48,9 @@ struct ServiceWorkerRegistrationInfo;
 
 // This class provides an interface to store and retrieve ServiceWorker
 // registration data. The lifetime is equal to ServiceWorkerContextCore that is
-// an owner of this class.
+// an owner of this class. When a storage operation fails, this is marked as
+// disabled and all subsequent requests are aborted until the context core is
+// restarted.
 class CONTENT_EXPORT ServiceWorkerStorage
     : NON_EXPORTED_BASE(public ServiceWorkerVersion::Listener) {
  public:
@@ -58,10 +60,14 @@ class CONTENT_EXPORT ServiceWorkerStorage
                               const scoped_refptr<ServiceWorkerRegistration>&
                                   registration)> FindRegistrationCallback;
   typedef base::Callback<void(
+      ServiceWorkerStatusCode status,
       const std::vector<scoped_refptr<ServiceWorkerRegistration>>&
-          registrations)> GetRegistrationsCallback;
-  typedef base::Callback<void(const std::vector<ServiceWorkerRegistrationInfo>&
-                                  registrations)> GetRegistrationsInfosCallback;
+          registrations)>
+      GetRegistrationsCallback;
+  typedef base::Callback<void(
+      ServiceWorkerStatusCode status,
+      const std::vector<ServiceWorkerRegistrationInfo>& registrations)>
+      GetRegistrationsInfosCallback;
   typedef base::Callback<
       void(const std::string& data, ServiceWorkerStatusCode status)>
           GetUserDataCallback;
@@ -71,16 +77,16 @@ class CONTENT_EXPORT ServiceWorkerStorage
 
   ~ServiceWorkerStorage() override;
 
-  static scoped_ptr<ServiceWorkerStorage> Create(
+  static std::unique_ptr<ServiceWorkerStorage> Create(
       const base::FilePath& path,
       const base::WeakPtr<ServiceWorkerContextCore>& context,
-      scoped_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager,
+      std::unique_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager,
       const scoped_refptr<base::SingleThreadTaskRunner>& disk_cache_thread,
       storage::QuotaManagerProxy* quota_manager_proxy,
       storage::SpecialStoragePolicy* special_storage_policy);
 
   // Used for DeleteAndStartOver. Creates new storage based on |old_storage|.
-  static scoped_ptr<ServiceWorkerStorage> Create(
+  static std::unique_ptr<ServiceWorkerStorage> Create(
       const base::WeakPtr<ServiceWorkerContextCore>& context,
       ServiceWorkerStorage* old_storage);
 
@@ -142,12 +148,14 @@ class CONTENT_EXPORT ServiceWorkerStorage
                           const GURL& origin,
                           const StatusCallback& callback);
 
-  scoped_ptr<ServiceWorkerResponseReader> CreateResponseReader(
+  // Creates a resource accessor. Never returns nullptr but an accessor may be
+  // associated with the disabled disk cache if the storage is disabled.
+  std::unique_ptr<ServiceWorkerResponseReader> CreateResponseReader(
       int64_t resource_id);
-  scoped_ptr<ServiceWorkerResponseWriter> CreateResponseWriter(
+  std::unique_ptr<ServiceWorkerResponseWriter> CreateResponseWriter(
       int64_t resource_id);
-  scoped_ptr<ServiceWorkerResponseMetadataWriter> CreateResponseMetadataWriter(
-      int64_t resource_id);
+  std::unique_ptr<ServiceWorkerResponseMetadataWriter>
+  CreateResponseMetadataWriter(int64_t resource_id);
 
   // Adds |resource_id| to the set of resources that are in the disk cache
   // but not yet stored with a registration.
@@ -211,12 +219,12 @@ class CONTENT_EXPORT ServiceWorkerStorage
       ServiceWorkerRegistration* registration);
 
   void Disable();
-  bool IsDisabled() const;
 
   // |resources| must already be on the purgeable list.
   void PurgeResources(const ResourceList& resources);
 
  private:
+  friend class ServiceWorkerDispatcherHostTest;
   friend class ServiceWorkerHandleTest;
   friend class ServiceWorkerStorageTest;
   friend class ServiceWorkerResourceStorageTest;
@@ -267,6 +275,7 @@ class CONTENT_EXPORT ServiceWorkerStorage
     StatusCallback callback;
 
     DidDeleteRegistrationParams();
+    DidDeleteRegistrationParams(const DidDeleteRegistrationParams& other);
     ~DidDeleteRegistrationParams();
   };
 
@@ -283,7 +292,7 @@ class CONTENT_EXPORT ServiceWorkerStorage
   typedef std::vector<ServiceWorkerDatabase::RegistrationData> RegistrationList;
   typedef std::map<int64_t, scoped_refptr<ServiceWorkerRegistration>>
       RegistrationRefsById;
-  typedef base::Callback<void(scoped_ptr<InitialData> data,
+  typedef base::Callback<void(std::unique_ptr<InitialData> data,
                               ServiceWorkerDatabase::Status status)>
       InitializeCallback;
   typedef base::Callback<void(ServiceWorkerDatabase::Status status)>
@@ -316,7 +325,7 @@ class CONTENT_EXPORT ServiceWorkerStorage
   ServiceWorkerStorage(
       const base::FilePath& path,
       base::WeakPtr<ServiceWorkerContextCore> context,
-      scoped_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager,
+      std::unique_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager,
       const scoped_refptr<base::SingleThreadTaskRunner>& disk_cache_thread,
       storage::QuotaManagerProxy* quota_manager_proxy,
       storage::SpecialStoragePolicy* special_storage_policy);
@@ -326,7 +335,7 @@ class CONTENT_EXPORT ServiceWorkerStorage
 
   bool LazyInitialize(
       const base::Closure& callback);
-  void DidReadInitialData(scoped_ptr<InitialData> data,
+  void DidReadInitialData(std::unique_ptr<InitialData> data,
                           ServiceWorkerDatabase::Status status);
   void DidFindRegistrationForDocument(
       const GURL& document_url,
@@ -481,6 +490,7 @@ class CONTENT_EXPORT ServiceWorkerStorage
       ServiceWorkerDatabase* database,
       const std::set<GURL>& origins);
 
+  bool IsDisabled() const;
   void ScheduleDeleteAndStartOver();
   void DidDeleteDatabase(
       const StatusCallback& callback,
@@ -518,14 +528,14 @@ class CONTENT_EXPORT ServiceWorkerStorage
   base::WeakPtr<ServiceWorkerContextCore> context_;
 
   // Only accessed using |database_task_manager_|.
-  scoped_ptr<ServiceWorkerDatabase> database_;
+  std::unique_ptr<ServiceWorkerDatabase> database_;
 
-  scoped_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager_;
+  std::unique_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager_;
   scoped_refptr<base::SingleThreadTaskRunner> disk_cache_thread_;
   scoped_refptr<storage::QuotaManagerProxy> quota_manager_proxy_;
   scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy_;
 
-  scoped_ptr<ServiceWorkerDiskCache> disk_cache_;
+  std::unique_ptr<ServiceWorkerDiskCache> disk_cache_;
 
   std::deque<int64_t> purgeable_resource_ids_;
   bool is_purge_pending_;

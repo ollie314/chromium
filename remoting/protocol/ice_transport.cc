@@ -10,6 +10,7 @@
 #include "remoting/protocol/pseudotcp_channel_factory.h"
 #include "remoting/protocol/secure_channel_factory.h"
 #include "remoting/protocol/stream_channel_factory.h"
+#include "remoting/protocol/stream_message_pipe_adapter.h"
 #include "remoting/protocol/transport_context.h"
 
 namespace remoting {
@@ -28,6 +29,7 @@ IceTransport::IceTransport(scoped_refptr<TransportContext> transport_context,
     : transport_context_(transport_context),
       event_handler_(event_handler),
       weak_factory_(this) {
+  transport_context_->set_relay_mode(TransportContext::RelayMode::GTURN);
   transport_context->Prepare();
 }
 
@@ -45,6 +47,9 @@ void IceTransport::Start(
   pseudotcp_channel_factory_.reset(new PseudoTcpChannelFactory(this));
   secure_channel_factory_.reset(new SecureChannelFactory(
       pseudotcp_channel_factory_.get(), authenticator));
+  message_channel_factory_.reset(new StreamMessageChannelFactoryAdapter(
+      secure_channel_factory_.get(),
+      base::Bind(&IceTransport::OnChannelError, weak_factory_.GetWeakPtr())));
 }
 
 bool IceTransport::ProcessTransportInfo(buzz::XmlElement* transport_info_xml) {
@@ -79,23 +84,26 @@ bool IceTransport::ProcessTransportInfo(buzz::XmlElement* transport_info_xml) {
   return true;
 }
 
-StreamChannelFactory* IceTransport::GetStreamChannelFactory() {
-  return secure_channel_factory_.get();
+MessageChannelFactory* IceTransport::GetChannelFactory() {
+  return message_channel_factory_.get();
 }
 
-StreamChannelFactory* IceTransport::GetMultiplexedChannelFactory() {
-  if (!channel_multiplexer_.get()) {
+MessageChannelFactory* IceTransport::GetMultiplexedChannelFactory() {
+  if (!channel_multiplexer_) {
     channel_multiplexer_.reset(
-        new ChannelMultiplexer(GetStreamChannelFactory(), kMuxChannelName));
+        new ChannelMultiplexer(secure_channel_factory_.get(), kMuxChannelName));
+    mux_channel_factory_.reset(new StreamMessageChannelFactoryAdapter(
+        channel_multiplexer_.get(),
+        base::Bind(&IceTransport::OnChannelError, weak_factory_.GetWeakPtr())));
   }
-  return channel_multiplexer_.get();
+  return mux_channel_factory_.get();
 }
 
 void IceTransport::CreateChannel(const std::string& name,
                                  const ChannelCreatedCallback& callback) {
   DCHECK(!channels_[name]);
 
-  scoped_ptr<IceTransportChannel> channel(
+  std::unique_ptr<IceTransportChannel> channel(
       new IceTransportChannel(transport_context_));
   channel->Connect(name, this, callback);
   AddPendingRemoteTransportInfo(channel.get());
@@ -185,10 +193,15 @@ void IceTransport::EnsurePendingTransportInfoMessage() {
 void IceTransport::SendTransportInfo() {
   DCHECK(pending_transport_info_message_);
 
-  scoped_ptr<buzz::XmlElement> transport_info_xml =
+  std::unique_ptr<buzz::XmlElement> transport_info_xml =
       pending_transport_info_message_->ToXml();
   pending_transport_info_message_.reset();
   send_transport_info_callback_.Run(std::move(transport_info_xml));
+}
+
+void IceTransport::OnChannelError(int error) {
+  LOG(ERROR) << "Data channel failed, error=" << error;
+  event_handler_->OnIceTransportError(CHANNEL_CONNECTION_ERROR);
 }
 
 }  // namespace protocol

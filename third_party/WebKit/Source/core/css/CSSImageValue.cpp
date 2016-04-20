@@ -28,16 +28,17 @@
 #include "core/fetch/ResourceFetcher.h"
 #include "core/loader/MixedContentChecker.h"
 #include "core/style/StyleFetchedImage.h"
+#include "core/style/StyleInvalidImage.h"
 #include "platform/CrossOriginAttributeValue.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityPolicy.h"
 
 namespace blink {
 
-CSSImageValue::CSSImageValue(const AtomicString& rawValue, const KURL& url, StyleFetchedImage* image)
+CSSImageValue::CSSImageValue(const AtomicString& rawValue, const KURL& url, StyleImage* image)
     : CSSValue(ImageClass)
     , m_relativeURL(rawValue)
-    , m_absoluteURL(url.string())
+    , m_absoluteURL(url.getString())
     , m_isCachePending(!image)
     , m_cachedImage(image)
 {
@@ -55,7 +56,7 @@ CSSImageValue::~CSSImageValue()
 {
 }
 
-StyleFetchedImage* CSSImageValue::cacheImage(Document* document, CrossOriginAttributeValue crossOrigin)
+StyleImage* CSSImageValue::cacheImage(Document* document, CrossOriginAttributeValue crossOrigin)
 {
     ASSERT(document);
 
@@ -63,13 +64,14 @@ StyleFetchedImage* CSSImageValue::cacheImage(Document* document, CrossOriginAttr
         m_isCachePending = false;
 
         FetchRequest request(ResourceRequest(m_absoluteURL), m_initiatorName.isEmpty() ? FetchInitiatorTypeNames::css : m_initiatorName);
-        request.mutableResourceRequest().setHTTPReferrer(SecurityPolicy::generateReferrer(m_referrer.referrerPolicy, request.url(), m_referrer.referrer));
 
         if (crossOrigin != CrossOriginAttributeNotSet)
-            request.setCrossOriginAccessControl(document->securityOrigin(), crossOrigin);
+            request.setCrossOriginAccessControl(document->getSecurityOrigin(), crossOrigin);
 
-        if (ResourcePtr<ImageResource> cachedImage = ImageResource::fetch(request, document->fetcher()))
-            m_cachedImage = StyleFetchedImage::create(cachedImage.get(), document, request.url());
+        if (ImageResource* cachedImage = ImageResource::fetch(request, document->fetcher()))
+            m_cachedImage = StyleFetchedImage::create(cachedImage, document, request.url());
+        else
+            m_cachedImage = StyleInvalidImage::create(url());
     }
 
     return m_cachedImage.get();
@@ -111,7 +113,7 @@ String CSSImageValue::customCSSText() const
     return serializeURI(m_relativeURL);
 }
 
-bool CSSImageValue::knownToBeOpaque(const LayoutObject* layoutObject) const
+bool CSSImageValue::knownToBeOpaque(const LayoutObject& layoutObject) const
 {
     return m_cachedImage ? m_cachedImage->knownToBeOpaque(layoutObject) : false;
 }
@@ -125,7 +127,7 @@ DEFINE_TRACE_AFTER_DISPATCH(CSSImageValue)
 void CSSImageValue::reResolveURL(const Document& document)
 {
     KURL url = document.completeURL(m_relativeURL);
-    AtomicString urlString(url.string());
+    AtomicString urlString(url.getString());
     if (urlString == m_absoluteURL)
         return;
     m_absoluteURL = urlString;

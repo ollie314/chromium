@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/dns_probe_service.h"
@@ -14,10 +13,10 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/features.h"
-#include "chrome/common/localized_error.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "components/error_page/common/net_error_info.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
@@ -40,7 +39,6 @@ using content::WebContents;
 using content::WebContentsObserver;
 using error_page::DnsProbeStatus;
 using error_page::DnsProbeStatusToString;
-using error_page::OfflinePageStatus;
 using ui::PageTransition;
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(chrome_browser_net::NetErrorTabHelper);
@@ -133,7 +131,7 @@ void NetErrorTabHelper::DidStartProvisionalLoadForFrame(
   is_error_page_ = is_error_page;
 
 #if BUILDFLAG(ANDROID_JAVA_UI)
-  SetOfflinePageInfo(render_frame_host, validated_url);
+  UpdateHasOfflinePages(render_frame_host);
 #endif  // BUILDFLAG(ANDROID_JAVA_UI)
 }
 
@@ -188,7 +186,6 @@ bool NetErrorTabHelper::OnMessageReceived(
                         RunNetworkDiagnostics)
 #if BUILDFLAG(ANDROID_JAVA_UI)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_ShowOfflinePages, ShowOfflinePages)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_LoadOfflineCopy, LoadOfflineCopy)
 #endif  // BUILDFLAG(ANDROID_JAVA_UI)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -266,7 +263,7 @@ bool NetErrorTabHelper::ProbesAllowed() const {
   if (testing_state_ != TESTING_DEFAULT)
     return testing_state_ == TESTING_FORCE_ENABLED;
 
-  // TODO(ttuttle): Disable on mobile?
+  // TODO(juliatuttle): Disable on mobile?
   return *resolve_errors_with_web_service_;
 }
 
@@ -298,9 +295,8 @@ void NetErrorTabHelper::RunNetworkDiagnosticsHelper(
 }
 
 #if BUILDFLAG(ANDROID_JAVA_UI)
-void NetErrorTabHelper::SetOfflinePageInfo(
-    content::RenderFrameHost* render_frame_host,
-    const GURL& url) {
+void NetErrorTabHelper::UpdateHasOfflinePages(
+    content::RenderFrameHost* render_frame_host) {
   // Bails out if offline pages not supported.
   if (!offline_pages::IsOfflinePagesEnabled())
     return;
@@ -311,14 +307,22 @@ void NetErrorTabHelper::SetOfflinePageInfo(
   if (!offline_page_model)
     return;
 
-  OfflinePageStatus status = OfflinePageStatus::NONE;
-  if (offline_page_model->HasOfflinePages()) {
-    status = offline_page_model->GetPageByOnlineURL(url)
-                 ? OfflinePageStatus::HAS_OFFLINE_PAGE
-                 : OfflinePageStatus::HAS_OTHER_OFFLINE_PAGES;
-  }
-  render_frame_host->Send(new ChromeViewMsg_SetOfflinePageInfo(
-      render_frame_host->GetRoutingID(), status));
+  offline_page_model->HasPages(
+      offline_pages::BOOKMARK_NAMESPACE,
+      base::Bind(&NetErrorTabHelper::SetHasOfflinePages,
+                 weak_factory_.GetWeakPtr(),
+                 render_frame_host->GetFrameTreeNodeId()));
+}
+
+void NetErrorTabHelper::SetHasOfflinePages(int frame_tree_node_id,
+                                           bool has_offline_pages) {
+  content::RenderFrameHost* render_frame_host =
+      web_contents()->FindFrameByFrameTreeNodeId(frame_tree_node_id);
+  if (render_frame_host == nullptr)
+    return;
+
+  render_frame_host->Send(new ChromeViewMsg_SetHasOfflinePages(
+      render_frame_host->GetRoutingID(), has_offline_pages));
 }
 
 void NetErrorTabHelper::ShowOfflinePages() {
@@ -330,23 +334,6 @@ void NetErrorTabHelper::ShowOfflinePages() {
   TabAndroid* tab = TabAndroid::FromWebContents(web_contents());
   if (tab)
     tab->ShowOfflinePages();
-}
-
-void NetErrorTabHelper::LoadOfflineCopy(const GURL& url) {
-  // Makes sure that this is coming from an error page.
-  if (!IsFromErrorPage())
-    return;
-
-  GURL validated_url(url);
-  if (!validated_url.is_valid())
-    return;
-
-  if (validated_url != web_contents()->GetLastCommittedURL())
-    return;
-
-  TabAndroid* tab = TabAndroid::FromWebContents(web_contents());
-  if (tab)
-    tab->LoadOfflineCopy(url);
 }
 
 bool NetErrorTabHelper::IsFromErrorPage() const {

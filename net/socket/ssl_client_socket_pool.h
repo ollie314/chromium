@@ -5,11 +5,11 @@
 #ifndef NET_SOCKET_SSL_CLIENT_SOCKET_POOL_H_
 #define NET_SOCKET_SSL_CLIENT_SOCKET_POOL_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "net/base/privacy_mode.h"
 #include "net/http/http_response_info.h"
@@ -72,7 +72,6 @@ class NET_EXPORT_PRIVATE SSLSocketParams
   PrivacyMode privacy_mode() const { return privacy_mode_; }
   int load_flags() const { return load_flags_; }
   bool expect_spdy() const { return expect_spdy_; }
-  bool ignore_limits() const { return ignore_limits_; }
 
  private:
   friend class base::RefCounted<SSLSocketParams>;
@@ -86,7 +85,6 @@ class NET_EXPORT_PRIVATE SSLSocketParams
   const PrivacyMode privacy_mode_;
   const int load_flags_;
   const bool expect_spdy_;
-  bool ignore_limits_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLSocketParams);
 };
@@ -99,6 +97,7 @@ class SSLConnectJob : public ConnectJob {
   // job.
   SSLConnectJob(const std::string& group_name,
                 RequestPriority priority,
+                ClientSocketPool::RespectLimits respect_limits,
                 const scoped_refptr<SSLSocketParams>& params,
                 const base::TimeDelta& timeout_duration,
                 TransportClientSocketPool* transport_pool,
@@ -161,8 +160,8 @@ class SSLConnectJob : public ConnectJob {
 
   State next_state_;
   CompletionCallback callback_;
-  scoped_ptr<ClientSocketHandle> transport_socket_handle_;
-  scoped_ptr<SSLClientSocket> ssl_socket_;
+  std::unique_ptr<ClientSocketHandle> transport_socket_handle_;
+  std::unique_ptr<SSLClientSocket> ssl_socket_;
 
   HttpResponseInfo error_response_info_;
 
@@ -205,6 +204,7 @@ class NET_EXPORT_PRIVATE SSLClientSocketPool
   int RequestSocket(const std::string& group_name,
                     const void* connect_params,
                     RequestPriority priority,
+                    RespectLimits respect_limits,
                     ClientSocketHandle* handle,
                     const CompletionCallback& callback,
                     const BoundNetLog& net_log) override;
@@ -218,7 +218,7 @@ class NET_EXPORT_PRIVATE SSLClientSocketPool
                      ClientSocketHandle* handle) override;
 
   void ReleaseSocket(const std::string& group_name,
-                     scoped_ptr<StreamSocket> socket,
+                     std::unique_ptr<StreamSocket> socket,
                      int id) override;
 
   void FlushWithError(int error) override;
@@ -232,7 +232,7 @@ class NET_EXPORT_PRIVATE SSLClientSocketPool
   LoadState GetLoadState(const std::string& group_name,
                          const ClientSocketHandle* handle) const override;
 
-  scoped_ptr<base::DictionaryValue> GetInfoAsValue(
+  std::unique_ptr<base::DictionaryValue> GetInfoAsValue(
       const std::string& name,
       const std::string& type,
       bool include_nested_pools) const override;
@@ -271,7 +271,7 @@ class NET_EXPORT_PRIVATE SSLClientSocketPool
     ~SSLConnectJobFactory() override;
 
     // ClientSocketPoolBase::ConnectJobFactory methods.
-    scoped_ptr<ConnectJob> NewConnectJob(
+    std::unique_ptr<ConnectJob> NewConnectJob(
         const std::string& group_name,
         const PoolBase::Request& request,
         ConnectJob::Delegate* delegate) const override;

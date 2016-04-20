@@ -47,8 +47,6 @@
         'gl_bindings_autogen_gl.h',
         'gl_bindings_autogen_osmesa.cc',
         'gl_bindings_autogen_osmesa.h',
-        'gl_bindings_skia_in_process.cc',
-        'gl_bindings_skia_in_process.h',
         'gl_context.cc',
         'gl_context.h',
         'gl_context_android.cc',
@@ -76,6 +74,7 @@
         'gl_gl_api_implementation.h',
         'gl_helper.cc',
         'gl_helper.h',
+        'gl_image.cc',
         'gl_image.h',
         'gl_image_memory.cc',
         'gl_image_memory.h',
@@ -186,10 +185,16 @@
             '<(DEPTH)/build/linux/system.gyp:xcomposite',
             '<(DEPTH)/build/linux/system.gyp:xext',
             '<(DEPTH)/ui/events/platform/events_platform.gyp:events_platform',
-            '<(DEPTH)/third_party/angle/src/angle.gyp:libEGL_ANGLE',
-            '<(DEPTH)/third_party/angle/src/angle.gyp:libGLESv2_ANGLE',
             '<(DEPTH)/ui/gfx/x/gfx_x11.gyp:gfx_x11',
           ],
+          'copies': [{
+            'destination': '<(PRODUCT_DIR)',
+            'files':
+            [
+              "<(PRODUCT_DIR)/lib/libEGL.so",
+              "<(PRODUCT_DIR)/lib/libGLESv2.so",
+            ],
+          }],
         }],
         ['OS=="win"', {
           'sources': [
@@ -238,6 +243,8 @@
             'gl_image_io_surface.h',
             'scoped_cgl.cc',
             'scoped_cgl.h',
+            'yuv_to_rgb_converter.cc',
+            'yuv_to_rgb_converter.h',
           ],
           'link_settings': {
             'libraries': [

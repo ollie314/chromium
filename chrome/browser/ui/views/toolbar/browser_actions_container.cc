@@ -12,7 +12,6 @@
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/extensions/extension_toolbar_icon_surfacing_bubble_delegate.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
@@ -20,10 +19,9 @@
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/extensions/browser_action_drag_data.h"
-#include "chrome/browser/ui/views/extensions/extension_message_bubble_view.h"
-#include "chrome/browser/ui/views/extensions/extension_toolbar_icon_surfacing_bubble_views.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/app_menu_button.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_actions_bar_bubble_views.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/extensions/command.h"
 #include "chrome/grit/generated_resources.h"
@@ -33,8 +31,8 @@
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/nine_image_painter_factory.h"
-#include "ui/base/resource/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
@@ -96,7 +94,6 @@ BrowserActionsContainer::BrowserActionsContainer(
       chevron_(NULL),
       suppress_chevron_(false),
       added_to_view_(false),
-      shown_bubble_(false),
       resize_starting_width_(-1),
       resize_amount_(0),
       animation_target_size_(0),
@@ -177,16 +174,6 @@ size_t BrowserActionsContainer::VisibleBrowserActionsAfterAnimation() const {
   return toolbar_actions_bar_->WidthToIconCount(animation_target_size_);
 }
 
-void BrowserActionsContainer::ExecuteExtensionCommand(
-    const extensions::Extension* extension,
-    const extensions::Command& command) {
-  // Global commands are handled by the ExtensionCommandsGlobalRegistry
-  // instance.
-  DCHECK(!command.global());
-  extension_keybinding_registry_->ExecuteCommand(extension->id(),
-                                                 command.accelerator());
-}
-
 bool BrowserActionsContainer::ShownInsideMenu() const {
   return in_overflow_mode();
 }
@@ -201,20 +188,6 @@ views::MenuButton* BrowserActionsContainer::GetOverflowReferenceView() {
   return chevron_ ? static_cast<views::MenuButton*>(chevron_)
                   : static_cast<views::MenuButton*>(
                         GetToolbarView(browser_)->app_menu_button());
-}
-
-void BrowserActionsContainer::OnMouseEnteredToolbarActionView() {
-  if (!shown_bubble_ && !toolbar_action_views_.empty() &&
-      toolbar_actions_bar_->show_icon_surfacing_bubble()) {
-    ExtensionToolbarIconSurfacingBubble* bubble =
-        new ExtensionToolbarIconSurfacingBubble(
-            this,
-            make_scoped_ptr(new ExtensionToolbarIconSurfacingBubbleDelegate(
-                browser_->profile())));
-    views::BubbleDelegateView::CreateBubble(bubble);
-    bubble->Show();
-  }
-  shown_bubble_ = true;
 }
 
 void BrowserActionsContainer::AddViewForAction(
@@ -271,6 +244,8 @@ void BrowserActionsContainer::Redraw(bool order_changed) {
         while (actions[i] != toolbar_action_views_[j]->view_controller())
           ++j;
         std::swap(toolbar_action_views_[i], toolbar_action_views_[j]);
+        // Also move the view in the child views vector.
+        ReorderChildView(toolbar_action_views_[i], i);
       }
     }
   }
@@ -329,26 +304,33 @@ int BrowserActionsContainer::GetChevronWidth() const {
       chevron_->GetPreferredSize().width() + GetChevronSpacing() : 0;
 }
 
-void BrowserActionsContainer::ShowExtensionMessageBubble(
-    scoped_ptr<extensions::ExtensionMessageBubbleController> controller,
-    ToolbarActionViewController* anchor_action) {
+void BrowserActionsContainer::ShowToolbarActionBubble(
+    std::unique_ptr<ToolbarActionsBarBubbleDelegate> controller) {
   // The container shouldn't be asked to show a bubble if it's animating.
   DCHECK(!animating());
+  DCHECK(!active_bubble_);
 
-  views::View* reference_view =
-      anchor_action
-          ? static_cast<views::View*>(GetViewForId(anchor_action->GetId()))
-          : BrowserView::GetBrowserViewForBrowser(browser_)
-                ->toolbar()
-                ->app_menu_button();
+  views::View* anchor_view = nullptr;
+  if (!controller->GetAnchorActionId().empty()) {
+    ToolbarActionView* action_view =
+        GetViewForId(controller->GetAnchorActionId());
+    if (action_view) {
+      anchor_view =
+          action_view->visible() ? action_view : GetOverflowReferenceView();
+    } else {
+      anchor_view = BrowserView::GetBrowserViewForBrowser(browser_)
+                        ->toolbar()
+                        ->app_menu_button();
+    }
+  } else {
+    anchor_view = this;
+  }
 
-  extensions::ExtensionMessageBubbleView* bubble =
-      new extensions::ExtensionMessageBubbleView(reference_view,
-                                                 views::BubbleBorder::TOP_RIGHT,
-                                                 std::move(controller));
-  views::BubbleDelegateView::CreateBubble(bubble);
+  ToolbarActionsBarBubbleViews* bubble =
+      new ToolbarActionsBarBubbleViews(anchor_view, std::move(controller));
   active_bubble_ = bubble;
-  active_bubble_->GetWidget()->AddObserver(this);
+  views::BubbleDialogDelegateView::CreateBubble(bubble);
+  bubble->GetWidget()->AddObserver(this);
   bubble->Show();
 }
 
@@ -448,10 +430,6 @@ void BrowserActionsContainer::Layout() {
       view->SetVisible(true);
     }
   }
-}
-
-void BrowserActionsContainer::OnMouseEntered(const ui::MouseEvent& event) {
-  OnMouseEnteredToolbarActionView();
 }
 
 bool BrowserActionsContainer::GetDropFormats(
@@ -598,11 +576,10 @@ void BrowserActionsContainer::WriteDragDataForView(View* sender,
   toolbar_actions_bar_->OnDragStarted();
   DCHECK(data);
 
-  ToolbarActionViews::iterator iter = std::find(toolbar_action_views_.begin(),
-                                                toolbar_action_views_.end(),
-                                                sender);
-  DCHECK(iter != toolbar_action_views_.end());
-  ToolbarActionViewController* view_controller = (*iter)->view_controller();
+  auto it = std::find(toolbar_action_views_.cbegin(),
+                      toolbar_action_views_.cend(), sender);
+  DCHECK(it != toolbar_action_views_.cend());
+  ToolbarActionViewController* view_controller = (*it)->view_controller();
   gfx::Size size(ToolbarActionsBar::IconWidth(false),
                  ToolbarActionsBar::IconHeight());
   drag_utils::SetDragImageOnDataObject(
@@ -611,7 +588,7 @@ void BrowserActionsContainer::WriteDragDataForView(View* sender,
       data);
   // Fill in the remaining info.
   BrowserActionDragData drag_data(view_controller->GetId(),
-                                  iter - toolbar_action_views_.begin());
+                                  it - toolbar_action_views_.cbegin());
   drag_data.Write(browser_->profile(), data);
 }
 
@@ -685,15 +662,6 @@ content::WebContents* BrowserActionsContainer::GetCurrentWebContents() {
   return browser_->tab_strip_model()->GetActiveWebContents();
 }
 
-extensions::ActiveTabPermissionGranter*
-    BrowserActionsContainer::GetActiveTabPermissionGranter() {
-  content::WebContents* web_contents = GetCurrentWebContents();
-  if (!web_contents)
-    return NULL;
-  return extensions::TabHelper::FromWebContents(web_contents)->
-      active_tab_permission_granter();
-}
-
 void BrowserActionsContainer::OnPaint(gfx::Canvas* canvas) {
   // If the views haven't been initialized yet, wait for the next call to
   // paint (one will be triggered by entering highlight mode).
@@ -752,15 +720,6 @@ void BrowserActionsContainer::ViewHierarchyChanged(
     return;
 
   if (details.is_add && details.child == this) {
-    if (!in_overflow_mode() &&  // We only need one keybinding registry.
-        parent()->GetFocusManager()) {  // focus manager can be null in tests.
-      extension_keybinding_registry_.reset(new ExtensionKeybindingRegistryViews(
-          browser_->profile(),
-          parent()->GetFocusManager(),
-          extensions::ExtensionKeybindingRegistry::ALL_EXTENSIONS,
-          this));
-    }
-
     // Initial toolbar button creation and placement in the widget hierarchy.
     // We do this here instead of in the constructor because adding views
     // calls Layout on the Toolbar, which needs this object to be constructed
@@ -794,4 +753,5 @@ void BrowserActionsContainer::ClearActiveBubble(views::Widget* widget) {
   DCHECK_EQ(active_bubble_->GetWidget(), widget);
   widget->RemoveObserver(this);
   active_bubble_ = nullptr;
+  toolbar_actions_bar_->OnBubbleClosed();
 }

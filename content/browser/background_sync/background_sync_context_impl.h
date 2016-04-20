@@ -5,11 +5,11 @@
 #ifndef CONTENT_BROWSER_BACKGROUND_SYNC_BACKGROUND_SYNC_CONTEXT_IMPL_H_
 #define CONTENT_BROWSER_BACKGROUND_SYNC_BACKGROUND_SYNC_CONTEXT_IMPL_H_
 
+#include <memory>
 #include <set>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "content/common/background_sync_service.mojom.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/background_sync_context.h"
@@ -37,7 +37,8 @@ class CONTENT_EXPORT BackgroundSyncContextImpl : public BackgroundSyncContext {
 
   // Create a BackgroundSyncServiceImpl that is owned by this. Call on the UI
   // thread.
-  void CreateService(mojo::InterfaceRequest<BackgroundSyncService> request);
+  void CreateService(
+      mojo::InterfaceRequest<mojom::BackgroundSyncService> request);
 
   // Called by BackgroundSyncServiceImpl objects so that they can
   // be deleted. Call on the IO thread.
@@ -49,19 +50,22 @@ class CONTENT_EXPORT BackgroundSyncContextImpl : public BackgroundSyncContext {
  protected:
   ~BackgroundSyncContextImpl() override;
 
+  void set_background_sync_manager_for_testing(
+      std::unique_ptr<BackgroundSyncManager> manager);
+
  private:
   friend class BackgroundSyncServiceImplTest;
 
-  void CreateBackgroundSyncManager(
-      const scoped_refptr<ServiceWorkerContextWrapper>& context);
+  virtual void CreateBackgroundSyncManager(
+      scoped_refptr<ServiceWorkerContextWrapper> context);
 
   void CreateServiceOnIOThread(
-      mojo::InterfaceRequest<BackgroundSyncService> request);
+      mojo::InterfaceRequest<mojom::BackgroundSyncService> request);
 
   void ShutdownOnIO();
 
   // Only accessed on the IO thread.
-  scoped_ptr<BackgroundSyncManager> background_sync_manager_;
+  std::unique_ptr<BackgroundSyncManager> background_sync_manager_;
 
   // The services are owned by this. They're either deleted
   // during ShutdownOnIO or when the channel is closed via

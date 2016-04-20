@@ -14,12 +14,10 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_member.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
@@ -33,6 +31,7 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
+#include "chrome/browser/chromeos/arc/arc_auth_service.h"
 #include "chrome/browser/chromeos/base/locale_util.h"
 #include "chrome/browser/chromeos/boot_times_recorder.h"
 #include "chrome/browser/chromeos/first_run/first_run.h"
@@ -42,6 +41,7 @@
 #include "chrome/browser/chromeos/login/chrome_restart_request.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_key_manager.h"
+#include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/profile_auth_data.h"
@@ -53,7 +53,6 @@
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/ui/input_events_blocker.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/user_flow.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/supervised_user_manager.h"
@@ -62,6 +61,7 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/component_updater/ev_whitelist_component_installer.h"
+#include "chrome/browser/component_updater/sth_set_component_installer.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_brand_chromeos.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -83,6 +83,7 @@
 #include "chrome/common/pref_names.h"
 #include "chromeos/cert_loader.h"
 #include "chromeos/chromeos_switches.h"
+#include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/cryptohome/cryptohome_util.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -97,6 +98,10 @@
 #include "components/component_updater/component_updater_service.h"
 #include "components/flags_ui/pref_service_flags_storage.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/prefs/pref_member.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/quirks/quirks_manager.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/signin/core/browser/account_tracker_service.h"
@@ -109,6 +114,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
+#include "net/cert/sth_distributor.h"
 #include "ui/base/ime/chromeos/input_method_descriptor.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "url/gurl.h"
@@ -433,7 +439,7 @@ void UserSessionManager::CompleteGuestSessionLogin(const GURL& start_url) {
   if (!about_flags::AreSwitchesIdenticalToCurrentCommandLine(
           user_flags, *base::CommandLine::ForCurrentProcess(), NULL)) {
     DBusThreadManager::Get()->GetSessionManagerClient()->SetFlagsForUser(
-        login::GuestAccountId().GetUserEmail(),
+        cryptohome::Identification(login::GuestAccountId()),
         base::CommandLine::StringVector());
   }
 
@@ -717,7 +723,9 @@ bool UserSessionManager::RestartToApplyPerSessionFlagsIfNeed(
   flags.assign(user_flags.argv().begin() + 1, user_flags.argv().end());
   LOG(WARNING) << "Restarting to apply per-session flags...";
   DBusThreadManager::Get()->GetSessionManagerClient()->SetFlagsForUser(
-      user_manager::UserManager::Get()->GetActiveUser()->email(), flags);
+      cryptohome::Identification(
+          user_manager::UserManager::Get()->GetActiveUser()->GetAccountId()),
+      flags);
   AttemptRestart(profile);
   return true;
 }
@@ -797,6 +805,11 @@ void UserSessionManager::OnSessionRestoreStateChanged(
     // We need to restart cleanly in this case to make sure OAuth2 RT is
     // actually saved.
     chrome::AttemptRestart();
+  } else {
+    // Schedule another flush after session restore for non-ephemeral profile
+    // if not restarting.
+    if (!ProfileHelper::IsEphemeralUserProfile(user_profile))
+      ProfileHelper::Get()->FlushProfile(user_profile);
   }
 }
 
@@ -893,7 +906,7 @@ void UserSessionManager::StartCrosSession() {
   BootTimesRecorder* btl = BootTimesRecorder::Get();
   btl->AddLoginTimeMarker("StartSession-Start", false);
   DBusThreadManager::Get()->GetSessionManagerClient()->StartSession(
-      user_context_.GetAccountId().GetUserEmail());
+      cryptohome::Identification(user_context_.GetAccountId()));
   btl->AddLoginTimeMarker("StartSession-End", false);
 }
 
@@ -907,8 +920,8 @@ void UserSessionManager::NotifyUserLoggedIn() {
 }
 
 void UserSessionManager::PrepareProfile() {
-  const bool is_demo_session = DemoAppLauncher::IsDemoAppSession(
-      user_context_.GetAccountId().GetUserEmail());
+  const bool is_demo_session =
+      DemoAppLauncher::IsDemoAppSession(user_context_.GetAccountId());
 
   // TODO(nkostylev): Figure out whether demo session is using the right profile
   // path or not. See https://codereview.chromium.org/171423009
@@ -1041,7 +1054,7 @@ void UserSessionManager::UserProfileInitialized(Profile* profile,
     if (has_auth_cookies_) {
       const user_manager::User* user =
           user_manager::UserManager::Get()->FindUser(account_id);
-      if (user->is_affiliated()) {
+      if (user->IsAffiliated()) {
         CrosSettings::Get()->GetBoolean(
             kAccountsPrefTransferSAMLCookies,
             &transfer_saml_auth_cookies_on_subsequent_login);
@@ -1138,13 +1151,16 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
     InitRlz(profile);
     InitializeCerts(profile);
     InitializeCRLSetFetcher(user);
-    InitializeEVCertificatesWhitelistComponent(user);
+    InitializeCertificateTransparencyComponents(user);
 
     if (arc::ArcBridgeService::GetEnabled(
             base::CommandLine::ForCurrentProcess())) {
       DCHECK(arc::ArcServiceManager::Get());
       arc::ArcServiceManager::Get()->OnPrimaryUserProfilePrepared(
           multi_user_util::GetAccountIdFromProfile(profile));
+      arc::ArcAuthService* arc_auth_service = arc::ArcAuthService::Get();
+      DCHECK(arc_auth_service);
+      arc_auth_service->OnPrimaryUserProfilePrepared(profile);
     }
   }
 
@@ -1167,8 +1183,15 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
   // launch browser.
   bool browser_launched = InitializeUserSession(profile);
 
+  // Only allow Quirks downloads after login is finished.
+  quirks::QuirksManager::Get()->OnLoginCompleted();
+
   // If needed, create browser observer to display first run OOBE Goodies page.
   first_run::GoodiesDisplayer::Init();
+
+  // Schedule a flush if profile is not ephemeral.
+  if (!ProfileHelper::IsEphemeralUserProfile(profile))
+    ProfileHelper::Get()->FlushProfile(profile);
 
   // TODO(nkostylev): This pointer should probably never be NULL, but it looks
   // like OnProfileCreated() may be getting called before
@@ -1181,7 +1204,7 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
 }
 
 void UserSessionManager::ActivateWizard(const std::string& screen_name) {
-  LoginDisplayHost* host = LoginDisplayHostImpl::default_host();
+  LoginDisplayHost* host = LoginDisplayHost::default_host();
   CHECK(host);
   host->StartWizard(screen_name);
 }
@@ -1271,7 +1294,7 @@ bool UserSessionManager::InitializeUserSession(Profile* profile) {
     }
   }
 
-  DoBrowserLaunch(profile, LoginDisplayHostImpl::default_host());
+  DoBrowserLaunch(profile, LoginDisplayHost::default_host());
   return true;
 }
 
@@ -1339,7 +1362,8 @@ void UserSessionManager::RestoreAuthSessionImpl(
   if (!auth_request_context &&
       (authenticator_.get() && authenticator_->authentication_context())) {
     auth_request_context =
-        authenticator_->authentication_context()->GetRequestContext();
+        content::BrowserContext::GetDefaultStoragePartition(
+            authenticator_->authentication_context())->GetURLRequestContext();
   }
   login_manager->RestoreSession(auth_request_context, session_restore_strategy_,
                                 user_context_.GetRefreshToken(),
@@ -1364,7 +1388,7 @@ void UserSessionManager::InitRlzImpl(Profile* profile, bool disabled) {
   // Negative ping delay means to send ping immediately after a first search is
   // recorded.
   rlz::RLZTracker::SetRlzDelegate(
-      make_scoped_ptr(new ChromeRLZTrackerDelegate));
+      base::WrapUnique(new ChromeRLZTrackerDelegate));
   rlz::RLZTracker::InitRlzDelayed(
       user_manager::UserManager::Get()->IsCurrentUserNew(), ping_delay < 0,
       base::TimeDelta::FromMilliseconds(abs(ping_delay)),
@@ -1397,7 +1421,7 @@ void UserSessionManager::InitializeCRLSetFetcher(
   }
 }
 
-void UserSessionManager::InitializeEVCertificatesWhitelistComponent(
+void UserSessionManager::InitializeCertificateTransparencyComponents(
     const user_manager::User* user) {
   const std::string username_hash = user->username_hash();
   component_updater::ComponentUpdateService* cus =
@@ -1405,7 +1429,10 @@ void UserSessionManager::InitializeEVCertificatesWhitelistComponent(
   if (!username_hash.empty() && cus) {
     const base::FilePath path =
         ProfileHelper::GetProfilePathByUserIdHash(username_hash);
+    // EV whitelist.
     RegisterEVWhitelistComponent(cus, path);
+    // STH set fetcher.
+    RegisterSTHSetComponent(cus, path);
   }
 }
 
@@ -1424,13 +1451,14 @@ void UserSessionManager::OnRestoreActiveSessions(
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   DCHECK_EQ(1u, user_manager->GetLoggedInUsers().size());
   DCHECK(user_manager->GetActiveUser());
-  std::string active_user_id = user_manager->GetActiveUser()->email();
+  const cryptohome::Identification active_cryptohome_id =
+      cryptohome::Identification(user_manager->GetActiveUser()->GetAccountId());
 
   SessionManagerClient::ActiveSessionsMap::const_iterator it;
   for (it = sessions.begin(); it != sessions.end(); ++it) {
-    if (active_user_id == it->first)
+    if (active_cryptohome_id == it->first)
       continue;
-    pending_user_sessions_[it->first] = it->second;
+    pending_user_sessions_[(it->first).GetAccountId()] = it->second;
   }
   RestorePendingUserSessions();
 }
@@ -1443,13 +1471,12 @@ void UserSessionManager::RestorePendingUserSessions() {
   }
 
   // Get next user to restore sessions and delete it from list.
-  SessionManagerClient::ActiveSessionsMap::const_iterator it =
-      pending_user_sessions_.begin();
-  std::string user_id = it->first;
+  PendingUserSessions::const_iterator it = pending_user_sessions_.begin();
+  const AccountId account_id = it->first;
   std::string user_id_hash = it->second;
-  DCHECK(!user_id.empty());
+  DCHECK(account_id.is_valid());
   DCHECK(!user_id_hash.empty());
-  pending_user_sessions_.erase(user_id);
+  pending_user_sessions_.erase(account_id);
 
   // Check that this user is not logged in yet.
   user_manager::UserList logged_in_users =
@@ -1459,7 +1486,7 @@ void UserSessionManager::RestorePendingUserSessions() {
        it != logged_in_users.end();
        ++it) {
     const user_manager::User* user = (*it);
-    if (user->email() == user_id) {
+    if (user->GetAccountId() == account_id) {
       user_already_logged_in = true;
       break;
     }
@@ -1467,7 +1494,7 @@ void UserSessionManager::RestorePendingUserSessions() {
   DCHECK(!user_already_logged_in);
 
   if (!user_already_logged_in) {
-    UserContext user_context(AccountId::FromUserEmail(user_id));
+    UserContext user_context(account_id);
     user_context.SetUserIDHash(user_id_hash);
     user_context.SetIsUsingOAuth(false);
 
@@ -1546,7 +1573,8 @@ UserSessionManager::GetAuthRequestContext() const {
       auth_request_context = signin_partition->GetURLRequestContext();
   } else if (authenticator_.get() && authenticator_->authentication_context()) {
     auth_request_context =
-        authenticator_->authentication_context()->GetRequestContext();
+        content::BrowserContext::GetDefaultStoragePartition(
+            authenticator_->authentication_context())->GetURLRequestContext();
   }
   return auth_request_context;
 }
@@ -1753,7 +1781,7 @@ void UserSessionManager::SendUserPodsMetrics() {
 void UserSessionManager::OnOAuth2TokensFetched(UserContext context) {
   if (StartupUtils::IsWebviewSigninEnabled() && TokenHandlesEnabled()) {
     CreateTokenUtilIfMissing();
-    if (token_handle_util_->ShouldObtainHandle(context.GetAccountId())) {
+    if (!token_handle_util_->HasToken(context.GetAccountId())) {
       token_handle_fetcher_.reset(new TokenHandleFetcher(
           token_handle_util_.get(), context.GetAccountId()));
       token_handle_fetcher_->FillForNewUser(
@@ -1785,6 +1813,13 @@ bool UserSessionManager::TokenHandlesEnabled() {
 }
 
 void UserSessionManager::Shutdown() {
+  if (arc::ArcBridgeService::GetEnabled(
+          base::CommandLine::ForCurrentProcess())) {
+    DCHECK(arc::ArcServiceManager::Get());
+    arc::ArcAuthService* arc_auth_service = arc::ArcAuthService::Get();
+    if (arc_auth_service)
+      arc_auth_service->Shutdown();
+  }
   token_handle_fetcher_.reset();
   token_handle_util_.reset();
   first_run::GoodiesDisplayer::Delete();

@@ -5,12 +5,13 @@
 #include "chrome/browser/signin/easy_unlock_service.h"
 
 #include <stddef.h>
+
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
@@ -45,7 +46,9 @@ namespace {
 
 // IDs for fake users used in tests.
 const char kTestUserPrimary[] = "primary_user@nowhere.com";
+const char kPrimaryGaiaId[] = "1111111111";
 const char kTestUserSecondary[] = "secondary_user@nowhere.com";
+const char kSecondaryGaiaId[] = "2222222222";
 
 // App manager to be used in EasyUnlockService tests.
 // This effectivelly abstracts the extension system from the tests.
@@ -141,10 +144,10 @@ class TestAppManagerFactory {
 
   // Creates a TestAppManager for the provided browser context. If a
   // TestAppManager was already created for the context, returns NULL.
-  scoped_ptr<TestAppManager> Create(content::BrowserContext* context) {
+  std::unique_ptr<TestAppManager> Create(content::BrowserContext* context) {
     if (Find(context))
-      return scoped_ptr<TestAppManager>();
-    scoped_ptr<TestAppManager> app_manager(new TestAppManager());
+      return std::unique_ptr<TestAppManager>();
+    std::unique_ptr<TestAppManager> app_manager(new TestAppManager());
     mapping_[context] = app_manager.get();
     return app_manager;
   }
@@ -174,19 +177,19 @@ TestAppManagerFactory* app_manager_factory = NULL;
 
 // EasyUnlockService factory function injected into testing profiles.
 // It creates an EasyUnlockService with test AppManager.
-scoped_ptr<KeyedService> CreateEasyUnlockServiceForTest(
+std::unique_ptr<KeyedService> CreateEasyUnlockServiceForTest(
     content::BrowserContext* context) {
   EXPECT_TRUE(app_manager_factory);
   if (!app_manager_factory)
     return nullptr;
 
-  scoped_ptr<EasyUnlockAppManager> app_manager =
+  std::unique_ptr<EasyUnlockAppManager> app_manager =
       app_manager_factory->Create(context);
   EXPECT_TRUE(app_manager.get());
   if (!app_manager.get())
     return nullptr;
 
-  scoped_ptr<EasyUnlockServiceRegular> service(
+  std::unique_ptr<EasyUnlockServiceRegular> service(
       new EasyUnlockServiceRegular(Profile::FromBrowserContext(context)));
   service->Initialize(std::move(app_manager));
   return std::move(service);
@@ -210,11 +213,11 @@ class EasyUnlockServiceTest : public testing::Test {
         .WillRepeatedly(testing::Invoke(
             this, &EasyUnlockServiceTest::is_bluetooth_adapter_present));
 
-    scoped_ptr<DBusThreadManagerSetter> dbus_setter =
+    std::unique_ptr<DBusThreadManagerSetter> dbus_setter =
         chromeos::DBusThreadManager::GetSetterForTesting();
     power_manager_client_ = new FakePowerManagerClient;
     dbus_setter->SetPowerManagerClient(
-        scoped_ptr<PowerManagerClient>(power_manager_client_));
+        std::unique_ptr<PowerManagerClient>(power_manager_client_));
 
     ON_CALL(*mock_user_manager_, Shutdown()).WillByDefault(Return());
     ON_CALL(*mock_user_manager_, IsLoggedInAsUserWithGaiaAccount())
@@ -222,7 +225,8 @@ class EasyUnlockServiceTest : public testing::Test {
     ON_CALL(*mock_user_manager_, IsCurrentUserNonCryptohomeDataEphemeral())
         .WillByDefault(Return(false));
 
-    SetUpProfile(&profile_, AccountId::FromUserEmail(kTestUserPrimary));
+    SetUpProfile(&profile_, AccountId::FromUserEmailGaiaId(
+        kTestUserPrimary, kPrimaryGaiaId));
   }
 
   void TearDown() override {
@@ -267,12 +271,13 @@ class EasyUnlockServiceTest : public testing::Test {
 
   void SetUpSecondaryProfile() {
     SetUpProfile(&secondary_profile_,
-                 AccountId::FromUserEmail(kTestUserSecondary));
+                 AccountId::FromUserEmailGaiaId(kTestUserSecondary,
+                 kSecondaryGaiaId));
   }
 
  private:
   // Sets up a test profile with a user id.
-  void SetUpProfile(scoped_ptr<TestingProfile>* profile,
+  void SetUpProfile(std::unique_ptr<TestingProfile>* profile,
                     const AccountId& account_id) {
     ASSERT_TRUE(profile);
     ASSERT_FALSE(profile->get());
@@ -287,13 +292,13 @@ class EasyUnlockServiceTest : public testing::Test {
 
     SigninManagerBase* signin_manager =
         SigninManagerFactory::GetForProfile(profile->get());
-    signin_manager->SetAuthenticatedAccountInfo(account_id.GetUserEmail(),
+    signin_manager->SetAuthenticatedAccountInfo(account_id.GetGaiaId(),
                                                 account_id.GetUserEmail());
   }
 
  protected:
-  scoped_ptr<TestingProfile> profile_;
-  scoped_ptr<TestingProfile> secondary_profile_;
+  std::unique_ptr<TestingProfile> profile_;
+  std::unique_ptr<TestingProfile> secondary_profile_;
   chromeos::MockUserManager* mock_user_manager_;
 
  private:
@@ -373,6 +378,16 @@ TEST_F(EasyUnlockServiceTest, NotAllowedForEphemeralAccounts) {
   EXPECT_FALSE(EasyUnlockService::Get(profile_.get())->IsAllowed());
   EXPECT_TRUE(
       EasyUnlockAppInState(profile_.get(), TestAppManager::STATE_NOT_LOADED));
+}
+
+TEST_F(EasyUnlockServiceTest, GetAccountId) {
+  EXPECT_EQ(AccountId::FromUserEmailGaiaId(kTestUserPrimary, kPrimaryGaiaId),
+            EasyUnlockService::Get(profile_.get())->GetAccountId());
+
+  SetUpSecondaryProfile();
+  EXPECT_EQ(AccountId::FromUserEmailGaiaId(kTestUserSecondary,
+                                           kSecondaryGaiaId),
+            EasyUnlockService::Get(secondary_profile_.get())->GetAccountId());
 }
 
 }  // namespace

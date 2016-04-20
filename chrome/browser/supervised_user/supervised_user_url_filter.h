@@ -6,18 +6,19 @@
 #define CHROME_BROWSER_SUPERVISED_USER_SUPERVISED_USER_URL_FILTER_H_
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/values.h"
 #include "chrome/browser/supervised_user/supervised_user_site_list.h"
 #include "chrome/browser/supervised_user/supervised_users.h"
+#include "components/supervised_user_error_page/supervised_user_error_page.h"
 
 class GURL;
 class SupervisedUserBlacklist;
@@ -51,25 +52,20 @@ class SupervisedUserURLFilter
     BLOCK,
     INVALID
   };
-  enum FilteringBehaviorReason {
-    DEFAULT,
-    ASYNC_CHECKER,
-    BLACKLIST,
-    MANUAL,
-    WHITELIST
-  };
 
-  using FilteringBehaviorCallback = base::Callback<void(FilteringBehavior,
-                                                        FilteringBehaviorReason,
-                                                        bool /* uncertain */)>;
+  using FilteringBehaviorCallback =
+      base::Callback<void(FilteringBehavior,
+                          supervised_user_error_page::FilteringBehaviorReason,
+                          bool /* uncertain */)>;
 
   class Observer {
    public:
     virtual void OnSiteListUpdated() = 0;
-    virtual void OnURLChecked(const GURL& url,
-                              FilteringBehavior behavior,
-                              FilteringBehaviorReason reason,
-                              bool uncertain) {}
+    virtual void OnURLChecked(
+        const GURL& url,
+        FilteringBehavior behavior,
+        supervised_user_error_page::FilteringBehaviorReason reason,
+        bool uncertain) {}
   };
 
   struct Contents;
@@ -78,14 +74,8 @@ class SupervisedUserURLFilter
 
   static FilteringBehavior BehaviorFromInt(int behavior_value);
 
-  static int GetBlockMessageID(
-      FilteringBehaviorReason reason,
-      bool is_child_account,
-      bool single_parent);
-
-  static int GetBlockHeaderID(FilteringBehaviorReason reason);
-
-  static bool ReasonIsAutomatic(FilteringBehaviorReason reason);
+  static bool ReasonIsAutomatic(
+      supervised_user_error_page::FilteringBehaviorReason reason);
 
   // Normalizes a URL for matching purposes.
   static GURL Normalize(const GURL& url);
@@ -186,10 +176,12 @@ class SupervisedUserURLFilter
   friend class base::RefCountedThreadSafe<SupervisedUserURLFilter>;
   ~SupervisedUserURLFilter();
 
-  void SetContents(scoped_ptr<Contents> url_matcher);
+  void SetContents(std::unique_ptr<Contents> url_matcher);
 
   FilteringBehavior GetFilteringBehaviorForURL(
-      const GURL& url, bool manual_only, FilteringBehaviorReason* reason) const;
+      const GURL& url,
+      bool manual_only,
+      supervised_user_error_page::FilteringBehaviorReason* reason) const;
 
   void CheckCallback(const FilteringBehaviorCallback& callback,
                      const GURL& url,
@@ -200,7 +192,7 @@ class SupervisedUserURLFilter
   mutable base::ObserverList<Observer> observers_;
 
   FilteringBehavior default_behavior_;
-  scoped_ptr<Contents> contents_;
+  std::unique_ptr<Contents> contents_;
 
   // Maps from a URL to whether it is manually allowed (true) or blocked
   // (false).
@@ -213,7 +205,7 @@ class SupervisedUserURLFilter
   // Not owned.
   const SupervisedUserBlacklist* blacklist_;
 
-  scoped_ptr<SupervisedUserAsyncURLChecker> async_url_checker_;
+  std::unique_ptr<SupervisedUserAsyncURLChecker> async_url_checker_;
 
   scoped_refptr<base::TaskRunner> blocking_task_runner_;
 

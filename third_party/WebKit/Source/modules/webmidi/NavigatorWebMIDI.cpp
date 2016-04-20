@@ -36,6 +36,7 @@
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Navigator.h"
+#include "core/frame/UseCounter.h"
 #include "modules/webmidi/MIDIAccessInitializer.h"
 #include "modules/webmidi/MIDIOptions.h"
 
@@ -46,13 +47,9 @@ NavigatorWebMIDI::NavigatorWebMIDI(LocalFrame* frame)
 {
 }
 
-NavigatorWebMIDI::~NavigatorWebMIDI()
-{
-}
-
 DEFINE_TRACE(NavigatorWebMIDI)
 {
-    HeapSupplement<Navigator>::trace(visitor);
+    Supplement<Navigator>::trace(visitor);
     DOMWindowProperty::trace(visitor);
 }
 
@@ -63,7 +60,7 @@ const char* NavigatorWebMIDI::supplementName()
 
 NavigatorWebMIDI& NavigatorWebMIDI::from(Navigator& navigator)
 {
-    NavigatorWebMIDI* supplement = static_cast<NavigatorWebMIDI*>(HeapSupplement<Navigator>::from(navigator, supplementName()));
+    NavigatorWebMIDI* supplement = static_cast<NavigatorWebMIDI*>(Supplement<Navigator>::from(navigator, supplementName()));
     if (!supplement) {
         supplement = new NavigatorWebMIDI(navigator.frame());
         provideTo(navigator, supplementName(), supplement);
@@ -82,6 +79,7 @@ ScriptPromise NavigatorWebMIDI::requestMIDIAccess(ScriptState* scriptState, cons
         return ScriptPromise::rejectWithDOMException(scriptState, DOMException::create(AbortError, "The frame is not working."));
     }
 
+    UseCounter::countCrossOriginIframe(*frame()->document(), UseCounter::RequestMIDIAccessIframe);
     return MIDIAccessInitializer::start(scriptState, options);
 }
 

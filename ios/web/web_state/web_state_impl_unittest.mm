@@ -2,25 +2,32 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ios/web/web_state/web_state_impl.h"
+
 #include <stddef.h>
 
+#include <memory>
+
+#include "base/base64.h"
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/mac/bind_objc_block.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/test/ios/wait_util.h"
 #include "base/values.h"
 #include "ios/web/public/load_committed_details.h"
 #include "ios/web/public/test/test_browser_state.h"
 #include "ios/web/public/web_state/global_web_state_observer.h"
+#include "ios/web/public/web_state/web_state_delegate.h"
 #include "ios/web/public/web_state/web_state_observer.h"
 #include "ios/web/public/web_state/web_state_policy_decider.h"
+#import "ios/web/test/web_test.h"
 #include "ios/web/web_state/global_web_state_event_tracker.h"
-#include "ios/web/web_state/web_state_impl.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
-#include "testing/platform_test.h"
 #include "url/gurl.h"
 
 using testing::_;
@@ -102,6 +109,27 @@ class TestGlobalWebStateObserver : public GlobalWebStateObserver {
   bool did_stop_loading_called_;
   bool page_loaded_called_with_success_;
   bool web_state_destroyed_called_;
+};
+
+// Test delegate to check that the WebStateDelegate methods are called as
+// expected.
+class TestWebStateDelegate : public WebStateDelegate {
+ public:
+  TestWebStateDelegate() : load_progress_changed_called_(false) {}
+
+  // Methods returning true if the corresponding WebStateObserver method has
+  // been called.
+  bool load_progress_changed_called() const {
+    return load_progress_changed_called_;
+  }
+
+ private:
+  // WebStateObserver implementation:
+  void LoadProgressChanged(WebState* source, double progress) override {
+    load_progress_changed_called_ = true;
+  }
+
+  bool load_progress_changed_called_;
 };
 
 // Test observer to check that the WebStateObserver methods are called as
@@ -222,16 +250,50 @@ bool HandleScriptCommand(bool* is_called,
   return should_handle;
 }
 
-class WebStateTest : public PlatformTest {
+class WebStateTest : public web::WebTest {
  protected:
   void SetUp() override {
     web_state_.reset(new WebStateImpl(&browser_state_));
-    web_state_->SetWebController(nil);
+  }
+
+  // Loads specified html page into WebState.
+  void LoadHtml(std::string html) {
+    web_state_->GetNavigationManagerImpl().InitializeSession(nil, nil, NO, 0);
+
+    // Use data: url for loading html page.
+    std::string encoded_html;
+    base::Base64Encode(html, &encoded_html);
+    GURL url("data:text/html;charset=utf8;base64," + encoded_html);
+    web::NavigationManager::WebLoadParams params(url);
+    web_state_->GetNavigationManager()->LoadURLWithParams(params);
+
+    // Trigger the load.
+    web_state_->GetWebController().webUsageEnabled = YES;
+    web_state_->GetView();
+
+    // Wait until load is completed.
+    EXPECT_TRUE(web_state_->IsLoading());
+    base::test::ios::WaitUntilCondition(^bool() {
+      return !web_state_->IsLoading();
+    });
   }
 
   web::TestBrowserState browser_state_;
-  scoped_ptr<WebStateImpl> web_state_;
+  std::unique_ptr<WebStateImpl> web_state_;
 };
+
+TEST_F(WebStateTest, WebUsageEnabled) {
+  // Default is false.
+  ASSERT_FALSE(web_state_->IsWebUsageEnabled());
+
+  web_state_->SetWebUsageEnabled(true);
+  EXPECT_TRUE(web_state_->IsWebUsageEnabled());
+  EXPECT_TRUE(web_state_->GetWebController().webUsageEnabled);
+
+  web_state_->SetWebUsageEnabled(false);
+  EXPECT_FALSE(web_state_->IsWebUsageEnabled());
+  EXPECT_FALSE(web_state_->GetWebController().webUsageEnabled);
+}
 
 TEST_F(WebStateTest, ResponseHeaders) {
   GURL real_url("http://foo.com/bar");
@@ -293,7 +355,7 @@ TEST_F(WebStateTest, ResponseHeaderClearing) {
 }
 
 TEST_F(WebStateTest, ObserverTest) {
-  scoped_ptr<TestWebStateObserver> observer(
+  std::unique_ptr<TestWebStateObserver> observer(
       new TestWebStateObserver(web_state_.get()));
   EXPECT_EQ(web_state_.get(), observer->web_state());
 
@@ -343,9 +405,20 @@ TEST_F(WebStateTest, ObserverTest) {
   EXPECT_EQ(nullptr, observer->web_state());
 }
 
+// Tests that WebStateDelegate methods appropriately called.
+TEST_F(WebStateTest, DelegateTest) {
+  TestWebStateDelegate delegate;
+  web_state_->SetDelegate(&delegate);
+
+  // Test that LoadProgressChanged() is called.
+  EXPECT_FALSE(delegate.load_progress_changed_called());
+  web_state_->SendChangeLoadProgress(0.0);
+  EXPECT_TRUE(delegate.load_progress_changed_called());
+}
+
 // Verifies that GlobalWebStateObservers are called when expected.
 TEST_F(WebStateTest, GlobalObserverTest) {
-  scoped_ptr<TestGlobalWebStateObserver> observer(
+  std::unique_ptr<TestGlobalWebStateObserver> observer(
       new TestGlobalWebStateObserver());
 
   // Test that NavigationItemsPruned() is called.
@@ -496,6 +569,29 @@ TEST_F(WebStateTest, ScriptCommand) {
   EXPECT_TRUE(is_called_2);
 
   web_state_->RemoveScriptCommandCallback(kPrefix2);
+}
+
+// Tests script execution with and without callback.
+TEST_F(WebStateTest, ScriptExecution) {
+  LoadHtml("<html></html>");
+
+  // Execute script without callback.
+  web_state_->ExecuteJavaScript(base::UTF8ToUTF16("window.foo = 'bar'"));
+
+  // Execute script with callback.
+  __block std::unique_ptr<base::Value> execution_result;
+  web_state_->ExecuteJavaScript(base::UTF8ToUTF16("window.foo"),
+                                base::BindBlock(^(const base::Value* value) {
+                                  ASSERT_TRUE(value);
+                                  execution_result = value->CreateDeepCopy();
+                                }));
+  base::test::ios::WaitUntilCondition(^bool() {
+    return execution_result.get();
+  });
+
+  std::string string_result;
+  execution_result->GetAsString(&string_result);
+  EXPECT_EQ("bar", string_result);
 }
 
 }  // namespace

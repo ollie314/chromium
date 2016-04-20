@@ -33,6 +33,7 @@
 #include "platform/graphics/ImageOrientation.h"
 #include "platform/image-decoders/ImageAnimation.h"
 #include "platform/image-decoders/ImageFrame.h"
+#include "platform/image-decoders/SegmentReader.h"
 #include "public/platform/Platform.h"
 #include "wtf/Assertions.h"
 #include "wtf/PassOwnPtr.h"
@@ -43,9 +44,34 @@
 
 #if USE(QCMSLIB)
 #include "qcms.h"
-#endif
 
-typedef Vector<char> ColorProfile;
+namespace WTF {
+
+template <typename T>
+struct OwnedPtrDeleter;
+template <>
+struct OwnedPtrDeleter<qcms_transform> {
+    static void deletePtr(qcms_transform* transform)
+    {
+        if (transform)
+            qcms_transform_release(transform);
+    }
+};
+
+template <typename T>
+struct OwnedPtrDeleter;
+template <>
+struct OwnedPtrDeleter<qcms_profile> {
+    static void deletePtr(qcms_profile* profile)
+    {
+        if (profile)
+            qcms_profile_release(profile);
+    }
+};
+
+} // namespace WTF
+
+#endif // USE(QCMSLIB)
 
 namespace blink {
 
@@ -55,7 +81,7 @@ class PLATFORM_EXPORT ImagePlanes final {
     WTF_MAKE_NONCOPYABLE(ImagePlanes);
 public:
     ImagePlanes();
-    ImagePlanes(void* planes[3], size_t rowBytes[3]);
+    ImagePlanes(void* planes[3], const size_t rowBytes[3]);
 
     void* plane(int);
     size_t rowBytes(int) const;
@@ -71,8 +97,6 @@ private:
 class PLATFORM_EXPORT ImageDecoder {
     WTF_MAKE_NONCOPYABLE(ImageDecoder); USING_FAST_MALLOC(ImageDecoder);
 public:
-    enum SizeType { ActualSize, SizeForMemoryAllocation };
-
     static const size_t noDecodedImageByteLimit = Platform::noDecodedImageByteLimit;
 
     enum AlphaOption {
@@ -99,22 +123,29 @@ public:
     // we can't sniff a supported type from the provided data (possibly
     // because there isn't enough data yet).
     // Sets m_maxDecodedBytes to Platform::maxImageDecodedBytes().
-    static PassOwnPtr<ImageDecoder> create(const SharedBuffer& data, AlphaOption, GammaAndColorProfileOption);
+    static PassOwnPtr<ImageDecoder> create(const char* data, size_t length, AlphaOption, GammaAndColorProfileOption);
+    static PassOwnPtr<ImageDecoder> create(const SharedBuffer&, AlphaOption, GammaAndColorProfileOption);
+    static PassOwnPtr<ImageDecoder> create(const SegmentReader&, AlphaOption, GammaAndColorProfileOption);
 
     virtual String filenameExtension() const = 0;
 
     bool isAllDataReceived() const { return m_isAllDataReceived; }
 
-    void setData(SharedBuffer* data, bool allDataReceived)
+    void setData(PassRefPtr<SegmentReader> data, bool allDataReceived)
     {
         if (m_failed)
             return;
         m_data = data;
         m_isAllDataReceived = allDataReceived;
-        onSetData(data);
+        onSetData(m_data.get());
     }
 
-    virtual void onSetData(SharedBuffer* data) { }
+    void setData(PassRefPtr<SharedBuffer> data, bool allDataReceived)
+    {
+        setData(SegmentReader::createFromSharedBuffer(data), allDataReceived);
+    }
+
+    virtual void onSetData(SegmentReader* data) { }
 
     bool isSizeAvailable()
     {
@@ -136,9 +167,21 @@ public:
     // return the actual decoded size.
     virtual IntSize decodedSize() const { return size(); }
 
-    // Decoders which support YUV decoding can override this to
-    // give potentially different sizes per component.
-    virtual IntSize decodedYUVSize(int component, SizeType) const { return decodedSize(); }
+    // Image decoders that support YUV decoding must override this to
+    // provide the size of each component.
+    virtual IntSize decodedYUVSize(int component) const
+    {
+        ASSERT(false);
+        return IntSize();
+    }
+
+    // Image decoders that support YUV decoding must override this to
+    // return the width of each row of the memory allocation.
+    virtual size_t decodedYUVWidthBytes(int component) const
+    {
+        ASSERT(false);
+        return 0;
+    }
 
     // This will only differ from size() for ICO (where each frame is a
     // different icon) or other formats where different frames are different
@@ -186,7 +229,7 @@ public:
     // Number of bytes in the decoded frame. Returns 0 if the decoder doesn't
     // have this frame cached (either because it hasn't been decoded, or because
     // it has been cleared).
-    size_t frameBytesAtIndex(size_t) const;
+    virtual size_t frameBytesAtIndex(size_t) const;
 
     ImageOrientation orientation() const { return m_orientation; }
 
@@ -195,70 +238,11 @@ public:
     void setIgnoreGammaAndColorProfile(bool flag) { m_ignoreGammaAndColorProfile = flag; }
     bool ignoresGammaAndColorProfile() const { return m_ignoreGammaAndColorProfile; }
 
-    virtual bool hasColorProfile() const { return false; }
+    bool hasColorProfile() const;
 
 #if USE(QCMSLIB)
-    enum { iccColorProfileHeaderLength = 128 };
-
-    static bool rgbColorProfile(const char* profileData, unsigned profileLength)
-    {
-        ASSERT_UNUSED(profileLength, profileLength >= iccColorProfileHeaderLength);
-
-        return !memcmp(&profileData[16], "RGB ", 4);
-    }
-
-    static bool inputDeviceColorProfile(const char* profileData, unsigned profileLength)
-    {
-        ASSERT_UNUSED(profileLength, profileLength >= iccColorProfileHeaderLength);
-
-        return !memcmp(&profileData[12], "mntr", 4) || !memcmp(&profileData[12], "scnr", 4);
-    }
-
-    class OutputDeviceProfile final {
-        USING_FAST_MALLOC(OutputDeviceProfile);
-        WTF_MAKE_NONCOPYABLE(OutputDeviceProfile);
-    public:
-        OutputDeviceProfile()
-            : m_outputDeviceProfile(0)
-        {
-            ColorProfile profile = screenColorProfile();
-            if (!profile.isEmpty())
-                m_outputDeviceProfile = qcms_profile_from_memory(profile.data(), profile.size());
-
-            if (m_outputDeviceProfile && qcms_profile_is_bogus(m_outputDeviceProfile)) {
-                qcms_profile_release(m_outputDeviceProfile);
-                m_outputDeviceProfile = 0;
-            }
-
-            if (!m_outputDeviceProfile)
-                m_outputDeviceProfile = qcms_profile_sRGB();
-            if (m_outputDeviceProfile)
-                qcms_profile_precache_output_transform(m_outputDeviceProfile);
-        }
-
-        qcms_profile* profile() const { return m_outputDeviceProfile; }
-
-    private:
-        static ColorProfile screenColorProfile()
-        {
-            // FIXME: Add optional ICCv4 support and support for multiple monitors.
-            WebVector<char> profile;
-            Platform::current()->screenColorProfile(&profile);
-
-            ColorProfile colorProfile;
-            colorProfile.append(profile.data(), profile.size());
-            return colorProfile;
-        }
-
-        qcms_profile* m_outputDeviceProfile;
-    };
-
-    static qcms_profile* qcmsOutputDeviceProfile()
-    {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(OutputDeviceProfile, outputDeviceProfile, new OutputDeviceProfile);
-
-        return outputDeviceProfile.profile();
-    }
+    void setColorProfileAndTransform(const char* iccData, unsigned iccLength, bool hasAlpha, bool useSRGB);
+    qcms_transform* colorTransform() { return m_sourceToOutputDeviceColorTransform.get(); }
 #endif
 
     // Sets the "decode failure" flag.  For caller convenience (since so
@@ -334,7 +318,7 @@ protected:
     // Decodes the requested frame.
     virtual void decode(size_t) = 0;
 
-    RefPtr<SharedBuffer> m_data; // The encoded data.
+    RefPtr<SegmentReader> m_data; // The encoded data.
     Vector<ImageFrame, 1> m_frameBufferCache;
     bool m_premultiplyAlpha;
     bool m_ignoreGammaAndColorProfile;
@@ -361,6 +345,10 @@ private:
     bool m_sizeAvailable;
     bool m_isAllDataReceived;
     bool m_failed;
+
+#if USE(QCMSLIB)
+    OwnPtr<qcms_transform> m_sourceToOutputDeviceColorTransform;
+#endif
 };
 
 } // namespace blink

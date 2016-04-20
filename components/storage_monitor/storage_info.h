@@ -29,8 +29,6 @@ class StorageInfo {
     ITUNES,
     // A Picasa database.
     PICASA,
-    // An iPhoto library.
-    IPHOTO,
   };
 
   StorageInfo();
@@ -41,6 +39,7 @@ class StorageInfo {
               const base::string16& vendor,
               const base::string16& model,
               uint64_t size_in_bytes);
+  StorageInfo(const StorageInfo& other);
   ~StorageInfo();
 
   // Returns a device id given properties of the device. A prefix dependent on
@@ -68,8 +67,6 @@ class StorageInfo {
   static bool IsITunesDevice(const std::string& device_id);
 
   static bool IsPicasaDevice(const std::string& device_id);
-
-  static bool IsIPhotoDevice(const std::string& device_id);
 
   static bool IsMTPDevice(const std::string& device_id);
 

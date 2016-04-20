@@ -7,14 +7,15 @@
 
 #include <stddef.h>
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "cc/trees/occlusion.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/transform.h"
 
 namespace cc {
-class LayerImpl;
+class RenderSurfaceImpl;
 
 // Container for properties that layers need to compute before they can be
 // drawn.
@@ -49,11 +50,6 @@ struct CC_EXPORT DrawProperties {
   // True if the layer needs to be clipped by clip_rect.
   bool is_clipped;
 
-  // The layer whose coordinate space this layer draws into. This can be
-  // either the same layer (draw_properties_.render_target == this) or an
-  // ancestor of this layer.
-  LayerImpl* render_target;
-
   // This rect is a bounding box around what part of the layer is visible, in
   // the layer's coordinate space.
   gfx::Rect visible_layer_rect;
@@ -69,12 +65,6 @@ struct CC_EXPORT DrawProperties {
   // Number of descendants with a clip parent that is our ancestor. NB - this
   // does not include our clip children because they are clipped by us.
   size_t num_unclipped_descendants;
-
-  // This is true if the layer has any direct child that has a scroll parent.
-  // This layer will not be the scroll parent in this case. This information
-  // lets us avoid work in CalculateDrawPropertiesInternal -- if none of our
-  // children have scroll parents, we will not need to recur out of order.
-  bool has_child_with_a_scroll_parent;
 
   // Each time we generate a new render surface layer list, an ID is used to
   // identify it. |last_drawn_render_surface_layer_list_id| is set to the ID

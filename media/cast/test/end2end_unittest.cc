@@ -26,17 +26,17 @@
 #include "base/test/simple_test_tick_clock.h"
 #include "base/time/tick_clock.h"
 #include "media/base/audio_bus.h"
+#include "media/base/fake_single_thread_task_runner.h"
 #include "media/base/video_frame.h"
 #include "media/cast/cast_config.h"
 #include "media/cast/cast_environment.h"
 #include "media/cast/cast_receiver.h"
 #include "media/cast/cast_sender.h"
 #include "media/cast/logging/simple_event_subscriber.h"
+#include "media/cast/net/cast_transport.h"
 #include "media/cast/net/cast_transport_config.h"
 #include "media/cast/net/cast_transport_defines.h"
-#include "media/cast/net/cast_transport_sender.h"
-#include "media/cast/net/cast_transport_sender_impl.h"
-#include "media/cast/test/fake_single_thread_task_runner.h"
+#include "media/cast/net/cast_transport_impl.h"
 #include "media/cast/test/skewed_single_thread_task_runner.h"
 #include "media/cast/test/skewed_tick_clock.h"
 #include "media/cast/test/utility/audio_utility.h"
@@ -92,12 +92,6 @@ std::string ConvertFromBase16String(const std::string& base_16) {
   }
   compressed.assign(reinterpret_cast<const char*>(&v[0]), v.size());
   return compressed;
-}
-
-void UpdateCastTransportStatus(CastTransportStatus status) {
-  bool result = (status == TRANSPORT_AUDIO_INITIALIZED ||
-                 status == TRANSPORT_VIDEO_INITIALIZED);
-  EXPECT_TRUE(result);
 }
 
 void ExpectSuccessOperationalStatus(OperationalStatus status) {
@@ -172,7 +166,7 @@ class LoopBackPacketPipe : public test::PacketPipe {
 // media/cast/test/loopback_transport.*.  It's roughly the same class and has
 // exactly the same name (and when it was outside of the anonymous namespace bad
 // things happened when linking on Android!).
-class LoopBackTransport : public PacketSender {
+class LoopBackTransport : public PacketTransport {
  public:
   explicit LoopBackTransport(scoped_refptr<CastEnvironment> cast_environment)
       : send_packets_(true),
@@ -212,6 +206,11 @@ class LoopBackTransport : public PacketSender {
   }
 
   int64_t GetBytesSent() final { return bytes_sent_; }
+
+  void StartReceiving(
+      const PacketReceiverCallbackWithStatus& packet_receiver) final {}
+
+  void StopReceiving() final {}
 
   void SetSendPackets(bool send_packets) { send_packets_ = send_packets; }
 
@@ -397,10 +396,15 @@ class TestReceiverVideoCallback
 // The actual test class, generate synthetic data for both audio and video and
 // send those through the sender and receiver and analyzes the result.
 class End2EndTest : public ::testing::Test {
+ public:
+  void ReceivePacket(scoped_ptr<media::cast::Packet> packet) {
+    cast_receiver_->ReceivePacket(std::move(packet));
+  };
+
  protected:
   End2EndTest()
       : start_time_(),
-        task_runner_(new test::FakeSingleThreadTaskRunner(&testing_clock_)),
+        task_runner_(new FakeSingleThreadTaskRunner(&testing_clock_)),
         testing_clock_sender_(new test::SkewedTickClock(&testing_clock_)),
         task_runner_sender_(
             new test::SkewedSingleThreadTaskRunner(task_runner_)),
@@ -417,8 +421,8 @@ class End2EndTest : public ::testing::Test {
             task_runner_receiver_,
             task_runner_receiver_,
             task_runner_receiver_)),
-        receiver_to_sender_(cast_environment_receiver_),
-        sender_to_receiver_(cast_environment_sender_),
+        receiver_to_sender_(new LoopBackTransport(cast_environment_receiver_)),
+        sender_to_receiver_(new LoopBackTransport(cast_environment_sender_)),
         test_receiver_audio_callback_(new TestReceiverAudioCallback()),
         test_receiver_video_callback_(new TestReceiverVideoCallback()) {
     testing_clock_.Advance(
@@ -549,68 +553,7 @@ class End2EndTest : public ::testing::Test {
     }
   }
 
-  void ReceivePacket(scoped_ptr<Packet> packet) {
-    cast_receiver_->ReceivePacket(std::move(packet));
-  }
-
-  void Create() {
-    net::IPEndPoint dummy_endpoint;
-    transport_sender_.reset(new CastTransportSenderImpl(
-        nullptr, testing_clock_sender_, dummy_endpoint, dummy_endpoint,
-        make_scoped_ptr(new base::DictionaryValue),
-        base::Bind(&UpdateCastTransportStatus),
-        base::Bind(&LogEventDispatcher::DispatchBatchOfEvents,
-                   base::Unretained(cast_environment_sender_->logger())),
-        base::TimeDelta::FromMilliseconds(1), task_runner_sender_,
-        PacketReceiverCallback(), &sender_to_receiver_));
-
-    transport_receiver_.reset(new CastTransportSenderImpl(
-        nullptr, testing_clock_sender_, dummy_endpoint, dummy_endpoint,
-        make_scoped_ptr(new base::DictionaryValue),
-        base::Bind(&UpdateCastTransportStatus),
-        base::Bind(&LogEventDispatcher::DispatchBatchOfEvents,
-                   base::Unretained(cast_environment_receiver_->logger())),
-        base::TimeDelta::FromMilliseconds(1), task_runner_sender_,
-        base::Bind(&End2EndTest::ReceivePacket, base::Unretained(this)),
-        &receiver_to_sender_));
-
-    cast_receiver_ = CastReceiver::Create(cast_environment_receiver_,
-                                          audio_receiver_config_,
-                                          video_receiver_config_,
-                                          transport_receiver_.get());
-
-    cast_sender_ =
-        CastSender::Create(cast_environment_sender_, transport_sender_.get());
-
-    // Initializing audio and video senders.
-    cast_sender_->InitializeAudio(
-        audio_sender_config_,
-        base::Bind(&ExpectSuccessOperationalStatus));
-    cast_sender_->InitializeVideo(
-        video_sender_config_,
-        base::Bind(&ExpectSuccessOperationalStatus),
-        CreateDefaultVideoEncodeAcceleratorCallback(),
-        CreateDefaultVideoEncodeMemoryCallback());
-    task_runner_->RunTasks();
-
-    receiver_to_sender_.SetPacketReceiver(
-        transport_sender_->PacketReceiverForTesting(),
-        task_runner_,
-        &testing_clock_);
-    sender_to_receiver_.SetPacketReceiver(
-        transport_receiver_->PacketReceiverForTesting(),
-        task_runner_,
-        &testing_clock_);
-
-    audio_frame_input_ = cast_sender_->audio_frame_input();
-    video_frame_input_ = cast_sender_->video_frame_input();
-
-    audio_bus_factory_.reset(
-        new TestAudioBusFactory(audio_sender_config_.channels,
-                                audio_sender_config_.frequency,
-                                kSoundFrequency,
-                                kSoundVolume));
-  }
+  void Create();
 
   ~End2EndTest() override {
     cast_environment_sender_->logger()->Unsubscribe(&event_subscriber_sender_);
@@ -897,7 +840,7 @@ class End2EndTest : public ::testing::Test {
 
   // These run in "test time"
   base::SimpleTestTickClock testing_clock_;
-  scoped_refptr<test::FakeSingleThreadTaskRunner> task_runner_;
+  scoped_refptr<FakeSingleThreadTaskRunner> task_runner_;
 
   // These run on the sender timeline.
   test::SkewedTickClock* testing_clock_sender_;
@@ -916,10 +859,11 @@ class End2EndTest : public ::testing::Test {
   scoped_refptr<CastEnvironment> cast_environment_sender_;
   scoped_refptr<CastEnvironment> cast_environment_receiver_;
 
-  LoopBackTransport receiver_to_sender_;
-  LoopBackTransport sender_to_receiver_;
-  scoped_ptr<CastTransportSenderImpl> transport_sender_;
-  scoped_ptr<CastTransportSenderImpl> transport_receiver_;
+  LoopBackTransport* receiver_to_sender_;  // Owned by CastTransport.
+  LoopBackTransport* sender_to_receiver_;  // Owned by CastTransport.
+
+  scoped_ptr<CastTransportImpl> transport_sender_;
+  scoped_ptr<CastTransportImpl> transport_receiver_;
 
   scoped_ptr<CastReceiver> cast_receiver_;
   scoped_ptr<CastSender> cast_sender_;
@@ -939,6 +883,83 @@ class End2EndTest : public ::testing::Test {
   // |transport_sender_| has a RepeatingTimer which needs a MessageLoop.
   base::MessageLoop message_loop_;
 };
+
+namespace {
+
+class TransportClient : public CastTransport::Client {
+ public:
+  TransportClient(LogEventDispatcher* log_event_dispatcher,
+                  End2EndTest* e2e_test)
+      : log_event_dispatcher_(log_event_dispatcher), e2e_test_(e2e_test) {}
+
+  void OnStatusChanged(media::cast::CastTransportStatus status) final {
+    bool result = (status == TRANSPORT_AUDIO_INITIALIZED ||
+                   status == TRANSPORT_VIDEO_INITIALIZED);
+    EXPECT_TRUE(result);
+  };
+  void OnLoggingEventsReceived(
+      scoped_ptr<std::vector<FrameEvent>> frame_events,
+      scoped_ptr<std::vector<PacketEvent>> packet_events) final {
+    log_event_dispatcher_->DispatchBatchOfEvents(std::move(frame_events),
+                                                 std::move(packet_events));
+  };
+  void ProcessRtpPacket(scoped_ptr<Packet> packet) final {
+    if (e2e_test_)
+      e2e_test_->ReceivePacket(std::move(packet));
+  };
+
+ private:
+  LogEventDispatcher* const log_event_dispatcher_;  // Not owned by this class.
+  End2EndTest* const e2e_test_;                     // Not owned by this class.
+
+  DISALLOW_COPY_AND_ASSIGN(TransportClient);
+};
+
+}  // namespace
+
+void End2EndTest::Create() {
+  transport_sender_.reset(new CastTransportImpl(
+      testing_clock_sender_, base::TimeDelta::FromMilliseconds(1),
+      make_scoped_ptr(
+          new TransportClient(cast_environment_sender_->logger(), nullptr)),
+      make_scoped_ptr(sender_to_receiver_), task_runner_sender_));
+
+  transport_receiver_.reset(new CastTransportImpl(
+      testing_clock_sender_, base::TimeDelta::FromMilliseconds(1),
+      make_scoped_ptr(
+          new TransportClient(cast_environment_receiver_->logger(), this)),
+      make_scoped_ptr(receiver_to_sender_), task_runner_sender_));
+
+  cast_receiver_ =
+      CastReceiver::Create(cast_environment_receiver_, audio_receiver_config_,
+                           video_receiver_config_, transport_receiver_.get());
+
+  cast_sender_ =
+      CastSender::Create(cast_environment_sender_, transport_sender_.get());
+
+  // Initializing audio and video senders.
+  cast_sender_->InitializeAudio(audio_sender_config_,
+                                base::Bind(&ExpectSuccessOperationalStatus));
+  cast_sender_->InitializeVideo(video_sender_config_,
+                                base::Bind(&ExpectSuccessOperationalStatus),
+                                CreateDefaultVideoEncodeAcceleratorCallback(),
+                                CreateDefaultVideoEncodeMemoryCallback());
+  task_runner_->RunTasks();
+
+  receiver_to_sender_->SetPacketReceiver(
+      transport_sender_->PacketReceiverForTesting(), task_runner_,
+      &testing_clock_);
+  sender_to_receiver_->SetPacketReceiver(
+      transport_receiver_->PacketReceiverForTesting(), task_runner_,
+      &testing_clock_);
+
+  audio_frame_input_ = cast_sender_->audio_frame_input();
+  video_frame_input_ = cast_sender_->video_frame_input();
+
+  audio_bus_factory_.reset(new TestAudioBusFactory(
+      audio_sender_config_.channels, audio_sender_config_.frequency,
+      kSoundFrequency, kSoundVolume));
+}
 
 TEST_F(End2EndTest, LoopWithLosslessEncoding) {
   Configure(CODEC_VIDEO_FAKE, CODEC_AUDIO_PCM16);
@@ -980,7 +1001,7 @@ TEST_F(End2EndTest, DISABLED_StartSenderBeforeReceiver) {
   int frame_number = 0;
   int audio_diff = kFrameTimerMs;
 
-  sender_to_receiver_.SetSendPackets(false);
+  sender_to_receiver_->SetSendPackets(false);
 
   const int test_delay_ms = 100;
 
@@ -1015,7 +1036,7 @@ TEST_F(End2EndTest, DISABLED_StartSenderBeforeReceiver) {
   }
 
   RunTasks(test_delay_ms);
-  sender_to_receiver_.SetSendPackets(true);
+  sender_to_receiver_->SetSendPackets(true);
 
   int num_audio_frames_requested = 0;
   for (int j = 0; j < 10; ++j) {
@@ -1142,8 +1163,8 @@ TEST_F(End2EndTest, SmoothPlayoutWithFivePercentClockRateSkew) {
 
 TEST_F(End2EndTest, EvilNetwork) {
   Configure(CODEC_VIDEO_FAKE, CODEC_AUDIO_PCM16);
-  receiver_to_sender_.SetPacketPipe(test::EvilNetwork());
-  sender_to_receiver_.SetPacketPipe(test::EvilNetwork());
+  receiver_to_sender_->SetPacketPipe(test::EvilNetwork());
+  sender_to_receiver_->SetPacketPipe(test::EvilNetwork());
   Create();
   StartBasicPlayer();
 
@@ -1164,8 +1185,8 @@ TEST_F(End2EndTest, EvilNetwork) {
 // at a much higher frame rate.
 TEST_F(End2EndTest, ShoveHighFrameRateDownYerThroat) {
   Configure(CODEC_VIDEO_FAKE, CODEC_AUDIO_PCM16);
-  receiver_to_sender_.SetPacketPipe(test::EvilNetwork());
-  sender_to_receiver_.SetPacketPipe(test::EvilNetwork());
+  receiver_to_sender_->SetPacketPipe(test::EvilNetwork());
+  sender_to_receiver_->SetPacketPipe(test::EvilNetwork());
   Create();
   StartBasicPlayer();
 
@@ -1185,7 +1206,7 @@ TEST_F(End2EndTest, ShoveHighFrameRateDownYerThroat) {
 
 TEST_F(End2EndTest, OldPacketNetwork) {
   Configure(CODEC_VIDEO_FAKE, CODEC_AUDIO_PCM16);
-  sender_to_receiver_.SetPacketPipe(test::NewRandomDrop(0.01));
+  sender_to_receiver_->SetPacketPipe(test::NewRandomDrop(0.01));
   scoped_ptr<test::PacketPipe> echo_chamber(
       test::NewDuplicateAndDelay(1, 10 * kFrameTimerMs));
   echo_chamber->AppendToPipe(
@@ -1197,7 +1218,7 @@ TEST_F(End2EndTest, OldPacketNetwork) {
   echo_chamber->AppendToPipe(
       test::NewDuplicateAndDelay(1, 160 * kFrameTimerMs));
 
-  receiver_to_sender_.SetPacketPipe(std::move(echo_chamber));
+  receiver_to_sender_->SetPacketPipe(std::move(echo_chamber));
   Create();
   StartBasicPlayer();
 

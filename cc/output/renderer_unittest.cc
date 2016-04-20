@@ -18,8 +18,7 @@ namespace {
 
 class TestOutputSurface : public OutputSurface {
  public:
-  explicit TestOutputSurface(
-      const scoped_refptr<ContextProvider>& context_provider);
+  explicit TestOutputSurface(scoped_refptr<ContextProvider> context_provider);
   ~TestOutputSurface() override;
 
   // OutputSurface implementation
@@ -27,9 +26,8 @@ class TestOutputSurface : public OutputSurface {
 };
 
 TestOutputSurface::TestOutputSurface(
-    const scoped_refptr<ContextProvider>& context_provider)
-    : OutputSurface(context_provider) {
-}
+    scoped_refptr<ContextProvider> context_provider)
+    : OutputSurface(std::move(context_provider)) {}
 
 TestOutputSurface::~TestOutputSurface() {
 }
@@ -41,7 +39,8 @@ void TestOutputSurface::SwapBuffers(CompositorFrame* frame) {
 
 class MockContextProvider : public TestContextProvider {
  public:
-  explicit MockContextProvider(scoped_ptr<TestWebGraphicsContext3D> context)
+  explicit MockContextProvider(
+      std::unique_ptr<TestWebGraphicsContext3D> context)
       : TestContextProvider(std::move(context)) {}
   MOCK_METHOD0(DeleteCachedResources, void());
 
@@ -50,13 +49,13 @@ class MockContextProvider : public TestContextProvider {
 };
 
 template <class T>
-scoped_ptr<Renderer> CreateRenderer(RendererClient* client,
-                                    const RendererSettings* settings,
-                                    OutputSurface* output_surface,
-                                    ResourceProvider* resource_provider);
+std::unique_ptr<Renderer> CreateRenderer(RendererClient* client,
+                                         const RendererSettings* settings,
+                                         OutputSurface* output_surface,
+                                         ResourceProvider* resource_provider);
 
 template <>
-scoped_ptr<Renderer> CreateRenderer<DelegatingRenderer>(
+std::unique_ptr<Renderer> CreateRenderer<DelegatingRenderer>(
     RendererClient* client,
     const RendererSettings* settings,
     OutputSurface* output_surface,
@@ -66,7 +65,7 @@ scoped_ptr<Renderer> CreateRenderer<DelegatingRenderer>(
 }
 
 template <>
-scoped_ptr<Renderer> CreateRenderer<GLRenderer>(
+std::unique_ptr<Renderer> CreateRenderer<GLRenderer>(
     RendererClient* client,
     const RendererSettings* settings,
     OutputSurface* output_surface,
@@ -95,9 +94,9 @@ class RendererTest : public ::testing::Test {
   RendererSettings tree_settings_;
   FakeOutputSurfaceClient output_surface_client_;
   scoped_refptr<MockContextProvider> context_provider_;
-  scoped_ptr<OutputSurface> output_surface_;
-  scoped_ptr<ResourceProvider> resource_provider_;
-  scoped_ptr<Renderer> renderer_;
+  std::unique_ptr<OutputSurface> output_surface_;
+  std::unique_ptr<ResourceProvider> resource_provider_;
+  std::unique_ptr<Renderer> renderer_;
 };
 
 typedef ::testing::Types<DelegatingRenderer, GLRenderer> RendererTypes;

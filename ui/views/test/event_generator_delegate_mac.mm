@@ -9,6 +9,7 @@
 #import "base/mac/scoped_objc_class_swizzler.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
+#include "ui/base/cocoa/cocoa_base_utils.h"
 #include "ui/events/event_processor.h"
 #include "ui/events/event_target.h"
 #include "ui/events/event_target_iterator.h"
@@ -35,8 +36,8 @@ namespace {
 
 NSPoint ConvertRootPointToTarget(NSWindow* target,
                                  const gfx::Point& point_in_root) {
-  // Normally this would do [NSWindow convertScreenToBase:]. However, Cocoa can
-  // reposition the window on screen and make things flaky. Initially, just
+  // Normally this would do ui::ConvertPointFromScreenToWindow. However, Cocoa
+  // can reposition the window on screen and make things flaky. Initially, just
   // assume that the contentRect of |target| is at the top-left corner of the
   // screen.
   NSRect content_rect = [target contentRectForFrameRect:[target frame]];
@@ -240,7 +241,7 @@ class EventGeneratorDelegateMac : public ui::EventTarget,
   // Overridden from ui::EventTarget:
   bool CanAcceptEvent(const ui::Event& event) override { return true; }
   ui::EventTarget* GetParentTarget() override { return nullptr; }
-  scoped_ptr<ui::EventTargetIterator> GetChildIterator() const override;
+  std::unique_ptr<ui::EventTargetIterator> GetChildIterator() const override;
   ui::EventTargeter* GetEventTargeter() override { return this; }
 
   // Overridden from ui::EventHandler:
@@ -301,9 +302,9 @@ class EventGeneratorDelegateMac : public ui::EventTarget,
 
   ui::test::EventGenerator* owner_;
   base::scoped_nsobject<NSWindow> window_;
-  scoped_ptr<base::mac::ScopedObjCClassSwizzler> swizzle_pressed_;
-  scoped_ptr<base::mac::ScopedObjCClassSwizzler> swizzle_location_;
-  scoped_ptr<base::mac::ScopedObjCClassSwizzler> swizzle_current_event_;
+  std::unique_ptr<base::mac::ScopedObjCClassSwizzler> swizzle_pressed_;
+  std::unique_ptr<base::mac::ScopedObjCClassSwizzler> swizzle_location_;
+  std::unique_ptr<base::mac::ScopedObjCClassSwizzler> swizzle_current_event_;
   base::scoped_nsobject<NSMenu> fake_menu_;
 
   DISALLOW_COPY_AND_ASSIGN(EventGeneratorDelegateMac);
@@ -341,7 +342,7 @@ EventGeneratorDelegateMac::~EventGeneratorDelegateMac() {
   ui::test::EventGenerator::default_delegate = nullptr;
 }
 
-scoped_ptr<ui::EventTargetIterator>
+std::unique_ptr<ui::EventTargetIterator>
 EventGeneratorDelegateMac::GetChildIterator() const {
   // Return nullptr to dispatch all events to the result of GetRootTarget().
   return nullptr;
@@ -362,7 +363,7 @@ void EventGeneratorDelegateMac::OnKeyEvent(ui::KeyEvent* event) {
   NSUInteger modifiers = EventFlagsToModifiers(event->flags());
   NSEvent* ns_event = cocoa_test_event_utils::SynthesizeKeyEvent(
       window_, event->type() == ui::ET_KEY_PRESSED, event->key_code(),
-      modifiers);
+      modifiers, event->is_char() ? event->GetDomKey() : ui::DomKey::NONE);
   if (owner_->targeting_application()) {
     [NSApp sendEvent:ns_event];
     return;
@@ -473,7 +474,7 @@ void InitializeMacEventGeneratorDelegate() {
   gfx::Point point_in_root = generator->current_location();
   NSWindow* window = EventGeneratorDelegateMac::GetInstance()->window();
   NSPoint point_in_window = ConvertRootPointToTarget(window, point_in_root);
-  return [window convertBaseToScreen:point_in_window];
+  return ui::ConvertPointFromWindowToScreen(window, point_in_window);
 }
 
 @end

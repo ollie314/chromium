@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <list>
+#include <memory>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -15,7 +16,7 @@
 #include "base/memory/linked_ptr.h"
 #include "gpu/command_buffer/client/cmd_buffer_helper.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
-#include "gpu/command_buffer/service/gpu_scheduler.h"
+#include "gpu/command_buffer/service/command_executor.h"
 #include "gpu/command_buffer/service/mocks.h"
 #include "gpu/command_buffer/service/transfer_buffer_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -107,14 +108,14 @@ class CommandBufferHelperTest : public testing::Test {
         new CommandBufferServiceLocked(transfer_buffer_manager_.get()));
     EXPECT_TRUE(command_buffer_->Initialize());
 
-    gpu_scheduler_.reset(new GpuScheduler(
-        command_buffer_.get(), api_mock_.get(), NULL));
+    executor_.reset(
+        new CommandExecutor(command_buffer_.get(), api_mock_.get(), NULL));
     command_buffer_->SetPutOffsetChangeCallback(base::Bind(
-        &GpuScheduler::PutChanged, base::Unretained(gpu_scheduler_.get())));
+        &CommandExecutor::PutChanged, base::Unretained(executor_.get())));
     command_buffer_->SetGetBufferChangeCallback(base::Bind(
-        &GpuScheduler::SetGetBuffer, base::Unretained(gpu_scheduler_.get())));
+        &CommandExecutor::SetGetBuffer, base::Unretained(executor_.get())));
 
-    api_mock_->set_engine(gpu_scheduler_.get());
+    api_mock_->set_engine(executor_.get());
 
     helper_.reset(new CommandBufferHelper(command_buffer_.get()));
     helper_->Initialize(kCommandBufferSizeBytes);
@@ -123,14 +124,12 @@ class CommandBufferHelperTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    // If the GpuScheduler posts any tasks, this forces them to run.
+    // If the CommandExecutor posts any tasks, this forces them to run.
     base::MessageLoop::current()->RunUntilIdle();
     test_command_args_.clear();
   }
 
-  const CommandParser* GetParser() const {
-    return gpu_scheduler_->parser();
-  }
+  const CommandParser* GetParser() const { return executor_->parser(); }
 
   int32_t ImmediateEntryCount() const {
     return helper_->immediate_entry_count_;
@@ -260,11 +259,11 @@ class CommandBufferHelperTest : public testing::Test {
 
   CommandBufferOffset get_helper_put() { return helper_->put_; }
 
-  scoped_ptr<AsyncAPIMock> api_mock_;
+  std::unique_ptr<AsyncAPIMock> api_mock_;
   scoped_refptr<TransferBufferManagerInterface> transfer_buffer_manager_;
-  scoped_ptr<CommandBufferServiceLocked> command_buffer_;
-  scoped_ptr<GpuScheduler> gpu_scheduler_;
-  scoped_ptr<CommandBufferHelper> helper_;
+  std::unique_ptr<CommandBufferServiceLocked> command_buffer_;
+  std::unique_ptr<CommandExecutor> executor_;
+  std::unique_ptr<CommandBufferHelper> helper_;
   std::list<linked_ptr<std::vector<CommandBufferEntry> > > test_command_args_;
   unsigned int test_command_next_id_;
   Sequence sequence_;

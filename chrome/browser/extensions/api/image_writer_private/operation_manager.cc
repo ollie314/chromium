@@ -19,6 +19,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/storage_partition.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
@@ -79,13 +80,14 @@ void OperationManager::StartWriteFromUrl(
     return callback.Run(false, error::kOperationAlreadyInProgress);
   }
 
-  scoped_refptr<Operation> operation(
-      new WriteFromUrlOperation(weak_factory_.GetWeakPtr(),
-                                extension_id,
-                                browser_context_->GetRequestContext(),
-                                url,
-                                hash,
-                                device_path));
+  scoped_refptr<Operation> operation(new WriteFromUrlOperation(
+      weak_factory_.GetWeakPtr(),
+      extension_id,
+      content::BrowserContext::GetDefaultStoragePartition(browser_context_)->
+          GetURLRequestContext(),
+      url,
+      hash,
+      device_path));
   operations_[extension_id] = operation;
   BrowserThread::PostTask(BrowserThread::FILE,
                           FROM_HERE,
@@ -162,9 +164,9 @@ void OperationManager::OnProgress(const ExtensionId& extension_id,
   info.stage = stage;
   info.percent_complete = progress;
 
-  scoped_ptr<base::ListValue> args(
+  std::unique_ptr<base::ListValue> args(
       image_writer_api::OnWriteProgress::Create(info));
-  scoped_ptr<Event> event(new Event(
+  std::unique_ptr<Event> event(new Event(
       events::IMAGE_WRITER_PRIVATE_ON_WRITE_PROGRESS,
       image_writer_api::OnWriteProgress::kEventName, std::move(args)));
 
@@ -175,8 +177,9 @@ void OperationManager::OnProgress(const ExtensionId& extension_id,
 void OperationManager::OnComplete(const ExtensionId& extension_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  scoped_ptr<base::ListValue> args(image_writer_api::OnWriteComplete::Create());
-  scoped_ptr<Event> event(new Event(
+  std::unique_ptr<base::ListValue> args(
+      image_writer_api::OnWriteComplete::Create());
+  std::unique_ptr<Event> event(new Event(
       events::IMAGE_WRITER_PRIVATE_ON_WRITE_COMPLETE,
       image_writer_api::OnWriteComplete::kEventName, std::move(args)));
 
@@ -198,11 +201,11 @@ void OperationManager::OnError(const ExtensionId& extension_id,
   info.stage = stage;
   info.percent_complete = progress;
 
-  scoped_ptr<base::ListValue> args(
+  std::unique_ptr<base::ListValue> args(
       image_writer_api::OnWriteError::Create(info, error_message));
-  scoped_ptr<Event> event(new Event(events::IMAGE_WRITER_PRIVATE_ON_WRITE_ERROR,
-                                    image_writer_api::OnWriteError::kEventName,
-                                    std::move(args)));
+  std::unique_ptr<Event> event(
+      new Event(events::IMAGE_WRITER_PRIVATE_ON_WRITE_ERROR,
+                image_writer_api::OnWriteError::kEventName, std::move(args)));
 
   EventRouter::Get(browser_context_)
       ->DispatchEventToExtension(extension_id, std::move(event));

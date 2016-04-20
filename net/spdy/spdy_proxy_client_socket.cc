@@ -18,7 +18,6 @@
 #include "base/values.h"
 #include "net/base/auth.h"
 #include "net/base/io_buffer.h"
-#include "net/base/net_util.h"
 #include "net/http/http_auth_cache.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_request_info.h"
@@ -169,10 +168,6 @@ void SpdyProxyClientSocket::SetOmniboxSpeculation() {
 
 bool SpdyProxyClientSocket::WasEverUsed() const {
   return was_ever_used_ || (spdy_stream_.get() && spdy_stream_->WasEverUsed());
-}
-
-bool SpdyProxyClientSocket::UsingTCPFastOpen() const {
-  return false;
 }
 
 bool SpdyProxyClientSocket::WasNpnNegotiated() const {
@@ -369,7 +364,7 @@ int SpdyProxyClientSocket::DoSendRequest() {
       base::Bind(&HttpRequestHeaders::NetLogCallback,
                  base::Unretained(&request_.extra_headers), &request_line));
 
-  scoped_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock());
+  std::unique_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock());
   CreateSpdyHeadersFromHttpRequest(request_, request_.extra_headers,
                                    spdy_stream_->GetProtocolVersion(), true,
                                    headers.get());
@@ -465,7 +460,7 @@ SpdyResponseHeadersStatus SpdyProxyClientSocket::OnResponseHeadersUpdated(
 }
 
 // Called when data is received or on EOF (if |buffer| is NULL).
-void SpdyProxyClientSocket::OnDataReceived(scoped_ptr<SpdyBuffer> buffer) {
+void SpdyProxyClientSocket::OnDataReceived(std::unique_ptr<SpdyBuffer> buffer) {
   if (buffer) {
     net_log_.AddByteTransferEvent(NetLog::TYPE_SOCKET_BYTES_RECEIVED,
                                   buffer->GetRemainingSize(),
@@ -496,7 +491,7 @@ void SpdyProxyClientSocket::OnDataSent()  {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&SpdyProxyClientSocket::RunCallback,
                             write_callback_weak_factory_.GetWeakPtr(),
-                            ResetAndReturn(&write_callback_), rv));
+                            base::ResetAndReturn(&write_callback_), rv));
 }
 
 void SpdyProxyClientSocket::OnTrailers(const SpdyHeaderBlock& trailers) {
@@ -530,7 +525,7 @@ void SpdyProxyClientSocket::OnClose(int status)  {
     read_callback.Run(status);
   } else if (!read_callback_.is_null()) {
     // If we have a read_callback_, the we need to make sure we call it back.
-    OnDataReceived(scoped_ptr<SpdyBuffer>());
+    OnDataReceived(std::unique_ptr<SpdyBuffer>());
   }
   // This may have been deleted by read_callback_, so check first.
   if (weak_ptr.get() && !write_callback.is_null())

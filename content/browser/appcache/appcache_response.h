@@ -7,9 +7,10 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/appcache_interfaces.h"
 #include "content/common/content_export.h"
@@ -52,7 +53,7 @@ class CONTENT_EXPORT AppCacheResponseInfo
 
   const GURL manifest_url_;
   const int64_t response_id_;
-  const scoped_ptr<net::HttpResponseInfo> http_response_info_;
+  const std::unique_ptr<net::HttpResponseInfo> http_response_info_;
   const int64_t response_data_size_;
   AppCacheStorage* storage_;
 };
@@ -61,7 +62,7 @@ class CONTENT_EXPORT AppCacheResponseInfo
 // refcounting semantics used with IOBuffer with these structures too.
 struct CONTENT_EXPORT HttpResponseInfoIOBuffer
     : public base::RefCountedThreadSafe<HttpResponseInfoIOBuffer> {
-  scoped_ptr<net::HttpResponseInfo> http_info;
+  std::unique_ptr<net::HttpResponseInfo> http_info;
   int response_data_size;
 
   HttpResponseInfoIOBuffer();
@@ -93,6 +94,8 @@ class CONTENT_EXPORT AppCacheDiskCacheInterface {
     virtual ~Entry() {}
   };
 
+  AppCacheDiskCacheInterface();
+
   virtual int CreateEntry(int64_t key,
                           Entry** entry,
                           const net::CompletionCallback& callback) = 0;
@@ -102,9 +105,12 @@ class CONTENT_EXPORT AppCacheDiskCacheInterface {
   virtual int DoomEntry(int64_t key,
                         const net::CompletionCallback& callback) = 0;
 
+  base::WeakPtr<AppCacheDiskCacheInterface> GetWeakPtr();
+
  protected:
-  friend class base::RefCounted<AppCacheDiskCacheInterface>;
-  virtual ~AppCacheDiskCacheInterface() {}
+  virtual ~AppCacheDiskCacheInterface();
+
+  base::WeakPtrFactory<AppCacheDiskCacheInterface> weak_factory_;
 };
 
 // Common base class for response reader and writer.
@@ -114,9 +120,9 @@ class CONTENT_EXPORT AppCacheResponseIO {
   int64_t response_id() const { return response_id_; }
 
  protected:
-  AppCacheResponseIO(int64_t response_id,
-                     int64_t group_id,
-                     AppCacheDiskCacheInterface* disk_cache);
+  AppCacheResponseIO(
+      int64_t response_id,
+      const base::WeakPtr<AppCacheDiskCacheInterface>& disk_cache);
 
   virtual void OnIOComplete(int result) = 0;
   virtual void OnOpenEntryComplete() {}
@@ -129,8 +135,7 @@ class CONTENT_EXPORT AppCacheResponseIO {
   void OpenEntryIfNeeded();
 
   const int64_t response_id_;
-  const int64_t group_id_;
-  AppCacheDiskCacheInterface* disk_cache_;
+  base::WeakPtr<AppCacheDiskCacheInterface> disk_cache_;
   AppCacheDiskCacheInterface::Entry* entry_;
   scoped_refptr<HttpResponseInfoIOBuffer> info_buffer_;
   scoped_refptr<net::IOBuffer> buffer_;
@@ -190,9 +195,9 @@ class CONTENT_EXPORT AppCacheResponseReader
   friend class content::MockAppCacheStorage;
 
   // Should only be constructed by the storage class and derivatives.
-  AppCacheResponseReader(int64_t response_id,
-                         int64_t group_id,
-                         AppCacheDiskCacheInterface* disk_cache);
+  AppCacheResponseReader(
+      int64_t response_id,
+      const base::WeakPtr<AppCacheDiskCacheInterface>& disk_cache);
 
   void OnIOComplete(int result) override;
   void OnOpenEntryComplete() override;
@@ -247,9 +252,9 @@ class CONTENT_EXPORT AppCacheResponseWriter
 
  protected:
   // Should only be constructed by the storage class and derivatives.
-  AppCacheResponseWriter(int64_t response_id,
-                         int64_t group_id,
-                         AppCacheDiskCacheInterface* disk_cache);
+  AppCacheResponseWriter(
+      int64_t response_id,
+      const base::WeakPtr<AppCacheDiskCacheInterface>& disk_cache);
 
  private:
   friend class AppCacheStorageImpl;
@@ -304,10 +309,11 @@ class CONTENT_EXPORT AppCacheResponseMetadataWriter
  protected:
   friend class AppCacheStorageImpl;
   friend class content::MockAppCacheStorage;
+
   // Should only be constructed by the storage class and derivatives.
-  AppCacheResponseMetadataWriter(int64_t response_id,
-                                 int64_t group_id,
-                                 AppCacheDiskCacheInterface* disk_cache);
+  AppCacheResponseMetadataWriter(
+      int64_t response_id,
+      const base::WeakPtr<AppCacheDiskCacheInterface>& disk_cache);
 
  private:
   void OnIOComplete(int result) override;

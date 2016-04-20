@@ -200,7 +200,7 @@ static bool passesTimingAllowCheck(const ResourceResponse& response, const Secur
 
     const String& securityOrigin = initiatorSecurityOrigin.toString();
     Vector<String> timingAllowOrigins;
-    timingAllowOriginString.string().split(' ', timingAllowOrigins);
+    timingAllowOriginString.getString().split(' ', timingAllowOrigins);
     for (const String& allowOrigin : timingAllowOrigins) {
         if (allowOrigin == securityOrigin)
             return true;
@@ -227,8 +227,8 @@ void PerformanceBase::addResourceTiming(const ResourceTimingInfo& info)
     if (isResourceTimingBufferFull() && !hasObserverFor(PerformanceEntry::Resource))
         return;
     SecurityOrigin* securityOrigin = nullptr;
-    if (ExecutionContext* context = executionContext())
-        securityOrigin = context->securityOrigin();
+    if (ExecutionContext* context = getExecutionContext())
+        securityOrigin = context->getSecurityOrigin();
     if (!securityOrigin)
         return;
 
@@ -445,7 +445,7 @@ DEFINE_TRACE(PerformanceBase)
     visitor->trace(m_observers);
     visitor->trace(m_activeObservers);
     visitor->trace(m_suspendedObservers);
-    RefCountedGarbageCollectedEventTargetWithInlineData<PerformanceBase>::trace(visitor);
+    EventTargetWithInlineData::trace(visitor);
 }
 
 } // namespace blink

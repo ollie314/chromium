@@ -62,7 +62,7 @@ string P256KeyExchange::NewPrivateKey() {
     DVLOG(1) << "Can't convert private key to string";
     return string();
   }
-  scoped_ptr<uint8_t[]> private_key(new uint8_t[key_len]);
+  std::unique_ptr<uint8_t[]> private_key(new uint8_t[key_len]);
   uint8_t* keyp = private_key.get();
   if (!i2d_ECPrivateKey(key.get(), &keyp)) {
     DVLOG(1) << "Can't convert private key to string.";
@@ -77,7 +77,7 @@ KeyExchange* P256KeyExchange::NewKeyPair(QuicRandom* /*rand*/) const {
   return P256KeyExchange::New(private_value);
 }
 
-bool P256KeyExchange::CalculateSharedKey(const StringPiece& peer_public_value,
+bool P256KeyExchange::CalculateSharedKey(StringPiece peer_public_value,
                                          string* out_result) const {
   if (peer_public_value.size() != kUncompressedP256PointBytes) {
     DVLOG(1) << "Peer public value is invalid";

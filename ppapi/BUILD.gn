@@ -2,8 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/features.gni")
+
 assert(!is_android || enable_plugins,
        "//ppapi should not be referenced when is_android && !enable_plugins")
+
+if (is_mac) {
+  import("//build/config/mac/rules.gni")
+}
 
 copy("copy_test_files") {
   visibility = [ ":*" ]
@@ -36,7 +42,7 @@ import("//build/config/nacl/rules.gni")
 import("//ppapi/ppapi_sources.gni")
 import("//testing/test.gni")
 
-shared_library("ppapi_tests") {
+source_set("ppapi_tests_sources") {
   sources = ppapi_sources.test_common_source_files +
             ppapi_sources.test_trusted_source_files
 
@@ -57,7 +63,21 @@ shared_library("ppapi_tests") {
   ]
 }
 
-shared_library("power_saver_test_plugin") {
+if (!is_mac) {
+  shared_library("ppapi_tests") {
+    deps = [
+      ":ppapi_tests_sources",
+    ]
+  }
+} else {
+  mac_plugin_bundle("ppapi_tests") {
+    deps = [
+      ":ppapi_tests_sources",
+    ]
+  }
+}
+
+source_set("power_saver_test_plugin_sources") {
   sources = [
     "tests/power_saver_test_plugin.cc",
     "tests/test_utils.cc",
@@ -70,16 +90,72 @@ shared_library("power_saver_test_plugin") {
   ]
 }
 
-loadable_module("blink_test_plugin") {
+if (!is_mac) {
+  shared_library("power_saver_test_plugin") {
+    deps = [
+      ":power_saver_test_plugin_sources",
+    ]
+  }
+} else {
+  mac_plugin_bundle("power_saver_test_plugin") {
+    deps = [
+      ":power_saver_test_plugin_sources",
+    ]
+  }
+}
+
+source_set("blink_deprecated_test_plugin_sources") {
+  sources = [
+    "tests/blink_deprecated_test_plugin.cc",
+  ]
+
+  deps = [
+    "//base",
+    "//build/config/sanitizers:deps",
+    "//ppapi/cpp",
+    "//ppapi/shared_impl",
+  ]
+}
+
+if (!is_mac) {
+  loadable_module("blink_deprecated_test_plugin") {
+    deps = [
+      ":blink_deprecated_test_plugin_sources",
+    ]
+  }
+} else {
+  mac_plugin_bundle("blink_deprecated_test_plugin") {
+    deps = [
+      ":blink_deprecated_test_plugin_sources",
+    ]
+  }
+}
+
+source_set("blink_test_plugin_sources") {
   sources = [
     "tests/blink_test_plugin.cc",
   ]
 
   deps = [
+    "//base",
     "//build/config/sanitizers:deps",
     "//ppapi/cpp",
     "//ppapi/shared_impl",
   ]
+}
+
+if (!is_mac) {
+  loadable_module("blink_test_plugin") {
+    deps = [
+      ":blink_test_plugin_sources",
+    ]
+  }
+} else {
+  mac_plugin_bundle("blink_test_plugin") {
+    deps = [
+      ":blink_test_plugin_sources",
+    ]
+  }
 }
 
 test("ppapi_unittests") {
@@ -119,10 +195,9 @@ test("ppapi_unittests") {
   ]
 
   deps = [
-    "//base/allocator",
     "//base/test:run_all_unittests",
     "//base/test:test_support",
-    "//gpu/ipc",
+    "//gpu/ipc/common:command_buffer_traits",
     "//ipc",
     "//ipc:test_support",
     "//media:shared_memory_support",
@@ -131,6 +206,7 @@ test("ppapi_unittests") {
     "//ppapi/proxy:test_support",
     "//ppapi/shared_impl",
     "//ppapi/shared_impl:test_support",
+    "//skia",
     "//testing/gmock",
     "//testing/gtest",
     "//ui/surface",
@@ -144,7 +220,6 @@ test("ppapi_perftests") {
   ]
 
   deps = [
-    "//base/allocator",
     "//base/test:test_support",
     "//ppapi/proxy",
     "//ppapi/proxy:test_support",
@@ -369,12 +444,8 @@ if (enable_nacl) {
       ":copy_test_files",
       ":ppapi_nacl_tests_copy(//build/toolchain/nacl:clang_newlib_${target_cpu})",
       ":ppapi_nacl_tests(//build/toolchain/nacl:glibc_${target_cpu})",
+      ":ppapi_nacl_tests(//build/toolchain/nacl:newlib_pnacl)",
+      ":ppapi_nacl_tests(//build/toolchain/nacl:newlib_pnacl_nonsfi)",
     ]
-    if (enable_pnacl) {
-      data_deps += [
-        ":ppapi_nacl_tests(//build/toolchain/nacl:newlib_pnacl)",
-        ":ppapi_nacl_tests(//build/toolchain/nacl:newlib_pnacl_nonsfi)",
-      ]
-    }
   }
 }

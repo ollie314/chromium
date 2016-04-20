@@ -47,12 +47,12 @@ class DevToolsProtocolTest : public ContentBrowserTest,
 
  protected:
   void SendCommand(const std::string& method,
-                   scoped_ptr<base::DictionaryValue> params) {
+                   std::unique_ptr<base::DictionaryValue> params) {
     SendCommand(method, std::move(params), true);
   }
 
   void SendCommand(const std::string& method,
-                   scoped_ptr<base::DictionaryValue> params,
+                   std::unique_ptr<base::DictionaryValue> params,
                    bool wait) {
     in_dispatch_ = true;
     base::DictionaryValue command;
@@ -115,7 +115,7 @@ class DevToolsProtocolTest : public ContentBrowserTest,
     RunMessageLoop();
   }
 
-  scoped_ptr<base::DictionaryValue> result_;
+  std::unique_ptr<base::DictionaryValue> result_;
   scoped_refptr<DevToolsAgentHost> agent_host_;
   int last_sent_id_;
   std::vector<int> result_ids_;
@@ -124,8 +124,9 @@ class DevToolsProtocolTest : public ContentBrowserTest,
  private:
   void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
                                const std::string& message) override {
-    scoped_ptr<base::DictionaryValue> root(static_cast<base::DictionaryValue*>(
-        base::JSONReader::Read(message).release()));
+    std::unique_ptr<base::DictionaryValue> root(
+        static_cast<base::DictionaryValue*>(
+            base::JSONReader::Read(message).release()));
     int id;
     if (root->GetInteger("id", &id)) {
       result_ids_.push_back(id);
@@ -163,7 +164,7 @@ class SyntheticKeyEventTest : public DevToolsProtocolTest {
                     int modifier,
                     int windowsKeyCode,
                     int nativeKeyCode) {
-    scoped_ptr<base::DictionaryValue> params(new base::DictionaryValue());
+    std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
     params->SetString("type", type);
     params->SetInteger("modifiers", modifier);
     params->SetInteger("windowsVirtualKeyCode", windowsKeyCode);
@@ -263,7 +264,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, DISABLED_SynthesizePinchGesture) {
       shell()->web_contents(),
       "domAutomationController.send(window.innerHeight)", &old_height));
 
-  scoped_ptr<base::DictionaryValue> params(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
   params->SetInteger("x", old_width / 2);
   params->SetInteger("y", old_height / 2);
   params->SetDouble("scaleFactor", 2.0);
@@ -282,7 +283,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, DISABLED_SynthesizePinchGesture) {
   ASSERT_DOUBLE_EQ(2.0, static_cast<double>(old_height) / new_height);
 }
 
-IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, SynthesizeScrollGesture) {
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, DISABLED_SynthesizeScrollGesture) {
   GURL test_url = GetTestUrl("devtools", "synthetic_gesture_tests.html");
   NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 1);
   Attach();
@@ -293,7 +294,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, SynthesizeScrollGesture) {
       "domAutomationController.send(document.body.scrollTop)", &scroll_top));
   ASSERT_EQ(0, scroll_top);
 
-  scoped_ptr<base::DictionaryValue> params(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
   params->SetInteger("x", 0);
   params->SetInteger("y", 0);
   params->SetInteger("xDistance", 0);
@@ -306,7 +307,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, SynthesizeScrollGesture) {
   ASSERT_EQ(100, scroll_top);
 }
 
-IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, SynthesizeTapGesture) {
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, DISABLED_SynthesizeTapGesture) {
   GURL test_url = GetTestUrl("devtools", "synthetic_gesture_tests.html");
   NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 1);
   Attach();
@@ -317,7 +318,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, SynthesizeTapGesture) {
       "domAutomationController.send(document.body.scrollTop)", &scroll_top));
   ASSERT_EQ(0, scroll_top);
 
-  scoped_ptr<base::DictionaryValue> params(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
   params->SetInteger("x", 16);
   params->SetInteger("y", 16);
   params->SetString("gestureSourceType", "touch");
@@ -341,10 +342,12 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, NavigationPreservesMessages) {
   Attach();
   SendCommand("Page.enable", nullptr, false);
 
-  scoped_ptr<base::DictionaryValue> params(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
   test_url = GetTestUrl("devtools", "navigation.html");
   params->SetString("url", test_url.spec());
+  TestNavigationObserver navigation_observer(shell()->web_contents());
   SendCommand("Page.navigate", std::move(params), true);
+  navigation_observer.Wait();
 
   bool enough_results = result_ids_.size() >= 2u;
   EXPECT_TRUE(enough_results);
@@ -484,6 +487,32 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, ReloadBlankPage) {
   Attach();
   SendCommand("Page.reload", nullptr, false);
   // Should not crash at this point.
+}
+
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, EvaluateInBlankPage) {
+  NavigateToURLBlockUntilNavigationsComplete(shell(), GURL("about:blank"), 1);
+  Attach();
+  std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
+  params->SetString("expression", "window");
+  SendCommand("Runtime.evaluate", std::move(params), true);
+  bool wasThrown = true;
+  EXPECT_TRUE(result_->GetBoolean("wasThrown", &wasThrown));
+  EXPECT_FALSE(wasThrown);
+}
+
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest,
+    EvaluateInBlankPageAfterNavigation) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL test_url = embedded_test_server()->GetURL("/devtools/navigation.html");
+  NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 1);
+  Attach();
+  NavigateToURLBlockUntilNavigationsComplete(shell(), GURL("about:blank"), 1);
+  std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
+  params->SetString("expression", "window");
+  SendCommand("Runtime.evaluate", std::move(params), true);
+  bool wasThrown = true;
+  EXPECT_TRUE(result_->GetBoolean("wasThrown", &wasThrown));
+  EXPECT_FALSE(wasThrown);
 }
 
 }  // namespace content

@@ -151,12 +151,12 @@ class ProfileInfoCache : public ProfileInfoInterface,
   bool IsDefaultProfileName(const base::string16& name) const;
 
   // Returns unique name that can be assigned to a newly created profile.
-  base::string16 ChooseNameForNewProfile(size_t icon_index) const;
+  base::string16 ChooseNameForNewProfile(size_t icon_index) const override;
 
   // Returns an avatar icon index that can be assigned to a newly created
   // profile. Note that the icon may not be unique since there are a limited
   // set of default icons.
-  size_t ChooseAvatarIconIndexForNewProfile() const;
+  size_t ChooseAvatarIconIndexForNewProfile() const override;
 
   // Statistics
   void SetStatsBrowsingHistoryOfProfileAtIndex(size_t index, int value);
@@ -177,13 +177,13 @@ class ProfileInfoCache : public ProfileInfoInterface,
   // Saves the avatar |image| at |image_path|. This is used both for the
   // GAIA profile pictures and the ProfileAvatarDownloader that is used to
   // download the high res avatars.
-  void SaveAvatarImageAtPath(const gfx::Image* image,
+  void SaveAvatarImageAtPath(const base::FilePath& profile_path,
+                             const gfx::Image* image,
                              const std::string& key,
-                             const base::FilePath& image_path,
-                             const base::FilePath& profile_path);
+                             const base::FilePath& image_path);
 
-  void AddObserver(ProfileInfoCacheObserver* obs);
-  void RemoveObserver(ProfileInfoCacheObserver* obs);
+  void AddObserver(ProfileInfoCacheObserver* obs) override;
+  void RemoveObserver(ProfileInfoCacheObserver* obs) override;
 
   void set_disable_avatar_download_for_testing(
       bool disable_avatar_download_for_testing) {
@@ -201,6 +201,8 @@ class ProfileInfoCache : public ProfileInfoInterface,
   // Returns a vector containing one attributes entry per known profile. They
   // are not sorted in any particular order.
   std::vector<ProfileAttributesEntry*> GetAllProfilesAttributes() override;
+  std::vector<ProfileAttributesEntry*> GetAllProfilesAttributesSortedByName()
+      override;
   bool GetProfileAttributesWithPath(
       const base::FilePath& path,
       ProfileAttributesEntry** entry) override;
@@ -264,7 +266,8 @@ class ProfileInfoCache : public ProfileInfoInterface,
 
   PrefService* prefs_;
   std::vector<std::string> sorted_keys_;
-  base::ScopedPtrHashMap<base::FilePath, scoped_ptr<ProfileAttributesEntry> >
+  base::ScopedPtrHashMap<base::FilePath,
+                         std::unique_ptr<ProfileAttributesEntry>>
       profile_attributes_entries_;
   base::FilePath user_data_dir_;
 

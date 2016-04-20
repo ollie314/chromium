@@ -17,17 +17,18 @@
 #include "bindings/core/v8/V8TestInterface.h"
 #include "bindings/core/v8/V8TestInterface2.h"
 #include "bindings/core/v8/V8TestInterfaceGarbageCollected.h"
-#include "bindings/core/v8/V8TestInterfaceWillBeGarbageCollected.h"
 #include "bindings/core/v8/V8Uint8Array.h"
 #include "core/dom/FlexibleArrayBufferView.h"
-#include "core/frame/UseCounter.h"
+#include "core/frame/Deprecation.h"
+#include "platform/RuntimeEnabledFeatures.h"
 
 namespace blink {
 
 void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, TestDictionary& impl, ExceptionState& exceptionState)
 {
-    if (isUndefinedOrNull(v8Value))
+    if (isUndefinedOrNull(v8Value)) {
         return;
+    }
     if (!v8Value->IsObject()) {
         exceptionState.throwTypeError("cannot convert to dictionary.");
         return;
@@ -94,7 +95,7 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
         if (deprecatedCreateMemberValue.IsEmpty() || deprecatedCreateMemberValue->IsUndefined()) {
             // Do nothing.
         } else {
-            UseCounter::countDeprecationIfNotPrivateScript(isolate, currentExecutionContext(isolate), UseCounter::CreateMember);
+            Deprecation::countDeprecationIfNotPrivateScript(isolate, currentExecutionContext(isolate), UseCounter::CreateMember);
             bool deprecatedCreateMember = toBoolean(isolate, deprecatedCreateMemberValue, exceptionState);
             if (exceptionState.hadException())
                 return;
@@ -508,7 +509,7 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
         if (testInterfaceGarbageCollectedSequenceMemberValue.IsEmpty() || testInterfaceGarbageCollectedSequenceMemberValue->IsUndefined()) {
             // Do nothing.
         } else {
-            HeapVector<Member<TestInterfaceGarbageCollected>> testInterfaceGarbageCollectedSequenceMember = (toMemberNativeArray<TestInterfaceGarbageCollected, V8TestInterfaceGarbageCollected>(testInterfaceGarbageCollectedSequenceMemberValue, 0, isolate, exceptionState));
+            HeapVector<Member<TestInterfaceGarbageCollected>> testInterfaceGarbageCollectedSequenceMember = (toMemberNativeArray<TestInterfaceGarbageCollected>(testInterfaceGarbageCollectedSequenceMemberValue, 0, isolate, exceptionState));
             if (exceptionState.hadException())
                 return;
             impl.setTestInterfaceGarbageCollectedSequenceMember(testInterfaceGarbageCollectedSequenceMember);
@@ -562,64 +563,10 @@ void V8TestDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value
         if (testInterfaceSequenceMemberValue.IsEmpty() || testInterfaceSequenceMemberValue->IsUndefined()) {
             // Do nothing.
         } else {
-            Vector<RefPtr<TestInterfaceImplementation>> testInterfaceSequenceMember = (toRefPtrNativeArray<TestInterface, V8TestInterface>(testInterfaceSequenceMemberValue, 0, isolate, exceptionState));
+            HeapVector<Member<TestInterfaceImplementation>> testInterfaceSequenceMember = (toMemberNativeArray<TestInterface>(testInterfaceSequenceMemberValue, 0, isolate, exceptionState));
             if (exceptionState.hadException())
                 return;
             impl.setTestInterfaceSequenceMember(testInterfaceSequenceMember);
-        }
-    }
-
-    {
-        v8::Local<v8::Value> testInterfaceWillBeGarbageCollectedMemberValue;
-        if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "testInterfaceWillBeGarbageCollectedMember")).ToLocal(&testInterfaceWillBeGarbageCollectedMemberValue)) {
-            exceptionState.rethrowV8Exception(block.Exception());
-            return;
-        }
-        if (testInterfaceWillBeGarbageCollectedMemberValue.IsEmpty() || testInterfaceWillBeGarbageCollectedMemberValue->IsUndefined()) {
-            // Do nothing.
-        } else {
-            TestInterfaceWillBeGarbageCollected* testInterfaceWillBeGarbageCollectedMember = V8TestInterfaceWillBeGarbageCollected::toImplWithTypeCheck(isolate, testInterfaceWillBeGarbageCollectedMemberValue);
-            if (!testInterfaceWillBeGarbageCollectedMember && !testInterfaceWillBeGarbageCollectedMemberValue->IsNull()) {
-                exceptionState.throwTypeError("member testInterfaceWillBeGarbageCollectedMember is not of type TestInterfaceWillBeGarbageCollected.");
-                return;
-            }
-            impl.setTestInterfaceWillBeGarbageCollectedMember(testInterfaceWillBeGarbageCollectedMember);
-        }
-    }
-
-    {
-        v8::Local<v8::Value> testInterfaceWillBeGarbageCollectedOrNullMemberValue;
-        if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "testInterfaceWillBeGarbageCollectedOrNullMember")).ToLocal(&testInterfaceWillBeGarbageCollectedOrNullMemberValue)) {
-            exceptionState.rethrowV8Exception(block.Exception());
-            return;
-        }
-        if (testInterfaceWillBeGarbageCollectedOrNullMemberValue.IsEmpty() || testInterfaceWillBeGarbageCollectedOrNullMemberValue->IsUndefined()) {
-            // Do nothing.
-        } else if (testInterfaceWillBeGarbageCollectedOrNullMemberValue->IsNull()) {
-            impl.setTestInterfaceWillBeGarbageCollectedOrNullMemberToNull();
-        } else {
-            TestInterfaceWillBeGarbageCollected* testInterfaceWillBeGarbageCollectedOrNullMember = V8TestInterfaceWillBeGarbageCollected::toImplWithTypeCheck(isolate, testInterfaceWillBeGarbageCollectedOrNullMemberValue);
-            if (!testInterfaceWillBeGarbageCollectedOrNullMember && !testInterfaceWillBeGarbageCollectedOrNullMemberValue->IsNull()) {
-                exceptionState.throwTypeError("member testInterfaceWillBeGarbageCollectedOrNullMember is not of type TestInterfaceWillBeGarbageCollected.");
-                return;
-            }
-            impl.setTestInterfaceWillBeGarbageCollectedOrNullMember(testInterfaceWillBeGarbageCollectedOrNullMember);
-        }
-    }
-
-    {
-        v8::Local<v8::Value> testInterfaceWillBeGarbageCollectedSequenceMemberValue;
-        if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "testInterfaceWillBeGarbageCollectedSequenceMember")).ToLocal(&testInterfaceWillBeGarbageCollectedSequenceMemberValue)) {
-            exceptionState.rethrowV8Exception(block.Exception());
-            return;
-        }
-        if (testInterfaceWillBeGarbageCollectedSequenceMemberValue.IsEmpty() || testInterfaceWillBeGarbageCollectedSequenceMemberValue->IsUndefined()) {
-            // Do nothing.
-        } else {
-            WillBeHeapVector<RefPtrWillBeMember<TestInterfaceWillBeGarbageCollected>> testInterfaceWillBeGarbageCollectedSequenceMember = (toRefPtrWillBeMemberNativeArray<TestInterfaceWillBeGarbageCollected, V8TestInterfaceWillBeGarbageCollected>(testInterfaceWillBeGarbageCollectedSequenceMemberValue, 0, isolate, exceptionState));
-            if (exceptionState.hadException())
-                return;
-            impl.setTestInterfaceWillBeGarbageCollectedSequenceMember(testInterfaceWillBeGarbageCollectedSequenceMember);
         }
     }
 
@@ -851,25 +798,7 @@ bool toV8TestDictionary(const TestDictionary& impl, v8::Local<v8::Object> dictio
         if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "testInterfaceSequenceMember"), toV8(impl.testInterfaceSequenceMember(), creationContext, isolate))))
             return false;
     } else {
-        if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "testInterfaceSequenceMember"), toV8(Vector<RefPtr<TestInterfaceImplementation>>(), creationContext, isolate))))
-            return false;
-    }
-
-    if (impl.hasTestInterfaceWillBeGarbageCollectedMember()) {
-        if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "testInterfaceWillBeGarbageCollectedMember"), toV8(impl.testInterfaceWillBeGarbageCollectedMember(), creationContext, isolate))))
-            return false;
-    }
-
-    if (impl.hasTestInterfaceWillBeGarbageCollectedOrNullMember()) {
-        if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "testInterfaceWillBeGarbageCollectedOrNullMember"), toV8(impl.testInterfaceWillBeGarbageCollectedOrNullMember(), creationContext, isolate))))
-            return false;
-    }
-
-    if (impl.hasTestInterfaceWillBeGarbageCollectedSequenceMember()) {
-        if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "testInterfaceWillBeGarbageCollectedSequenceMember"), toV8(impl.testInterfaceWillBeGarbageCollectedSequenceMember(), creationContext, isolate))))
-            return false;
-    } else {
-        if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "testInterfaceWillBeGarbageCollectedSequenceMember"), toV8(WillBeHeapVector<RefPtrWillBeMember<TestInterfaceWillBeGarbageCollected>>(), creationContext, isolate))))
+        if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "testInterfaceSequenceMember"), toV8(HeapVector<Member<TestInterfaceImplementation>>(), creationContext, isolate))))
             return false;
     }
 

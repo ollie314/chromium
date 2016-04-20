@@ -8,9 +8,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 #include "net/base/net_export.h"
 
@@ -32,7 +33,7 @@ class NET_EXPORT_PRIVATE DnsQuery {
   ~DnsQuery();
 
   // Clones |this| verbatim, with ID field of the header set to |id|.
-  scoped_ptr<DnsQuery> CloneWithNewId(uint16_t id) const;
+  std::unique_ptr<DnsQuery> CloneWithNewId(uint16_t id) const;
 
   // DnsQuery field accessors.
   uint16_t id() const;
@@ -51,9 +52,6 @@ class NET_EXPORT_PRIVATE DnsQuery {
  private:
   DnsQuery(const DnsQuery& orig, uint16_t id);
 
-  // Convenience for header access.
-  dns_protocol::Header* header();
-
   // Returns the size of the question section.
   size_t question_size() const {
     // QNAME + QTYPE + QCLASS
@@ -66,6 +64,9 @@ class NET_EXPORT_PRIVATE DnsQuery {
 
   // Contains query bytes to be consumed by higher level Write() call.
   scoped_refptr<IOBufferWithSize> io_buffer_;
+
+  // Pointer to the dns header section.
+  dns_protocol::Header* header_;
 
   DISALLOW_COPY_AND_ASSIGN(DnsQuery);
 };

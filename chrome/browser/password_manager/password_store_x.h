@@ -7,10 +7,10 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/time/time.h"
 #include "components/password_manager/core/browser/password_store_default.h"
@@ -69,6 +69,10 @@ class PasswordStoreX : public password_manager::PasswordStoreDefault {
         base::Time delete_end,
         password_manager::PasswordStoreChangeList* changes) = 0;
 
+    // Sets the 'skip_zero_click' flag to 'true' for all logins in the database.
+    virtual bool DisableAutoSignInForAllLogins(
+        password_manager::PasswordStoreChangeList* changes) = 0;
+
     // The three methods below overwrite |forms| with all stored credentials
     // matching |form|, all stored non-blacklisted credentials, and all stored
     // blacklisted credentials, respectively. On success, they return true.
@@ -79,13 +83,15 @@ class PasswordStoreX : public password_manager::PasswordStoreDefault {
         ScopedVector<autofill::PasswordForm>* forms) WARN_UNUSED_RESULT = 0;
     virtual bool GetBlacklistLogins(ScopedVector<autofill::PasswordForm>* forms)
         WARN_UNUSED_RESULT = 0;
+    virtual bool GetAllLogins(ScopedVector<autofill::PasswordForm>* forms)
+        WARN_UNUSED_RESULT = 0;
   };
 
   // Takes ownership of |login_db| and |backend|. |backend| may be NULL in which
   // case this PasswordStoreX will act the same as PasswordStoreDefault.
   PasswordStoreX(scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner,
                  scoped_refptr<base::SingleThreadTaskRunner> db_thread_runner,
-                 scoped_ptr<password_manager::LoginDatabase> login_db,
+                 std::unique_ptr<password_manager::LoginDatabase> login_db,
                  NativeBackend* backend);
 
  private:
@@ -100,15 +106,20 @@ class PasswordStoreX : public password_manager::PasswordStoreDefault {
       const autofill::PasswordForm& form) override;
   password_manager::PasswordStoreChangeList RemoveLoginImpl(
       const autofill::PasswordForm& form) override;
+  password_manager::PasswordStoreChangeList RemoveLoginsByURLAndTimeImpl(
+      const base::Callback<bool(const GURL&)>& url_filter,
+      base::Time delete_begin,
+      base::Time delete_end) override;
   password_manager::PasswordStoreChangeList RemoveLoginsCreatedBetweenImpl(
       base::Time delete_begin,
       base::Time delete_end) override;
   password_manager::PasswordStoreChangeList RemoveLoginsSyncedBetweenImpl(
       base::Time delete_begin,
       base::Time delete_end) override;
+  password_manager::PasswordStoreChangeList DisableAutoSignInForAllLoginsImpl()
+      override;
   ScopedVector<autofill::PasswordForm> FillMatchingLogins(
-      const autofill::PasswordForm& form,
-      AuthorizationPromptPolicy prompt_policy) override;
+      const autofill::PasswordForm& form) override;
   bool FillAutofillableLogins(
       ScopedVector<autofill::PasswordForm>* forms) override;
   bool FillBlacklistLogins(
@@ -131,7 +142,7 @@ class PasswordStoreX : public password_manager::PasswordStoreDefault {
   ssize_t MigrateLogins();
 
   // The native backend in use, or NULL if none.
-  scoped_ptr<NativeBackend> backend_;
+  std::unique_ptr<NativeBackend> backend_;
   // Whether we have already attempted migration to the native store.
   bool migration_checked_;
   // Whether we should allow falling back to the default store. If there is

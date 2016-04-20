@@ -45,9 +45,9 @@ FEGaussianBlur::FEGaussianBlur(Filter* filter, float x, float y)
 {
 }
 
-PassRefPtrWillBeRawPtr<FEGaussianBlur> FEGaussianBlur::create(Filter* filter, float x, float y)
+FEGaussianBlur* FEGaussianBlur::create(Filter* filter, float x, float y)
 {
-    return adoptRefWillBeNoop(new FEGaussianBlur(filter, x, y));
+    return new FEGaussianBlur(filter, x, y);
 }
 
 IntSize FEGaussianBlur::calculateUnscaledKernelSize(const FloatPoint& std)
@@ -70,17 +70,16 @@ IntSize FEGaussianBlur::calculateUnscaledKernelSize(const FloatPoint& std)
     return kernelSize;
 }
 
-IntSize FEGaussianBlur::calculateKernelSize(Filter* filter, const FloatPoint& std)
+IntSize FEGaussianBlur::calculateKernelSize(const Filter* filter, const FloatPoint& std)
 {
     FloatPoint stdError(filter->applyHorizontalScale(std.x()), filter->applyVerticalScale(std.y()));
-
     return calculateUnscaledKernelSize(stdError);
 }
 
-FloatRect FEGaussianBlur::mapRect(const FloatRect& rect, bool)
+FloatRect FEGaussianBlur::mapRect(const FloatRect& rect, bool) const
 {
     FloatRect result = rect;
-    IntSize kernelSize = calculateKernelSize(filter(), FloatPoint(m_stdX, m_stdY));
+    IntSize kernelSize = calculateKernelSize(getFilter(), FloatPoint(m_stdX, m_stdY));
 
     // We take the half kernel size and multiply it with three, because we run box blur three times.
     result.inflateX(3 * kernelSize.width() * 0.5f);
@@ -108,13 +107,13 @@ FloatRect FEGaussianBlur::determineAbsolutePaintRect(const FloatRect& originalRe
     return outputRect;
 }
 
-PassRefPtr<SkImageFilter> FEGaussianBlur::createImageFilter(SkiaImageFilterBuilder& builder)
+sk_sp<SkImageFilter> FEGaussianBlur::createImageFilter()
 {
-    RefPtr<SkImageFilter> input(builder.build(inputEffect(0), operatingColorSpace()));
-    float stdX = filter()->applyHorizontalScale(m_stdX);
-    float stdY = filter()->applyVerticalScale(m_stdY);
-    SkImageFilter::CropRect rect = getCropRect(builder.cropOffset());
-    return adoptRef(SkBlurImageFilter::Create(SkFloatToScalar(stdX), SkFloatToScalar(stdY), input.get(), &rect));
+    sk_sp<SkImageFilter> input(SkiaImageFilterBuilder::build(inputEffect(0), operatingColorSpace()));
+    float stdX = getFilter()->applyHorizontalScale(m_stdX);
+    float stdY = getFilter()->applyVerticalScale(m_stdY);
+    SkImageFilter::CropRect rect = getCropRect();
+    return SkBlurImageFilter::Make(SkFloatToScalar(stdX), SkFloatToScalar(stdY), std::move(input), &rect);
 }
 
 TextStream& FEGaussianBlur::externalRepresentation(TextStream& ts, int indent) const

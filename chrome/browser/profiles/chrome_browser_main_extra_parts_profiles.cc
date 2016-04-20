@@ -23,19 +23,20 @@
 #include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/engagement/site_engagement_service_factory.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/geolocation/geolocation_permission_context_factory.h"
 #include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences_factory.h"
 #include "chrome/browser/notifications/extension_welcome_notification_factory.h"
-#include "chrome/browser/notifications/notification_permission_context_factory.h"
 #include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "chrome/browser/ntp_snippets/ntp_snippets_service_factory.h"
 #include "chrome/browser/password_manager/password_manager_setting_migrator_service_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/plugins/plugin_prefs_factory.h"
+#include "chrome/browser/policy/cloud/policy_header_service_factory.h"
+#include "chrome/browser/policy/cloud/user_cloud_policy_invalidator_factory.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
+#include "chrome/browser/policy/schema_registry_service_factory.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
 #include "chrome/browser/predictors/predictor_database_factory.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor_factory.h"
@@ -64,6 +65,7 @@
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
 #include "chrome/browser/undo/bookmark_undo_service_factory.h"
 #include "chrome/browser/web_data_service_factory.h"
+#include "chrome/common/features.h"
 
 #if defined(ENABLE_EXTENSIONS)
 #include "apps/browser_context_keyed_service_factories.h"
@@ -83,10 +85,6 @@
 #include "chrome/browser/captive_portal/captive_portal_service_factory.h"
 #endif
 
-#if defined(ENABLE_CONFIGURATION_POLICY)
-#include "chrome/browser/policy/cloud/policy_header_service_factory.h"
-#include "chrome/browser/policy/cloud/user_cloud_policy_invalidator_factory.h"
-#include "chrome/browser/policy/schema_registry_service_factory.h"
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/policy/consumer_enrollment_handler_factory.h"
@@ -100,7 +98,6 @@
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
 #include "chrome/browser/policy/cloud/user_policy_signin_service_factory.h"
 #endif
-#endif
 
 #if defined(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/legacy/supervised_user_sync_service_factory.h"
@@ -111,9 +108,7 @@
 #endif
 #endif
 
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
-#include "chrome/browser/media/protected_media_identifier_permission_context_factory.h"
-#else
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
 #include "chrome/browser/signin/cross_device_promo_factory.h"
 #endif
 
@@ -184,7 +179,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   AccountTrackerServiceFactory::GetInstance();
   AccountFetcherServiceFactory::GetInstance();
   autofill::PersonalDataManagerFactory::GetInstance();
-#if defined(ENABLE_BACKGROUND)
+#if BUILDFLAG(ENABLE_BACKGROUND)
   BackgroundContentsServiceFactory::GetInstance();
 #endif
   BookmarkModelFactory::GetInstance();
@@ -195,10 +190,6 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #endif
 #if defined(OS_ANDROID)
   chrome::android::DataUseUITabModelFactory::GetInstance();
-#endif
-  GeolocationPermissionContextFactory::GetInstance();
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
-  ProtectedMediaIdentifierPermissionContextFactory::GetInstance();
 #endif
 #if defined(ENABLE_PRINT_PREVIEW)
   CloudPrintProxyServiceFactory::GetInstance();
@@ -211,7 +202,6 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #if defined(ENABLE_EXTENSIONS)
   ExtensionWelcomeNotificationFactory::GetInstance();
 #endif
-  NotificationPermissionContextFactory::GetInstance();
   NotifierStateTrackerFactory::GetInstance();
 #endif  // defined(ENABLE_NOTIFICATIONS)
   dom_distiller::DomDistillerServiceFactory::GetInstance();
@@ -255,13 +245,13 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #endif
 #if defined(ENABLE_EXTENSIONS)
 #if defined(OS_CHROMEOS) || defined(OS_WIN) || defined(OS_MACOSX)
-  scoped_ptr<extensions::NetworkingPrivateVerifyDelegateFactoryImpl>
+  std::unique_ptr<extensions::NetworkingPrivateVerifyDelegateFactoryImpl>
       networking_private_verify_delegate_factory(
           new extensions::NetworkingPrivateVerifyDelegateFactoryImpl);
   extensions::NetworkingPrivateDelegateFactory::GetInstance()
       ->SetVerifyDelegateFactory(
           std::move(networking_private_verify_delegate_factory));
-  scoped_ptr<extensions::NetworkingPrivateUIDelegateFactoryImpl>
+  std::unique_ptr<extensions::NetworkingPrivateUIDelegateFactoryImpl>
       networking_private_ui_delegate_factory(
           new extensions::NetworkingPrivateUIDelegateFactoryImpl);
   extensions::NetworkingPrivateDelegateFactory::GetInstance()
@@ -283,7 +273,6 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #endif
   PrefsTabHelper::GetServiceInstance();
   policy::ProfilePolicyConnectorFactory::GetInstance();
-#if defined(ENABLE_CONFIGURATION_POLICY)
 #if defined(OS_CHROMEOS)
   chromeos::OwnerSettingsServiceChromeOSFactory::GetInstance();
   policy::ConsumerEnrollmentHandlerFactory::GetInstance();
@@ -293,14 +282,13 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   policy::UserCloudPolicyManagerFactoryChromeOS::GetInstance();
   policy::UserCloudPolicyTokenForwarderFactory::GetInstance();
   policy::UserNetworkConfigurationUpdaterFactory::GetInstance();
-#else
+#else  // !defined(OS_CHROMEOS)
   policy::UserCloudPolicyManagerFactory::GetInstance();
   policy::UserPolicySigninServiceFactory::GetInstance();
 #endif
   policy::PolicyHeaderServiceFactory::GetInstance();
   policy::SchemaRegistryServiceFactory::GetInstance();
   policy::UserCloudPolicyInvalidatorFactory::GetInstance();
-#endif
   predictors::AutocompleteActionPredictorFactory::GetInstance();
   predictors::PredictorDatabaseFactory::GetInstance();
   predictors::ResourcePrefetchPredictorFactory::GetInstance();

@@ -22,7 +22,8 @@ class TestTabModel : public TabModel {
   content::WebContents* GetWebContentsAt(int index) const override {
     return nullptr;
   }
-  void CreateTab(content::WebContents* web_contents,
+  void CreateTab(TabAndroid* parent,
+                 content::WebContents* web_contents,
                  int parent_tab_id) override {}
   content::WebContents* CreateNewTabForDevTools(const GURL& url) override {
     return nullptr;
@@ -41,7 +42,7 @@ TEST_F(TabModelListTest, TestGetTabModelForWebContents) {
   TestTabModel tab_model(profile());
   TabModelList::AddTabModel(&tab_model);
 
-  scoped_ptr<content::WebContents> contents(CreateTestWebContents());
+  std::unique_ptr<content::WebContents> contents(CreateTestWebContents());
 
   // Should not crash when there are no tabs.
   EXPECT_EQ(NULL, TabModelList::GetTabModelForWebContents(contents.get()));

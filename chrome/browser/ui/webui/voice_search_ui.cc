@@ -13,7 +13,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -33,6 +32,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
@@ -79,7 +79,7 @@ content::WebUIDataSource* CreateVoiceSearchUiHtmlSource() {
 void AddPair16(base::ListValue* list,
                const base::string16& key,
                const base::string16& value) {
-  scoped_ptr<base::DictionaryValue> results(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> results(new base::DictionaryValue());
   results->SetString("key", key);
   results->SetString("value", value);
   list->Append(results.release());
@@ -158,7 +158,7 @@ class VoiceSearchDomHandler : public WebUIMessageHandler {
     PopulatePageInformation();
   }
 
-  void ReturnVoiceSearchInfo(scoped_ptr<base::ListValue> info) {
+  void ReturnVoiceSearchInfo(std::unique_ptr<base::ListValue> info) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     DCHECK(info);
     base::DictionaryValue voiceSearchInfo;
@@ -169,7 +169,7 @@ class VoiceSearchDomHandler : public WebUIMessageHandler {
   // Fill in the data to be displayed on the page.
   void PopulatePageInformation() {
     // Store Key-Value pairs of about-information.
-    scoped_ptr<base::ListValue> list(new base::ListValue());
+    std::unique_ptr<base::ListValue> list(new base::ListValue());
 
     // Populate information.
     AddOperatingSystemInfo(list.get());

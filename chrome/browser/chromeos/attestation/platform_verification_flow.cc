@@ -17,12 +17,12 @@
 #include "chrome/browser/chromeos/attestation/attestation_signed_data.pb.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/media/protected_media_identifier_permission_context.h"
-#include "chrome/browser/media/protected_media_identifier_permission_context_factory.h"
+#include "chrome/browser/permissions/permission_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chromeos/attestation/attestation_flow.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/cryptohome/async_method_caller.h"
+#include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -30,6 +30,7 @@
 #include "components/user_manager/user.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/permission_type.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
@@ -37,6 +38,7 @@
 #include "content/public/common/url_constants.h"
 #include "net/cert/pem_tokenizer.h"
 #include "net/cert/x509_certificate.h"
+#include "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h"
 
 namespace {
 
@@ -104,21 +106,20 @@ class DefaultDelegate : public PlatformVerificationFlow::Delegate {
   }
 
   bool IsPermittedByUser(content::WebContents* web_contents) override {
-    ProtectedMediaIdentifierPermissionContext* permission_context =
-        ProtectedMediaIdentifierPermissionContextFactory::GetForProfile(
-            Profile::FromBrowserContext(web_contents->GetBrowserContext()));
-
     // TODO(xhwang): Using delegate_->GetURL() here is not right. The platform
     // verification may be requested by a frame from a different origin. This
     // will be solved when http://crbug.com/454847 is fixed.
     const GURL& requesting_origin = GetURL(web_contents).GetOrigin();
 
     GURL embedding_origin = web_contents->GetLastCommittedURL().GetOrigin();
+    blink::mojom::PermissionStatus status =
+        PermissionManager::Get(
+            Profile::FromBrowserContext(web_contents->GetBrowserContext()))
+            ->GetPermissionStatus(
+                content::PermissionType::PROTECTED_MEDIA_IDENTIFIER,
+                requesting_origin, embedding_origin);
 
-    ContentSetting content_setting = permission_context->GetPermissionStatus(
-        requesting_origin, embedding_origin);
-
-    return content_setting == CONTENT_SETTING_ALLOW;
+    return status == blink::mojom::PermissionStatus::GRANTED;
   }
 
   bool IsInSupportedMode(content::WebContents* web_contents) override {
@@ -146,6 +147,9 @@ PlatformVerificationFlow::ChallengeContext::ChallengeContext(
       challenge(challenge),
       callback(callback) {}
 
+PlatformVerificationFlow::ChallengeContext::ChallengeContext(
+    const ChallengeContext& other) = default;
+
 PlatformVerificationFlow::ChallengeContext::~ChallengeContext() {}
 
 PlatformVerificationFlow::PlatformVerificationFlow()
@@ -155,7 +159,7 @@ PlatformVerificationFlow::PlatformVerificationFlow()
       delegate_(NULL),
       timeout_delay_(base::TimeDelta::FromSeconds(kTimeoutInSeconds)) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  scoped_ptr<ServerProxy> attestation_ca_client(new AttestationCAClient());
+  std::unique_ptr<ServerProxy> attestation_ca_client(new AttestationCAClient());
   default_attestation_flow_.reset(new AttestationFlow(
       async_caller_, cryptohome_client_, std::move(attestation_ca_client)));
   attestation_flow_ = default_attestation_flow_.get();
@@ -249,38 +253,33 @@ void PlatformVerificationFlow::OnAttestationPrepared(
     return;
   }
 
-  GetCertificate(context, user->email(), false /* Don't force a new key */);
+  GetCertificate(context, user->GetAccountId(),
+                 false /* Don't force a new key */);
 }
 
 void PlatformVerificationFlow::GetCertificate(const ChallengeContext& context,
-                                              const std::string& user_id,
+                                              const AccountId& account_id,
                                               bool force_new_key) {
-  scoped_ptr<base::Timer> timer(new base::Timer(false,    // Don't retain.
-                                                false));  // Don't repeat.
+  std::unique_ptr<base::Timer> timer(new base::Timer(false,    // Don't retain.
+                                                     false));  // Don't repeat.
   base::Closure timeout_callback = base::Bind(
       &PlatformVerificationFlow::OnCertificateTimeout,
       this,
       context);
   timer->Start(FROM_HERE, timeout_delay_, timeout_callback);
 
-  AttestationFlow::CertificateCallback certificate_callback = base::Bind(
-      &PlatformVerificationFlow::OnCertificateReady,
-      this,
-      context,
-      user_id,
-      base::Passed(&timer));
-  attestation_flow_->GetCertificate(
-      PROFILE_CONTENT_PROTECTION_CERTIFICATE,
-      user_id,
-      context.service_id,
-      force_new_key,
-      certificate_callback);
+  AttestationFlow::CertificateCallback certificate_callback =
+      base::Bind(&PlatformVerificationFlow::OnCertificateReady, this, context,
+                 account_id, base::Passed(&timer));
+  attestation_flow_->GetCertificate(PROFILE_CONTENT_PROTECTION_CERTIFICATE,
+                                    account_id, context.service_id,
+                                    force_new_key, certificate_callback);
 }
 
 void PlatformVerificationFlow::OnCertificateReady(
     const ChallengeContext& context,
-    const std::string& user_id,
-    scoped_ptr<base::Timer> timer,
+    const AccountId& account_id,
+    std::unique_ptr<base::Timer> timer,
     bool operation_success,
     const std::string& certificate_chain) {
   // Log failure before checking the timer so all failures are logged, even if
@@ -301,20 +300,18 @@ void PlatformVerificationFlow::OnCertificateReady(
   ExpiryStatus expiry_status = CheckExpiry(certificate_chain);
   ReportExpiryStatus(expiry_status);
   if (expiry_status == EXPIRY_STATUS_EXPIRED) {
-    GetCertificate(context, user_id, true /* Force a new key */);
+    GetCertificate(context, account_id, true /* Force a new key */);
     return;
   }
   bool is_expiring_soon = (expiry_status == EXPIRY_STATUS_EXPIRING_SOON);
   cryptohome::AsyncMethodCaller::DataCallback cryptohome_callback =
       base::Bind(&PlatformVerificationFlow::OnChallengeReady, this, context,
-                 user_id, certificate_chain, is_expiring_soon);
+                 account_id, certificate_chain, is_expiring_soon);
   std::string key_name = kContentProtectionKeyPrefix;
   key_name += context.service_id;
-  async_caller_->TpmAttestationSignSimpleChallenge(KEY_USER,
-                                                   user_id,
-                                                   key_name,
-                                                   context.challenge,
-                                                   cryptohome_callback);
+  async_caller_->TpmAttestationSignSimpleChallenge(
+      KEY_USER, cryptohome::Identification(account_id), key_name,
+      context.challenge, cryptohome_callback);
 }
 
 void PlatformVerificationFlow::OnCertificateTimeout(
@@ -325,7 +322,7 @@ void PlatformVerificationFlow::OnCertificateTimeout(
 
 void PlatformVerificationFlow::OnChallengeReady(
     const ChallengeContext& context,
-    const std::string& user_id,
+    const AccountId& account_id,
     const std::string& certificate_chain,
     bool is_expiring_soon,
     bool operation_success,
@@ -352,7 +349,7 @@ void PlatformVerificationFlow::OnChallengeReady(
         base::Bind(&PlatformVerificationFlow::RenewCertificateCallback, this,
                    certificate_chain);
     attestation_flow_->GetCertificate(PROFILE_CONTENT_PROTECTION_CERTIFICATE,
-                                      user_id, context.service_id,
+                                      account_id, context.service_id,
                                       true,  // force_new_key
                                       renew_callback);
   }

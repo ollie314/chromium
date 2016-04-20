@@ -4,7 +4,9 @@
 
 #include "core/layout/compositing/CompositingInputsUpdater.h"
 
+#include "core/frame/FrameView.h"
 #include "core/layout/LayoutBlock.h"
+#include "core/layout/LayoutView.h"
 #include "core/layout/compositing/CompositedLayerMapping.h"
 #include "core/layout/compositing/PaintLayerCompositor.h"
 #include "core/paint/PaintLayer.h"
@@ -97,6 +99,28 @@ void CompositingInputsUpdater::updateRecursive(PaintLayer* layer, UpdateType upd
     if (!layer->childNeedsCompositingInputsUpdate() && updateType != ForceUpdate)
         return;
 
+    const PaintLayer* previousOverflowLayer = layer->ancestorOverflowLayer();
+    layer->updateAncestorOverflowLayer(info.lastOverflowClipLayer);
+    if (info.lastOverflowClipLayer && layer->needsCompositingInputsUpdate() && layer->layoutObject()->style()->position() == StickyPosition) {
+        if (info.lastOverflowClipLayer != previousOverflowLayer) {
+            // Old ancestor scroller should no longer have these constraints.
+            ASSERT(!previousOverflowLayer || !previousOverflowLayer->getScrollableArea()->stickyConstraintsMap().contains(layer));
+
+            if (info.lastOverflowClipLayer->isRootLayer())
+                layer->layoutObject()->view()->frameView()->addViewportConstrainedObject(layer->layoutObject());
+            else if (previousOverflowLayer && previousOverflowLayer->isRootLayer())
+                layer->layoutObject()->view()->frameView()->removeViewportConstrainedObject(layer->layoutObject());
+        }
+        layer->layoutObject()->updateStickyPositionConstraints();
+
+        // Sticky position constraints and ancestor overflow scroller affect
+        // the sticky layer position, so we need to update it again here.
+        // TODO(flackr): This should be refactored in the future to be clearer
+        // (i.e. update layer position and ancestor inputs updates in the
+        // same walk)
+        layer->updateLayerPosition();
+    }
+
     m_geometryMap.pushMappingsToAncestor(layer, layer->parent());
 
     if (layer->hasCompositedLayerMapping())
@@ -110,6 +134,7 @@ void CompositingInputsUpdater::updateRecursive(PaintLayer* layer, UpdateType upd
 
     if (updateType == ForceUpdate) {
         PaintLayer::AncestorDependentCompositingInputs properties;
+        PaintLayer::RareAncestorDependentCompositingInputs rareProperties;
 
         if (!layer->isRootLayer()) {
             properties.clippedAbsoluteBoundingBox = enclosingIntRect(m_geometryMap.absoluteRect(FloatRect(layer->boundingBoxForCompositingOverlapTest())));
@@ -123,11 +148,11 @@ void CompositingInputsUpdater::updateRecursive(PaintLayer* layer, UpdateType upd
             properties.clippedAbsoluteBoundingBox.intersect(clipRect);
 
             const PaintLayer* parent = layer->parent();
-            properties.opacityAncestor = parent->isTransparent() ? parent : parent->opacityAncestor();
-            properties.transformAncestor = parent->hasTransformRelatedProperty() ? parent : parent->transformAncestor();
-            properties.filterAncestor = parent->hasFilter() ? parent : parent->filterAncestor();
+            rareProperties.opacityAncestor = parent->isTransparent() ? parent : parent->opacityAncestor();
+            rareProperties.transformAncestor = parent->hasTransformRelatedProperty() ? parent : parent->transformAncestor();
+            rareProperties.filterAncestor = parent->hasFilterInducingProperty() ? parent : parent->filterAncestor();
             bool layerIsFixedPosition = layer->layoutObject()->style()->position() == FixedPosition;
-            properties.nearestFixedPositionLayer = layerIsFixedPosition ? layer : parent->nearestFixedPositionLayer();
+            rareProperties.nearestFixedPositionLayer = layerIsFixedPosition ? layer : parent->nearestFixedPositionLayer();
 
             if (info.hasAncestorWithClipRelatedProperty) {
                 const PaintLayer* parentLayerOnClippingContainerChain = findParentLayerOnClippingContainerChain(layer);
@@ -139,29 +164,31 @@ void CompositingInputsUpdater::updateRecursive(PaintLayer* layer, UpdateType upd
                 const LayoutObject* containingBlock = layer->layoutObject()->containingBlock();
                 const PaintLayer* parentLayerOnContainingBlockChain = findParentLayerOnContainingBlockChain(containingBlock);
 
-                properties.ancestorScrollingLayer = parentLayerOnContainingBlockChain->ancestorScrollingLayer();
+                rareProperties.ancestorScrollingLayer = parentLayerOnContainingBlockChain->ancestorScrollingLayer();
                 if (parentLayerOnContainingBlockChain->scrollsOverflow())
-                    properties.ancestorScrollingLayer = parentLayerOnContainingBlockChain;
+                    rareProperties.ancestorScrollingLayer = parentLayerOnContainingBlockChain;
 
                 if (layer->layoutObject()->isOutOfFlowPositioned() && !layer->subtreeIsInvisible()) {
                     const PaintLayer* clippingLayer = properties.clippingContainer ? properties.clippingContainer->enclosingLayer() : layer->compositor()->rootLayer();
                     if (hasClippedStackingAncestor(layer, clippingLayer))
-                        properties.clipParent = clippingLayer;
+                        rareProperties.clipParent = clippingLayer;
                 }
 
-                if (layer->stackingNode()->isTreatedAsOrStackingContext()
-                    && properties.ancestorScrollingLayer
-                    && !info.ancestorStackingContext->layoutObject()->isDescendantOf(properties.ancestorScrollingLayer->layoutObject()))
-                    properties.scrollParent = properties.ancestorScrollingLayer;
+                if (layer->stackingNode()->isStacked()
+                    && rareProperties.ancestorScrollingLayer
+                    && !info.ancestorStackingContext->layoutObject()->isDescendantOf(rareProperties.ancestorScrollingLayer->layoutObject()))
+                    rareProperties.scrollParent = rareProperties.ancestorScrollingLayer;
             }
         }
 
-        properties.hasAncestorWithClipPath = info.hasAncestorWithClipPath;
-        layer->updateAncestorDependentCompositingInputs(properties);
+        layer->updateAncestorDependentCompositingInputs(properties, rareProperties, info.hasAncestorWithClipPath);
     }
 
     if (layer->stackingNode()->isStackingContext())
         info.ancestorStackingContext = layer;
+
+    if (layer->isRootLayer() || layer->layoutObject()->hasOverflowClip())
+        info.lastOverflowClipLayer = layer;
 
     if (layer->scrollsOverflow())
         info.lastScrollingAncestor = layer;
@@ -172,15 +199,16 @@ void CompositingInputsUpdater::updateRecursive(PaintLayer* layer, UpdateType upd
     if (layer->layoutObject()->hasClipPath())
         info.hasAncestorWithClipPath = true;
 
-    PaintLayer::DescendantDependentCompositingInputs descendantProperties;
+    bool hasDescendantWithClipPath = false;
+    bool hasNonIsolatedDescendantWithBlendMode = false;
     for (PaintLayer* child = layer->firstChild(); child; child = child->nextSibling()) {
         updateRecursive(child, updateType, info);
 
-        descendantProperties.hasDescendantWithClipPath |= child->hasDescendantWithClipPath() || child->layoutObject()->hasClipPath();
-        descendantProperties.hasNonIsolatedDescendantWithBlendMode |= (!child->stackingNode()->isStackingContext() && child->hasNonIsolatedDescendantWithBlendMode()) || child->layoutObject()->style()->hasBlendMode();
+        hasDescendantWithClipPath |= child->hasDescendantWithClipPath() || child->layoutObject()->hasClipPath();
+        hasNonIsolatedDescendantWithBlendMode |= (!child->stackingNode()->isStackingContext() && child->hasNonIsolatedDescendantWithBlendMode()) || child->layoutObject()->style()->hasBlendMode();
     }
 
-    layer->updateDescendantDependentCompositingInputs(descendantProperties);
+    layer->updateDescendantDependentCompositingInputs(hasDescendantWithClipPath, hasNonIsolatedDescendantWithBlendMode);
     layer->didUpdateCompositingInputs();
 
     m_geometryMap.popMappingsToAncestor(layer->parent());

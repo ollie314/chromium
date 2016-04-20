@@ -20,6 +20,8 @@ class NotificationPermissionContext : public PermissionContextBase {
   // PermissionContextBase implementation.
   void ResetPermission(const GURL& requesting_origin,
                        const GURL& embedder_origin) override;
+  void CancelPermissionRequest(content::WebContents* web_contents,
+                               const PermissionRequestID& id) override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(NotificationPermissionContextTest,
@@ -32,7 +34,6 @@ class NotificationPermissionContext : public PermissionContextBase {
                         const PermissionRequestID& id,
                         const GURL& requesting_origin,
                         const GURL& embedding_origin,
-                        bool user_gesture,
                         const BrowserPermissionCallback& callback) override;
   void UpdateContentSetting(const GURL& requesting_origin,
                             const GURL& embedder_origin,

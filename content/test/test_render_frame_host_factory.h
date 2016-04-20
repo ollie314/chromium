@@ -7,9 +7,10 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "content/browser/frame_host/render_frame_host_factory.h"
 
 namespace content {
@@ -26,7 +27,7 @@ class TestRenderFrameHostFactory : public RenderFrameHostFactory {
 
  protected:
   // RenderFrameHostFactory implementation.
-  scoped_ptr<RenderFrameHostImpl> CreateRenderFrameHost(
+  std::unique_ptr<RenderFrameHostImpl> CreateRenderFrameHost(
       SiteInstance* site_instance,
       RenderViewHostImpl* render_view_host,
       RenderFrameHostDelegate* delegate,
@@ -35,7 +36,7 @@ class TestRenderFrameHostFactory : public RenderFrameHostFactory {
       FrameTreeNode* frame_tree_node,
       int32_t routing_id,
       int32_t widget_routing_id,
-      int flags) override;
+      bool hidden) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestRenderFrameHostFactory);

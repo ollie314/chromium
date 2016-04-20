@@ -52,22 +52,66 @@ source_set("ui") {
     "//chrome/app/theme:theme_resources",
     "//chrome/common",
     "//components/app_modal",
-    "//components/auto_login_parser",
+    "//components/autofill/core/browser",
+    "//components/bookmarks/browser",
+    "//components/browser_sync/browser",
     "//components/certificate_reporting:cert_logger_proto",
     "//components/certificate_reporting:encrypted_cert_logger_proto",
+    "//components/content_settings/core/browser",
+    "//components/data_reduction_proxy/core/browser",
+    "//components/device_event_log",
+    "//components/dom_distiller/content/browser",
     "//components/dom_distiller/webui",
+    "//components/domain_reliability",
+    "//components/favicon/content",
+    "//components/favicon/core",
+    "//components/feedback",
     "//components/flags_ui",
+    "//components/gcm_driver",
+    "//components/google/core/browser",
+    "//components/guest_view/browser",
+    "//components/history/core/browser",
+    "//components/infobars/core",
     "//components/invalidation/impl",
-    "//components/omnibox/common",
+    "//components/keyed_service/content",
+    "//components/keyed_service/core",
+    "//components/metrics:profiler",
+    "//components/mime_util",
+    "//components/omnibox/browser",
     "//components/onc",
+    "//components/password_manager/content/browser",
     "//components/password_manager/core/browser",
+    "//components/pdf/browser",
+    "//components/policy",
+    "//components/pref_registry",
+    "//components/proximity_auth",
+    "//components/proxy_config",
+    "//components/query_parser",
+    "//components/rappor",
+    "//components/renderer_context_menu",
     "//components/resources",
+    "//components/search",
+    "//components/search_engines",
+    "//components/security_interstitials/core",
+    "//components/security_state",
+    "//components/signin/core/account_id",
+    "//components/signin/core/browser",
+    "//components/ssl_errors",
+    "//components/startup_metric_utils/browser:lib",
     "//components/strings",
+    "//components/sync_driver",
+    "//components/sync_sessions",
     "//components/toolbar",
+    "//components/translate/core/browser",
+    "//components/ui/zoom",
     "//components/update_client",
+    "//components/upload_list",
+    "//components/user_prefs",
     "//components/version_ui",
+    "//components/web_resource",
     "//content/public/common",
     "//crypto",
+    "//device/core",
     "//skia",
     "//third_party/cacheinvalidation",
     "//third_party/icu",
@@ -75,6 +119,7 @@ source_set("ui") {
     "//ui/accessibility",
     "//ui/base",
     "//ui/content_accelerators",
+    "//ui/display",
     "//ui/events",
     "//ui/events:gesture_detection",
     "//ui/gfx",
@@ -82,9 +127,14 @@ source_set("ui") {
     "//ui/message_center",
     "//ui/native_theme",
     "//ui/resources",
+    "//ui/shell_dialogs",
     "//ui/snapshot",
     "//ui/strings",
   ]
+
+  if (enable_extensions) {
+    deps += [ "//extensions/browser" ]
+  }
 
   if (!is_ios) {
     sources += rebase_path(gypi_values.chrome_browser_ui_non_ios_sources,
@@ -98,9 +148,11 @@ source_set("ui") {
       "//chrome/browser/ui/views",
       "//chrome/browser/ui/webui/engagement:mojo_bindings",
       "//chrome/browser/ui/webui/omnibox:mojo_bindings",
+      "//chrome/browser/ui/webui/plugins:mojo_bindings",
       "//chrome/common/net",
       "//chrome/installer/util:with_no_strings",
       "//components/autofill/content/browser:risk_proto",
+      "//components/browsing_data_ui",
       "//components/bubble:bubble",
       "//components/crash/core/browser",
       "//components/net_log",
@@ -110,6 +162,7 @@ source_set("ui") {
       "//components/url_formatter",
       "//device/nfc",
       "//media",
+      "//mojo/edk/system",
       "//net:net_with_v8",
       "//net:stale_while_revalidate_experiment_domains",
       "//storage/browser",
@@ -118,7 +171,6 @@ source_set("ui") {
       "//third_party/adobe/flash:flapper_version_h",
       "//third_party/leveldatabase",
       "//third_party/libjingle",
-      "//third_party/mojo/src/mojo/edk/system",
       "//third_party/re2",
       "//ui/base/ime",
       "//ui/compositor",
@@ -147,12 +199,7 @@ source_set("ui") {
       "//components/feedback/proto",
       "//components/proximity_auth/webui",
       "//device/bluetooth",
-      "//third_party/libusb",
     ]
-
-    if (is_android) {
-      deps -= [ "//third_party/libusb" ]
-    }
   }
 
   if (use_aura) {
@@ -167,12 +214,6 @@ source_set("ui") {
     sources +=
         rebase_path(gypi_values.chrome_browser_ui_nacl_sources, ".", "//chrome")
     deps += [ "//native_client/src/trusted/service_runtime:sel" ]
-  }
-  if (enable_configuration_policy) {
-    sources += rebase_path(gypi_values.chrome_browser_ui_policy_sources,
-                           ".",
-                           "//chrome")
-    deps += [ "//components/policy" ]
   }
   if (enable_plugins) {
     sources += rebase_path(gypi_values.chrome_browser_ui_plugin_sources,
@@ -201,9 +242,8 @@ source_set("ui") {
     deps += [
       "//chrome/browser/chromeos",
       "//components/arc",
+      "//ui/base/ime",
     ]
-  } else {
-    defines += [ "FRAME_AVATAR_BUTTON=1" ]
   }
   if (use_cups) {
     configs += [ "//printing:cups" ]
@@ -211,11 +251,17 @@ source_set("ui") {
   if (use_ash) {
     sources +=
         rebase_path(gypi_values.chrome_browser_ui_ash_sources, ".", "//chrome")
+    sources += [
+      "ash/keyboard_ui_service.cc",
+      "ash/keyboard_ui_service.h",
+    ]
     deps += [
       "//ash",
       "//ash:ash_with_content",
       "//ash/strings",
       "//components/user_manager",
+      "//ui/app_list/presenter",
+      "//ui/keyboard:mojom",
     ]
     if (!is_chromeos) {
       sources += rebase_path(gypi_values.chrome_browser_ui_ash_non_chromeos,
@@ -284,6 +330,8 @@ source_set("ui") {
         # This is not explicitly excluded in GYP, but I think the static
         # library linking rules means it's never referenced when compiling in
         # non-Views mode on Mac. It appears not to link in that case.
+        "views/frame/avatar_button_manager.cc",
+        "views/frame/avatar_button_manager.h",
         "views/profiles/new_avatar_button.cc",
         "views/profiles/new_avatar_button.h",
       ]
@@ -314,6 +362,11 @@ source_set("ui") {
   if (use_nss_certs) {
     sources +=
         rebase_path(gypi_values.chrome_browser_ui_nss_sources, ".", "//chrome")
+  }
+  if (is_mac || is_win) {
+    sources += rebase_path(gypi_values.chrome_browser_ui_non_nss_sources,
+                           ".",
+                           "//chrome")
   }
   if (!enable_themes) {
     sources -= [ "webui/theme_source.cc" ]
@@ -397,6 +450,8 @@ source_set("ui") {
       "//third_party/isimpledom",
       "//third_party/wtl",
       "//ui/app_list",
+      "//ui/base/ime",
+      "//ui/events:dom_keycode_converter",
     ]
     if (!is_chrome_branded) {
       deps -= [ "//google_update" ]
@@ -418,6 +473,10 @@ source_set("ui") {
     sources += rebase_path(gypi_values.chrome_browser_ui_desktop_linux_sources,
                            ".",
                            "//chrome")
+    deps += [
+      "//ui/base/ime",
+      "//ui/events:dom_keycode_converter",
+    ]
   }
   if (is_linux) {  # Both desktop Linux and ChromeOS.
     sources += rebase_path(gypi_values.chrome_browser_ui_linux_sources,
@@ -529,7 +588,7 @@ if (is_mac) {
 
   action("generate_localizer") {
     script = "//chrome/tools/build/mac/generate_localizer"
-    sources = []
+    sources = rebase_path(nib_gypi_values.mac_translated_xibs, ".", "//chrome")
     table_path = "$target_gen_dir/ui_localizer_table.h"
     outputs = [
       table_path,
@@ -557,8 +616,8 @@ source_set("test_support") {
     "exclusive_access/fullscreen_controller_test.cc",
     "exclusive_access/fullscreen_controller_test.h",
     "find_bar/find_bar_host_unittest_util.h",
-    "login/login_prompt_test_utils.cc",
-    "login/login_prompt_test_utils.h",
+    "login/login_handler_test_utils.cc",
+    "login/login_handler_test_utils.h",
     "passwords/manage_passwords_ui_controller_mock.cc",
     "passwords/manage_passwords_ui_controller_mock.h",
     "test/test_confirm_bubble_model.cc",

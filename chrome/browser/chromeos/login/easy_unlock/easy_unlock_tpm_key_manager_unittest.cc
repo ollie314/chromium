@@ -7,8 +7,6 @@
 #include "base/base64.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/scoped_user_pref_update.h"
-#include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager.h"
@@ -22,6 +20,8 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/prefs/scoped_user_pref_update.h"
+#include "components/prefs/testing_pref_service.h"
 #include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -207,14 +207,14 @@ class EasyUnlockTpmKeyManagerTest : public testing::Test {
 
     signin_profile_ = profile_manager_.CreateTestingProfile(
         chrome::kInitialProfile,
-        scoped_ptr<syncable_prefs::TestingPrefServiceSyncable>(),
+        std::unique_ptr<syncable_prefs::TestingPrefServiceSyncable>(),
         base::UTF8ToUTF16(chrome::kInitialProfile), 0 /* avatar id */,
         std::string() /* supervized user id */,
         TestingProfile::TestingFactories());
 
     user_profile_ = profile_manager_.CreateTestingProfile(
         test_account_id_.GetUserEmail(),
-        scoped_ptr<syncable_prefs::TestingPrefServiceSyncable>(),
+        std::unique_ptr<syncable_prefs::TestingPrefServiceSyncable>(),
         base::UTF8ToUTF16(test_account_id_.GetUserEmail()), 0 /* avatar id */,
         std::string() /* supervized user id */,
         TestingProfile::TestingFactories());
@@ -339,8 +339,8 @@ class EasyUnlockTpmKeyManagerTest : public testing::Test {
   content::TestBrowserThreadBundle thread_bundle_;
 
   // The NSS system slot used by EasyUnlockTPMKeyManagers in tests.
-  scoped_ptr<crypto::ScopedTestSystemNSSKeySlot> test_system_slot_;
-  scoped_ptr<crypto::ScopedTestNSSChromeOSUser> test_nss_user_;
+  std::unique_ptr<crypto::ScopedTestSystemNSSKeySlot> test_system_slot_;
+  std::unique_ptr<crypto::ScopedTestNSSChromeOSUser> test_nss_user_;
 
   // Needed to properly set up signin and user profiles for test.
   user_manager::FakeUserManager* user_manager_;

@@ -5,6 +5,7 @@
 #include "ui/views/controls/menu/menu_scroll_view_container.h"
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/accessibility/ax_view_state.h"
@@ -76,7 +77,6 @@ class MenuScrollButton : public View {
     // The background.
     gfx::Rect item_bounds(0, 0, width(), height());
     NativeTheme::ExtraParams extra;
-    extra.menu_item.is_selected = false;
     GetNativeTheme()->Paint(canvas->sk_canvas(),
                             NativeTheme::kMenuItemBackground,
                             NativeTheme::kNormal, item_bounds, extra);
@@ -263,9 +263,6 @@ void MenuScrollViewContainer::GetAccessibleState(
 
   // Now change the role.
   state->role = ui::AX_ROLE_MENU_BAR;
-  // Some AT (like NVDA) will not process focus events on menu item children
-  // unless a parent claims to be focused.
-  state->AddStateFlag(ui::AX_STATE_FOCUSED);
 }
 
 void MenuScrollViewContainer::OnBoundsChanged(
@@ -297,7 +294,8 @@ void MenuScrollViewContainer::CreateDefaultBorder() {
                               ui::NativeTheme::kColorId_MenuBorderColor)
                         : gfx::kPlaceholderColor;
     SetBorder(views::Border::CreateBorderPainter(
-        new views::RoundRectPainter(color, menu_config.corner_radius),
+        base::WrapUnique(
+            new views::RoundRectPainter(color, menu_config.corner_radius)),
         gfx::Insets(top, left, bottom, right)));
   } else {
     SetBorder(Border::CreateEmptyBorder(top, left, bottom, right));
@@ -308,7 +306,7 @@ void MenuScrollViewContainer::CreateBubbleBorder() {
   bubble_border_ = new BubbleBorder(arrow_,
                                     BubbleBorder::SMALL_SHADOW,
                                     SK_ColorWHITE);
-  SetBorder(scoped_ptr<Border>(bubble_border_));
+  SetBorder(std::unique_ptr<Border>(bubble_border_));
   set_background(new BubbleBackground(bubble_border_));
 }
 

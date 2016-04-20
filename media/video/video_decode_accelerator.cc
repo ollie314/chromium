@@ -24,8 +24,9 @@ std::string VideoDecodeAccelerator::Config::AsHumanReadableString() const {
   return s.str();
 }
 
-void VideoDecodeAccelerator::Client::NotifyCdmAttached(bool success) {
-  NOTREACHED() << "By default CDM is not supported.";
+void VideoDecodeAccelerator::Client::NotifyInitializationComplete(
+    bool success) {
+  NOTREACHED() << "By default deferred initialization is not supported.";
 }
 
 VideoDecodeAccelerator::~VideoDecodeAccelerator() {}
@@ -34,22 +35,37 @@ void VideoDecodeAccelerator::SetCdm(int cdm_id) {
   NOTREACHED() << "By default CDM is not supported.";
 }
 
-bool VideoDecodeAccelerator::CanDecodeOnIOThread() {
-  // GPU process subclasses must override this.
-  LOG(FATAL) << "This should only get called in the GPU process";
-  return false;  // not reached
+bool VideoDecodeAccelerator::TryToSetupDecodeOnSeparateThread(
+    const base::WeakPtr<Client>& decode_client,
+    const scoped_refptr<base::SingleThreadTaskRunner>& decode_task_runner) {
+  // Implementations in the process that VDA runs in must override this.
+  LOG(FATAL) << "This may only be called in the same process as VDA impl.";
+  return false;
+}
+
+void VideoDecodeAccelerator::ImportBufferForPicture(
+    int32_t picture_buffer_id,
+    const std::vector<gfx::GpuMemoryBufferHandle>& gpu_memory_buffer_handles) {
+  NOTREACHED() << "Buffer import not supported.";
 }
 
 GLenum VideoDecodeAccelerator::GetSurfaceInternalFormat() const {
   return GL_RGBA;
 }
 
+VideoPixelFormat VideoDecodeAccelerator::GetOutputFormat() const {
+  return PIXEL_FORMAT_UNKNOWN;
+}
+
 VideoDecodeAccelerator::SupportedProfile::SupportedProfile()
-    : profile(media::VIDEO_CODEC_PROFILE_UNKNOWN) {}
+    : profile(media::VIDEO_CODEC_PROFILE_UNKNOWN), encrypted_only(false) {}
 
 VideoDecodeAccelerator::SupportedProfile::~SupportedProfile() {}
 
 VideoDecodeAccelerator::Capabilities::Capabilities() : flags(NO_FLAGS) {}
+
+VideoDecodeAccelerator::Capabilities::Capabilities(const Capabilities& other) =
+    default;
 
 VideoDecodeAccelerator::Capabilities::~Capabilities() {}
 

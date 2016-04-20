@@ -6,12 +6,13 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -24,7 +25,6 @@
 #include "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/bubble_sync_promo_controller.h"
 #include "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
-#include "chrome/browser/ui/cocoa/extensions/bundle_util.h"
 #include "chrome/browser/ui/cocoa/hover_close_button.h"
 #include "chrome/browser/ui/cocoa/info_bubble_view.h"
 #include "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
@@ -43,16 +43,17 @@
 #include "components/bubble/bubble_controller.h"
 #include "components/bubble/bubble_ui.h"
 #include "components/signin/core/browser/signin_metrics.h"
+#include "content/public/browser/browser_thread.h"
 #include "extensions/browser/install/extension_install_ui.h"
 #include "extensions/common/extension.h"
 #import "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/cocoa/cocoa_base_utils.h"
 #import "ui/base/cocoa/controls/hyperlink_text_view.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
-using extensions::BundleInstaller;
 using extensions::Extension;
 
 @interface ExtensionInstalledBubbleController ()
@@ -64,9 +65,6 @@ using extensions::Extension;
 - (NSPoint)calculateArrowPoint;
 - (NSWindow*)initializeWindow;
 - (int)calculateWindowHeight;
-- (NSInteger)addExtensionList:(NSTextField*)headingMsg
-                    itemsView:(NSView*)itemsView
-                        state:(BundleInstaller::Item::State)state;
 - (void)setMessageFrames:(int)newWindowHeight;
 - (void)updateAnchorPosition;
 
@@ -121,7 +119,7 @@ bool ExtensionInstalledBubble::ShouldShow() {
 }
 
 // Implemented here to create the platform specific instance of the BubbleUi.
-scoped_ptr<BubbleUi> ExtensionInstalledBubble::BuildBubbleUi() {
+std::unique_ptr<BubbleUi> ExtensionInstalledBubble::BuildBubbleUi() {
   // |controller| is owned by the parent window.
   ExtensionInstalledBubbleController* controller =
       [[ExtensionInstalledBubbleController alloc]
@@ -130,12 +128,11 @@ scoped_ptr<BubbleUi> ExtensionInstalledBubble::BuildBubbleUi() {
 
   // The bridge to the C++ object that performs shared logic across platforms.
   // This tells the controller when to show the bubble.
-  return make_scoped_ptr(new ExtensionInstalledBubbleBridge(controller));
+  return base::WrapUnique(new ExtensionInstalledBubbleBridge(controller));
 }
 
 @implementation ExtensionInstalledBubbleController
 
-@synthesize bundle = bundle_;
 @synthesize installedBubble = installedBubble_;
 // Exposed for unit tests.
 @synthesize heading = heading_;
@@ -168,25 +165,8 @@ scoped_ptr<BubbleUi> ExtensionInstalledBubble::BuildBubbleUi() {
   return self;
 }
 
-- (id)initWithParentWindow:(NSWindow*)parentWindow
-                    bundle:(const BundleInstaller*)bundle
-                   browser:(Browser*)browser {
-  if ((self = [super initWithWindowNibPath:@"ExtensionInstalledBubbleBundle"
-                              parentWindow:parentWindow
-                                anchoredAt:NSZeroPoint])) {
-    bundle_ = bundle;
-    DCHECK(browser);
-    browser_ = browser;
-    icon_.reset([skia::SkBitmapToNSImage(SkBitmap()) retain]);
-    pageActionPreviewShowing_ = NO;
-    type_ = extension_installed_bubble::kBundle;
-    [self showWindow:self];
-  }
-  return self;
-}
-
 - (const Extension*)extension {
-  if (type_ == extension_installed_bubble::kBundle || !installedBubble_)
+  if (!installedBubble_)
     return nullptr;
   return installedBubble_->extension();
 }
@@ -265,8 +245,6 @@ scoped_ptr<BubbleUi> ExtensionInstalledBubble::BuildBubbleUi() {
         NSMidX(bounds),
         NSMaxY(bounds) - extension_installed_bubble::kAppsBubbleArrowOffset);
     arrowPoint = [button convertPoint:anchor toView:nil];
-  } else if (type_ == extension_installed_bubble::kBundle) {
-    arrowPoint = getAppMenuButtonAnchorPoint();
   } else {
     DCHECK(installedBubble_);
     switch (installedBubble_->anchor_position()) {
@@ -349,9 +327,6 @@ scoped_ptr<BubbleUi> ExtensionInstalledBubble::BuildBubbleUi() {
     [self.bubble setArrowLocation:info_bubble::kTopRight];
   }
 
-  if (type_ == extension_installed_bubble::kBundle)
-    return window;
-
   // Set appropriate icon, resizing if necessary.
   if ([icon_ size].width > extension_installed_bubble::kIconSize) {
     [icon_ setSize:NSMakeSize(extension_installed_bubble::kIconSize,
@@ -374,28 +349,6 @@ scoped_ptr<BubbleUi> ExtensionInstalledBubble::BuildBubbleUi() {
       2 * extension_installed_bubble::kOuterVerticalMargin;
   int iconColumnHeight = 2 * extension_installed_bubble::kOuterVerticalMargin +
                          NSHeight([iconImage_ frame]);
-
-  // If type is bundle, list the extensions that were installed and those that
-  // failed.
-  if (type_ == extension_installed_bubble::kBundle) {
-    NSInteger installedListHeight =
-        [self addExtensionList:installedHeadingMsg_
-                     itemsView:installedItemsView_
-                         state:BundleInstaller::Item::STATE_INSTALLED];
-
-    NSInteger failedListHeight =
-        [self addExtensionList:failedHeadingMsg_
-                     itemsView:failedItemsView_
-                         state:BundleInstaller::Item::STATE_FAILED];
-
-    contentColumnHeight += installedListHeight + failedListHeight;
-
-    // Put some space between the lists if both are present.
-    if (installedListHeight > 0 && failedListHeight > 0)
-      contentColumnHeight += extension_installed_bubble::kInnerVerticalMargin;
-
-    return std::max(contentColumnHeight, iconColumnHeight);
-  }
 
   CGFloat syncPromoHeight = 0;
   if (installedBubble_->options() & ExtensionInstalledBubble::SIGN_IN_PROMO) {
@@ -492,65 +445,8 @@ scoped_ptr<BubbleUi> ExtensionInstalledBubble::BuildBubbleUi() {
   return std::max(contentColumnHeight, iconColumnHeight);
 }
 
-- (NSInteger)addExtensionList:(NSTextField*)headingMsg
-                    itemsView:(NSView*)itemsView
-                        state:(BundleInstaller::Item::State)state {
-  base::string16 heading = bundle_->GetHeadingTextFor(state);
-  bool hidden = heading.empty();
-  [headingMsg setHidden:hidden];
-  [itemsView setHidden:hidden];
-  if (hidden)
-    return 0;
-
-  [headingMsg setStringValue:base::SysUTF16ToNSString(heading)];
-  [GTMUILocalizerAndLayoutTweaker sizeToFitFixedWidthTextField:headingMsg];
-
-  CGFloat height =
-      PopulateBundleItemsList(bundle_->GetItemsWithState(state), itemsView);
-
-  NSRect frame = [itemsView frame];
-  frame.size.height = height;
-  [itemsView setFrame:frame];
-
-  return NSHeight([headingMsg frame]) +
-      extension_installed_bubble::kInnerVerticalMargin +
-      NSHeight([itemsView frame]);
-}
-
 // Adjust y-position of messages to sit properly in new window height.
 - (void)setMessageFrames:(int)newWindowHeight {
-  if (type_ == extension_installed_bubble::kBundle) {
-    // Layout the messages from the bottom up.
-    NSView* msgs[] = { failedItemsView_, failedHeadingMsg_,
-                       installedItemsView_, installedHeadingMsg_ };
-    NSInteger offsetFromBottom = 0;
-    BOOL isFirstVisible = YES;
-    for (size_t i = 0; i < arraysize(msgs); ++i) {
-      if ([msgs[i] isHidden])
-        continue;
-
-      NSRect frame = [msgs[i] frame];
-      NSInteger margin = isFirstVisible ?
-          extension_installed_bubble::kOuterVerticalMargin :
-          extension_installed_bubble::kInnerVerticalMargin;
-
-      frame.origin.y = offsetFromBottom + margin;
-      [msgs[i] setFrame:frame];
-      offsetFromBottom += NSHeight(frame) + margin;
-
-      isFirstVisible = NO;
-    }
-
-    // Move the close button a bit to vertically align it with the heading.
-    NSInteger closeButtonFudge = 1;
-    NSRect frame = [closeButton_ frame];
-    frame.origin.y = newWindowHeight - (NSHeight(frame) + closeButtonFudge +
-         extension_installed_bubble::kOuterVerticalMargin);
-    [closeButton_ setFrame:frame];
-
-    return;
-  }
-
   NSRect headingFrame = [heading_ frame];
   headingFrame.origin.y = newWindowHeight - (
       NSHeight(headingFrame) +
@@ -588,8 +484,8 @@ scoped_ptr<BubbleUi> ExtensionInstalledBubble::BuildBubbleUi() {
 }
 
 - (void)updateAnchorPosition {
-  self.anchorPoint =
-      [self.parentWindow convertBaseToScreen:[self calculateArrowPoint]];
+  self.anchorPoint = ui::ConvertPointFromWindowToScreen(
+      self.parentWindow, [self calculateArrowPoint]);
 }
 
 - (IBAction)onManageShortcutClicked:(id)sender {
@@ -604,7 +500,7 @@ scoped_ptr<BubbleUi> ExtensionInstalledBubble::BuildBubbleUi() {
 }
 
 - (IBAction)onAppShortcutClicked:(id)sender {
-  scoped_ptr<extensions::ExtensionInstallUI> install_ui(
+  std::unique_ptr<extensions::ExtensionInstallUI> install_ui(
       extensions::CreateExtensionInstallUI(browser_->profile()));
   install_ui->OpenAppInstalledUI([self extension]->id());
 }

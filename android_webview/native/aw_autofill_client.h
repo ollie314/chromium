@@ -11,9 +11,9 @@
 #include "base/android/jni_weak_ref.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service_factory.h"
 #include "components/autofill/core/browser/autofill_client.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service_factory.h"
 #include "content/public/browser/web_contents_user_data.h"
 
 namespace autofill {
@@ -70,13 +70,14 @@ class AwAutofillClient : public autofill::AutofillClient,
   void ShowAutofillSettings() override;
   void ShowUnmaskPrompt(
       const autofill::CreditCard& card,
+      UnmaskCardReason reason,
       base::WeakPtr<autofill::CardUnmaskDelegate> delegate) override;
   void OnUnmaskVerificationResult(PaymentsRpcResult result) override;
   void ConfirmSaveCreditCardLocally(const autofill::CreditCard& card,
                                     const base::Closure& callback) override;
   void ConfirmSaveCreditCardToCloud(
       const autofill::CreditCard& card,
-      scoped_ptr<base::DictionaryValue> legal_message,
+      std::unique_ptr<base::DictionaryValue> legal_message,
       const base::Closure& callback) override;
   void LoadRiskData(
       const base::Callback<void(const std::string&)>& callback) override;

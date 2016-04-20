@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -277,7 +278,7 @@ bool GetMTPDeviceObjectEntries(IPortableDevice* device,
   const bool get_all_entries = object_name.empty();
   for (HRESULT hr = S_OK; hr == S_OK;) {
     DWORD num_objects_fetched = 0;
-    scoped_ptr<base::char16*[]> object_ids(
+    std::unique_ptr<base::char16* []> object_ids(
         new base::char16*[num_objects_to_request]);
     hr = enum_object_ids->Next(num_objects_to_request,
                                object_ids.get(),

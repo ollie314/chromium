@@ -5,8 +5,8 @@
 #include "net/tools/flip_server/spdy_interface.h"
 
 #include <list>
+#include <memory>
 
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 #include "net/spdy/buffered_spdy_framer.h"
 #include "net/tools/balsa/balsa_enums.h"
@@ -169,7 +169,7 @@ class SpdySMTestBase : public ::testing::TestWithParam<SpdyMajorVersion> {
                                     acceptor_.get(),
                                     GetParam()));
 
-    spdy_framer_.reset(new BufferedSpdyFramer(GetParam(), true));
+    spdy_framer_.reset(new BufferedSpdyFramer(GetParam()));
     spdy_framer_visitor_.reset(new SpdyFramerVisitor);
     spdy_framer_->set_visitor(spdy_framer_visitor_.get());
   }
@@ -194,14 +194,14 @@ class SpdySMTestBase : public ::testing::TestWithParam<SpdyMajorVersion> {
   }
 
  protected:
-  scoped_ptr<MockSMInterface> mock_another_interface_;
-  scoped_ptr<MemoryCache> memory_cache_;
-  scoped_ptr<FlipAcceptor> acceptor_;
-  scoped_ptr<EpollServer> epoll_server_;
-  scoped_ptr<FakeSMConnection> connection_;
-  scoped_ptr<TestSpdySM> interface_;
-  scoped_ptr<BufferedSpdyFramer> spdy_framer_;
-  scoped_ptr<SpdyFramerVisitor> spdy_framer_visitor_;
+  std::unique_ptr<MockSMInterface> mock_another_interface_;
+  std::unique_ptr<MemoryCache> memory_cache_;
+  std::unique_ptr<FlipAcceptor> acceptor_;
+  std::unique_ptr<EpollServer> epoll_server_;
+  std::unique_ptr<FakeSMConnection> connection_;
+  std::unique_ptr<TestSpdySM> interface_;
+  std::unique_ptr<BufferedSpdyFramer> spdy_framer_;
+  std::unique_ptr<SpdyFramerVisitor> spdy_framer_visitor_;
 };
 
 class SpdySMProxyTest : public SpdySMTestBase {
@@ -230,13 +230,14 @@ TEST_P(SpdySMProxyTest, InitSMConnection) {
 
 TEST_P(SpdySMProxyTest, OnStreamFrameData) {
   BufferedSpdyFramerVisitorInterface* visitor = interface_.get();
-  scoped_ptr<MockSMInterface> mock_interface(new MockSMInterface);
+  std::unique_ptr<MockSMInterface> mock_interface(new MockSMInterface);
   uint32_t stream_id = 92;
   uint32_t associated_id = 43;
   SpdyHeaderBlock block;
   testing::MockFunction<void(int)> checkpoint;  // NOLINT
 
-  scoped_ptr<SpdyFrame> frame(spdy_framer_->CreatePingFrame(12, false));
+  std::unique_ptr<SpdySerializedFrame> frame(
+      spdy_framer_->CreatePingFrame(12, false));
   block[":method"] = "GET";
   block[":host"] = "www.example.com";
   block[":path"] = "/path";

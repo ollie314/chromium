@@ -22,6 +22,7 @@ namespace protocol {
 class ChannelMultiplexer;
 class PseudoTcpChannelFactory;
 class SecureChannelFactory;
+class MessageChannelFactory;
 
 class IceTransport : public Transport,
                      public IceTransportChannel::Delegate,
@@ -42,8 +43,8 @@ class IceTransport : public Transport,
                EventHandler* event_handler);
   ~IceTransport() override;
 
-  StreamChannelFactory* GetStreamChannelFactory();
-  StreamChannelFactory* GetMultiplexedChannelFactory();
+  MessageChannelFactory* GetChannelFactory();
+  MessageChannelFactory* GetMultiplexedChannelFactory();
 
   // Transport interface.
   void Start(Authenticator* authenticator,
@@ -80,22 +81,29 @@ class IceTransport : public Transport,
   // Sends transport-info message with candidates from |pending_candidates_|.
   void SendTransportInfo();
 
+  // Callback passed to StreamMessageChannelFactoryAdapter to handle read/write
+  // errors on the data channels.
+  void OnChannelError(int error);
+
   scoped_refptr<TransportContext> transport_context_;
   EventHandler* event_handler_;
 
   SendTransportInfoCallback send_transport_info_callback_;
 
   ChannelsMap channels_;
-  scoped_ptr<PseudoTcpChannelFactory> pseudotcp_channel_factory_;
-  scoped_ptr<SecureChannelFactory> secure_channel_factory_;
-  scoped_ptr<ChannelMultiplexer> channel_multiplexer_;
+  std::unique_ptr<PseudoTcpChannelFactory> pseudotcp_channel_factory_;
+  std::unique_ptr<SecureChannelFactory> secure_channel_factory_;
+  std::unique_ptr<MessageChannelFactory> message_channel_factory_;
+
+  std::unique_ptr<ChannelMultiplexer> channel_multiplexer_;
+  std::unique_ptr<MessageChannelFactory> mux_channel_factory_;
 
   // Pending remote transport info received before the local channels were
   // created.
   std::list<IceTransportInfo::IceCredentials> pending_remote_ice_credentials_;
   std::list<IceTransportInfo::NamedCandidate> pending_remote_candidates_;
 
-  scoped_ptr<IceTransportInfo> pending_transport_info_message_;
+  std::unique_ptr<IceTransportInfo> pending_transport_info_message_;
   base::OneShotTimer transport_info_timer_;
 
   base::WeakPtrFactory<IceTransport> weak_factory_;

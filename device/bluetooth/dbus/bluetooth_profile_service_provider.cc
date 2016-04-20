@@ -4,6 +4,7 @@
 
 #include "device/bluetooth/dbus/bluetooth_profile_service_provider.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -102,7 +103,7 @@ class BluetoothProfileServiceProviderImpl
 
     dbus::MessageReader reader(method_call);
     dbus::ObjectPath device_path;
-    scoped_ptr<dbus::FileDescriptor> fd(new dbus::FileDescriptor());
+    std::unique_ptr<dbus::FileDescriptor> fd(new dbus::FileDescriptor());
     dbus::MessageReader array_reader(NULL);
     if (!reader.PopObjectPath(&device_path) ||
         !reader.PopFileDescriptor(fd.get()) ||
@@ -241,11 +242,10 @@ BluetoothProfileServiceProvider* BluetoothProfileServiceProvider::Create(
     dbus::Bus* bus,
     const dbus::ObjectPath& object_path,
     Delegate* delegate) {
-  if (!bluez::BluezDBusManager::Get()->IsUsingStub()) {
+  if (!bluez::BluezDBusManager::Get()->IsUsingFakes()) {
     return new BluetoothProfileServiceProviderImpl(bus, object_path, delegate);
-  } else {
-    return new FakeBluetoothProfileServiceProvider(object_path, delegate);
   }
+  return new FakeBluetoothProfileServiceProvider(object_path, delegate);
 }
 
 }  // namespace bluez

@@ -21,8 +21,8 @@
 #ifndef WTF_PassRefPtr_h
 #define WTF_PassRefPtr_h
 
+#include "wtf/Allocator.h"
 #include "wtf/Assertions.h"
-#include "wtf/RawPtr.h"
 #include "wtf/TypeTraits.h"
 
 namespace WTF {
@@ -56,11 +56,11 @@ template <typename T> ALWAYS_INLINE void derefIfNotNull(T* ptr)
 }
 
 template <typename T> class PassRefPtr {
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 public:
     PassRefPtr() : m_ptr(nullptr) {}
     PassRefPtr(std::nullptr_t) : m_ptr(nullptr) {}
     PassRefPtr(T* ptr) : m_ptr(ptr) { refIfNotNull(ptr); }
-    template <typename U> PassRefPtr(const RawPtr<U>& ptr, EnsurePtrConvertibleArgDecl(U, T)) : m_ptr(ptr.get()) { refIfNotNull(m_ptr); }
     explicit PassRefPtr(T& ptr) : m_ptr(&ptr) { m_ptr->ref(); }
     // It somewhat breaks the type system to allow transfer of ownership out of
     // a const PassRefPtr. However, it makes it much easier to work with
@@ -81,11 +81,7 @@ public:
     T* operator->() const { return m_ptr; }
 
     bool operator!() const { return !m_ptr; }
-
-    // This conversion operator allows implicit conversion to bool but not to
-    // other integer types.
-    typedef T* (PassRefPtr::*UnspecifiedBoolType);
-    operator UnspecifiedBoolType() const { return m_ptr ? &PassRefPtr::m_ptr : 0; }
+    explicit operator bool() const { return m_ptr; }
 
     friend PassRefPtr adoptRef<T>(T*);
 
@@ -142,14 +138,14 @@ template <typename T, typename U> inline bool operator==(T* a, const PassRefPtr<
     return a == b.get();
 }
 
-template <typename T, typename U> inline bool operator==(const PassRefPtr<T>& a, const RawPtr<U>& b)
+template <typename T> inline bool operator==(const PassRefPtr<T>& a, std::nullptr_t)
 {
-    return a.get() == b.get();
+    return !a.get();
 }
 
-template <typename T, typename U> inline bool operator==(const RawPtr<T>& a, const PassRefPtr<U>& b)
+template <typename T> inline bool operator==(std::nullptr_t, const PassRefPtr<T>& b)
 {
-    return a.get() == b.get();
+    return !b.get();
 }
 
 template <typename T, typename U> inline bool operator!=(const PassRefPtr<T>& a, const PassRefPtr<U>& b)
@@ -177,14 +173,14 @@ template <typename T, typename U> inline bool operator!=(T* a, const PassRefPtr<
     return a != b.get();
 }
 
-template <typename T, typename U> inline bool operator!=(const PassRefPtr<T>& a, const RawPtr<U>& b)
+template <typename T> inline bool operator!=(const PassRefPtr<T>& a, std::nullptr_t)
 {
-    return a.get() != b.get();
+    return a.get();
 }
 
-template <typename T, typename U> inline bool operator!=(const RawPtr<T>& a, const PassRefPtr<U>& b)
+template <typename T> inline bool operator!=(std::nullptr_t, const PassRefPtr<T>& b)
 {
-    return a.get() != b.get();
+    return b.get();
 }
 
 template <typename T> PassRefPtr<T> adoptRef(T* p)

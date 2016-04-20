@@ -52,6 +52,8 @@ public:
     AtomicString standardFontFamilyName() const;
     AtomicString genericFontFamilyName(FontDescription::GenericFamilyType) const;
 
+    float fontSizeForKeyword(unsigned keyword, bool isMonospace) const;
+
     void setWeight(FontWeight);
     void setSize(const FontDescription::Size&);
     void setSizeAdjust(const float aspectValue);
@@ -61,15 +63,16 @@ public:
     void setLocale(const AtomicString&);
     void setStyle(FontStyle);
     void setVariant(FontVariant);
+    void setVariantCaps(FontDescription::FontVariantCaps);
     void setVariantLigatures(const FontDescription::VariantLigatures&);
     void setTextRendering(TextRenderingMode);
     void setKerning(FontDescription::Kerning);
     void setFontSmoothing(FontSmoothingMode);
 
     // FIXME: These need to just vend a Font object eventually.
-    void createFont(PassRefPtrWillBeRawPtr<FontSelector>, ComputedStyle&);
+    void createFont(FontSelector*, ComputedStyle&);
 
-    void createFontForDocument(PassRefPtrWillBeRawPtr<FontSelector>, ComputedStyle&);
+    void createFontForDocument(FontSelector*, ComputedStyle&);
 
     bool fontDirty() const { return m_flags; }
 
@@ -80,6 +83,7 @@ public:
     static float initialSizeAdjust() { return FontSizeAdjustNone; }
     static TextRenderingMode initialTextRendering() { return AutoTextRendering; }
     static FontVariant initialVariant() { return FontVariantNormal; }
+    static FontDescription::FontVariantCaps initialVariantCaps() { return FontDescription::CapsNormal; }
     static FontDescription::VariantLigatures initialVariantLigatures() { return FontDescription::VariantLigatures(); }
     static const AtomicString& initialLocale() { return nullAtom; }
     static FontStyle initialStyle() { return FontStyleNormal; }
@@ -101,7 +105,7 @@ private:
 
     float getComputedSizeFromSpecifiedSize(FontDescription&, float effectiveZoom, float specifiedSize);
 
-    RawPtrWillBeMember<const Document> m_document;
+    Member<const Document> m_document;
     FontDescription m_fontDescription;
 
     enum class PropertySetFlag {
@@ -114,6 +118,7 @@ private:
         Style,
         SizeAdjust,
         Variant,
+        VariantCaps,
         VariantLigatures,
         TextRendering,
         Kerning,
@@ -130,6 +135,6 @@ private:
     unsigned m_flags;
 };
 
-}
+} // namespace blink
 
 #endif

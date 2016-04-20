@@ -12,6 +12,7 @@
 #include <stddef.h>
 
 #include <deque>
+#include <memory>
 
 #include "base/macros.h"
 #include "net/base/linked_hash_map.h"
@@ -22,7 +23,6 @@
 #include "net/quic/quic_protocol.h"
 
 namespace net {
-namespace tools {
 
 class QuicServerSessionVisitor;
 
@@ -99,6 +99,14 @@ class QuicTimeWaitListManager : public QuicBlockedWriterInterface {
   // The number of connections on the time-wait list.
   size_t num_connections() const { return connection_id_map_.size(); }
 
+  // Sends a version negotiation packet for |connection_id| announcing support
+  // for |supported_versions| to |client_address| from |server_address|.
+  virtual void SendVersionNegotiationPacket(
+      QuicConnectionId connection_id,
+      const QuicVersionVector& supported_versions,
+      const IPEndPoint& server_address,
+      const IPEndPoint& client_address);
+
  protected:
   virtual QuicEncryptedPacket* BuildPublicReset(
       const QuicPublicResetPacket& packet);
@@ -150,6 +158,8 @@ class QuicTimeWaitListManager : public QuicBlockedWriterInterface {
                      QuicTime time_added_,
                      bool connection_rejected_statelessly);
 
+    ConnectionIdData(const ConnectionIdData& other);
+
     ~ConnectionIdData();
 
     int num_packets;
@@ -173,7 +183,7 @@ class QuicTimeWaitListManager : public QuicBlockedWriterInterface {
 
   // Alarm to clean up connection_ids that have out lived their duration in
   // time wait state.
-  scoped_ptr<QuicAlarm> connection_id_clean_up_alarm_;
+  std::unique_ptr<QuicAlarm> connection_id_clean_up_alarm_;
 
   // Clock to efficiently measure approximate time.
   const QuicClock* clock_;
@@ -187,7 +197,6 @@ class QuicTimeWaitListManager : public QuicBlockedWriterInterface {
   DISALLOW_COPY_AND_ASSIGN(QuicTimeWaitListManager);
 };
 
-}  // namespace tools
 }  // namespace net
 
 #endif  // NET_TOOLS_QUIC_QUIC_TIME_WAIT_LIST_MANAGER_H_

@@ -75,6 +75,12 @@ class LoginSigninTest : public InProcessBrowserTest {
     command_line->AppendSwitch(switches::kForceLoginManagerInTests);
   }
 
+  void TearDownOnMainThread() override {
+    // Close the login manager, which otherwise holds a KeepAlive that is not
+    // cleared in time by the end of the test.
+    LoginDisplayHost::default_host()->Finalize();
+  }
+
   void SetUpOnMainThread() override {
     LoginDisplayHostImpl::DisableRestrictiveProxyCheckForTest();
 
@@ -161,8 +167,8 @@ class LoginTest : public LoginManagerTest {
 
     StartGaiaAuthOffline();
 
-    UserContext user_context(AccountId::FromUserEmail(kTestUser));
-    user_context.SetGaiaID(kGaiaId);
+    UserContext user_context(
+        AccountId::FromUserEmailGaiaId(kTestUser, kGaiaId));
     user_context.SetKey(Key(kPassword));
     SetExpectedCredentials(user_context);
   }
@@ -228,8 +234,8 @@ IN_PROC_BROWSER_TEST_F(LoginCursorTest, CursorHidden) {
   EXPECT_TRUE(ui_test_utils::SendMouseMoveSync(gfx::Point()));
   EXPECT_TRUE(ash::Shell::GetInstance()->cursor_manager()->IsCursorVisible());
 
-  base::MessageLoop::current()->DeleteSoon(
-      FROM_HERE, LoginDisplayHostImpl::default_host());
+  base::MessageLoop::current()->DeleteSoon(FROM_HERE,
+                                           LoginDisplayHost::default_host());
 
   TestSystemTrayIsVisible();
 }

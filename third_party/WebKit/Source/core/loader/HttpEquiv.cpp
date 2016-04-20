@@ -5,6 +5,7 @@
 #include "core/loader/HttpEquiv.h"
 
 #include "core/dom/Document.h"
+#include "core/dom/ScriptableDocumentParser.h"
 #include "core/dom/StyleEngine.h"
 #include "core/fetch/ClientHintsPreferences.h"
 #include "core/frame/UseCounter.h"
@@ -12,6 +13,8 @@
 #include "core/html/HTMLDocument.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/loader/DocumentLoader.h"
+#include "core/origin_trials/OriginTrialContext.h"
+#include "platform/HTTPNames.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/weborigin/KURL.h"
 
@@ -32,7 +35,7 @@ void HttpEquiv::process(Document& document, const AtomicString& equiv, const Ato
     } else if (equalIgnoringCase(equiv, "x-dns-prefetch-control")) {
         document.parseDNSPrefetchControlHeader(content);
     } else if (equalIgnoringCase(equiv, "x-frame-options")) {
-        processHttpEquivXFrameOptions(document, content);
+        document.addConsoleMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "X-Frame-Options may only be set via an HTTP header sent along with a document. It may not be set inside <meta>."));
     } else if (equalIgnoringCase(equiv, "accept-ch")) {
         processHttpEquivAcceptCH(document, content);
     } else if (equalIgnoringCase(equiv, "content-security-policy") || equalIgnoringCase(equiv, "content-security-policy-report-only")) {
@@ -40,6 +43,11 @@ void HttpEquiv::process(Document& document, const AtomicString& equiv, const Ato
             processHttpEquivContentSecurityPolicy(document, equiv, content);
         else
             document.contentSecurityPolicy()->reportMetaOutsideHead(content);
+    } else if (equalIgnoringCase(equiv, "suborigin")) {
+        document.addConsoleMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Error with Suborigin header: Suborigin header with value '" + content + "' was delivered via a <meta> element and not an HTTP header, which is disallowed. The Suborigin has been ignored."));
+    } else if (equalIgnoringCase(equiv, HTTPNames::Origin_Trial)) {
+        if (inDocumentHeadElement)
+            OriginTrialContext::from(&document)->addToken(content);
     }
 }
 
@@ -66,15 +74,7 @@ void HttpEquiv::processHttpEquivAcceptCH(Document& document, const AtomicString&
 
 void HttpEquiv::processHttpEquivDefaultStyle(Document& document, const AtomicString& content)
 {
-    // The preferred style set has been overridden as per section
-    // 14.3.2 of the HTML4.0 specification. We need to update the
-    // sheet used variable and then update our style selector.
-    // For more info, see the test at:
-    // http://www.hixie.ch/tests/evil/css/import/main/preferred.html
-    // -dwh
-    document.styleEngine().setSelectedStylesheetSetName(content);
-    document.styleEngine().setPreferredStylesheetSetName(content);
-    document.styleResolverChanged();
+    document.styleEngine().setHttpDefaultStyle(content);
 }
 
 void HttpEquiv::processHttpEquivRefresh(Document& document, const AtomicString& content)
@@ -92,28 +92,4 @@ void HttpEquiv::processHttpEquivSetCookie(Document& document, const AtomicString
     toHTMLDocument(document).setCookie(content, IGNORE_EXCEPTION);
 }
 
-void HttpEquiv::processHttpEquivXFrameOptions(Document& document, const AtomicString& content)
-{
-    LocalFrame* frame = document.frame();
-    if (!frame)
-        return;
-
-    unsigned long requestIdentifier = document.loader()->mainResourceIdentifier();
-    if (!frame->loader().shouldInterruptLoadForXFrameOptions(content, document.url(), requestIdentifier))
-        return;
-
-    RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel,
-        "Refused to display '" + document.url().elidedString() + "' in a frame because it set 'X-Frame-Options' to '" + content + "'.");
-    consoleMessage->setRequestIdentifier(requestIdentifier);
-    document.addConsoleMessage(consoleMessage.release());
-
-    frame->loader().stopAllLoaders();
-    // Stopping the loader isn't enough, as we're already parsing the document; to honor the header's
-    // intent, we must navigate away from the possibly partially-rendered document to a location that
-    // doesn't inherit the parent's SecurityOrigin.
-    // TODO(dglazkov): This should probably check document lifecycle instead.
-    if (document.frame())
-        frame->navigate(document, SecurityOrigin::urlWithUniqueSecurityOrigin(), true, UserGestureStatus::None);
-}
-
-}
+} // namespace blink

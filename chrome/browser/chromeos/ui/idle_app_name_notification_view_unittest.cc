@@ -22,11 +22,7 @@ const char kTestAppName[] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 class IdleAppNameNotificationViewTest : public BrowserWithTestWindowTest {
  public:
   IdleAppNameNotificationViewTest()
-      : BrowserWithTestWindowTest(
-            Browser::TYPE_TABBED,
-            chrome::HOST_DESKTOP_TYPE_ASH,
-            false) {
-  }
+      : BrowserWithTestWindowTest(Browser::TYPE_TABBED, false) {}
 
   ~IdleAppNameNotificationViewTest() override {}
 
@@ -90,14 +86,14 @@ class IdleAppNameNotificationViewTest : public BrowserWithTestWindowTest {
 // message).
 TEST_F(IdleAppNameNotificationViewTest, CheckTooEarlyDestruction) {
   // Create a message which is visible for 10ms and fades in/out for 5ms.
-  scoped_ptr<chromeos::IdleAppNameNotificationView> message(
+  std::unique_ptr<chromeos::IdleAppNameNotificationView> message(
       new chromeos::IdleAppNameNotificationView(10, 5, correct_extension()));
 }
 
 // Check that the message gets created and it destroys itself after time.
 TEST_F(IdleAppNameNotificationViewTest, CheckSelfDestruction) {
   // Create a message which is visible for 10ms and fades in/out for 5ms.
-  scoped_ptr<chromeos::IdleAppNameNotificationView> message(
+  std::unique_ptr<chromeos::IdleAppNameNotificationView> message(
       new chromeos::IdleAppNameNotificationView(10, 5, correct_extension()));
   EXPECT_TRUE(message->IsVisible());
 
@@ -112,7 +108,7 @@ TEST_F(IdleAppNameNotificationViewTest, CheckSelfDestruction) {
 // Check that the shown text for a correct application is correct.
 TEST_F(IdleAppNameNotificationViewTest, CheckCorrectApp) {
   // Create a message which is visible for 10ms and fades in/out for 5ms.
-  scoped_ptr<chromeos::IdleAppNameNotificationView> message(
+  std::unique_ptr<chromeos::IdleAppNameNotificationView> message(
       new chromeos::IdleAppNameNotificationView(10, 5, correct_extension()));
   base::string16 text = message->GetShownTextForTest();
   // Check that the string is the application name.
@@ -123,7 +119,7 @@ TEST_F(IdleAppNameNotificationViewTest, CheckCorrectApp) {
 // Check that an invalid app gets shown accordingly.
 TEST_F(IdleAppNameNotificationViewTest, CheckInvalidApp) {
   // Create a message which is visible for 10ms and fades in/out for 5ms.
-  scoped_ptr<chromeos::IdleAppNameNotificationView> message(
+  std::unique_ptr<chromeos::IdleAppNameNotificationView> message(
       new chromeos::IdleAppNameNotificationView(10, 5, NULL));
   base::string16 text = message->GetShownTextForTest();
   base::string16 error = l10n_util::GetStringUTF16(

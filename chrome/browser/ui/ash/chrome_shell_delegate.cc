@@ -20,25 +20,30 @@
 #include "chrome/browser/ui/ash/chrome_keyboard_ui.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/launcher_context_menu.h"
+#include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/session_util.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/grit/chromium_strings.h"
 #include "grit/theme_resources.h"
+#include "ui/app_list/presenter/app_list_presenter.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/display/display_configuration_observer.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #endif
@@ -50,18 +55,12 @@ const char kKeyboardShortcutHelpPageUrl[] =
 
 }  // namespace
 
-// static
-ChromeShellDelegate* ChromeShellDelegate::instance_ = NULL;
-
 ChromeShellDelegate::ChromeShellDelegate()
     : shelf_delegate_(NULL) {
-  instance_ = this;
   PlatformInit();
 }
 
 ChromeShellDelegate::~ChromeShellDelegate() {
-  if (instance_ == this)
-    instance_ = NULL;
 }
 
 bool ChromeShellDelegate::IsMultiProfilesEnabled() const {
@@ -126,10 +125,24 @@ void ChromeShellDelegate::Exit() {
   chrome::AttemptUserExit();
 }
 
-app_list::AppListViewDelegate* ChromeShellDelegate::GetAppListViewDelegate() {
+void ChromeShellDelegate::OpenUrl(const GURL& url) {
+  if (!url.is_valid())
+    return;
+
+  chrome::ScopedTabbedBrowserDisplayer displayer(
+      ProfileManager::GetActiveUserProfile());
+  chrome::AddSelectedTabWithURL(displayer.browser(), url,
+                                ui::PAGE_TRANSITION_LINK);
+
+  // Since the ScopedTabbedBrowserDisplayer does not guarantee that the
+  // browser will be shown on the active desktop, we ensure the visibility.
+  multi_user_util::MoveWindowToCurrentDesktop(
+      displayer.browser()->window()->GetNativeWindow());
+}
+
+app_list::AppListPresenter* ChromeShellDelegate::GetAppListPresenter() {
   DCHECK(ash::Shell::HasInstance());
-  return AppListServiceAsh::GetInstance()->GetViewDelegate(
-      Profile::FromBrowserContext(GetActiveBrowserContext()));
+  return AppListServiceAsh::GetInstance()->GetAppListPresenter();
 }
 
 ash::ShelfDelegate* ChromeShellDelegate::CreateShelfDelegate(
@@ -142,18 +155,14 @@ ash::ShelfDelegate* ChromeShellDelegate::CreateShelfDelegate(
 }
 
 ui::MenuModel* ChromeShellDelegate::CreateContextMenu(
-    aura::Window* root,
-    ash::ShelfItemDelegate* item_delegate,
-    ash::ShelfItem* item) {
+    ash::Shelf* shelf,
+    const ash::ShelfItem* item) {
   DCHECK(shelf_delegate_);
   // Don't show context menu for exclusive app runtime mode.
   if (chrome::IsRunningInAppMode())
-    return NULL;
+    return nullptr;
 
-  if (item_delegate && item)
-    return new LauncherContextMenu(shelf_delegate_, item_delegate, item, root);
-
-  return new LauncherContextMenu(shelf_delegate_, root);
+  return LauncherContextMenu::Create(shelf_delegate_, item, shelf);
 }
 
 ash::GPUSupport* ChromeShellDelegate::CreateGPUSupport() {
@@ -167,12 +176,10 @@ base::string16 ChromeShellDelegate::GetProductName() const {
 
 void ChromeShellDelegate::OpenKeyboardShortcutHelpPage() const {
   Profile* profile = ProfileManager::GetActiveUserProfile();
-  Browser* browser =
-      chrome::FindTabbedBrowser(profile, false, chrome::HOST_DESKTOP_TYPE_ASH);
+  Browser* browser = chrome::FindTabbedBrowser(profile, false);
 
   if (!browser) {
-    browser = new Browser(
-        Browser::CreateParams(profile, chrome::HOST_DESKTOP_TYPE_ASH));
+    browser = new Browser(Browser::CreateParams(profile));
     browser->window()->Show();
   }
 

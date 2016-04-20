@@ -6,7 +6,8 @@
 
 #include <stddef.h>
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "build/build_config.h"
 #include "content/common/text_input_client_messages.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
@@ -54,7 +55,7 @@ void TextInputClientObserver::OnStringAtPoint(gfx::Point point) {
   NSAttributedString* string = blink::WebSubstringUtil::attributedWordAtPoint(
       webview(), point, baselinePoint);
 
-  scoped_ptr<const mac::AttributedStringCoder::EncodedString> encoded(
+  std::unique_ptr<const mac::AttributedStringCoder::EncodedString> encoded(
       mac::AttributedStringCoder::Encode(string));
   Send(new TextInputClientReplyMsg_GotStringAtPoint(
       routing_id(), *encoded.get(), baselinePoint));
@@ -65,7 +66,8 @@ void TextInputClientObserver::OnStringAtPoint(gfx::Point point) {
 
 void TextInputClientObserver::OnCharacterIndexForPoint(gfx::Point point) {
   blink::WebPoint web_point(point);
-  size_t index = webview()->focusedFrame()->characterIndexForPoint(web_point);
+  uint32_t index = static_cast<uint32_t>(
+      webview()->focusedFrame()->characterIndexForPoint(web_point));
   Send(new TextInputClientReplyMsg_GotCharacterIndexForPoint(routing_id(),
       index));
 }
@@ -98,7 +100,7 @@ void TextInputClientObserver::OnStringForRange(gfx::Range range) {
     string = blink::WebSubstringUtil::attributedSubstringInRange(
         frame, range.start(), range.length(), &baselinePoint);
   }
-  scoped_ptr<const mac::AttributedStringCoder::EncodedString> encoded(
+  std::unique_ptr<const mac::AttributedStringCoder::EncodedString> encoded(
       mac::AttributedStringCoder::Encode(string));
   Send(new TextInputClientReplyMsg_GotStringForRange(routing_id(),
       *encoded.get(), baselinePoint));

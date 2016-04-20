@@ -6,10 +6,10 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 #include "build/build_config.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -60,6 +60,13 @@ class Shell : public WebContentsDelegate,
   void LoadDataWithBaseURL(const GURL& url,
                            const std::string& data,
                            const GURL& base_url);
+
+#if defined(OS_ANDROID)
+  // Android-only path to allow loading long data strings.
+  void LoadDataAsStringWithBaseURL(const GURL& url,
+                                   const std::string& data,
+                                   const GURL& base_url);
+#endif
   void GoBackOrForward(int offset);
   void Reload();
   void Stop();
@@ -135,10 +142,9 @@ class Shell : public WebContentsDelegate,
   void DidNavigateMainFramePostCommit(WebContents* web_contents) override;
   JavaScriptDialogManager* GetJavaScriptDialogManager(
       WebContents* source) override;
-  scoped_ptr<BluetoothChooser> RunBluetoothChooser(
-      WebContents* web_contents,
-      const BluetoothChooser::EventHandler& event_handler,
-      const GURL& origin) override;
+  std::unique_ptr<BluetoothChooser> RunBluetoothChooser(
+      RenderFrameHost* frame,
+      const BluetoothChooser::EventHandler& event_handler) override;
 #if defined(OS_MACOSX)
   void HandleKeyboardEvent(WebContents* source,
                            const NativeWebKeyboardEvent& event) override;
@@ -205,21 +211,28 @@ class Shell : public WebContentsDelegate,
       const WebContents* web_contents) const;
 #endif
 
+  // Helper method for the two public LoadData methods.
+  void LoadDataWithBaseURLInternal(const GURL& url,
+                                   const std::string& data,
+                                   const GURL& base_url,
+                                   bool load_as_string);
+
   gfx::NativeView GetContentView();
 
   void ToggleFullscreenModeForTab(WebContents* web_contents,
                                   bool enter_fullscreen);
   // WebContentsObserver
+  void RenderViewCreated(RenderViewHost* render_view_host) override;
   void TitleWasSet(NavigationEntry* entry, bool explicit_set) override;
 
   void InnerShowDevTools();
   void OnDevToolsWebContentsDestroyed();
 
-  scoped_ptr<ShellJavaScriptDialogManager> dialog_manager_;
+  std::unique_ptr<ShellJavaScriptDialogManager> dialog_manager_;
 
-  scoped_ptr<WebContents> web_contents_;
+  std::unique_ptr<WebContents> web_contents_;
 
-  scoped_ptr<DevToolsWebContentsObserver> devtools_observer_;
+  std::unique_ptr<DevToolsWebContentsObserver> devtools_observer_;
   ShellDevToolsFrontend* devtools_frontend_;
 
   bool is_fullscreen_;

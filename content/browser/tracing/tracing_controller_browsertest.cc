@@ -59,7 +59,7 @@ class TracingControllerTestEndpoint
     : public TracingController::TraceDataEndpoint {
  public:
   TracingControllerTestEndpoint(
-      base::Callback<void(scoped_ptr<const base::DictionaryValue>,
+      base::Callback<void(std::unique_ptr<const base::DictionaryValue>,
                           base::RefCountedString*)> done_callback)
       : done_callback_(done_callback) {}
 
@@ -69,7 +69,7 @@ class TracingControllerTestEndpoint
   }
 
   void ReceiveTraceFinalContents(
-      scoped_ptr<const base::DictionaryValue> metadata,
+      std::unique_ptr<const base::DictionaryValue> metadata,
       const std::string& contents) override {
     EXPECT_EQ(trace_, contents);
 
@@ -80,15 +80,16 @@ class TracingControllerTestEndpoint
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(done_callback_, base::Passed(std::move(metadata)),
-                   chunk_ptr));
+                   base::RetainedRef(chunk_ptr)));
   }
 
  protected:
   ~TracingControllerTestEndpoint() override {}
 
   std::string trace_;
-  base::Callback<void(scoped_ptr<const base::DictionaryValue>,
-                      base::RefCountedString*)> done_callback_;
+  base::Callback<void(std::unique_ptr<const base::DictionaryValue>,
+                      base::RefCountedString*)>
+      done_callback_;
 };
 
 class TracingControllerTest : public ContentBrowserTest {
@@ -99,9 +100,6 @@ class TracingControllerTest : public ContentBrowserTest {
     get_categories_done_callback_count_ = 0;
     enable_recording_done_callback_count_ = 0;
     disable_recording_done_callback_count_ = 0;
-    enable_monitoring_done_callback_count_ = 0;
-    disable_monitoring_done_callback_count_ = 0;
-    capture_monitoring_snapshot_done_callback_count_ = 0;
     ContentBrowserTest::SetUp();
   }
 
@@ -125,7 +123,7 @@ class TracingControllerTest : public ContentBrowserTest {
 
   void StopTracingStringDoneCallbackTest(
       base::Closure quit_callback,
-      scoped_ptr<const base::DictionaryValue> metadata,
+      std::unique_ptr<const base::DictionaryValue> metadata,
       base::RefCountedString* data) {
     disable_recording_done_callback_count_++;
     last_metadata_.reset(metadata.release());
@@ -145,28 +143,7 @@ class TracingControllerTest : public ContentBrowserTest {
     last_actual_recording_file_path_ = file_path;
   }
 
-  void StartMonitoringDoneCallbackTest(base::Closure quit_callback) {
-    enable_monitoring_done_callback_count_++;
-    quit_callback.Run();
-  }
-
-  void StopMonitoringDoneCallbackTest(base::Closure quit_callback) {
-    disable_monitoring_done_callback_count_++;
-    quit_callback.Run();
-  }
-
-  void CaptureMonitoringSnapshotDoneCallbackTest(
-      base::Closure quit_callback, const base::FilePath& file_path) {
-    capture_monitoring_snapshot_done_callback_count_++;
-    EXPECT_TRUE(PathExists(file_path));
-    int64_t file_size;
-    base::GetFileSize(file_path, &file_size);
-    EXPECT_TRUE(file_size > 0);
-    quit_callback.Run();
-    last_actual_monitoring_file_path_ = file_path;
-  }
-
-  int get_categories_done_callback_count() const {
+    int get_categories_done_callback_count() const {
     return get_categories_done_callback_count_;
   }
 
@@ -178,24 +155,8 @@ class TracingControllerTest : public ContentBrowserTest {
     return disable_recording_done_callback_count_;
   }
 
-  int enable_monitoring_done_callback_count() const {
-    return enable_monitoring_done_callback_count_;
-  }
-
-  int disable_monitoring_done_callback_count() const {
-    return disable_monitoring_done_callback_count_;
-  }
-
-  int capture_monitoring_snapshot_done_callback_count() const {
-    return capture_monitoring_snapshot_done_callback_count_;
-  }
-
   base::FilePath last_actual_recording_file_path() const {
     return last_actual_recording_file_path_;
-  }
-
-  base::FilePath last_actual_monitoring_file_path() const {
-    return last_actual_monitoring_file_path_;
   }
 
   const base::DictionaryValue* last_metadata() const {
@@ -226,11 +187,11 @@ class TracingControllerTest : public ContentBrowserTest {
 
     {
       base::RunLoop run_loop;
-      base::Callback<void(scoped_ptr<const base::DictionaryValue>,
-                          base::RefCountedString*)> callback = base::Bind(
-          &TracingControllerTest::StopTracingStringDoneCallbackTest,
-          base::Unretained(this),
-          run_loop.QuitClosure());
+      base::Callback<void(std::unique_ptr<const base::DictionaryValue>,
+                          base::RefCountedString*)>
+          callback = base::Bind(
+              &TracingControllerTest::StopTracingStringDoneCallbackTest,
+              base::Unretained(this), run_loop.QuitClosure());
       bool result = controller->StopTracing(
           TracingController::CreateStringSink(callback));
       ASSERT_TRUE(result);
@@ -264,11 +225,11 @@ class TracingControllerTest : public ContentBrowserTest {
 
     {
       base::RunLoop run_loop;
-      base::Callback<void(scoped_ptr<const base::DictionaryValue>,
-                          base::RefCountedString*)> callback = base::Bind(
-          &TracingControllerTest::StopTracingStringDoneCallbackTest,
-          base::Unretained(this),
-          run_loop.QuitClosure());
+      base::Callback<void(std::unique_ptr<const base::DictionaryValue>,
+                          base::RefCountedString*)>
+          callback = base::Bind(
+              &TracingControllerTest::StopTracingStringDoneCallbackTest,
+              base::Unretained(this), run_loop.QuitClosure());
 
       scoped_refptr<TracingController::TraceDataSink> trace_data_sink =
           TracingController::CreateStringSink(callback);
@@ -304,10 +265,11 @@ class TracingControllerTest : public ContentBrowserTest {
 
     {
       base::RunLoop run_loop;
-      base::Callback<void(scoped_ptr<const base::DictionaryValue>,
-                          base::RefCountedString*)> callback = base::Bind(
-          &TracingControllerTest::StopTracingStringDoneCallbackTest,
-          base::Unretained(this), run_loop.QuitClosure());
+      base::Callback<void(std::unique_ptr<const base::DictionaryValue>,
+                          base::RefCountedString*)>
+          callback = base::Bind(
+              &TracingControllerTest::StopTracingStringDoneCallbackTest,
+              base::Unretained(this), run_loop.QuitClosure());
       bool result = controller->StopTracing(
           TracingController::CreateCompressedStringSink(
               new TracingControllerTestEndpoint(callback)));
@@ -382,97 +344,12 @@ class TracingControllerTest : public ContentBrowserTest {
     }
   }
 
-  void TestEnableCaptureAndStopMonitoring(
-      const base::FilePath& result_file_path) {
-    Navigate(shell());
-
-    TracingController* controller = TracingController::GetInstance();
-
-    {
-      bool is_monitoring;
-      TraceConfig trace_config("", "");
-      controller->GetMonitoringStatus(
-          &is_monitoring, &trace_config);
-      EXPECT_FALSE(is_monitoring);
-      EXPECT_EQ("-*Debug,-*Test", trace_config.ToCategoryFilterString());
-      EXPECT_FALSE(trace_config.GetTraceRecordMode() == RECORD_CONTINUOUSLY);
-      EXPECT_FALSE(trace_config.IsSamplingEnabled());
-      EXPECT_FALSE(trace_config.IsSystraceEnabled());
-    }
-
-    {
-      base::RunLoop run_loop;
-      TracingController::StartMonitoringDoneCallback callback =
-          base::Bind(&TracingControllerTest::StartMonitoringDoneCallbackTest,
-                     base::Unretained(this),
-                     run_loop.QuitClosure());
-
-      TraceConfig trace_config("*", "");
-      trace_config.EnableSampling();
-      bool result = controller->StartMonitoring(trace_config, callback);
-      ASSERT_TRUE(result);
-      run_loop.Run();
-      EXPECT_EQ(enable_monitoring_done_callback_count(), 1);
-    }
-
-    {
-      bool is_monitoring;
-      TraceConfig trace_config("", "");
-      controller->GetMonitoringStatus(&is_monitoring, &trace_config);
-      EXPECT_TRUE(is_monitoring);
-      EXPECT_EQ("*", trace_config.ToCategoryFilterString());
-      EXPECT_FALSE(trace_config.GetTraceRecordMode() == RECORD_CONTINUOUSLY);
-      EXPECT_TRUE(trace_config.IsSamplingEnabled());
-      EXPECT_FALSE(trace_config.IsSystraceEnabled());
-    }
-
-    {
-      base::RunLoop run_loop;
-      base::Closure callback = base::Bind(
-          &TracingControllerTest::CaptureMonitoringSnapshotDoneCallbackTest,
-          base::Unretained(this),
-          run_loop.QuitClosure(),
-          result_file_path);
-      ASSERT_TRUE(controller->CaptureMonitoringSnapshot(
-          TracingController::CreateFileSink(result_file_path, callback)));
-      run_loop.Run();
-      EXPECT_EQ(capture_monitoring_snapshot_done_callback_count(), 1);
-    }
-
-    {
-      base::RunLoop run_loop;
-      TracingController::StopMonitoringDoneCallback callback =
-          base::Bind(&TracingControllerTest::StopMonitoringDoneCallbackTest,
-                     base::Unretained(this),
-                     run_loop.QuitClosure());
-      bool result = controller->StopMonitoring(callback);
-      ASSERT_TRUE(result);
-      run_loop.Run();
-      EXPECT_EQ(disable_monitoring_done_callback_count(), 1);
-    }
-
-    {
-      bool is_monitoring;
-      TraceConfig trace_config("", "");
-      controller->GetMonitoringStatus(&is_monitoring, &trace_config);
-      EXPECT_FALSE(is_monitoring);
-      EXPECT_EQ("", trace_config.ToCategoryFilterString());
-      EXPECT_FALSE(trace_config.GetTraceRecordMode() == RECORD_CONTINUOUSLY);
-      EXPECT_FALSE(trace_config.IsSamplingEnabled());
-      EXPECT_FALSE(trace_config.IsSystraceEnabled());
-    }
-  }
-
  private:
   int get_categories_done_callback_count_;
   int enable_recording_done_callback_count_;
   int disable_recording_done_callback_count_;
-  int enable_monitoring_done_callback_count_;
-  int disable_monitoring_done_callback_count_;
-  int capture_monitoring_snapshot_done_callback_count_;
   base::FilePath last_actual_recording_file_path_;
-  base::FilePath last_actual_monitoring_file_path_;
-  scoped_ptr<const base::DictionaryValue> last_metadata_;
+  std::unique_ptr<const base::DictionaryValue> last_metadata_;
   std::string last_data_;
 };
 
@@ -582,47 +459,6 @@ IN_PROC_BROWSER_TEST_F(TracingControllerTest,
       TraceConfig(),
       TracingController::StartTracingDoneCallback()));
   EXPECT_TRUE(controller->StopTracing(NULL));
-  base::RunLoop().RunUntilIdle();
-}
-
-IN_PROC_BROWSER_TEST_F(TracingControllerTest,
-                       EnableCaptureAndStopMonitoring) {
-  base::FilePath file_path;
-  base::CreateTemporaryFile(&file_path);
-  TestEnableCaptureAndStopMonitoring(file_path);
-}
-
-IN_PROC_BROWSER_TEST_F(TracingControllerTest,
-                       EnableCaptureAndStopMonitoringWithFilePath) {
-  base::FilePath file_path;
-  base::CreateTemporaryFile(&file_path);
-  TestEnableCaptureAndStopMonitoring(file_path);
-  EXPECT_EQ(file_path.value(), last_actual_monitoring_file_path().value());
-}
-
-// See http://crbug.com/392446
-#if defined(OS_ANDROID)
-#define MAYBE_EnableCaptureAndStopMonitoringWithEmptyFileAndNullCallback \
-    DISABLED_EnableCaptureAndStopMonitoringWithEmptyFileAndNullCallback
-#else
-#define MAYBE_EnableCaptureAndStopMonitoringWithEmptyFileAndNullCallback \
-    EnableCaptureAndStopMonitoringWithEmptyFileAndNullCallback
-#endif
-IN_PROC_BROWSER_TEST_F(
-    TracingControllerTest,
-    MAYBE_EnableCaptureAndStopMonitoringWithEmptyFileAndNullCallback) {
-  Navigate(shell());
-
-  TracingController* controller = TracingController::GetInstance();
-  TraceConfig trace_config("*", "");
-  trace_config.EnableSampling();
-  EXPECT_TRUE(controller->StartMonitoring(
-      trace_config,
-      TracingController::StartMonitoringDoneCallback()));
-  controller->CaptureMonitoringSnapshot(NULL);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(controller->StopMonitoring(
-      TracingController::StopMonitoringDoneCallback()));
   base::RunLoop().RunUntilIdle();
 }
 

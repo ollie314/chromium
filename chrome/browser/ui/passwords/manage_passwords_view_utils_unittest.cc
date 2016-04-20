@@ -62,11 +62,17 @@ const struct {
     {"https://another.org", "https://example.com:8001/login#form?value=3", true,
      PasswordTittleType::SAVE_PASSWORD, "https://example.com:8001", 12, 29},
 
-    // Update bubble.
+    // Update bubble, same domains.
     {"http://example.com/landing", "http://example.com/login#form?value=3",
      false, PasswordTittleType::UPDATE_PASSWORD, "this site", 0, 0},
     {"http://example.com/landing", "http://example.com/login#form?value=3",
      true, PasswordTittleType::UPDATE_PASSWORD, "this site", 12, 29},
+
+    // Update bubble, different domains.
+    {"https://another.org", "http://example.com/login#form?value=3", false,
+     PasswordTittleType::UPDATE_PASSWORD, "http://example.com", 0, 0},
+    {"https://another.org", "http://example.com/login#form?value=3", true,
+     PasswordTittleType::UPDATE_PASSWORD, "http://example.com", 12, 29},
 
     // Same domains, federated credential.
     {"http://example.com/landing", "http://example.com/login#form?value=3",
@@ -139,14 +145,21 @@ TEST(ManagePasswordsViewUtilTest, GetManagePasswordsDialogTitleText) {
   }
 }
 
-TEST(ManagePasswordsViewUtilTest,
-     GetAccountChooserDialogTitleTextAndLinkRangeSmartLockUsers) {
+// The parameter is |many_accounts| passed to
+// GetAccountChooserDialogTitleTextAndLinkRange
+class AccountChooserDialogTitleTest : public ::testing::TestWithParam<bool> {
+};
+
+TEST_P(AccountChooserDialogTitleTest,
+       GetAccountChooserDialogTitleTextAndLinkRangeSmartLockUsers) {
   base::string16 branding =
       l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SMART_LOCK);
   base::string16 title;
   gfx::Range title_link_range;
   GetAccountChooserDialogTitleTextAndLinkRange(
-      true /* is_smartlock_branding_enabled */, &title, &title_link_range);
+      true /* is_smartlock_branding_enabled */,
+      GetParam(),
+      &title, &title_link_range);
 
   // Check that branding string is a part of a title.
   EXPECT_LT(title.find(branding, 0), title.size());
@@ -156,15 +169,20 @@ TEST(ManagePasswordsViewUtilTest,
   EXPECT_NE(0U, title_link_range.end());
 }
 
-TEST(ManagePasswordsViewUtilTest,
-     GetAccountChooserDialogTitleTextAndLinkRangeNonSmartLockUsers) {
+TEST_P(AccountChooserDialogTitleTest,
+       GetAccountChooserDialogTitleTextAndLinkRangeNonSmartLockUsers) {
   base::string16 branding =
       l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SMART_LOCK);
   base::string16 title;
   gfx::Range title_link_range;
   GetAccountChooserDialogTitleTextAndLinkRange(
-      false /* is_smartlock_branding_enabled */, &title, &title_link_range);
+      false /* is_smartlock_branding_enabled */,
+      GetParam(),
+      &title, &title_link_range);
   EXPECT_GE(title.find(branding, 0), title.size());
   EXPECT_EQ(0U, title_link_range.start());
   EXPECT_EQ(0U, title_link_range.end());
 }
+
+INSTANTIATE_TEST_CASE_P(, AccountChooserDialogTitleTest,
+                        ::testing::Bool());

@@ -25,6 +25,8 @@ const char kJingleNamespace[] = "urn:xmpp:jingle:1";
 // Namespace for transport messages when using standard ICE.
 const char kIceTransportNamespace[] = "google:remoting:ice";
 
+const char kWebrtcTransportNamespace[] = "google:remoting:webrtc";
+
 const char kEmptyNamespace[] = "";
 const char kXmlNamespace[] = "http://www.w3.org/XML/1998/namespace";
 
@@ -283,8 +285,8 @@ bool JingleMessage::ParseXml(const buzz::XmlElement* stanza,
   return true;
 }
 
-scoped_ptr<buzz::XmlElement> JingleMessage::ToXml() const {
-  scoped_ptr<XmlElement> root(
+std::unique_ptr<buzz::XmlElement> JingleMessage::ToXml() const {
+  std::unique_ptr<XmlElement> root(
       new XmlElement(QName("jabber:client", "iq"), true));
 
   DCHECK(!to.empty());
@@ -332,11 +334,15 @@ scoped_ptr<buzz::XmlElement> JingleMessage::ToXml() const {
                          ContentDescription::kChromotingContentName);
     content_tag->AddAttr(QName(kEmptyNamespace, "creator"), "initiator");
 
-    if (description.get())
+    if (description)
       content_tag->AddElement(description->ToXml());
 
-    if (transport_info)
+    if (transport_info) {
       content_tag->AddElement(new XmlElement(*transport_info));
+    } else if (description && description->config()->webrtc_supported()) {
+      content_tag->AddElement(
+          new XmlElement(QName(kWebrtcTransportNamespace, "transport")));
+    }
   }
 
   return root;
@@ -361,9 +367,9 @@ JingleMessageReply::JingleMessageReply(ErrorType error,
 
 JingleMessageReply::~JingleMessageReply() { }
 
-scoped_ptr<buzz::XmlElement> JingleMessageReply::ToXml(
+std::unique_ptr<buzz::XmlElement> JingleMessageReply::ToXml(
     const buzz::XmlElement* request_stanza) const {
-  scoped_ptr<XmlElement> iq(
+  std::unique_ptr<XmlElement> iq(
       new XmlElement(QName(kJabberNamespace, "iq"), true));
   iq->SetAttr(QName(kEmptyNamespace, "to"),
               request_stanza->Attr(QName(kEmptyNamespace, "from")));
@@ -476,8 +482,8 @@ bool IceTransportInfo::ParseXml(
   return true;
 }
 
-scoped_ptr<buzz::XmlElement> IceTransportInfo::ToXml() const {
-  scoped_ptr<buzz::XmlElement> result(
+std::unique_ptr<buzz::XmlElement> IceTransportInfo::ToXml() const {
+  std::unique_ptr<buzz::XmlElement> result(
       new XmlElement(QName(kIceTransportNamespace, "transport"), true));
   for (const IceCredentials& credentials : ice_credentials) {
     result->AddElement(FormatIceCredentials(credentials));

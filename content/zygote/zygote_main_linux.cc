@@ -6,6 +6,7 @@
 
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <openssl/crypto.h>
 #include <openssl/rand.h>
 #include <pthread.h>
 #include <signal.h>
@@ -15,6 +16,8 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -46,8 +49,10 @@
 #include "sandbox/linux/services/namespace_sandbox.h"
 #include "sandbox/linux/services/thread_helpers.h"
 #include "sandbox/linux/suid/client/setuid_sandbox_client.h"
+#include "third_party/WebKit/public/web/linux/WebFontRendering.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "third_party/skia/include/ports/SkFontConfigInterface.h"
+#include "third_party/skia/include/ports/SkFontMgr_android.h"
 
 #if defined(OS_LINUX)
 #include <sys/prctl.h>
@@ -84,7 +89,7 @@ void RunTwoClosures(const base::Closure* first, const base::Closure* second) {
 
 }  // namespace
 
-// See http://code.google.com/p/chromium/wiki/LinuxZygote
+// See https://chromium.googlesource.com/chromium/src/+/master/docs/linux_zygote.md
 
 static void ProxyLocaltimeCallToBrowser(time_t input, struct tm* output,
                                         char* timezone_out,
@@ -148,7 +153,7 @@ static bool g_am_zygote_or_renderer = false;
 //
 // Our replacement functions can check this global and either proxy
 // the call to the browser over the sandbox IPC
-// (http://code.google.com/p/chromium/wiki/LinuxSandboxIPC) or they can use
+// (https://chromium.googlesource.com/chromium/src/+/master/docs/linux_sandbox_ipc.md) or they can use
 // dlsym with RTLD_NEXT to resolve the symbol, ignoring any symbols in the
 // current module.
 //
@@ -331,7 +336,13 @@ static void ZygotePreSandboxInit() {
   // Olson timezone ID by accessing the zoneinfo files on disk. After
   // TimeZone::createDefault is called once here, the timezone ID is
   // cached and there's no more need to access the file system.
-  scoped_ptr<icu::TimeZone> zone(icu::TimeZone::createDefault());
+  std::unique_ptr<icu::TimeZone> zone(icu::TimeZone::createDefault());
+
+#if defined(ARCH_CPU_ARM_FAMILY)
+  // On ARM, BoringSSL requires access to /proc/cpuinfo to determine processor
+  // features. Query this before entering the sandbox.
+  CRYPTO_library_init();
+#endif
 
   // Pass BoringSSL a copy of the /dev/urandom file descriptor so RAND_bytes
   // will work inside the sandbox.
@@ -344,8 +355,32 @@ static void ZygotePreSandboxInit() {
 #if defined(ENABLE_WEBRTC)
   InitializeWebRtcModule();
 #endif
+
   SkFontConfigInterface::SetGlobal(
       new FontConfigIPC(GetSandboxFD()))->unref();
+
+  // Set the android SkFontMgr for blink. We need to ensure this is done
+  // before the sandbox is initialized to allow the font manager to access
+  // font configuration files on disk.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAndroidFontsPath)) {
+    std::string android_fonts_dir =
+        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+            switches::kAndroidFontsPath);
+
+    if (android_fonts_dir.size() > 0 && android_fonts_dir.back() != '/')
+      android_fonts_dir += '/';
+    std::string font_config = android_fonts_dir + "fonts.xml";
+    SkFontMgr_Android_CustomFonts custom;
+    custom.fSystemFontUse =
+        SkFontMgr_Android_CustomFonts::SystemFontUse::kOnlyCustom;
+    custom.fBasePath = android_fonts_dir.c_str();
+    custom.fFontsXml = font_config.c_str();
+    custom.fFallbackFontsXml = nullptr;
+    custom.fIsolated = true;
+
+    blink::WebFontRendering::setSkiaFontManager(SkFontMgr_New_Android(&custom));
+  }
 }
 
 static bool CreateInitProcessReaper(base::Closure* post_fork_parent_callback) {
@@ -421,7 +456,7 @@ static int g_sanitizer_message_length = 1 * 1024 * 1024;
 // A helper process which collects code coverage data from the renderers over a
 // socket and dumps it to a file. See http://crbug.com/336212 for discussion.
 static void SanitizerCoverageHelper(int socket_fd, int file_fd) {
-  scoped_ptr<char[]> buffer(new char[g_sanitizer_message_length]);
+  std::unique_ptr<char[]> buffer(new char[g_sanitizer_message_length]);
   while (true) {
     ssize_t received_size = HANDLE_EINTR(
         recv(socket_fd, buffer.get(), g_sanitizer_message_length, 0));

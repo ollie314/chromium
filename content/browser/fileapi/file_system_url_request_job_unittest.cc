@@ -27,7 +27,6 @@
 #include "net/base/load_flags.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_byte_range.h"
 #include "net/http/http_request_headers.h"
@@ -257,11 +256,11 @@ class FileSystemURLRequestJobTest : public testing::Test {
   scoped_refptr<storage::FileSystemContext> file_system_context_;
 
   net::URLRequestContext empty_context_;
-  scoped_ptr<FileSystemURLRequestJobFactory> job_factory_;
+  std::unique_ptr<FileSystemURLRequestJobFactory> job_factory_;
 
   // NOTE: order matters, request must die before delegate
-  scoped_ptr<net::TestDelegate> delegate_;
-  scoped_ptr<net::URLRequest> request_;
+  std::unique_ptr<net::TestDelegate> delegate_;
+  std::unique_ptr<net::URLRequest> request_;
 
   base::WeakPtrFactory<FileSystemURLRequestJobTest> weak_factory_;
 };
@@ -284,7 +283,7 @@ TEST_F(FileSystemURLRequestJobTest, FileTest) {
 
 TEST_F(FileSystemURLRequestJobTest, FileTestFullSpecifiedRange) {
   const size_t buffer_size = 4000;
-  scoped_ptr<char[]> buffer(new char[buffer_size]);
+  std::unique_ptr<char[]> buffer(new char[buffer_size]);
   FillBuffer(buffer.get(), buffer_size);
   WriteFile("bigfile", buffer.get(), buffer_size);
 
@@ -308,7 +307,7 @@ TEST_F(FileSystemURLRequestJobTest, FileTestFullSpecifiedRange) {
 
 TEST_F(FileSystemURLRequestJobTest, FileTestHalfSpecifiedRange) {
   const size_t buffer_size = 4000;
-  scoped_ptr<char[]> buffer(new char[buffer_size]);
+  std::unique_ptr<char[]> buffer(new char[buffer_size]);
   FillBuffer(buffer.get(), buffer_size);
   WriteFile("bigfile", buffer.get(), buffer_size);
 

@@ -9,10 +9,10 @@
 
 #include <list>
 #include <map>
+#include <memory>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/byte_queue.h"
 #include "media/base/media_export.h"
@@ -40,7 +40,7 @@ class MEDIA_EXPORT Mp2tStreamParser : public StreamParser {
             bool ignore_text_tracks,
             const EncryptedMediaInitDataCB& encrypted_media_init_data_cb,
             const NewMediaSegmentCB& new_segment_cb,
-            const base::Closure& end_of_segment_cb,
+            const EndMediaSegmentCB& end_of_segment_cb,
             const scoped_refptr<MediaLog>& media_log) override;
   void Flush() override;
   bool Parse(const uint8_t* buf, int size) override;
@@ -52,6 +52,7 @@ class MEDIA_EXPORT Mp2tStreamParser : public StreamParser {
     BufferQueueWithConfig(bool is_cfg_sent,
                           const AudioDecoderConfig& audio_cfg,
                           const VideoDecoderConfig& video_cfg);
+    BufferQueueWithConfig(const BufferQueueWithConfig& other);
     ~BufferQueueWithConfig();
 
     bool is_config_sent;
@@ -102,7 +103,7 @@ class MEDIA_EXPORT Mp2tStreamParser : public StreamParser {
   NewBuffersCB new_buffers_cb_;
   EncryptedMediaInitDataCB encrypted_media_init_data_cb_;
   NewMediaSegmentCB new_segment_cb_;
-  base::Closure end_of_segment_cb_;
+  EndMediaSegmentCB end_of_segment_cb_;
   scoped_refptr<MediaLog> media_log_;
 
   // True when AAC SBR extension is signalled in the mimetype

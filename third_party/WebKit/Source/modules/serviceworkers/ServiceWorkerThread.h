@@ -40,17 +40,17 @@ class WorkerThreadStartupData;
 
 class MODULES_EXPORT ServiceWorkerThread final : public WorkerThread {
 public:
-    static PassRefPtr<ServiceWorkerThread> create(PassRefPtr<WorkerLoaderProxy>, WorkerReportingProxy&);
+    static PassOwnPtr<ServiceWorkerThread> create(PassRefPtr<WorkerLoaderProxy>, WorkerReportingProxy&);
     ~ServiceWorkerThread() override;
 
+    WorkerBackingThread& workerBackingThread() override { return *m_workerBackingThread; }
+
 protected:
-    PassRefPtrWillBeRawPtr<WorkerGlobalScope> createWorkerGlobalScope(PassOwnPtr<WorkerThreadStartupData>) override;
-    WebThreadSupportingGC& backingThread() override;
+    WorkerGlobalScope* createWorkerGlobalScope(PassOwnPtr<WorkerThreadStartupData>) override;
 
 private:
     ServiceWorkerThread(PassRefPtr<WorkerLoaderProxy>, WorkerReportingProxy&);
-
-    OwnPtr<WebThreadSupportingGC> m_thread;
+    OwnPtr<WorkerBackingThread> m_workerBackingThread;
 };
 
 } // namespace blink

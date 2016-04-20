@@ -142,7 +142,17 @@ void AutomationManagerAura::SendEvent(BrowserContext* context,
   processing_events_ = true;
 
   ExtensionMsg_AccessibilityEventParams params;
-  current_tree_serializer_->SerializeChanges(aura_obj, &params.update);
+  if (!current_tree_serializer_->SerializeChanges(aura_obj, &params.update)) {
+    LOG(ERROR) << "Unable to serialize one accessibility event.";
+    return;
+  }
+
+  // Make sure the focused node is serialized.
+  views::AXAuraObjWrapper* focus =
+      views::AXAuraObjCache::GetInstance()->GetFocus();
+  if (focus)
+    current_tree_serializer_->SerializeChanges(focus, &params.update);
+
   params.tree_id = 0;
   params.id = aura_obj->GetID();
   params.event_type = event_type;

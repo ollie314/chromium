@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_DEVTOOLS_DEVTOOLS_TARGET_IMPL_H_
 #define CHROME_BROWSER_DEVTOOLS_DEVTOOLS_TARGET_IMPL_H_
 
+#include <memory>
 #include <vector>
 
 #include "base/callback.h"
@@ -50,7 +51,7 @@ class DevToolsTargetImpl : public devtools_discovery::BasicTargetDescriptor {
   virtual void Reload() const;
 
   // Creates a new target associated with tab.
-  static scoped_ptr<DevToolsTargetImpl> CreateForTab(
+  static std::unique_ptr<DevToolsTargetImpl> CreateForTab(
       content::WebContents* web_contents);
 
   // Caller takes ownership of returned objects.

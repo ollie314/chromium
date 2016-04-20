@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/metrics/field_trial.h"
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
@@ -22,6 +21,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/prefs/pref_service.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/common/media_stream_request.h"
 #include "content/public/test/mock_render_process_host.h"
@@ -54,7 +54,7 @@ class MediaStreamDevicesControllerTest : public WebRtcTestBase {
   // Dummy callback for when we deny the current request directly.
   void OnMediaStreamResponse(const content::MediaStreamDevices& devices,
                              content::MediaStreamRequestResult result,
-                             scoped_ptr<content::MediaStreamUI> ui) {
+                             std::unique_ptr<content::MediaStreamUI> ui) {
     media_stream_devices_ = devices;
     media_stream_result_ = result;
   }
@@ -99,13 +99,11 @@ class MediaStreamDevicesControllerTest : public WebRtcTestBase {
     HostContentSettingsMap* content_settings =
         HostContentSettingsMapFactory::GetForProfile(
             Profile::FromBrowserContext(GetWebContents()->GetBrowserContext()));
-    ContentSettingsPattern pattern =
-        ContentSettingsPattern::FromURLNoWildcard(example_url_);
-    content_settings->SetContentSetting(pattern, pattern,
-                                        CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
-                                        std::string(), mic_setting);
-    content_settings->SetContentSetting(
-        pattern, pattern, CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+    content_settings->SetContentSettingDefaultScope(
+        example_url_, GURL(), CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
+        std::string(), mic_setting);
+    content_settings->SetContentSettingDefaultScope(
+        example_url_, GURL(), CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
         std::string(), cam_setting);
   }
 
@@ -512,9 +510,9 @@ IN_PROC_BROWSER_TEST_F(MediaStreamDevicesControllerTest,
   MediaCaptureDevicesDispatcher* dispatcher =
       MediaCaptureDevicesDispatcher::GetInstance();
   dispatcher->SetTestVideoCaptureDevices(video_devices);
-  scoped_ptr<content::MediaStreamUI> video_stream_ui =
-      dispatcher->GetMediaStreamCaptureIndicator()->
-          RegisterMediaStream(GetWebContents(), video_devices);
+  std::unique_ptr<content::MediaStreamUI> video_stream_ui =
+      dispatcher->GetMediaStreamCaptureIndicator()->RegisterMediaStream(
+          GetWebContents(), video_devices);
   video_stream_ui->OnStarted(base::Closure());
 
   // Request mic and deny.

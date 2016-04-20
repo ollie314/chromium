@@ -23,13 +23,13 @@
 #define LayoutSVGText_h
 
 #include "core/layout/svg/LayoutSVGBlock.h"
-#include "core/layout/svg/SVGTextLayoutAttributesBuilder.h"
 #include "platform/transforms/AffineTransform.h"
 
 namespace blink {
 
 class LayoutSVGInlineText;
 class SVGTextElement;
+class SVGTextLayoutAttributes;
 
 class LayoutSVGText final : public LayoutSVGBlock {
 public:
@@ -41,9 +41,10 @@ public:
     void setNeedsPositioningValuesUpdate() { m_needsPositioningValuesUpdate = true; }
     void setNeedsTransformUpdate() override { m_needsTransformUpdate = true; }
     void setNeedsTextMetricsUpdate() { m_needsTextMetricsUpdate = true; }
-    FloatRect paintInvalidationRectInLocalCoordinates() const override;
+    FloatRect paintInvalidationRectInLocalSVGCoordinates() const override;
     FloatRect objectBoundingBox() const override { return FloatRect(frameRect()); }
     FloatRect strokeBoundingBox() const override;
+    bool isObjectBoundingBoxValid() const;
 
     static LayoutSVGText* locateLayoutSVGTextAncestor(LayoutObject*);
     static const LayoutSVGText* locateLayoutSVGTextAncestor(const LayoutObject*);
@@ -51,13 +52,11 @@ public:
     bool needsReordering() const { return m_needsReordering; }
     Vector<SVGTextLayoutAttributes*>& layoutAttributes() { return m_layoutAttributes; }
 
-    void subtreeChildWasAdded(LayoutObject*);
-    void subtreeChildWillBeRemoved(LayoutObject*, Vector<SVGTextLayoutAttributes*, 2>& affectedAttributes);
-    void subtreeChildWasRemoved(const Vector<SVGTextLayoutAttributes*, 2>& affectedAttributes);
-    void subtreeStyleDidChange();
-    void subtreeTextDidChange(LayoutSVGInlineText*);
+    void subtreeChildWasAdded();
+    void subtreeChildWillBeRemoved();
+    void subtreeTextDidChange();
 
-    const AffineTransform& localToParentTransform() const override { return m_localTransform; }
+    const AffineTransform& localToSVGParentTransform() const override { return m_localTransform; }
 
     const char* name() const override { return "LayoutSVGText"; }
 
@@ -70,28 +69,27 @@ private:
 
     void layout() override;
 
-    void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed) const override;
+    void absoluteQuads(Vector<FloatQuad>&) const override;
 
     void addChild(LayoutObject* child, LayoutObject* beforeChild = nullptr) override;
     void removeChild(LayoutObject*) override;
     void willBeDestroyed() override;
 
-    void invalidateTreeIfNeeded(PaintInvalidationState&) override;
+    void invalidateTreeIfNeeded(const PaintInvalidationState&) override;
 
     RootInlineBox* createRootInlineBox() override;
 
-    bool shouldHandleSubtreeMutations() const;
+    void invalidatePositioningValues(LayoutInvalidationReasonForTracing);
 
     bool m_needsReordering : 1;
     bool m_needsPositioningValuesUpdate : 1;
     bool m_needsTransformUpdate : 1;
     bool m_needsTextMetricsUpdate : 1;
-    SVGTextLayoutAttributesBuilder m_layoutAttributesBuilder;
     Vector<SVGTextLayoutAttributes*> m_layoutAttributes;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutSVGText, isSVGText());
 
-}
+} // namespace blink
 
 #endif

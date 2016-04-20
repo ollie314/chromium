@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.widget.findinpage;
 
+import android.animation.Animator;
 import android.annotation.SuppressLint;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -45,6 +46,7 @@ import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
 import org.chromium.chrome.browser.widget.TintedImageButton;
 import org.chromium.chrome.browser.widget.VerticallyFixedEditText;
 import org.chromium.ui.UiUtils;
+import org.chromium.ui.base.WindowAndroid;
 
 /** A toolbar providing find in page functionality. */
 public class FindToolbar extends LinearLayout
@@ -61,11 +63,12 @@ public class FindToolbar extends LinearLayout
 
     private FindResultBar mResultBar = null;
 
-    protected TabModelSelector mTabModelSelector;
+    private TabModelSelector mTabModelSelector;
     private final TabModelSelectorObserver mTabModelSelectorObserver;
     private final TabModelObserver mTabModelObserver;
     private Tab mCurrentTab;
     private final TabObserver mTabObserver;
+    private WindowAndroid mWindowAndroid;
     private FindInPageBridge mFindInPageBridge;
     private FindToolbarObserver mObserver;
 
@@ -193,11 +196,19 @@ public class FindToolbar extends LinearLayout
             public void didSelectTab(Tab tab, TabSelectionType type, int lastId) {
                 deactivate();
             }
+
+            @Override
+            public void tabRemoved(Tab tab) {
+                if (tab != mCurrentTab) return;
+                deactivate();
+            }
         };
     }
 
     @Override
     public void onFinishInflate() {
+        super.onFinishInflate();
+
         setOrientation(HORIZONTAL);
         setGravity(Gravity.CENTER_VERTICAL);
 
@@ -220,6 +231,8 @@ public class FindToolbar extends LinearLayout
         mFindQuery.addTextChangedListener(new TextWatcher() {
             @Override
             public void onTextChanged(CharSequence s, int start, int before, int count) {
+                if (mFindInPageBridge == null) return;
+
                 mAccessibilityDidActivateResult = false;
                 setPrevNextEnabled(s.length() > 0);
 
@@ -259,6 +272,8 @@ public class FindToolbar extends LinearLayout
             @Override
             public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
                 if (event != null && event.getAction() == KeyEvent.ACTION_UP) return false;
+
+                if (mFindInPageBridge == null) return false;
 
                 // Only trigger a new find if the text was set programmatically.
                 // Otherwise just revisit the current active match.
@@ -308,6 +323,8 @@ public class FindToolbar extends LinearLayout
     }
 
     private void hideKeyboardAndStartFinding(boolean forward) {
+        if (mFindInPageBridge == null) return;
+
         final String findQuery = mFindQuery.getText().toString();
         if (findQuery.length() == 0) return;
 
@@ -369,6 +386,8 @@ public class FindToolbar extends LinearLayout
     @Override
     public void onFindResult(FindNotificationDetails result) {
         if (mResultBar != null) mResultBar.mWaitingForActivateAck = false;
+
+        assert mFindInPageBridge != null;
 
         if ((result.activeMatchOrdinal == -1 || result.numberOfMatches == 1)
                 && !result.finalUpdate) {
@@ -473,6 +492,13 @@ public class FindToolbar extends LinearLayout
     }
 
     /**
+     * Sets the WindowAndroid in which the find toolbar will be shown. Needed for animations.
+     */
+    public void setWindowAndroid(WindowAndroid windowAndroid) {
+        mWindowAndroid = windowAndroid;
+    }
+
+    /**
      * Handles updating any visual elements of the find toolbar based on changes to the tab model.
      * @param isIncognito Whether the current tab model is incognito or not.
      */
@@ -571,6 +597,8 @@ public class FindToolbar extends LinearLayout
         }
 
         mFindInPageBridge.destroy();
+        mFindInPageBridge = null;
+        mCurrentTab = null;
         mActive = false;
     }
 
@@ -586,6 +614,13 @@ public class FindToolbar extends LinearLayout
     protected void onHideAnimationStart() {
         // We do this because hiding the bar after the animation ends doesn't look good.
         setResultsBarVisibility(false);
+    }
+
+    /**
+     * @see WindowAndroid#startAnimationOverContent(Animator)
+     */
+    protected void startAnimationOverContent(Animator animation) {
+        mWindowAndroid.startAnimationOverContent(animation);
     }
 
     @VisibleForTesting
@@ -605,6 +640,8 @@ public class FindToolbar extends LinearLayout
      * Restores the last text searched in this tab, or the global last search.
      */
     private void initializeFindText() {
+        assert mFindInPageBridge != null;
+
         mSettingFindTextProgrammatically = true;
         String findText = null;
         if (mSettingFindTextProgrammatically) {
@@ -631,6 +668,8 @@ public class FindToolbar extends LinearLayout
     private void setResultsBarVisibility(boolean visibility) {
         if (visibility && mResultBar == null && mCurrentTab != null
                 && mCurrentTab.getContentViewCore() != null) {
+            assert mFindInPageBridge != null;
+
             mResultBar = new FindResultBar(getContext(), mCurrentTab, mFindInPageBridge);
         } else if (!visibility) {
             if (mResultBar != null) {

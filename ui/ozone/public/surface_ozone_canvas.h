@@ -5,7 +5,8 @@
 #ifndef UI_OZONE_PUBLIC_SURFACE_OZONE_CANVAS_H_
 #define UI_OZONE_PUBLIC_SURFACE_OZONE_CANVAS_H_
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "skia/ext/refptr.h"
 #include "ui/ozone/ozone_base_export.h"
 
@@ -27,7 +28,7 @@ class OZONE_BASE_EXPORT SurfaceOzoneCanvas {
   virtual ~SurfaceOzoneCanvas() {}
 
   // Returns an SkSurface for drawing on the window.
-  virtual skia::RefPtr<SkSurface> GetSurface() = 0;
+  virtual sk_sp<SkSurface> GetSurface() = 0;
 
   // Attempts to resize the canvas to match the viewport size. After
   // resizing, the compositor must call GetCanvas() to get the next
@@ -47,7 +48,7 @@ class OZONE_BASE_EXPORT SurfaceOzoneCanvas {
   // opening a file descriptor providing vsync events) that must be done
   // outside of the sandbox, they must have been completed in
   // InitializeHardware. Returns an empty scoped_ptr on error.
-  virtual scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() = 0;
+  virtual std::unique_ptr<gfx::VSyncProvider> CreateVSyncProvider() = 0;
 };
 
 }  // namespace ui

@@ -27,6 +27,8 @@
 #ifndef WTF_PassOwnPtr_h
 #define WTF_PassOwnPtr_h
 
+#include "wtf/Allocator.h"
+#include "wtf/Noncopyable.h"
 #include "wtf/OwnPtrCommon.h"
 
 namespace WTF {
@@ -37,6 +39,7 @@ template <typename T> PassOwnPtr<T> adoptPtr(T*);
 template <typename T> PassOwnPtr<T[]> adoptArrayPtr(T*);
 
 template <typename T> class PassOwnPtr {
+    DISALLOW_NEW();
 public:
     typedef typename std::remove_extent<T>::type ValueType;
     typedef ValueType* PtrType;
@@ -61,11 +64,7 @@ public:
     PtrType operator->() const { ASSERT(m_ptr); return m_ptr; }
 
     bool operator!() const { return !m_ptr; }
-
-    // This conversion operator allows implicit conversion to bool but not to
-    // other integer types.
-    typedef PtrType PassOwnPtr::*UnspecifiedBoolType;
-    operator UnspecifiedBoolType() const { return m_ptr ? &PassOwnPtr::m_ptr : 0; }
+    explicit operator bool() const { return m_ptr; }
 
     template <typename U> friend PassOwnPtr<U> adoptPtr(U*);
     template <typename U> friend PassOwnPtr<U[]> adoptArrayPtr(U*);
@@ -74,35 +73,15 @@ public:
 private:
     explicit PassOwnPtr(PtrType ptr) : m_ptr(ptr) {}
 
-    PassOwnPtr& operator=(const PassOwnPtr&)
-    {
-        static_assert(!sizeof(T*), "PassOwnPtr should never be assigned to");
-        return *this;
-    }
+    PassOwnPtr& operator=(const PassOwnPtr&) = delete;
 
     // We should never have two OwnPtrs for the same underlying object
     // (otherwise we'll get double-destruction), so these equality operators
     // should never be needed.
-    template <typename U> bool operator==(const PassOwnPtr<U>&) const
-    {
-        static_assert(!sizeof(U*), "OwnPtrs should never be equal");
-        return false;
-    }
-    template <typename U> bool operator!=(const PassOwnPtr<U>&) const
-    {
-        static_assert(!sizeof(U*), "OwnPtrs should never be equal");
-        return false;
-    }
-    template <typename U> bool operator==(const OwnPtr<U>&) const
-    {
-        static_assert(!sizeof(U*), "OwnPtrs should never be equal");
-        return false;
-    }
-    template <typename U> bool operator!=(const OwnPtr<U>&) const
-    {
-        static_assert(!sizeof(U*), "OwnPtrs should never be equal");
-        return false;
-    }
+    template <typename U> bool operator==(const PassOwnPtr<U>&) const = delete;
+    template <typename U> bool operator!=(const PassOwnPtr<U>&) const = delete;
+    template <typename U> bool operator==(const OwnPtr<U>&) const = delete;
+    template <typename U> bool operator!=(const OwnPtr<U>&) const = delete;
 
     mutable PtrType m_ptr;
 };

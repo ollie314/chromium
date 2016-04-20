@@ -5,11 +5,12 @@
 #ifndef CHROME_BROWSER_MEDIA_ANDROID_REMOTE_REMOTE_MEDIA_PLAYER_MANAGER_H_
 #define CHROME_BROWSER_MEDIA_ANDROID_REMOTE_REMOTE_MEDIA_PLAYER_MANAGER_H_
 
+#include <memory>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/media/android/remote/remote_media_player_bridge.h"
 #include "content/browser/media/android/browser_media_player_manager.h"
@@ -39,6 +40,9 @@ class RemoteMediaPlayerManager : public content::BrowserMediaPlayerManager {
   // Callback to trigger when the availability of remote routes changes.
   void OnRouteAvailabilityChanged(int tab_id, bool routes_available);
 
+  // Callback to trigger when the device picker dialog was dismissed.
+  void OnCancelledRemotePlaybackRequest(int player_id);
+
   void OnMediaMetadataChanged(int player_id,
                               base::TimeDelta duration,
                               int width,
@@ -49,6 +53,10 @@ class RemoteMediaPlayerManager : public content::BrowserMediaPlayerManager {
   void SwitchToRemotePlayer(int player_id, const std::string& casting_message);
   void SwitchToLocalPlayer(int player_id);
 
+  // Get the local player for a given player id, whether or not it is currently
+  // playing locally. Will return nullptr if the local player no longer exists.
+  media::MediaPlayerAndroid* GetLocalPlayer(int player_id);
+
  protected:
   void OnSetPoster(int player_id, const GURL& url) override;
 
@@ -56,8 +64,7 @@ class RemoteMediaPlayerManager : public content::BrowserMediaPlayerManager {
 
  private:
   // Returns a MediaPlayerAndroid implementation for playing the media remotely.
-  RemoteMediaPlayerBridge* CreateRemoteMediaPlayer(
-      media::MediaPlayerAndroid* local_player);
+  RemoteMediaPlayerBridge* CreateRemoteMediaPlayer(int player_id);
 
   // Replaces the remote player with the local player this class is holding.
   // Does nothing if there is no remote player.
@@ -69,10 +76,10 @@ class RemoteMediaPlayerManager : public content::BrowserMediaPlayerManager {
       const MediaPlayerHostMsg_Initialize_Params& media_player_params) override;
   void OnDestroyPlayer(int player_id) override;
   void OnSuspendAndReleaseResources(int player_id) override;
-  void OnSuspend(int player_id) override;
-  void OnResume(int player_id) override;
   void OnRequestRemotePlayback(int player_id) override;
   void OnRequestRemotePlaybackControl(int player_id) override;
+
+  bool IsPlayingRemotely(int player_id) override;
 
   void ReleaseFullscreenPlayer(media::MediaPlayerAndroid* player) override;
 
@@ -97,20 +104,17 @@ class RemoteMediaPlayerManager : public content::BrowserMediaPlayerManager {
   // playing remotely.
   RemoteMediaPlayerBridge* GetRemotePlayer(int player_id);
 
-  // Get the local player for a given player id, whether or not it is currently
-  // playing locally.
-  media::MediaPlayerAndroid* GetLocalPlayer(int player_id);
+  bool SwapCurrentPlayer(int player_id);
 
-  void SwapCurrentPlayer(int player_id);
+  void FetchPosterBitmap(int player_id);
 
   // Contains the alternative players that are not currently in use, i.e. the
   // remote players for videos that are playing locally, and the local players
   // for videos that are playing remotely.
   ScopedVector<media::MediaPlayerAndroid> alternative_players_;
 
-  bool IsPlayingRemotely(int player_id);
-
   std::set<int> players_playing_remotely_;
+  std::unordered_map<int, GURL> poster_urls_;
 
   base::WeakPtrFactory<RemoteMediaPlayerManager> weak_ptr_factory_;
 

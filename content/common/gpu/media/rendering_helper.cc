@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <memory>
 #include <numeric>
 #include <vector>
 
@@ -148,7 +149,7 @@ class RenderingHelper::StubOzoneDelegate : public ui::PlatformWindowDelegate {
   ui::PlatformWindow* platform_window() const { return platform_window_.get(); }
 
  private:
-  scoped_ptr<ui::PlatformWindow> platform_window_;
+  std::unique_ptr<ui::PlatformWindow> platform_window_;
   gfx::AcceleratedWidget accelerated_widget_;
 
   DISALLOW_COPY_AND_ASSIGN(StubOzoneDelegate);
@@ -159,6 +160,9 @@ class RenderingHelper::StubOzoneDelegate : public ui::PlatformWindowDelegate {
 RenderingHelperParams::RenderingHelperParams()
     : rendering_fps(0), warm_up_iterations(0), render_as_thumbnails(false) {
 }
+
+RenderingHelperParams::RenderingHelperParams(
+    const RenderingHelperParams& other) = default;
 
 RenderingHelperParams::~RenderingHelperParams() {}
 
@@ -178,6 +182,9 @@ VideoFrameTexture::~VideoFrameTexture() {
 RenderingHelper::RenderedVideo::RenderedVideo()
     : is_flushing(false), frames_to_drop(0) {
 }
+
+RenderingHelper::RenderedVideo::RenderedVideo(const RenderedVideo& other) =
+    default;
 
 RenderingHelper::RenderedVideo::~RenderedVideo() {
 }
@@ -269,7 +276,9 @@ void RenderingHelper::Setup() {
   display_configurator_.reset(new ui::DisplayConfigurator());
   display_configurator_->SetDelegateForTesting(0);
   display_configurator_->AddObserver(&display_setup_observer);
-  display_configurator_->Init(true);
+  display_configurator_->Init(
+      ui::OzonePlatform::GetInstance()->CreateNativeDisplayDelegate(),
+      true);
   display_configurator_->ForceInitialConfigure(0);
   // Make sure all the display configuration is applied.
   wait_display_setup.Run();
@@ -511,7 +520,8 @@ void RenderingHelper::Initialize(const RenderingHelperParams& params,
 // several frames here to warm up the rendering.
 void RenderingHelper::WarmUpRendering(int warm_up_iterations) {
   unsigned int texture_id;
-  scoped_ptr<GLubyte[]> emptyData(new GLubyte[screen_size_.GetArea() * 2]());
+  std::unique_ptr<GLubyte[]> emptyData(
+      new GLubyte[screen_size_.GetArea() * 2]());
   glGenTextures(1, &texture_id);
   glBindTexture(GL_TEXTURE_2D, texture_id);
   glTexImage2D(GL_TEXTURE_2D,
@@ -665,12 +675,8 @@ void RenderingHelper::DeleteTexture(uint32_t texture_id) {
   CHECK_EQ(static_cast<int>(glGetError()), GL_NO_ERROR);
 }
 
-scoped_refptr<gfx::GLContext> RenderingHelper::GetGLContext() {
-  return gl_context_;
-}
-
-void* RenderingHelper::GetGLContextHandle() {
-  return gl_context_->GetHandle();
+gfx::GLContext* RenderingHelper::GetGLContext() {
+  return gl_context_.get();
 }
 
 void* RenderingHelper::GetGLDisplay() {

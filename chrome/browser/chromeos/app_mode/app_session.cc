@@ -11,7 +11,6 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_update_service.h"
@@ -31,6 +30,7 @@
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
+#include "components/prefs/pref_service.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/browser_thread.h"
@@ -120,8 +120,9 @@ class AppSession::AppWindowHandler : public AppWindowRegistry::Observer {
 
   void OnAppWindowRemoved(AppWindow* app_window) override {
     if (window_registry_->GetAppWindowsForApp(app_id_).empty()) {
-      if (DemoAppLauncher::IsDemoAppSession(
-              user_manager::UserManager::Get()->GetActiveUser()->email())) {
+      if (DemoAppLauncher::IsDemoAppSession(user_manager::UserManager::Get()
+                                                ->GetActiveUser()
+                                                ->GetAccountId())) {
         // If we were in demo mode, we disabled all our network technologies,
         // re-enable them.
         NetworkStateHandler* handler =
@@ -188,7 +189,7 @@ void AppSession::Init(Profile* profile, const std::string& app_id) {
   // For a demo app, we don't need to either setup the update service or
   // the idle app name notification.
   if (DemoAppLauncher::IsDemoAppSession(
-          user_manager::UserManager::Get()->GetActiveUser()->email()))
+          user_manager::UserManager::Get()->GetActiveUser()->GetAccountId()))
     return;
 
   // Set the app_id for the current instance of KioskAppUpdateService.

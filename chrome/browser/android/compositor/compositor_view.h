@@ -12,7 +12,7 @@
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "cc/layers/layer_lists.h"
+#include "cc/layers/layer_collections.h"
 #include "cc/resources/ui_resource_client.h"
 #include "content/public/browser/android/compositor_client.h"
 #include "content/public/browser/browser_child_process_observer.h"
@@ -81,7 +81,6 @@ class CompositorView : public content::CompositorClient,
                          jfloat height,
                          jfloat visible_x_offset,
                          jfloat visible_y_offset,
-                         jfloat overdraw_bottom_height,
                          jfloat dp_to_pixel);
   void UpdateToolbarLayer(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& object,
@@ -140,10 +139,8 @@ class CompositorView : public content::CompositorClient,
 
   void SetBackground(bool visible, SkColor color);
 
-  int GetUsableContentHeight();
-
   base::android::ScopedJavaGlobalRef<jobject> obj_;
-  scoped_ptr<content::Compositor> compositor_;
+  std::unique_ptr<content::Compositor> compositor_;
   LayerTitleCache* layer_title_cache_;
   TabContentManager* tab_content_manager_;
 
@@ -155,7 +152,6 @@ class CompositorView : public content::CompositorClient,
   int current_surface_format_;
   int content_width_;
   int content_height_;
-  int overdraw_bottom_height_;
   bool overlay_video_mode_;
   SkColor empty_background_color_;
 

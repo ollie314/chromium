@@ -6,10 +6,10 @@
 #define SYNC_ENGINE_DIRECTORY_UPDATE_HANDLER_H_
 
 #include <map>
+#include <memory>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "sync/base/sync_export.h"
 #include "sync/engine/process_updates_util.h"
 #include "sync/engine/update_handler.h"
@@ -50,6 +50,7 @@ class SYNC_EXPORT DirectoryUpdateHandler : public UpdateHandler {
   ~DirectoryUpdateHandler() override;
 
   // UpdateHandler implementation.
+  bool IsInitialSyncEnded() const override;
   void GetDownloadProgress(
       sync_pb::DataTypeProgressMarker* progress_marker) const override;
   void GetDataTypeContext(sync_pb::DataTypeContext* context) const override;
@@ -104,7 +105,7 @@ class SYNC_EXPORT DirectoryUpdateHandler : public UpdateHandler {
   scoped_refptr<ModelSafeWorker> worker_;
   DirectoryTypeDebugInfoEmitter* debug_info_emitter_;
 
-  scoped_ptr<sync_pb::GarbageCollectionDirective> cached_gc_directive_;
+  std::unique_ptr<sync_pb::GarbageCollectionDirective> cached_gc_directive_;
 
   DISALLOW_COPY_AND_ASSIGN(DirectoryUpdateHandler);
 };

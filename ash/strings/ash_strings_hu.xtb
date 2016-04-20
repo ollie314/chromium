@@ -20,6 +20,7 @@
 <translation id="1467432559032391204">Balra</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME" /> (HDMI/DP)</translation>
 <translation id="1510238584712386396">Indító</translation>
+<translation id="1525508553941733066">ELVETÉS</translation>
 <translation id="15373452373711364">Nagy egérmutató</translation>
 <translation id="1550523713251050646">Kattintson további lehetőségekért</translation>
 <translation id="1602076796624386989">Mobiladatok engedélyezése</translation>
@@ -52,6 +53,7 @@ A váltáshoz nyomja meg a Shift + Alt billentyűkódot.</translation>
 <translation id="252373100621549798">Ismeretlen kijelző</translation>
 <translation id="2532589005999780174">Nagy kontrasztú mód</translation>
 <translation id="2562916301614567480">Magánhálózat</translation>
+<translation id="2661637000095600270">A kijelzők tükrözése sikertelen, mivel nem található támogatott felbontás. Ehelyett kiterjesztett asztal módba váltott a rendszer. Visszajelzés küldéséhez kattintson ide.</translation>
 <translation id="2692809339924654275"><ph name="BLUETOOTH" />: csatlakozás...</translation>
 <translation id="2700058918926273959">A munkamenet <ph name="SESSION_TIME_REMAINING" /> múlva véget ér. A rendszer ekkor kijelentkezteti Önt.</translation>
 <translation id="2727977024730340865">Kis teljesítményű töltőt csatlakoztatott. Az akkumulátor töltése nem megbízható.</translation>
@@ -113,7 +115,6 @@ Kikapcsolásához nyomja meg a Keresés vagy a Shift billentyűt.</translation>
 <translation id="4250680216510889253">Nem</translation>
 <translation id="4279490309300973883">Tükrözés</translation>
 <translation id="4321179778687042513">ctrl</translation>
-<translation id="4379753398862151997">Kedves Monitor, mi nem illünk össze. (A monitor nem támogatott.)</translation>
 <translation id="4421231901400348175">A képernyő irányításának megosztása <ph name="HELPER_NAME" /> segítővel a Távsegítség szolgáltatás keretein belül.</translation>
 <translation id="4430019312045809116">Hangerő</translation>
 <translation id="4527045527269911712">A(z) „<ph name="DEVICE_NAME" />” Bluetooth-eszköz engedélyt kér a párosításra.</translation>
@@ -182,7 +183,6 @@ A váltáshoz nyomja meg a Shift + Alt billentyűkódot.</translation>
 <translation id="6650933572246256093">A(z) „<ph name="DEVICE_NAME" />” Bluetooth-eszköz engedélyt kér a párosításra. Kérjük, adja meg ezt a biztonsági kódot azon az eszközön: <ph name="PASSKEY" /></translation>
 <translation id="6713285437468012787">A(z) „<ph name="DEVICE_NAME" />” Bluetooth-eszköz párosítva lett, és elérhető az összes felhasználó számára. A párosítást a Beállításokban szüntetheti meg.</translation>
 <translation id="6785414152754474415">Az akkumulátor töltöttsége <ph name="PERCENTAGE" />%, és töltődik.</translation>
-<translation id="6803622936009808957">A kijelzők tükrözése sikertelen, mivel nem található támogatott felbontás. Ehelyett kiterjesztett asztal módba váltott a rendszer.</translation>
 <translation id="683971173229319003">Keresés+L</translation>
 <translation id="68610848741840742">ChromeVox (beszélt visszajelzés)</translation>
 <translation id="6911468394164995108">Csatlakozás másik hálózathoz...</translation>
@@ -207,6 +207,7 @@ Kikapcsolásához nyomja meg az Alt + Keresés vagy a Shift billentyűt.</transl
 <translation id="7510334386202674593">Ctrl+Shift+L</translation>
 <translation id="7561014039265304140">A(z) <ph name="DISPLAY_NAME" /> nem támogatja a következő felbontást: <ph name="SPECIFIED_RESOLUTION" />. A felbontás megváltozott erre: <ph name="FALLBACK_RESOLUTION" /></translation>
 <translation id="7573962313813535744">Dokkolt mód</translation>
+<translation id="7580671184200851182">Azonos hang lejátszása mindegyik hangszórón (monó hang)</translation>
 <translation id="7593891976182323525">Keresés vagy Shift</translation>
 <translation id="7649070708921625228">Súgó</translation>
 <translation id="7692480393933218409">C típusú USB-vel kompatibilis eszközök töltése</translation>
@@ -237,6 +238,7 @@ Kikapcsolásához nyomja meg az Alt + Keresés vagy a Shift billentyűt.</transl
 <translation id="8878886163241303700">Kibővített képernyő</translation>
 <translation id="8938800817013097409">C típusú USB-vel kompatibilis eszköz (jobb hátsó port)</translation>
 <translation id="8940956008527784070">Alacsony akkumulátortöltöttség (<ph name="PERCENTAGE" />%)</translation>
+<translation id="9008540565042607572">Kedves Monitor, azt hiszem, nem illünk össze. (A monitor nem támogatott. Visszajelzés küldéséhez kattintson ide.)</translation>
 <translation id="9074739597929991885">Bluetooth</translation>
 <translation id="9080206825613744995">A mikrofon használatban van.</translation>
 <translation id="9089416786594320554">Beviteli módszerek</translation>

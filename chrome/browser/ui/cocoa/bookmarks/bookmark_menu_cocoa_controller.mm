@@ -4,6 +4,7 @@
 
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_cocoa_controller.h"
 
+#import "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_BOOKMARK_MENU
 #import "chrome/browser/app_controller_mac.h"
@@ -14,7 +15,6 @@
 #include "chrome/browser/ui/browser_finder.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
 #import "chrome/browser/ui/cocoa/l10n_util.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "content/public/browser/user_metrics.h"
 #import "ui/base/cocoa/cocoa_base_utils.h"
@@ -72,7 +72,8 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
 }
 
 - (BOOL)validateMenuItem:(NSMenuItem*)menuItem {
-  AppController* controller = [NSApp delegate];
+  AppController* controller =
+      base::mac::ObjCCastStrict<AppController>([NSApp delegate]);
   return ![controller keyWindowIsModal];
 }
 
@@ -90,13 +91,9 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
 
 // Open the URL of the given BookmarkNode in the current tab.
 - (void)openURLForNode:(const BookmarkNode*)node {
-  Browser* browser =
-      chrome::FindTabbedBrowser(bridge_->GetProfile(),
-                                true,
-                                chrome::HOST_DESKTOP_TYPE_NATIVE);
+  Browser* browser = chrome::FindTabbedBrowser(bridge_->GetProfile(), true);
   if (!browser) {
-    browser = new Browser(Browser::CreateParams(
-        bridge_->GetProfile(), chrome::HOST_DESKTOP_TYPE_NATIVE));
+    browser = new Browser(Browser::CreateParams(bridge_->GetProfile()));
   }
   WindowOpenDisposition disposition =
       ui::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
@@ -114,13 +111,9 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
   const BookmarkNode* node = [self nodeForIdentifier:identifier];
   DCHECK(node);
 
-  Browser* browser =
-      chrome::FindTabbedBrowser(bridge_->GetProfile(),
-                                true,
-                                chrome::HOST_DESKTOP_TYPE_NATIVE);
+  Browser* browser = chrome::FindTabbedBrowser(bridge_->GetProfile(), true);
   if (!browser) {
-    browser = new Browser(Browser::CreateParams(
-        bridge_->GetProfile(), chrome::HOST_DESKTOP_TYPE_NATIVE));
+    browser = new Browser(Browser::CreateParams(bridge_->GetProfile()));
   }
   DCHECK(browser);
 

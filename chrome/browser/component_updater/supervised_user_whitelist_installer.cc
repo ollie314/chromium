@@ -5,6 +5,8 @@
 #include "chrome/browser/component_updater/supervised_user_whitelist_installer.h"
 
 #include <stddef.h>
+
+#include <map>
 #include <utility>
 
 #include "base/bind.h"
@@ -15,19 +17,18 @@
 #include "base/files/important_file_writer.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/scoped_observer.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/thread_task_runner_handle.h"
-#include "chrome/browser/profiles/profile_info_cache.h"
-#include "chrome/browser/profiles/profile_info_cache_observer.h"
+#include "base/value_conversions.h"
+#include "base/values.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/supervised_user/supervised_user_whitelist_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
@@ -35,6 +36,9 @@
 #include "components/component_updater/component_updater_service.h"
 #include "components/component_updater/default_component_installer.h"
 #include "components/crx_file/id_util.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/safe_json/json_sanitizer.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -55,6 +59,8 @@ const char kName[] = "name";
 // (since it's not built on Android).
 const char kExtensionName[] = "name";
 const char kExtensionShortName[] = "short_name";
+const char kExtensionIcons[] = "icons";
+const char kExtensionLargeIcon[] = "128";
 
 base::string16 GetWhitelistTitle(const base::DictionaryValue& manifest) {
   base::string16 title;
@@ -63,17 +69,38 @@ base::string16 GetWhitelistTitle(const base::DictionaryValue& manifest) {
   return title;
 }
 
+base::FilePath GetSafeFilePath(const base::DictionaryValue& dictionary,
+                               const std::string& key,
+                               const base::FilePath& install_dir) {
+  const base::Value* path_value = nullptr;
+  if (!dictionary.Get(key, &path_value))
+    return base::FilePath();
+  base::FilePath path;
+  if (!base::GetValueAsFilePath(*path_value, &path))
+    return base::FilePath();
+  // Path components ("..") are not allowed.
+  if (path.ReferencesParent())
+    return base::FilePath();
+
+  return install_dir.Append(path);
+}
+
+base::FilePath GetLargeIconPath(const base::DictionaryValue& manifest,
+                                const base::FilePath& install_dir) {
+  const base::DictionaryValue* icons = nullptr;
+  if (!manifest.GetDictionary(kExtensionIcons, &icons))
+    return base::FilePath();
+
+  return GetSafeFilePath(*icons, kExtensionLargeIcon, install_dir);
+}
+
 base::FilePath GetRawWhitelistPath(const base::DictionaryValue& manifest,
                                    const base::FilePath& install_dir) {
   const base::DictionaryValue* whitelist_dict = nullptr;
   if (!manifest.GetDictionary(kWhitelistedContent, &whitelist_dict))
     return base::FilePath();
 
-  base::FilePath::StringType whitelist_file;
-  if (!whitelist_dict->GetString(kSites, &whitelist_file))
-    return base::FilePath();
-
-  return install_dir.Append(whitelist_file);
+  return GetSafeFilePath(*whitelist_dict, kSites, install_dir);
 }
 
 base::FilePath GetSanitizedWhitelistPath(const std::string& crx_id) {
@@ -95,6 +122,11 @@ void RecordUncleanUninstall() {
 void OnWhitelistSanitizationError(const base::FilePath& whitelist,
                                   const std::string& error) {
   LOG(WARNING) << "Invalid whitelist " << whitelist.value() << ": " << error;
+}
+
+void DeleteFileOnTaskRunner(const base::FilePath& path) {
+  if (!base::DeleteFile(path, true))
+    DPLOG(ERROR) << "Couldn't delete " << path.value();
 }
 
 void OnWhitelistSanitizationResult(
@@ -164,8 +196,7 @@ void RemoveUnregisteredWhitelistsOnTaskRunner(
 
       RecordUncleanUninstall();
 
-      if (!base::DeleteFile(path, true))
-        DPLOG(ERROR) << "Couldn't delete " << path.value();
+      DeleteFileOnTaskRunner(path);
     }
   }
 
@@ -195,8 +226,7 @@ void RemoveUnregisteredWhitelistsOnTaskRunner(
 
       RecordUncleanUninstall();
 
-      if (!base::DeleteFile(path, true))
-        DPLOG(ERROR) << "Couldn't delete " << path.value();
+      DeleteFileOnTaskRunner(path);
     }
   }
 }
@@ -205,7 +235,9 @@ class SupervisedUserWhitelistComponentInstallerTraits
     : public ComponentInstallerTraits {
  public:
   using RawWhitelistReadyCallback =
-      base::Callback<void(const base::string16&, const base::FilePath&)>;
+      base::Callback<void(const base::string16&, /* title */
+                          const base::FilePath&, /* icon_path */
+                          const base::FilePath& /* whitelist_path */)>;
 
   SupervisedUserWhitelistComponentInstallerTraits(
       const std::string& crx_id,
@@ -219,14 +251,16 @@ class SupervisedUserWhitelistComponentInstallerTraits
   bool VerifyInstallation(const base::DictionaryValue& manifest,
                           const base::FilePath& install_dir) const override;
   bool CanAutoUpdate() const override;
+  bool RequiresNetworkEncryption() const override;
   bool OnCustomInstall(const base::DictionaryValue& manifest,
                        const base::FilePath& install_dir) override;
   void ComponentReady(const base::Version& version,
                       const base::FilePath& install_dir,
-                      scoped_ptr<base::DictionaryValue> manifest) override;
+                      std::unique_ptr<base::DictionaryValue> manifest) override;
   base::FilePath GetBaseDirectory() const override;
   void GetHash(std::vector<uint8_t>* hash) const override;
   std::string GetName() const override;
+  std::string GetAp() const override;
 
   std::string crx_id_;
   std::string name_;
@@ -247,6 +281,11 @@ bool SupervisedUserWhitelistComponentInstallerTraits::CanAutoUpdate() const {
   return true;
 }
 
+bool SupervisedUserWhitelistComponentInstallerTraits::
+    RequiresNetworkEncryption() const {
+  return true;
+}
+
 bool SupervisedUserWhitelistComponentInstallerTraits::OnCustomInstall(
     const base::DictionaryValue& manifest,
     const base::FilePath& install_dir) {
@@ -257,11 +296,12 @@ bool SupervisedUserWhitelistComponentInstallerTraits::OnCustomInstall(
 void SupervisedUserWhitelistComponentInstallerTraits::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
-    scoped_ptr<base::DictionaryValue> manifest) {
+    std::unique_ptr<base::DictionaryValue> manifest) {
   // TODO(treib): Before getting the title, we should localize the manifest
   // using extension_l10n_util::LocalizeExtension, but that doesn't exist on
   // Android. crbug.com/558387
   callback_.Run(GetWhitelistTitle(*manifest),
+                GetLargeIconPath(*manifest, install_dir),
                 GetRawWhitelistPath(*manifest, install_dir));
 }
 
@@ -281,13 +321,18 @@ std::string SupervisedUserWhitelistComponentInstallerTraits::GetName() const {
   return name_;
 }
 
+std::string SupervisedUserWhitelistComponentInstallerTraits::GetAp() const {
+  return std::string();
+}
+
 class SupervisedUserWhitelistInstallerImpl
     : public SupervisedUserWhitelistInstaller,
-      public ProfileInfoCacheObserver {
+      public ProfileAttributesStorage::Observer {
  public:
-  SupervisedUserWhitelistInstallerImpl(ComponentUpdateService* cus,
-                                       ProfileInfoCache* profile_info_cache,
-                                       PrefService* local_state);
+  SupervisedUserWhitelistInstallerImpl(
+      ComponentUpdateService* cus,
+      ProfileAttributesStorage* profile_attributes_storage,
+      PrefService* local_state);
   ~SupervisedUserWhitelistInstallerImpl() override {}
 
  private:
@@ -301,9 +346,11 @@ class SupervisedUserWhitelistInstallerImpl
 
   void OnRawWhitelistReady(const std::string& crx_id,
                            const base::string16& title,
+                           const base::FilePath& large_icon_path,
                            const base::FilePath& whitelist_path);
   void OnSanitizedWhitelistReady(const std::string& crx_id,
-                                 const base::string16& title);
+                                 const base::string16& title,
+                                 const base::FilePath& large_icon_path);
 
   // SupervisedUserWhitelistInstaller overrides:
   void RegisterComponents() override;
@@ -314,7 +361,7 @@ class SupervisedUserWhitelistInstallerImpl
   void UnregisterWhitelist(const std::string& client_id,
                            const std::string& crx_id) override;
 
-  // ProfileInfoCacheObserver overrides:
+  // ProfileAttributesStorage::Observer overrides:
   void OnProfileWillBeRemoved(const base::FilePath& profile_path) override;
 
   ComponentUpdateService* cus_;
@@ -322,7 +369,8 @@ class SupervisedUserWhitelistInstallerImpl
 
   std::vector<WhitelistReadyCallback> callbacks_;
 
-  ScopedObserver<ProfileInfoCache, ProfileInfoCacheObserver> observer_;
+  ScopedObserver<ProfileAttributesStorage, ProfileAttributesStorage::Observer>
+      observer_;
 
   base::WeakPtrFactory<SupervisedUserWhitelistInstallerImpl> weak_ptr_factory_;
 
@@ -331,7 +379,7 @@ class SupervisedUserWhitelistInstallerImpl
 
 SupervisedUserWhitelistInstallerImpl::SupervisedUserWhitelistInstallerImpl(
     ComponentUpdateService* cus,
-    ProfileInfoCache* profile_info_cache,
+    ProfileAttributesStorage* profile_attributes_storage,
     PrefService* local_state)
     : cus_(cus),
       local_state_(local_state),
@@ -339,16 +387,14 @@ SupervisedUserWhitelistInstallerImpl::SupervisedUserWhitelistInstallerImpl(
       weak_ptr_factory_(this) {
   DCHECK(cus);
   DCHECK(local_state);
-  // In unit tests, the profile info cache can be null.
-  if (profile_info_cache)
-    observer_.Add(profile_info_cache);
+  observer_.Add(profile_attributes_storage);
 }
 
 void SupervisedUserWhitelistInstallerImpl::RegisterComponent(
     const std::string& crx_id,
     const std::string& name,
     const base::Closure& callback) {
-  scoped_ptr<ComponentInstallerTraits> traits(
+  std::unique_ptr<ComponentInstallerTraits> traits(
       new SupervisedUserWhitelistComponentInstallerTraits(
           crx_id, name,
           base::Bind(&SupervisedUserWhitelistInstallerImpl::OnRawWhitelistReady,
@@ -387,8 +433,9 @@ bool SupervisedUserWhitelistInstallerImpl::UnregisterWhitelistInternal(
   bool result = cus_->UnregisterComponent(crx_id);
   DCHECK(result);
 
-  result = base::DeleteFile(GetSanitizedWhitelistPath(crx_id), false);
-  DCHECK(result);
+  cus_->GetSequencedTaskRunner()->PostTask(
+    FROM_HERE,
+    base::Bind(&DeleteFileOnTaskRunner, GetSanitizedWhitelistPath(crx_id)));
 
   return removed;
 }
@@ -396,6 +443,7 @@ bool SupervisedUserWhitelistInstallerImpl::UnregisterWhitelistInternal(
 void SupervisedUserWhitelistInstallerImpl::OnRawWhitelistReady(
     const std::string& crx_id,
     const base::string16& title,
+    const base::FilePath& large_icon_path,
     const base::FilePath& whitelist_path) {
   cus_->GetSequencedTaskRunner()->PostTask(
       FROM_HERE,
@@ -404,14 +452,16 @@ void SupervisedUserWhitelistInstallerImpl::OnRawWhitelistReady(
           base::ThreadTaskRunnerHandle::Get(),
           base::Bind(
               &SupervisedUserWhitelistInstallerImpl::OnSanitizedWhitelistReady,
-              weak_ptr_factory_.GetWeakPtr(), crx_id, title)));
+              weak_ptr_factory_.GetWeakPtr(), crx_id, title, large_icon_path)));
 }
 
 void SupervisedUserWhitelistInstallerImpl::OnSanitizedWhitelistReady(
     const std::string& crx_id,
-    const base::string16& title) {
+    const base::string16& title,
+    const base::FilePath& large_icon_path) {
   for (const WhitelistReadyCallback& callback : callbacks_)
-    callback.Run(crx_id, title, GetSanitizedWhitelistPath(crx_id));
+    callback.Run(crx_id, title, large_icon_path,
+                 GetSanitizedWhitelistPath(crx_id));
 }
 
 void SupervisedUserWhitelistInstallerImpl::RegisterComponents() {
@@ -515,25 +565,32 @@ void SupervisedUserWhitelistInstallerImpl::OnProfileWillBeRemoved(
   std::string client_id = ClientIdForProfilePath(profile_path);
 
   // Go through all registered whitelists and possibly unregister them for this
-  // client.
+  // client. Because unregistering a whitelist might completely uninstall it, we
+  // need to make a copy of all the IDs before iterating over them.
   DictionaryPrefUpdate update(local_state_,
                               prefs::kRegisteredSupervisedUserWhitelists);
   base::DictionaryValue* pref_dict = update.Get();
+
+  std::vector<std::string> crx_ids;
   for (base::DictionaryValue::Iterator it(*pref_dict); !it.IsAtEnd();
        it.Advance()) {
-    UnregisterWhitelistInternal(pref_dict, client_id, it.key());
+    crx_ids.push_back(it.key());
   }
+
+  for (const std::string& crx_id : crx_ids)
+    UnregisterWhitelistInternal(pref_dict, client_id, crx_id);
 }
 
 }  // namespace
 
 // static
-scoped_ptr<SupervisedUserWhitelistInstaller>
-SupervisedUserWhitelistInstaller::Create(ComponentUpdateService* cus,
-                                         ProfileInfoCache* profile_info_cache,
-                                         PrefService* local_state) {
-  return make_scoped_ptr(new SupervisedUserWhitelistInstallerImpl(
-      cus, profile_info_cache, local_state));
+std::unique_ptr<SupervisedUserWhitelistInstaller>
+SupervisedUserWhitelistInstaller::Create(
+    ComponentUpdateService* cus,
+    ProfileAttributesStorage* profile_attributes_storage,
+    PrefService* local_state) {
+  return base::WrapUnique(new SupervisedUserWhitelistInstallerImpl(
+      cus, profile_attributes_storage, local_state));
 }
 
 // static
@@ -546,6 +603,8 @@ void SupervisedUserWhitelistInstaller::RegisterPrefs(
 std::string SupervisedUserWhitelistInstaller::ClientIdForProfilePath(
     const base::FilePath& profile_path) {
   // See ProfileInfoCache::CacheKeyFromProfilePath().
+  // TODO(anthonyvd): update comment when the refactoring of ProfileInfoCache
+  // is completed.
   return profile_path.BaseName().MaybeAsASCII();
 }
 

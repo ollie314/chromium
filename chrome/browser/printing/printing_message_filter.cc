@@ -4,6 +4,7 @@
 
 #include "chrome/browser/printing/printing_message_filter.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -94,9 +95,6 @@ void PrintingMessageFilter::OverrideThreadForMessage(
 bool PrintingMessageFilter::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PrintingMessageFilter, message)
-#if defined(OS_WIN)
-    IPC_MESSAGE_HANDLER(PrintHostMsg_DuplicateSection, OnDuplicateSection)
-#endif
 #if defined(OS_ANDROID)
     IPC_MESSAGE_HANDLER(PrintHostMsg_AllocateTempFileForPrinting,
                         OnAllocateTempFileForPrinting)
@@ -116,17 +114,6 @@ bool PrintingMessageFilter::OnMessageReceived(const IPC::Message& message) {
   IPC_END_MESSAGE_MAP()
   return handled;
 }
-
-#if defined(OS_WIN)
-void PrintingMessageFilter::OnDuplicateSection(
-    base::SharedMemoryHandle renderer_handle,
-    base::SharedMemoryHandle* browser_handle) {
-  // Duplicate the handle in this process right now so the memory is kept alive
-  // (even if it is not mapped)
-  base::SharedMemory shared_buf(renderer_handle, true, PeerHandle());
-  shared_buf.GiveToProcess(base::GetCurrentProcessHandle(), browser_handle);
-}
-#endif
 
 #if defined(OS_ANDROID)
 void PrintingMessageFilter::OnAllocateTempFileForPrinting(
@@ -281,7 +268,7 @@ void PrintingMessageFilter::UpdateFileDescriptor(int render_view_id, int fd) {
 void PrintingMessageFilter::OnUpdatePrintSettings(
     int document_cookie, const base::DictionaryValue& job_settings,
     IPC::Message* reply_msg) {
-  scoped_ptr<base::DictionaryValue> new_settings(job_settings.DeepCopy());
+  std::unique_ptr<base::DictionaryValue> new_settings(job_settings.DeepCopy());
 
   scoped_refptr<PrinterQuery> printer_query;
   if (!is_printing_enabled_->GetValue()) {

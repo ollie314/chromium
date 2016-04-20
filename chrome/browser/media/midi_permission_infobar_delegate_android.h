@@ -23,22 +23,19 @@ class MidiPermissionInfoBarDelegateAndroid : public PermissionInfobarDelegate {
   // |infobar_service|.  Returns the infobar if it was successfully added.
   static infobars::InfoBar* Create(InfoBarService* infobar_service,
                                    const GURL& requesting_frame,
-                                   const std::string& display_languages,
                                    const PermissionSetCallback& callback);
 
  private:
   MidiPermissionInfoBarDelegateAndroid(const GURL& requesting_frame,
-                                       const std::string& display_languages,
                                        const PermissionSetCallback& callback);
   ~MidiPermissionInfoBarDelegateAndroid() override;
 
   // ConfirmInfoBarDelegate:
   infobars::InfoBarDelegate::InfoBarIdentifier GetIdentifier() const override;
   int GetIconId() const override;
-  base::string16 GetMessageText() const override;
+  int GetMessageResourceId() const override;
 
   GURL requesting_frame_;
-  std::string display_languages_;
 
   DISALLOW_COPY_AND_ASSIGN(MidiPermissionInfoBarDelegateAndroid);
 };

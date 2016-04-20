@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -58,7 +60,7 @@ class BluetoothTestBase : public testing::Test {
   // Calls adapter_->StartDiscoverySessionWithFilter with Low Energy transport,
   // and this fixture's callbacks expecting success.
   // Then RunLoop().RunUntilIdle().
-  void StartLowEnergyDiscoverySession();
+  virtual void StartLowEnergyDiscoverySession();
 
   // Calls adapter_->StartDiscoverySessionWithFilter with Low Energy transport,
   // and this fixture's callbacks expecting error.
@@ -94,6 +96,8 @@ class BluetoothTestBase : public testing::Test {
   //      kTestDeviceAddress1.
   //   4: kTestDeviceNameEmpty with no advertised UUIDs and address
   //      kTestDeviceAddress2.
+  //   5: Device with no name, with no advertised UUIDs and address
+  //      kTestDeviceAddress1.
   virtual BluetoothDevice* DiscoverLowEnergyDevice(int device_ordinal);
 
   // Simulates success of implementation details of CreateGattConnection.
@@ -113,6 +117,9 @@ class BluetoothTestBase : public testing::Test {
       BluetoothDevice* device,
       const std::vector<std::string>& uuids) {}
 
+  // Simulates remove of a |service|.
+  virtual void SimulateGattServiceRemoved(BluetoothGattService* service) {}
+
   // Simulates failure to discover services.
   virtual void SimulateGattServicesDiscoveryError(BluetoothDevice* device) {}
 
@@ -120,6 +127,11 @@ class BluetoothTestBase : public testing::Test {
   virtual void SimulateGattCharacteristic(BluetoothGattService* service,
                                           const std::string& uuid,
                                           int properties) {}
+
+  // Simulates remove of a |characteristic| from |service|.
+  virtual void SimulateGattCharacteristicRemoved(
+      BluetoothGattService* service,
+      BluetoothGattCharacteristic* characteristic) {}
 
   // Remembers |characteristic|'s platform specific object to be used in a
   // subsequent call to methods such as SimulateGattCharacteristicRead that
@@ -129,9 +141,28 @@ class BluetoothTestBase : public testing::Test {
   virtual void RememberCharacteristicForSubsequentAction(
       BluetoothGattCharacteristic* characteristic) {}
 
+  // Remembers |characteristic|'s Client Characteristic Configuration (CCC)
+  // descriptor's platform specific object to be used in a subsequent call to
+  // methods such as SimulateGattNotifySessionStarted. This enables tests where
+  // the platform attempts to reference descriptor objects after the Chrome
+  // objects have been deleted, e.g. with DeleteDevice.
+  virtual void RememberCCCDescriptorForSubsequentAction(
+      BluetoothGattCharacteristic* characteristic) {}
+
   // Simulates a Characteristic Set Notify success.
+  // If |characteristic| is null, acts upon the characteristic & CCC
+  // descriptor provided to RememberCharacteristicForSubsequentAction &
+  // RememberCCCDescriptorForSubsequentAction.
   virtual void SimulateGattNotifySessionStarted(
       BluetoothGattCharacteristic* characteristic) {}
+
+  // Simulates a Characteristic Set Notify error.
+  // If |characteristic| is null, acts upon the characteristic & CCC
+  // descriptor provided to RememberCharacteristicForSubsequentAction &
+  // RememberCCCDescriptorForSubsequentAction.
+  virtual void SimulateGattNotifySessionStartError(
+      BluetoothGattCharacteristic* characteristic,
+      BluetoothGattService::GattErrorCode error_code) {}
 
   // Simulates a Characteristic Set Notify operation failing synchronously once
   // for an unknown reason.
@@ -181,6 +212,41 @@ class BluetoothTestBase : public testing::Test {
       BluetoothGattCharacteristic* characteristic,
       const std::string& uuid) {}
 
+  // Remembers |descriptor|'s platform specific object to be used in a
+  // subsequent call to methods such as SimulateGattDescriptorRead that
+  // accept a nullptr value to select this remembered descriptor. This
+  // enables tests where the platform attempts to reference descriptor
+  // objects after the Chrome objects have been deleted, e.g. with DeleteDevice.
+  virtual void RememberDescriptorForSubsequentAction(
+      BluetoothGattDescriptor* descriptor) {}
+
+  // Simulates a Descriptor Read operation succeeding, returning |value|.
+  // If |descriptor| is null, acts upon the descriptor provided to
+  // RememberDescriptorForSubsequentAction.
+  virtual void SimulateGattDescriptorRead(BluetoothGattDescriptor* descriptor,
+                                          const std::vector<uint8_t>& value) {}
+
+  // Simulates a Descriptor Read operation failing with a GattErrorCode.
+  virtual void SimulateGattDescriptorReadError(
+      BluetoothGattDescriptor* descriptor,
+      BluetoothGattService::GattErrorCode) {}
+
+  // Simulates a Descriptor Read operation failing synchronously once for an
+  // unknown reason.
+  virtual void SimulateGattDescriptorReadWillFailSynchronouslyOnce(
+      BluetoothGattDescriptor* descriptor) {}
+
+  // Simulates a Descriptor Write operation succeeding, returning |value|.
+  // If |descriptor| is null, acts upon the descriptor provided to
+  // RememberDescriptorForSubsequentAction.
+  virtual void SimulateGattDescriptorWrite(
+      BluetoothGattDescriptor* descriptor) {}
+
+  // Simulates a Descriptor Write operation failing with a GattErrorCode.
+  virtual void SimulateGattDescriptorWriteError(
+      BluetoothGattDescriptor* descriptor,
+      BluetoothGattService::GattErrorCode) {}
+
   // Simulates a Descriptor Write operation failing synchronously once for
   // an unknown reason.
   virtual void SimulateGattDescriptorWriteWillFailSynchronouslyOnce(
@@ -192,10 +258,11 @@ class BluetoothTestBase : public testing::Test {
   // Callbacks that increment |callback_count_|, |error_callback_count_|:
   void Callback(Call expected);
   void DiscoverySessionCallback(Call expected,
-                                scoped_ptr<BluetoothDiscoverySession>);
+                                std::unique_ptr<BluetoothDiscoverySession>);
   void GattConnectionCallback(Call expected,
-                              scoped_ptr<BluetoothGattConnection>);
-  void NotifyCallback(Call expected, scoped_ptr<BluetoothGattNotifySession>);
+                              std::unique_ptr<BluetoothGattConnection>);
+  void NotifyCallback(Call expected,
+                      std::unique_ptr<BluetoothGattNotifySession>);
   void ReadValueCallback(Call expected, const std::vector<uint8_t>& value);
   void ErrorCallback(Call expected);
   void ConnectErrorCallback(Call expected,
@@ -242,6 +309,7 @@ class BluetoothTestBase : public testing::Test {
   int gatt_notify_characteristic_attempts_ = 0;
   int gatt_read_characteristic_attempts_ = 0;
   int gatt_write_characteristic_attempts_ = 0;
+  int gatt_read_descriptor_attempts_ = 0;
   int gatt_write_descriptor_attempts_ = 0;
 
   // The following values are used to make sure the correct callbacks

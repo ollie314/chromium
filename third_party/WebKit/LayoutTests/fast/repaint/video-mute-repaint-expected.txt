@@ -22,18 +22,32 @@
               "position": [8, 8],
               "bounds": [700, 520],
               "drawsContent": true,
-              "repaintRects": [
-                [628, 492, 24, 25],
-                [570, 492, 89, 25],
-                [570, 492, 89, 25],
-                [570, 492, 24, 25],
-                [535, 489, 35, 31]
-              ],
-              "paintInvalidationClients": [
-                "LayoutButton INPUT",
-                "LayoutSlider INPUT",
-                "LayoutFlexibleBox DIV",
-                "LayoutBlockFlow DIV id='thumb'"
+              "paintInvalidations": [
+                {
+                  "object": "LayoutFlexibleBox DIV",
+                  "rect": [570, 493, 89, 24],
+                  "reason": "forced by layout"
+                },
+                {
+                  "object": "LayoutSlider INPUT",
+                  "rect": [570, 493, 89, 24],
+                  "reason": "full"
+                },
+                {
+                  "object": "LayoutButton INPUT",
+                  "rect": [535, 490, 35, 30],
+                  "reason": "full"
+                },
+                {
+                  "object": "LayoutBlockFlow DIV id='thumb'",
+                  "rect": [628, 493, 24, 24],
+                  "reason": "location change"
+                },
+                {
+                  "object": "LayoutBlockFlow DIV id='thumb'",
+                  "rect": [570, 493, 24, 24],
+                  "reason": "location change"
+                }
               ]
             }
           ]

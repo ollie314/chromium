@@ -6,11 +6,11 @@
 #define CC_SCHEDULER_SCHEDULER_H_
 
 #include <deque>
+#include <memory>
 #include <string>
 
 #include "base/cancelable_callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "cc/base/cc_export.h"
 #include "cc/output/begin_frame_args.h"
@@ -46,7 +46,6 @@ class SchedulerClient {
   virtual void ScheduledActionPrepareTiles() = 0;
   virtual void ScheduledActionInvalidateOutputSurface() = 0;
   virtual void DidFinishImplFrame() = 0;
-  virtual void SendBeginFramesToChildren(const BeginFrameArgs& args) = 0;
   virtual void SendBeginMainFrameNotExpectedSoon() = 0;
 
  protected:
@@ -55,13 +54,13 @@ class SchedulerClient {
 
 class CC_EXPORT Scheduler : public BeginFrameObserverBase {
  public:
-  static scoped_ptr<Scheduler> Create(
+  static std::unique_ptr<Scheduler> Create(
       SchedulerClient* client,
       const SchedulerSettings& scheduler_settings,
       int layer_tree_host_id,
       base::SingleThreadTaskRunner* task_runner,
-      BeginFrameSource* external_frame_source,
-      scoped_ptr<CompositorTimingHistory> compositor_timing_history);
+      BeginFrameSource* begin_frame_source,
+      std::unique_ptr<CompositorTimingHistory> compositor_timing_history);
 
   ~Scheduler() override;
 
@@ -73,8 +72,6 @@ class CC_EXPORT Scheduler : public BeginFrameObserverBase {
 
   const SchedulerSettings& settings() const { return settings_; }
 
-  void CommitVSyncParameters(base::TimeTicks timebase,
-                             base::TimeDelta interval);
   void SetEstimatedParentDrawTime(base::TimeDelta draw_time);
 
   void SetVisible(bool visible);
@@ -82,7 +79,7 @@ class CC_EXPORT Scheduler : public BeginFrameObserverBase {
   void SetCanDraw(bool can_draw);
   void NotifyReadyToActivate();
   void NotifyReadyToDraw();
-  void SetThrottleFrameProduction(bool throttle);
+  void SetBeginFrameSource(BeginFrameSource* source);
 
   void SetNeedsBeginMainFrame();
   // Requests a single impl frame (after the current frame if there is one
@@ -137,42 +134,37 @@ class CC_EXPORT Scheduler : public BeginFrameObserverBase {
 
   void SetDeferCommits(bool defer_commits);
 
-  scoped_refptr<base::trace_event::ConvertableToTraceFormat> AsValue() const;
+  std::unique_ptr<base::trace_event::ConvertableToTraceFormat> AsValue() const;
   void AsValueInto(base::trace_event::TracedValue* value) const override;
 
-  void SetChildrenNeedBeginFrames(bool children_need_begin_frames);
   void SetVideoNeedsBeginFrames(bool video_needs_begin_frames);
 
-  void SetAuthoritativeVSyncInterval(const base::TimeDelta& interval);
+  const BeginFrameSource* begin_frame_source() const {
+    return begin_frame_source_;
+  }
 
  protected:
   Scheduler(SchedulerClient* client,
             const SchedulerSettings& scheduler_settings,
             int layer_tree_host_id,
             base::SingleThreadTaskRunner* task_runner,
-            BeginFrameSource* external_frame_source,
-            scoped_ptr<SyntheticBeginFrameSource> synthetic_frame_source,
-            scoped_ptr<BackToBackBeginFrameSource> unthrottled_frame_source,
-            scoped_ptr<CompositorTimingHistory> compositor_timing_history);
+            BeginFrameSource* begin_frame_source,
+            std::unique_ptr<CompositorTimingHistory> compositor_timing_history);
 
   // Virtual for testing.
   virtual base::TimeTicks Now() const;
 
   const SchedulerSettings settings_;
+  // Not owned.
   SchedulerClient* client_;
   int layer_tree_host_id_;
   base::SingleThreadTaskRunner* task_runner_;
-  BeginFrameSource* external_frame_source_;
-  scoped_ptr<SyntheticBeginFrameSource> synthetic_frame_source_;
-  scoped_ptr<BackToBackBeginFrameSource> unthrottled_frame_source_;
 
-  scoped_ptr<BeginFrameSourceMultiplexer> frame_source_;
-  bool throttle_frame_production_;
+  // Not owned.  May be null.
+  BeginFrameSource* begin_frame_source_;
+  bool observing_begin_frame_source_;
 
-  base::TimeDelta authoritative_vsync_interval_;
-  base::TimeTicks last_vsync_timebase_;
-
-  scoped_ptr<CompositorTimingHistory> compositor_timing_history_;
+  std::unique_ptr<CompositorTimingHistory> compositor_timing_history_;
   base::TimeDelta estimated_parent_draw_time_;
 
   std::deque<BeginFrameArgs> begin_retro_frame_args_;
@@ -223,14 +215,6 @@ class CC_EXPORT Scheduler : public BeginFrameObserverBase {
 
   bool IsInsideAction(SchedulerStateMachine::Action action) {
     return inside_action_ == action;
-  }
-
-  BeginFrameSource* primary_frame_source() {
-    if (settings_.use_external_begin_frame_source) {
-      DCHECK(external_frame_source_);
-      return external_frame_source_;
-    }
-    return synthetic_frame_source_.get();
   }
 
   base::WeakPtrFactory<Scheduler> weak_factory_;

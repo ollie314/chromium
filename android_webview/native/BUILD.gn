@@ -14,6 +14,7 @@ source_set("native") {
     "//cc:cc",
     "//components/autofill/content/browser:browser",
     "//components/devtools_http_handler:devtools_http_handler",
+    "//components/strings",
     "//components/web_contents_delegate_android:web_contents_delegate_android",
     "//content/public/common",
     "//device/battery:mojo_bindings",
@@ -60,6 +61,8 @@ source_set("native") {
     "aw_dev_tools_server.h",
     "aw_form_database.cc",
     "aw_form_database.h",
+    "aw_gl_functor.cc",
+    "aw_gl_functor.h",
     "aw_http_auth_handler.cc",
     "aw_http_auth_handler.h",
     "aw_locale_manager_impl.cc",
@@ -109,6 +112,8 @@ source_set("native") {
     "permission/simple_permission_request.h",
     "state_serializer.cc",
     "state_serializer.h",
+    "token_binding_manager_bridge.cc",
+    "token_binding_manager_bridge.h",
   ]
   if (enable_video_hole) {
     deps += [ "//components/external_video_surface:external_video_surface" ]
@@ -131,6 +136,7 @@ generate_jni("native_jni") {
     "../java/src/org/chromium/android_webview/AwDebug.java",
     "../java/src/org/chromium/android_webview/AwDevToolsServer.java",
     "../java/src/org/chromium/android_webview/AwFormDatabase.java",
+    "../java/src/org/chromium/android_webview/AwGLFunctor.java",
     "../java/src/org/chromium/android_webview/AwHttpAuthHandler.java",
     "../java/src/org/chromium/android_webview/AwMessagePortService.java",
     "../java/src/org/chromium/android_webview/AwMetricsServiceClient.java",
@@ -139,6 +145,7 @@ generate_jni("native_jni") {
     "../java/src/org/chromium/android_webview/AwQuotaManagerBridge.java",
     "../java/src/org/chromium/android_webview/AwResource.java",
     "../java/src/org/chromium/android_webview/AwSettings.java",
+    "../java/src/org/chromium/android_webview/AwTokenBindingManager.java",
     "../java/src/org/chromium/android_webview/AwWebContentsDelegate.java",
     "../java/src/org/chromium/android_webview/AwWebResourceResponse.java",
     "../java/src/org/chromium/android_webview/InputStreamUtil.java",

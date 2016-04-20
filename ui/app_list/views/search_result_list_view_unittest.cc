@@ -100,9 +100,7 @@ class SearchResultListViewTest : public views::ViewsTestBase,
     return view_->OnKeyPressed(event);
   }
 
-  bool IsAutoLaunching() {
-    return view_->auto_launch_animation_;
-  }
+  bool IsAutoLaunching() { return !!view_->auto_launch_animation_; }
 
   void ForceAutoLaunch() {
     view_->ForceAutoLaunchForTest();
@@ -126,7 +124,7 @@ class SearchResultListViewTest : public views::ViewsTestBase,
   void OnResultInstalled(SearchResult* result) override {}
 
   AppListTestViewDelegate view_delegate_;
-  scoped_ptr<SearchResultListView> view_;
+  std::unique_ptr<SearchResultListView> view_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchResultListViewTest);
 };

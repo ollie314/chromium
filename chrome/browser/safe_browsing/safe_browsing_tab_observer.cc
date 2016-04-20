@@ -4,12 +4,12 @@
 
 #include "chrome/browser/safe_browsing/safe_browsing_tab_observer.h"
 
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_frame_host.h"
@@ -24,7 +24,8 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(safe_browsing::SafeBrowsingTabObserver);
 namespace safe_browsing {
 
 #if !defined(SAFE_BROWSING_CSD)
-// Provide a dummy implementation so that scoped_ptr<ClientSideDetectionHost>
+// Provide a dummy implementation so that
+// std::unique_ptr<ClientSideDetectionHost>
 // has a concrete destructor to call. This is necessary because it is used
 // as a member of SafeBrowsingTabObserver, even if it only ever contains NULL.
 // TODO(shess): This is weird, why not just guard the instance variable?

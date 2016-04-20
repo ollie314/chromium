@@ -11,9 +11,11 @@
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "chrome/browser/extensions/extension_action.h"
+#include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkTypeface.h"
-#include "ui/base/resource/material_design/material_design_controller.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
@@ -90,14 +92,14 @@ SkPaint* GetBadgeTextPaintSingleton() {
 }
 
 gfx::ImageSkiaRep ScaleImageSkiaRep(const gfx::ImageSkiaRep& rep,
+                                    int target_width_dp,
                                     float target_scale) {
-  gfx::Size scaled_size =
-      gfx::ScaleToCeiledSize(rep.pixel_size(), target_scale / rep.scale());
-  return gfx::ImageSkiaRep(skia::ImageOperations::Resize(
-      rep.sk_bitmap(),
-      skia::ImageOperations::RESIZE_BEST,
-      scaled_size.width(),
-      scaled_size.height()), target_scale);
+  int width_px = target_width_dp * target_scale;
+  return gfx::ImageSkiaRep(
+      skia::ImageOperations::Resize(rep.sk_bitmap(),
+                                    skia::ImageOperations::RESIZE_BEST,
+                                    width_px, width_px),
+      target_scale);
 }
 
 }  // namespace
@@ -112,7 +114,8 @@ IconWithBadgeImageSource::Badge::~Badge() {}
 IconWithBadgeImageSource::IconWithBadgeImageSource(const gfx::Size& size)
     : gfx::CanvasImageSource(size, false),
       grayscale_(false),
-      paint_decoration_(false) {}
+      paint_page_action_decoration_(false),
+      paint_blocked_actions_decoration_(false) {}
 
 IconWithBadgeImageSource::~IconWithBadgeImageSource() {}
 
@@ -120,7 +123,7 @@ void IconWithBadgeImageSource::SetIcon(const gfx::Image& icon) {
   icon_ = icon;
 }
 
-void IconWithBadgeImageSource::SetBadge(scoped_ptr<Badge> badge) {
+void IconWithBadgeImageSource::SetBadge(std::unique_ptr<Badge> badge) {
   badge_ = std::move(badge);
 }
 
@@ -129,24 +132,28 @@ void IconWithBadgeImageSource::Draw(gfx::Canvas* canvas) {
     return;
 
   gfx::ImageSkia skia = icon_.AsImageSkia();
-  // TODO(estade): Fix setIcon and enable this on !MD.
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    gfx::ImageSkiaRep rep = skia.GetRepresentation(canvas->image_scale());
-    if (rep.scale() != canvas->image_scale())
-      skia.AddRepresentation(ScaleImageSkiaRep(rep, canvas->image_scale()));
+  gfx::ImageSkiaRep rep = skia.GetRepresentation(canvas->image_scale());
+  if (rep.scale() != canvas->image_scale()) {
+    skia.AddRepresentation(ScaleImageSkiaRep(
+        rep, ExtensionAction::ActionIconSize(), canvas->image_scale()));
   }
   if (grayscale_)
-    skia = gfx::ImageSkiaOperations::CreateHSLShiftedImage(skia, {-1, 0, 0.6});
+    skia = gfx::ImageSkiaOperations::CreateHSLShiftedImage(skia, {-1, 0, 0.75});
 
-  int x_offset = std::floor((size().width() - icon_.Width()) / 2.0);
-  int y_offset = std::floor((size().height() - icon_.Height()) / 2.0);
+  int x_offset =
+      std::floor((size().width() - ExtensionAction::ActionIconSize()) / 2.0);
+  int y_offset =
+      std::floor((size().height() - ExtensionAction::ActionIconSize()) / 2.0);
   canvas->DrawImageInt(skia, x_offset, y_offset);
 
   // Draw a badge on the provided browser action icon's canvas.
   PaintBadge(canvas);
 
-  if (paint_decoration_)
-    PaintDecoration(canvas);
+  if (paint_page_action_decoration_)
+    PaintPageActionDecoration(canvas);
+
+  if (paint_blocked_actions_decoration_)
+    PaintBlockedActionDecoration(canvas);
 }
 
 // Paints badge with specified parameters to |canvas|.
@@ -265,7 +272,7 @@ void IconWithBadgeImageSource::PaintBadge(gfx::Canvas* canvas) {
   canvas->Restore();
 }
 
-void IconWithBadgeImageSource::PaintDecoration(gfx::Canvas* canvas) {
+void IconWithBadgeImageSource::PaintPageActionDecoration(gfx::Canvas* canvas) {
   static const SkColor decoration_color = SkColorSetARGB(255, 70, 142, 226);
 
   int major_radius = std::ceil(size().width() / 5.0);
@@ -279,4 +286,13 @@ void IconWithBadgeImageSource::PaintDecoration(gfx::Canvas* canvas) {
   canvas->DrawCircle(center_point, major_radius, paint);
   paint.setColor(decoration_color);
   canvas->DrawCircle(center_point, minor_radius, paint);
+}
+
+void IconWithBadgeImageSource::PaintBlockedActionDecoration(
+    gfx::Canvas* canvas) {
+  canvas->Save();
+  gfx::ImageSkia img = *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+      IDR_BLOCKED_EXTENSION_SCRIPT);
+  canvas->DrawImageInt(img, size().width() - img.width(), 0);
+  canvas->Restore();
 }

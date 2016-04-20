@@ -18,6 +18,7 @@
 #include "components/cdm/renderer/widevine_key_systems.h"
 #include "content/public/renderer/render_thread.h"
 #include "media/base/eme_constants.h"
+#include "media/media_features.h"
 
 #if defined(OS_ANDROID)
 #include "components/cdm/renderer/android_key_systems.h"
@@ -153,7 +154,7 @@ static void AddPepperBasedWidevine(
 #if defined(WIDEVINE_CDM_MIN_GLIBC_VERSION)
   Version glibc_version(gnu_get_libc_version());
   DCHECK(glibc_version.IsValid());
-  if (glibc_version.IsOlderThan(WIDEVINE_CDM_MIN_GLIBC_VERSION))
+  if (glibc_version < base::Version(WIDEVINE_CDM_MIN_GLIBC_VERSION))
     return;
 #endif  // defined(WIDEVINE_CDM_MIN_GLIBC_VERSION)
 
@@ -190,11 +191,15 @@ static void AddPepperBasedWidevine(
 #if defined(USE_PROPRIETARY_CODECS)
     if (codecs[i] == kCdmSupportedCodecAvc1)
       supported_codecs |= media::EME_CODEC_MP4_AVC1;
+#if BUILDFLAG(ENABLE_MP4_VP9_DEMUXING)
+    if (codecs[i] == kCdmSupportedCodecVp9)
+      supported_codecs |= media::EME_CODEC_MP4_VP9;
+#endif
 #endif  // defined(USE_PROPRIETARY_CODECS)
   }
 
   cdm::AddWidevineWithCodecs(
-      cdm::WIDEVINE, supported_codecs,
+      supported_codecs,
 #if defined(OS_CHROMEOS)
       media::EmeRobustness::HW_SECURE_ALL,  // Maximum audio robustness.
       media::EmeRobustness::HW_SECURE_ALL,  // Maximim video robustness.

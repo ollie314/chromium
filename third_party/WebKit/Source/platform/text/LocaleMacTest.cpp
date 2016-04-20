@@ -59,14 +59,14 @@ protected:
         Saturday,
     };
 
-    DateComponents dateComponents(int year, int month, int day)
+    DateComponents getDateComponents(int year, int month, int day)
     {
         DateComponents date;
         date.setMillisecondsSinceEpochForDate(msForDate(year, month, day));
         return date;
     }
 
-    DateComponents timeComponents(int hour, int minute, int second, int millisecond)
+    DateComponents getTimeComponents(int hour, int minute, int second, int millisecond)
     {
         DateComponents date;
         date.setMillisecondsSinceMidnight(hour * msPerHour + minute * msPerMinute + second * msPerSecond + millisecond);
@@ -99,13 +99,13 @@ protected:
     String formatDate(const String& localeString, int year, int month, int day)
     {
         OwnPtr<LocaleMac> locale = LocaleMac::create(localeString);
-        return locale->formatDateTime(dateComponents(year, month, day));
+        return locale->formatDateTime(getDateComponents(year, month, day));
     }
 
     String formatTime(const String& localeString, int hour, int minute, int second, int millisecond, bool useShortFormat)
     {
         OwnPtr<LocaleMac> locale = LocaleMac::create(localeString);
-        return locale->formatDateTime(timeComponents(hour, minute, second, millisecond), (useShortFormat ? Locale::FormatTypeShort : Locale::FormatTypeMedium));
+        return locale->formatDateTime(getTimeComponents(hour, minute, second, millisecond), (useShortFormat ? Locale::FormatTypeShort : Locale::FormatTypeMedium));
     }
 
     unsigned firstDayOfWeek(const String& localeString)
@@ -132,7 +132,6 @@ protected:
         return locale->isRTL();
     }
 
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
     String monthFormat(const String& localeString)
     {
         OwnPtr<LocaleMac> locale = LocaleMac::create(localeString);
@@ -180,7 +179,6 @@ protected:
         OwnPtr<LocaleMac> locale = LocaleMac::create(localeString);
         return locale->localizedDecimalSeparator();
     }
-#endif
 };
 
 TEST_F(LocaleMacTest, formatWeek)
@@ -274,7 +272,6 @@ TEST_F(LocaleMacTest, isRTL)
     EXPECT_FALSE(isRTL("**invalid**"));
 }
 
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 TEST_F(LocaleMacTest, monthFormat)
 {
     EXPECT_STREQ("MMMM yyyy", monthFormat("en_US").utf8().data());
@@ -355,7 +352,6 @@ TEST_F(LocaleMacTest, decimalSeparator)
     EXPECT_STREQ(".", decimalSeparator("en_US").utf8().data());
     EXPECT_STREQ(",", decimalSeparator("fr_FR").utf8().data());
 }
-#endif
 
 TEST_F(LocaleMacTest, invalidLocale)
 {

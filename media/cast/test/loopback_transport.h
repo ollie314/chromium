@@ -26,7 +26,7 @@ class PacketPipe;
 }  // namespace test
 
 // Class that sends the packet to a receiver through a stack of PacketPipes.
-class LoopBackTransport : public PacketSender {
+class LoopBackTransport : public PacketTransport {
  public:
   explicit LoopBackTransport(
       scoped_refptr<CastEnvironment> cast_environment);
@@ -35,6 +35,11 @@ class LoopBackTransport : public PacketSender {
   bool SendPacket(PacketRef packet, const base::Closure& cb) final;
 
   int64_t GetBytesSent() final;
+
+  void StartReceiving(
+      const PacketReceiverCallbackWithStatus& packet_receiver) final {}
+
+  void StopReceiving() final {}
 
   // Initiailize this loopback transport.
   // Establish a flow of packets from |pipe| to |packet_receiver|.

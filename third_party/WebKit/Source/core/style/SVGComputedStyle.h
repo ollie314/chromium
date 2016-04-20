@@ -30,6 +30,8 @@
 #include "core/style/StyleDifference.h"
 #include "platform/Length.h"
 #include "platform/graphics/GraphicsTypes.h"
+#include "wtf/Forward.h"
+#include "wtf/RefCounted.h"
 
 namespace blink {
 
@@ -89,7 +91,7 @@ public:
     static const AtomicString& initialMarkerEndResource() { return nullAtom; }
     static EMaskType initialMaskType() { return MT_LUMINANCE; }
     static EPaintOrder initialPaintOrder() { return PaintOrderNormal; }
-    static StylePath* initialD() { return StylePath::emptyPath(); }
+    static StylePath* initialD() { return nullptr; }
     static Length initialCx() { return Length(Fixed); }
     static Length initialCy() { return Length(Fixed); }
     static Length initialX() { return Length(Fixed); }

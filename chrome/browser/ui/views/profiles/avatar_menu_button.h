@@ -18,6 +18,7 @@ namespace gfx {
 class Canvas;
 class Image;
 }
+class BrowserNonClientFrameView;
 class BrowserView;
 class Profile;
 
@@ -46,17 +47,12 @@ class AvatarMenuButton : public views::MenuButton,
   // to Chrome avatar icons, will be resized and modified for the title bar.
   virtual void SetAvatarIcon(const gfx::Image& icon, bool is_rectangle);
 
-  void set_button_on_right(bool button_on_right) {
-    button_on_right_ = button_on_right;
-  }
-  bool button_on_right() { return button_on_right_; }
-
-  // Get avatar images for the BrowserView. |avatar| is used in the browser
-  // window whereas |taskbar_badge_avatar| is used for the OS taskbar. If
+  // Get avatar images. |avatar| is used in the browser window whereas
+  // |taskbar_badge_avatar| is used for the OS taskbar. If
   // |taskbar_badge_avatar| is empty then |avatar| should be used for the
   // taskbar as well. Returns false if the cache doesn't have an entry for a
   // Profile::REGULAR_PROFILE type Profile, otherwise return true.
-  static bool GetAvatarImages(BrowserView* browser_view,
+  static bool GetAvatarImages(const BrowserNonClientFrameView* frame_view,
                               bool should_show_avatar_menu,
                               gfx::Image* avatar,
                               gfx::Image* taskbar_badge_avatar,
@@ -68,20 +64,19 @@ class AvatarMenuButton : public views::MenuButton,
                          const gfx::Rect& rect) const override;
 
   // views::MenuButtonListener:
-  void OnMenuButtonClicked(views::View* source,
-                           const gfx::Point& point) override;
+  void OnMenuButtonClicked(views::MenuButton* source,
+                           const gfx::Point& point,
+                           const ui::Event* event) override;
 
   BrowserView* browser_view_;
   bool enabled_;
-  scoped_ptr<ui::MenuModel> menu_model_;
+  std::unique_ptr<ui::MenuModel> menu_model_;
 
   // Use a scoped ptr because gfx::Image doesn't have a default constructor.
-  scoped_ptr<gfx::Image> icon_;
+  std::unique_ptr<gfx::Image> icon_;
   gfx::ImageSkia button_icon_;
   bool is_rectangle_;
   int old_height_;
-  // True if the avatar button is on the right side of the browser window.
-  bool button_on_right_;
 
   DISALLOW_COPY_AND_ASSIGN(AvatarMenuButton);
 };

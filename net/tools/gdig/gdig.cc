@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #include <stdio.h>
+
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -12,7 +14,6 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -23,9 +24,10 @@
 #include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "net/base/address_list.h"
+#include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
+#include "net/base/url_util.h"
 #include "net/dns/dns_client.h"
 #include "net/dns/dns_config_service.h"
 #include "net/dns/dns_protocol.h"
@@ -53,11 +55,11 @@ bool StringToIPEndPoint(const std::string& ip_address_and_port,
   if (port == -1)
     port = dns_protocol::kDefaultPort;
 
-  net::IPAddressNumber ip_number;
-  if (!net::ParseIPLiteralToNumber(ip, &ip_number))
+  net::IPAddress ip_address;
+  if (!ip_address.AssignFromIPLiteral(ip))
     return false;
 
-  *ip_end_point = net::IPEndPoint(ip_number, static_cast<uint16_t>(port));
+  *ip_end_point = net::IPEndPoint(ip_address, static_cast<uint16_t>(port));
   return true;
 }
 
@@ -224,10 +226,10 @@ class GDig {
   Result result_;
 
   base::CancelableClosure timeout_closure_;
-  scoped_ptr<DnsConfigService> dns_config_service_;
-  scoped_ptr<FileNetLogObserver> log_observer_;
-  scoped_ptr<NetLog> log_;
-  scoped_ptr<HostResolver> resolver_;
+  std::unique_ptr<DnsConfigService> dns_config_service_;
+  std::unique_ptr<FileNetLogObserver> log_observer_;
+  std::unique_ptr<NetLog> log_;
+  std::unique_ptr<HostResolver> resolver_;
 
 #if defined(OS_MACOSX)
   // Without this there will be a mem leak on osx.
@@ -328,7 +330,7 @@ bool GDig::ParseCommandLine(int argc, const char* argv[]) {
       parsed_command_line.GetSwitchValueASCII("nameserver");
     if (!StringToIPEndPoint(nameserver, &nameserver_)) {
       fprintf(stderr,
-              "Cannot parse the namerserver string into an IPEndPoint\n");
+              "Cannot parse the nameserver string into an IPEndPoint\n");
       return false;
     }
   }
@@ -425,12 +427,12 @@ void GDig::OnDnsConfig(const DnsConfig& dns_config_const) {
     return;
   }
 
-  scoped_ptr<DnsClient> dns_client(DnsClient::CreateClient(NULL));
+  std::unique_ptr<DnsClient> dns_client(DnsClient::CreateClient(NULL));
   dns_client->SetConfig(dns_config);
   HostResolver::Options options;
   options.max_concurrent_resolves = parallellism_;
   options.max_retry_attempts = 1u;
-  scoped_ptr<HostResolverImpl> resolver(
+  std::unique_ptr<HostResolverImpl> resolver(
       new HostResolverImpl(options, log_.get()));
   resolver->SetDnsClient(std::move(dns_client));
   resolver_ = std::move(resolver);

@@ -16,6 +16,14 @@ test_harness_script = r"""
   }
 
   window.domAutomationController = domAutomationController;
+
+  function GetDriverBugWorkarounds() {
+    var query_result = document.querySelector('.workarounds-list');
+    var browser_list = []
+    for (var i=0; i < query_result.childElementCount; i++)
+      browser_list.push(query_result.children[i].textContent);
+    return browser_list;
+  };
 """
 
 class GpuProcessValidator(gpu_test_base.ValidatorBase):
@@ -30,10 +38,10 @@ class GpuProcessValidator(gpu_test_base.ValidatorBase):
     if hasattr(page, 'Validate'):
       page.Validate(tab, results)
     else:
-      has_gpu_process_js = 'chrome.gpuBenchmarking.hasGpuProcess()'
-      has_gpu_process = tab.EvaluateJavaScript(has_gpu_process_js)
-      if not has_gpu_process:
-        raise page_test.Failure('No GPU process detected')
+      has_gpu_channel_js = 'chrome.gpuBenchmarking.hasGpuChannel()'
+      has_gpu_channel = tab.EvaluateJavaScript(has_gpu_channel_js)
+      if not has_gpu_channel:
+        raise page_test.Failure('No GPU channel detected')
 
 class GpuProcess(gpu_test_base.TestBase):
   """Tests that accelerated content triggers the creation of a GPU process"""

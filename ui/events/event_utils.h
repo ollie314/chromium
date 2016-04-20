@@ -7,8 +7,9 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/event_types.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "ui/events/event.h"
@@ -43,7 +44,7 @@ EVENTS_EXPORT void UpdateDeviceList();
 
 // Returns a ui::Event wrapping a native event. Ownership of the returned value
 // is transferred to the caller.
-EVENTS_EXPORT scoped_ptr<Event> EventFromNative(
+EVENTS_EXPORT std::unique_ptr<Event> EventFromNative(
     const base::NativeEvent& native_event);
 
 // Get the EventType from a native event.
@@ -115,6 +116,10 @@ base::NativeEvent CopyNativeEvent(
 void ReleaseCopiedNativeEvent(
     const base::NativeEvent& native_event);
 
+// Returns the detailed pointer information for touch events.
+EVENTS_EXPORT PointerDetails
+GetTouchPointerDetailsFromNative(const base::NativeEvent& native_event);
+
 // Gets the touch id from a native event.
 EVENTS_EXPORT int GetTouchId(const base::NativeEvent& native_event);
 
@@ -122,15 +127,8 @@ EVENTS_EXPORT int GetTouchId(const base::NativeEvent& native_event);
 EVENTS_EXPORT void ClearTouchIdIfReleased(
     const base::NativeEvent& native_event);
 
-// Gets the radius along the X/Y axis from a native event. Default is 1.0.
-EVENTS_EXPORT float GetTouchRadiusX(const base::NativeEvent& native_event);
-EVENTS_EXPORT float GetTouchRadiusY(const base::NativeEvent& native_event);
-
 // Gets the angle of the major axis away from the X axis. Default is 0.0.
 EVENTS_EXPORT float GetTouchAngle(const base::NativeEvent& native_event);
-
-// Gets the force from a native_event. Normalized to be [0, 1]. Default is 0.0.
-EVENTS_EXPORT float GetTouchForce(const base::NativeEvent& native_event);
 
 // Gets the fling velocity from a native event. is_cancel is set to true if
 // this was a tap down, intended to stop an ongoing fling.

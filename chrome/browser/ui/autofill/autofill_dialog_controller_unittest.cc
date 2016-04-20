@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -13,9 +14,7 @@
 #include "base/command_line.h"
 #include "base/guid.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -27,7 +26,6 @@
 #include "chrome/browser/ui/autofill/autofill_dialog_i18n_input.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_view.h"
 #include "chrome/browser/ui/autofill/mock_address_validator.h"
-#include "chrome/browser/ui/autofill/mock_new_credit_card_bubble_controller.h"
 #include "chrome/browser/web_data_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -39,12 +37,14 @@
 #include "components/autofill/content/browser/risk/proto/fingerprint.pb.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
+#include "components/autofill/core/browser/country_names.h"
 #include "components/autofill/core/browser/test_personal_data_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/user_prefs/user_prefs.h"
@@ -209,13 +209,11 @@ class TestAutofillDialogController
       content::WebContents* contents,
       const FormData& form_structure,
       const GURL& source_url,
-      const AutofillClient::ResultCallback& callback,
-      MockNewCreditCardBubbleController* mock_new_card_bubble_controller)
+      const AutofillClient::ResultCallback& callback)
       : AutofillDialogControllerImpl(contents,
                                      form_structure,
                                      source_url,
                                      callback),
-        mock_new_card_bubble_controller_(mock_new_card_bubble_controller),
         submit_button_delay_count_(0) {}
 
   ~TestAutofillDialogController() override {}
@@ -281,13 +279,6 @@ class TestAutofillDialogController
     open_tab_url_ = url;
   }
 
-  void ShowNewCreditCardBubble(
-      scoped_ptr<CreditCard> new_card,
-      scoped_ptr<AutofillProfile> billing_profile) override {
-    mock_new_card_bubble_controller_->Show(std::move(new_card),
-                                           std::move(billing_profile));
-  }
-
   // AutofillDialogControllerImpl calls this method before showing the dialog
   // window.
   void SubmitButtonDelayBegin() override {
@@ -303,7 +294,6 @@ class TestAutofillDialogController
   testing::NiceMock<MockAddressValidator> mock_validator_;
 
   GURL open_tab_url_;
-  MockNewCreditCardBubbleController* mock_new_card_bubble_controller_;
 
   // The number of times that the submit button was delayed.
   int submit_button_delay_count_;
@@ -313,7 +303,9 @@ class TestAutofillDialogController
 
 class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
  protected:
-  AutofillDialogControllerTest(): form_structure_(NULL) {}
+  AutofillDialogControllerTest() : form_structure_(NULL) {
+    CountryNames::SetLocaleString("en-US");
+  }
 
   // testing::Test implementation:
   void SetUp() override {
@@ -330,9 +322,6 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
   void Reset() {
     if (controller_)
       controller_->ViewClosed();
-
-    mock_new_card_bubble_controller_.reset(
-        new MockNewCreditCardBubbleController);
 
     profile()->GetPrefs()->ClearPref(::prefs::kAutofillDialogSaveData);
 
@@ -366,8 +355,7 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
         web_contents(),
         form_data,
         GURL(kSourceUrl),
-        callback,
-        mock_new_card_bubble_controller_.get()))->AsWeakPtr();
+        callback))->AsWeakPtr();
     controller_->Init(profile());
   }
 
@@ -480,7 +468,7 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
     EXPECT_FALSE(shipping_country.empty());
     EXPECT_EQ(billing_country, shipping_country);
 
-    EXPECT_EQ(CREDIT_CARD_NAME,
+    EXPECT_EQ(CREDIT_CARD_NAME_FULL,
               form_structure()->field(1)->Type().GetStorableType());
     base::string16 cc_name = form_structure()->field(1)->value;
     EXPECT_EQ(NAME_FULL, form_structure()->field(6)->Type().GetStorableType());
@@ -501,10 +489,6 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
 
   const FormStructure* form_structure() { return form_structure_; }
 
-  const MockNewCreditCardBubbleController* mock_new_card_bubble_controller() {
-    return mock_new_card_bubble_controller_.get();
-  }
-
  private:
   void FinishedCallback(AutofillClient::RequestAutocompleteResult result,
                         const base::string16& debug_message,
@@ -523,11 +507,7 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
   // Returned when the dialog closes successfully.
   const FormStructure* form_structure_;
 
-  // Used to record when new card bubbles would show. Created in |Reset()|.
-  scoped_ptr<MockNewCreditCardBubbleController>
-      mock_new_card_bubble_controller_;
-
-  scoped_ptr<ScopedTestingLocalState> scoped_local_state_;
+  std::unique_ptr<ScopedTestingLocalState> scoped_local_state_;
 };
 
 }  // namespace
@@ -894,17 +874,15 @@ TEST_F(AutofillDialogControllerTest, NewAutofillProfileIsDefault) {
   new_credit_card.set_guid(
       controller()->GetTestingManager()->imported_credit_card().guid());
 
-  // Reload the dialog. The newly added address and credit card should now be
-  // set as the defaults.
+  // Reload the dialog. The newly added address should now be set as the
+  // default.
   Reset();
   controller()->GetTestingManager()->AddTestingProfile(&profile);
   controller()->GetTestingManager()->AddTestingProfile(&new_profile);
   controller()->GetTestingManager()->AddTestingCreditCard(&credit_card);
-  controller()->GetTestingManager()->AddTestingCreditCard(&new_credit_card);
 
   // Until a selection has been made, the default suggestion is the first one.
   // For the shipping section, this follows the "use billing" suggestion.
-  EXPECT_EQ(1, GetMenuModelForSection(SECTION_CC)->checked_item());
   EXPECT_EQ(2, GetMenuModelForSection(SECTION_SHIPPING)->checked_item());
 }
 
@@ -981,7 +959,7 @@ TEST_F(AutofillDialogControllerTest, AutofillCreditCards) {
 
   // Empty cards are ignored.
   CreditCard empty_card(base::GenerateGUID(), kSettingsOrigin);
-  empty_card.SetRawInfo(CREDIT_CARD_NAME, ASCIIToUTF16("John Doe"));
+  empty_card.SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("John Doe"));
   controller()->GetTestingManager()->AddTestingCreditCard(&empty_card);
   EXPECT_FALSE(controller()->MenuModelForSection(SECTION_CC));
 
@@ -1027,7 +1005,7 @@ TEST_F(AutofillDialogControllerTest, DontUseBillingAsShipping) {
   EXPECT_FALSE(shipping_state.empty());
   EXPECT_NE(billing_state, shipping_state);
 
-  EXPECT_EQ(CREDIT_CARD_NAME,
+  EXPECT_EQ(CREDIT_CARD_NAME_FULL,
             form_structure()->field(1)->Type().GetStorableType());
   base::string16 cc_name = form_structure()->field(1)->value;
   EXPECT_EQ(NAME_FULL, form_structure()->field(6)->Type().GetStorableType());
@@ -1376,14 +1354,6 @@ TEST_F(AutofillDialogControllerTest, ShippingSectionCanBeHidden) {
   EXPECT_TRUE(form_structure());
 }
 
-TEST_F(AutofillDialogControllerTest, NewCardBubbleShown) {
-  FillCreditCardInputs();
-  controller()->OnAccept();
-  controller()->ViewClosed();
-
-  EXPECT_EQ(1, mock_new_card_bubble_controller()->bubbles_shown());
-}
-
 TEST_F(AutofillDialogControllerTest, SaveInChromeByDefault) {
   EXPECT_TRUE(controller()->ShouldSaveInChrome());
   FillCreditCardInputs();
@@ -1460,45 +1430,6 @@ TEST_F(AutofillDialogControllerTest, FieldControlsIcons) {
   EXPECT_TRUE(controller()->FieldControlsIcons(CREDIT_CARD_NUMBER));
   EXPECT_FALSE(controller()->FieldControlsIcons(CREDIT_CARD_VERIFICATION_CODE));
   EXPECT_FALSE(controller()->FieldControlsIcons(EMAIL_ADDRESS));
-}
-
-TEST_F(AutofillDialogControllerTest, SaveCreditCardIncludesName_NoBilling) {
-  CreditCard test_credit_card(test::GetVerifiedCreditCard());
-  FillInputs(SECTION_CC, test_credit_card);
-
-  AutofillProfile test_profile(test::GetVerifiedProfile());
-  FillInputs(SECTION_BILLING, test_profile);
-
-  UseBillingForShipping();
-
-  controller()->GetView()->CheckSaveDetailsLocallyCheckbox(true);
-  controller()->OnAccept();
-
-  TestPersonalDataManager* test_pdm = controller()->GetTestingManager();
-  const CreditCard& imported_card = test_pdm->imported_credit_card();
-  EXPECT_EQ(test_profile.GetInfo(AutofillType(NAME_FULL), "en-US"),
-            imported_card.GetRawInfo(CREDIT_CARD_NAME));
-}
-
-TEST_F(AutofillDialogControllerTest, SaveCreditCardIncludesName_WithBilling) {
-  TestPersonalDataManager* test_pdm = controller()->GetTestingManager();
-  AutofillProfile test_profile(test::GetVerifiedProfile());
-
-  EXPECT_CALL(*controller()->GetView(), ModelChanged());
-  test_pdm->AddTestingProfile(&test_profile);
-  ASSERT_TRUE(controller()->MenuModelForSection(SECTION_BILLING));
-
-  CreditCard test_credit_card(test::GetVerifiedCreditCard());
-  FillInputs(SECTION_CC, test_credit_card);
-
-  controller()->GetView()->CheckSaveDetailsLocallyCheckbox(true);
-  controller()->OnAccept();
-
-  const CreditCard& imported_card = test_pdm->imported_credit_card();
-  EXPECT_EQ(test_profile.GetInfo(AutofillType(NAME_FULL), "en-US"),
-            imported_card.GetRawInfo(CREDIT_CARD_NAME));
-
-  controller()->ViewClosed();
 }
 
 // Verifies that a call to the IconsForFields() method before the card type is

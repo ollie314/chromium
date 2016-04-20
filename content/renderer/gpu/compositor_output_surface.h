@@ -7,10 +7,11 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/threading/platform_thread.h"
@@ -47,7 +48,10 @@ class CompositorOutputSurface
       const scoped_refptr<ContextProviderCommandBuffer>& context_provider,
       const scoped_refptr<ContextProviderCommandBuffer>&
           worker_context_provider,
-      scoped_ptr<cc::SoftwareOutputDevice> software,
+#if defined(ENABLE_VULKAN)
+      const scoped_refptr<cc::VulkanContextProvider>& vulkan_context_provider,
+#endif
+      std::unique_ptr<cc::SoftwareOutputDevice> software,
       scoped_refptr<FrameSwapMessageQueue> swap_frame_message_queue,
       bool use_swap_compositor_frame_message);
   ~CompositorOutputSurface() override;
@@ -57,13 +61,9 @@ class CompositorOutputSurface
   void DetachFromClient() override;
   void SwapBuffers(cc::CompositorFrame* frame) override;
 
-  // TODO(epenner): This seems out of place here and would be a better fit
-  // int CompositorThread after it is fully refactored (http://crbug/170828)
-  void UpdateSmoothnessTakesPriority(bool prefer_smoothness) override;
-
  protected:
   void ShortcutSwapAck(uint32_t output_surface_id,
-                       scoped_ptr<cc::GLFrameData> gl_frame_data);
+                       std::unique_ptr<cc::GLFrameData> gl_frame_data);
   virtual void OnSwapAck(uint32_t output_surface_id,
                          const cc::CompositorFrameAck& ack);
   virtual void OnReclaimResources(uint32_t output_surface_id,
@@ -104,14 +104,10 @@ class CompositorOutputSurface
   scoped_refptr<IPC::SyncMessageFilter> message_sender_;
   scoped_refptr<FrameSwapMessageQueue> frame_swap_message_queue_;
   int routing_id_;
-#if defined(OS_ANDROID)
-  bool prefers_smoothness_;
-  scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner_;
-#endif
 
   // TODO(danakj): Remove this when crbug.com/311404
   bool layout_test_mode_;
-  scoped_ptr<cc::CompositorFrameAck> layout_test_previous_frame_ack_;
+  std::unique_ptr<cc::CompositorFrameAck> layout_test_previous_frame_ack_;
   base::WeakPtrFactory<CompositorOutputSurface> weak_ptrs_;
 };
 

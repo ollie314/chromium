@@ -31,8 +31,8 @@ class ExtensionInstallViewDelegate {
   virtual ~ExtensionInstallViewDelegate() {}
 };
 
-// Displays the extension or bundle install prompt, and notifies the
-// Delegate of success or failure.
+// Displays the extension install prompt, and notifies the Delegate of success
+// or failure.
 @interface ExtensionInstallViewController : NSViewController
                                            <NSOutlineViewDataSource,
                                             NSOutlineViewDelegate> {
@@ -56,7 +56,7 @@ class ExtensionInstallViewDelegate {
   Profile* profile_; // weak
   content::PageNavigator* navigator_;  // weak
   ExtensionInstallViewDelegate* delegate_;  // weak
-  scoped_ptr<ExtensionInstallPrompt::Prompt> prompt_;
+  std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt_;
 
   base::scoped_nsobject<NSArray> warnings_;
   BOOL isComputingRowHeight_;
@@ -78,7 +78,7 @@ class ExtensionInstallViewDelegate {
 - (id)initWithProfile:(Profile*)profile
             navigator:(content::PageNavigator*)navigator
              delegate:(ExtensionInstallViewDelegate*)delegate
-               prompt:(scoped_ptr<ExtensionInstallPrompt::Prompt>)prompt;
+               prompt:(std::unique_ptr<ExtensionInstallPrompt::Prompt>)prompt;
 - (IBAction)storeLinkClicked:(id)sender; // Callback for "View details" link.
 - (IBAction)cancel:(id)sender;
 - (IBAction)ok:(id)sender;

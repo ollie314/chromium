@@ -5,9 +5,10 @@
 #ifndef NET_HTTP_HTTP_STREAM_FACTORY_IMPL_JOB_H_
 #define NET_HTTP_HTTP_STREAM_FACTORY_IMPL_JOB_H_
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "net/base/completion_callback.h"
@@ -17,7 +18,6 @@
 #include "net/http/http_request_info.h"
 #include "net/http/http_stream_factory_impl.h"
 #include "net/log/net_log.h"
-#include "net/net_features.h"
 #include "net/proxy/proxy_service.h"
 #include "net/quic/quic_stream_factory.h"
 #include "net/socket/client_socket_handle.h"
@@ -28,7 +28,7 @@
 
 namespace net {
 
-class BidirectionalStreamJob;
+class BidirectionalStreamImpl;
 class ClientSocketHandle;
 class HttpAuthController;
 class HttpNetworkSession;
@@ -93,7 +93,7 @@ class HttpStreamFactoryImpl::Job {
   NextProto protocol_negotiated() const;
   bool using_spdy() const;
   const BoundNetLog& net_log() const { return net_log_; }
-  bool for_bidirectional() const { return for_bidirectional_; }
+  HttpStreamRequest::StreamType stream_type() const { return stream_type_; }
 
   const SSLConfig& server_ssl_config() const;
   const SSLConfig& proxy_ssl_config() const;
@@ -113,6 +113,8 @@ class HttpStreamFactoryImpl::Job {
   void MarkOtherJobComplete(const Job& job);
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(HttpStreamFactoryImplRequestTest, DelayMainJob);
+
   enum State {
     STATE_START,
     STATE_RESOLVE_PROXY,
@@ -133,6 +135,8 @@ class HttpStreamFactoryImpl::Job {
     // The npn-spdy job will Resume() the http job if, in
     // STATE_INIT_CONNECTION_COMPLETE, it detects an error or does not find an
     // existing SpdySession. In that case, the http and npn-spdy jobs will race.
+    // When QUIC protocol is used by the npn-spdy job, then http job will wait
+    // for |wait_time_| when the http job was resumed.
     STATE_WAIT_FOR_JOB,
     STATE_WAIT_FOR_JOB_COMPLETE,
 
@@ -182,7 +186,7 @@ class HttpStreamFactoryImpl::Job {
     // |spdy_session| should not be used.
     int CreateAvailableSessionFromSocket(
         const SpdySessionKey& key,
-        scoped_ptr<ClientSocketHandle> connection,
+        std::unique_ptr<ClientSocketHandle> connection,
         const BoundNetLog& net_log,
         int certificate_error_code,
         bool is_secure,
@@ -201,8 +205,11 @@ class HttpStreamFactoryImpl::Job {
     const bool is_spdy_alternative_;
   };
 
+  // Resume the |this| job after the specified |wait_time_|.
+  void ResumeAfterDelay();
+
   void OnStreamReadyCallback();
-  void OnBidirectionalStreamJobReadyCallback();
+  void OnBidirectionalStreamImplReadyCallback();
   void OnWebSocketHandshakeStreamReadyCallback();
   // This callback function is called when a new SPDY session is created.
   void OnNewSpdySessionReadyCallback();
@@ -237,10 +244,10 @@ class HttpStreamFactoryImpl::Job {
   int DoRestartTunnelAuth();
   int DoRestartTunnelAuthComplete(int result);
 
-  // Creates a SpdyHttpStream or a BidirectionalStreamJob from the given values
-  // and sets to |stream_| or |bidirectional_stream_job_| respectively. Does
+  // Creates a SpdyHttpStream or a BidirectionalStreamImpl from the given values
+  // and sets to |stream_| or |bidirectional_stream_impl_| respectively. Does
   // nothing if |stream_factory_| is for WebSockets.
-  int SetSpdyHttpStreamOrBidirectionalStreamJob(
+  int SetSpdyHttpStreamOrBidirectionalStreamImpl(
       base::WeakPtr<SpdySession> session,
       bool direct);
 
@@ -256,11 +263,9 @@ class HttpStreamFactoryImpl::Job {
   bool IsSpdyAlternative() const;
   bool IsQuicAlternative() const;
 
-  // Sets several fields of |ssl_config| for |server| based on the proxy info
-  // and other factors.
-  void InitSSLConfig(const HostPortPair& server,
-                     SSLConfig* ssl_config,
-                     bool is_proxy) const;
+  // Sets several fields of |ssl_config| based on the proxy info and other
+  // factors.
+  void InitSSLConfig(SSLConfig* ssl_config, bool is_proxy) const;
 
   // Retrieve SSLInfo from our SSL Socket.
   // This must only be called when we are using an SSLSocket.
@@ -309,6 +314,7 @@ class HttpStreamFactoryImpl::Job {
   // session is found, and OK otherwise.
   static int OnHostResolution(SpdySessionPool* spdy_session_pool,
                               const SpdySessionKey& spdy_session_key,
+                              const GURL& origin_url,
                               const AddressList& addresses,
                               const BoundNetLog& net_log);
 
@@ -322,7 +328,7 @@ class HttpStreamFactoryImpl::Job {
   const BoundNetLog net_log_;
 
   CompletionCallback io_callback_;
-  scoped_ptr<ClientSocketHandle> connection_;
+  std::unique_ptr<ClientSocketHandle> connection_;
   HttpNetworkSession* const session_;
   HttpStreamFactoryImpl* const stream_factory_;
   State next_state_;
@@ -352,6 +358,8 @@ class HttpStreamFactoryImpl::Job {
   // proceed and then race the two Jobs.
   Job* waiting_job_;
 
+  base::TimeDelta wait_time_;
+
   // True if handling a HTTPS request, or using SPDY with SSL
   bool using_ssl_;
 
@@ -378,11 +386,9 @@ class HttpStreamFactoryImpl::Job {
   // read from the socket until the tunnel is done.
   bool establishing_tunnel_;
 
-  scoped_ptr<HttpStream> stream_;
-  scoped_ptr<WebSocketHandshakeStreamBase> websocket_stream_;
-#if BUILDFLAG(ENABLE_BIDIRECTIONAL_STREAM)
-  scoped_ptr<BidirectionalStreamJob> bidirectional_stream_job_;
-#endif
+  std::unique_ptr<HttpStream> stream_;
+  std::unique_ptr<WebSocketHandshakeStreamBase> websocket_stream_;
+  std::unique_ptr<BidirectionalStreamImpl> bidirectional_stream_impl_;
 
   // True if we negotiated NPN.
   bool was_npn_negotiated_;
@@ -394,7 +400,7 @@ class HttpStreamFactoryImpl::Job {
   // preconnect.
   int num_streams_;
 
-  scoped_ptr<ValidSpdySessionPool> valid_spdy_session_pool_;
+  std::unique_ptr<ValidSpdySessionPool> valid_spdy_session_pool_;
 
   // Initialized when we create a new SpdySession.
   base::WeakPtr<SpdySession> new_spdy_session_;
@@ -407,9 +413,10 @@ class HttpStreamFactoryImpl::Job {
 
   JobStatus job_status_;
   JobStatus other_job_status_;
+  base::TimeTicks job_stream_ready_start_time_;
 
-  // True if BidirectionalStreamJob is requested.
-  bool for_bidirectional_;
+  // Type of stream that is requested.
+  HttpStreamRequest::StreamType stream_type_;
 
   base::WeakPtrFactory<Job> ptr_factory_;
 

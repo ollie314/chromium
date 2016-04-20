@@ -30,6 +30,9 @@ TestLayerAnimationDelegate::TestLayerAnimationDelegate(
   CreateCcLayer();
 }
 
+TestLayerAnimationDelegate::TestLayerAnimationDelegate(
+    const TestLayerAnimationDelegate& other) = default;
+
 TestLayerAnimationDelegate::~TestLayerAnimationDelegate() {
 }
 
@@ -113,11 +116,11 @@ TestLayerAnimationDelegate::GetThreadedAnimationDelegate() {
 }
 
 void TestLayerAnimationDelegate::CreateCcLayer() {
-  cc_layer_ = cc::Layer::Create(ui::Layer::UILayerSettings());
+  cc_layer_ = cc::Layer::Create();
 }
 
 void TestLayerThreadedAnimationDelegate::AddThreadedAnimation(
-    scoped_ptr<cc::Animation> animation) {}
+    std::unique_ptr<cc::Animation> animation) {}
 
 void TestLayerThreadedAnimationDelegate::RemoveThreadedAnimation(
     int animation_id) {}

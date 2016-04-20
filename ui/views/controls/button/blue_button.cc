@@ -51,10 +51,10 @@ const char* BlueButton::GetClassName() const {
   return BlueButton::kViewClassName;
 }
 
-scoped_ptr<LabelButtonBorder> BlueButton::CreateDefaultBorder() const {
+std::unique_ptr<LabelButtonBorder> BlueButton::CreateDefaultBorder() const {
   // Insets for splitting the images.
-  const gfx::Insets insets(5, 5, 5, 5);
-  scoped_ptr<LabelButtonAssetBorder> button_border(
+  const gfx::Insets insets(5);
+  std::unique_ptr<LabelButtonAssetBorder> button_border(
       new LabelButtonAssetBorder(style()));
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   button_border->SetPainter(false, STATE_NORMAL, Painter::CreateImagePainter(

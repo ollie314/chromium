@@ -77,7 +77,7 @@ void FakeCrasAudioClient::Init(dbus::Bus* bus) {
   input_3.is_input = true;
   input_3.id = 20003;
   input_3.stable_device_id = 20003;
-  input_3.device_name = "Fake Mick Jack";
+  input_3.device_name = "Fake Mic Jack";
   input_3.type = "MIC";
   input_3.name = "Some type of Mic";
   node_list_.push_back(input_3);
@@ -167,11 +167,19 @@ void FakeCrasAudioClient::RemoveActiveInputNode(uint64_t node_id) {
 
 void FakeCrasAudioClient::SwapLeftRight(uint64_t node_id, bool swap) {}
 
+void FakeCrasAudioClient::SetGlobalOutputChannelRemix(
+    int32_t channels, const std::vector<double>& mixer) {}
+
 void FakeCrasAudioClient::AddActiveOutputNode(uint64_t node_id) {
   for (size_t i = 0; i < node_list_.size(); ++i) {
     if (node_list_[i].id == node_id)
       node_list_[i].active = true;
   }
+}
+
+void FakeCrasAudioClient::WaitForServiceToBeAvailable(
+    const WaitForServiceToBeAvailableCallback& callback) {
+  callback.Run(true);
 }
 
 void FakeCrasAudioClient::RemoveActiveOutputNode(uint64_t node_id) {

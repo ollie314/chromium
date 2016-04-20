@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include <array>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -17,7 +18,6 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/sha1.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
@@ -46,6 +46,7 @@ class SupervisedUserSiteList
     explicit HostnameHash(const std::string& hostname);
     // |bytes| must have a size of at least |base::kSHA1Length|.
     explicit HostnameHash(const std::vector<uint8_t>& bytes);
+    HostnameHash(const HostnameHash& other);
 
     bool operator==(const HostnameHash& rhs) const;
 
@@ -64,12 +65,14 @@ class SupervisedUserSiteList
   // the newly created object.
   static void Load(const std::string& id,
                    const base::string16& title,
+                   const base::FilePath& large_icon_path,
                    const base::FilePath& file,
                    const LoadedCallback& callback);
 
   const std::string& id() const { return id_; }
   const base::string16& title() const { return title_; }
   const GURL& entry_point() const { return entry_point_; }
+  const base::FilePath& large_icon_path() const { return large_icon_path_; }
   const std::vector<std::string>& patterns() const { return patterns_; }
   const std::vector<HostnameHash>& hostname_hashes() const {
     return hostname_hashes_;
@@ -85,12 +88,14 @@ class SupervisedUserSiteList
   SupervisedUserSiteList(const std::string& id,
                          const base::string16& title,
                          const GURL& entry_point,
+                         const base::FilePath& large_icon_path,
                          const base::ListValue* patterns,
                          const base::ListValue* hostname_hashes);
   // Used for testing.
   SupervisedUserSiteList(const std::string& id,
                          const base::string16& title,
                          const GURL& entry_point,
+                         const base::FilePath& large_icon_path,
                          const std::vector<std::string>& patterns,
                          const std::vector<std::string>& hostname_hashes);
   ~SupervisedUserSiteList();
@@ -99,14 +104,16 @@ class SupervisedUserSiteList
   static void OnJsonLoaded(
       const std::string& id,
       const base::string16& title,
+      const base::FilePath& large_icon_path,
       const base::FilePath& path,
       base::TimeTicks start_time,
       const SupervisedUserSiteList::LoadedCallback& callback,
-      scoped_ptr<base::Value> value);
+      std::unique_ptr<base::Value> value);
 
   std::string id_;
   base::string16 title_;
   GURL entry_point_;
+  base::FilePath large_icon_path_;
 
   // A list of URL patterns that should be whitelisted.
   std::vector<std::string> patterns_;

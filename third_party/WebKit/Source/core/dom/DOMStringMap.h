@@ -38,17 +38,10 @@ namespace blink {
 
 class Element;
 
-class DOMStringMap : public NoBaseWillBeGarbageCollected<DOMStringMap>, public ScriptWrappable {
-    DECLARE_EMPTY_VIRTUAL_DESTRUCTOR_WILL_BE_REMOVED(DOMStringMap);
+class DOMStringMap : public GarbageCollected<DOMStringMap>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
-    USING_FAST_MALLOC_WILL_BE_REMOVED(DOMStringMap);
     WTF_MAKE_NONCOPYABLE(DOMStringMap);
 public:
-#if !ENABLE(OILPAN)
-    virtual void ref() = 0;
-    virtual void deref() = 0;
-#endif
-
     virtual void getNames(Vector<String>&) = 0;
     virtual String item(const String& name) = 0;
     virtual bool contains(const String& name) = 0;

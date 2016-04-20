@@ -28,6 +28,7 @@
 #include "extensions/common/extension_icon_set.h"
 #include "extensions/common/feature_switch.h"
 #include "extensions/common/features/behavior_feature.h"
+#include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_provider.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_handlers/app_isolation_info.h"
@@ -55,10 +56,9 @@ const char kHasSetScriptOnAllUrlsPrefName[] = "has_set_script_all_urls";
 
 // Returns true if |extension| should always be enabled in incognito mode.
 bool IsWhitelistedForIncognito(const Extension* extension) {
-  return FeatureProvider::GetBehaviorFeature(
-             BehaviorFeature::kWhitelistedForIncognito)
-      ->IsAvailableToExtension(extension)
-      .is_available();
+  const Feature* feature = FeatureProvider::GetBehaviorFeature(
+      BehaviorFeature::kWhitelistedForIncognito);
+  return feature && feature->IsAvailableToExtension(extension).is_available();
 }
 
 // Returns |extension_id|. See note below.
@@ -294,7 +294,7 @@ bool IsExtensionIdle(const std::string& extension_id,
     SharedModuleService* service = ExtensionSystem::Get(context)
                                        ->extension_service()
                                        ->shared_module_service();
-    scoped_ptr<ExtensionSet> dependents =
+    std::unique_ptr<ExtensionSet> dependents =
         service->GetDependentExtensions(extension);
     for (ExtensionSet::const_iterator i = dependents->begin();
          i != dependents->end();
@@ -330,9 +330,10 @@ GURL GetSiteForExtensionId(const std::string& extension_id,
       context, Extension::GetBaseURLFromExtensionId(extension_id));
 }
 
-scoped_ptr<base::DictionaryValue> GetExtensionInfo(const Extension* extension) {
+std::unique_ptr<base::DictionaryValue> GetExtensionInfo(
+    const Extension* extension) {
   DCHECK(extension);
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
 
   dict->SetString("id", extension->id());
   dict->SetString("name", extension->name());

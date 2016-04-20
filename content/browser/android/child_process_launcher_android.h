@@ -6,7 +6,9 @@
 #define CONTENT_BROWSER_ANDROID_CHILD_PROCESS_LAUNCHER_ANDROID_H_
 
 #include <jni.h>
+
 #include <map>
+#include <memory>
 
 #include "base/callback.h"
 #include "base/command_line.h"
@@ -25,9 +27,13 @@ typedef base::Callback<void(base::ProcessHandle)> StartChildProcessCallback;
 void StartChildProcess(
     const base::CommandLine::StringVector& argv,
     int child_process_id,
-    const scoped_ptr<FileDescriptorInfo> files_to_register,
+    const std::unique_ptr<FileDescriptorInfo> files_to_register,
     const std::map<int, base::MemoryMappedFile::Region>& regions,
     const StartChildProcessCallback& callback);
+
+// Starts the background download process if it hasn't been started.
+// TODO(qinmin): pass the download parameters here and pass it to java side.
+void StartDownloadProcessIfNecessary();
 
 // Stops a child process based on the handle returned form
 // StartChildProcess.
@@ -41,6 +47,8 @@ void SetChildProcessInForeground(base::ProcessHandle handle,
 void RegisterViewSurface(int surface_id, jobject j_surface);
 
 void UnregisterViewSurface(int surface_id);
+
+gfx::ScopedJavaSurface GetViewSurface(int surface_id);
 
 void CreateSurfaceTextureSurface(int surface_texture_id,
                                  int client_id,

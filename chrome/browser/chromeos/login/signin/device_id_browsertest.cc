@@ -7,17 +7,16 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
-#include "chrome/browser/chromeos/login/ui/oobe_display.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/remove_user_delegate.h"
@@ -147,7 +146,7 @@ class DeviceIDTest : public OobeBaseTest,
     if (!base::ReadFileToString(GetRefreshTokenToDeviceIdMapFilePath(),
                                 &file_contents))
       return;
-    scoped_ptr<base::Value> value(base::JSONReader::Read(file_contents));
+    std::unique_ptr<base::Value> value(base::JSONReader::Read(file_contents));
     base::DictionaryValue* dictionary;
     EXPECT_TRUE(value->GetAsDictionary(&dictionary));
     FakeGaia::RefreshTokenToDeviceIdMap map;

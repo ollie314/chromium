@@ -44,10 +44,20 @@ WebInspector.NetworkManager = function(target)
         this._networkAgent.setCacheDisabled(true);
     if (WebInspector.moduleSetting("monitoringXHREnabled").get())
         this._networkAgent.setMonitoringXHREnabled(true);
-    this._networkAgent.enable();
+
+    // Limit buffer when talking to a remote device.
+    if (Runtime.queryParam("remoteFrontend") || Runtime.queryParam("ws"))
+        this._networkAgent.enable(10000000, 5000000);
+    else
+        this._networkAgent.enable();
 
     /** @type {!Map<!NetworkAgent.CertificateId, !Promise<!NetworkAgent.CertificateDetails>>} */
     this._certificateDetailsCache = new Map();
+
+    this._bypassServiceWorkerSetting = WebInspector.settings.createSetting("bypassServiceWorker", false);
+    if (this._bypassServiceWorkerSetting.get())
+        this._bypassServiceWorkerChanged();
+    this._bypassServiceWorkerSetting.addChangeListener(this._bypassServiceWorkerChanged, this);
 
     WebInspector.moduleSetting("cacheDisabled").addChangeListener(this._cacheDisabledSettingChanged, this);
 }
@@ -71,8 +81,12 @@ WebInspector.NetworkManager._MIMETypes = {
     "text/vtt":                    {"texttrack": true},
 }
 
-/** @typedef {{download: number, upload: number, latency: number}} */
+/** @typedef {{download: number, upload: number, latency: number, title: string}} */
 WebInspector.NetworkManager.Conditions;
+/** @type {!WebInspector.NetworkManager.Conditions} */
+WebInspector.NetworkManager.NoThrottlingConditions = {title: WebInspector.UIString("No throttling"), download: -1, upload: -1, latency: 0};
+/** @type {!WebInspector.NetworkManager.Conditions} */
+WebInspector.NetworkManager.OfflineConditions = {title: WebInspector.UIString("Offline"), download: 0, upload: 0, latency: 0};
 
 WebInspector.NetworkManager.prototype = {
     /**
@@ -134,6 +148,19 @@ WebInspector.NetworkManager.prototype = {
 
         this._certificateDetailsCache.set(certificateId, promise);
         return promise;
+    },
+
+    /**
+     * @return {!WebInspector.Setting}
+     */
+    bypassServiceWorkerSetting: function()
+    {
+        return this._bypassServiceWorkerSetting;
+    },
+
+    _bypassServiceWorkerChanged: function()
+    {
+        this._networkAgent.setBypassServiceWorker(this._bypassServiceWorkerSetting.get());
     },
 
     __proto__: WebInspector.SDKModel.prototype
@@ -654,7 +681,7 @@ WebInspector.MultitargetNetworkManager = function()
     /** @type {!Set<!Protocol.NetworkAgent>} */
     this._agentsCapableOfEmulation = new Set();
     /** @type {!WebInspector.NetworkManager.Conditions} */
-    this._networkConditions = { download: -1, upload: -1, latency: 0 };
+    this._networkConditions = WebInspector.NetworkManager.NoThrottlingConditions;
 }
 
 WebInspector.MultitargetNetworkManager.Events = {

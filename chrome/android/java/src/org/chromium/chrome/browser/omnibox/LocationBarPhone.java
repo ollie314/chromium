@@ -4,6 +4,9 @@
 
 package org.chromium.chrome.browser.omnibox;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.annotation.SuppressLint;
 import android.content.Context;
@@ -11,7 +14,6 @@ import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.text.Selection;
-import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -49,11 +51,13 @@ public class LocationBarPhone extends LocationBarLayout {
     private ImageView mMenuBadge;
     private View mMenuButtonWrapper;
     private int mIncognitoBadgePadding;
-    private boolean mVoiceSearchEnabled;
-    private boolean mUrlFocusChangeInProgress;
     private float mUrlFocusChangePercent;
     private Runnable mKeyboardResizeModeTask;
     private ObjectAnimator mOmniboxBackgroundAnimator;
+
+    private boolean mShowMenuBadge;
+    private AnimatorSet mMenuBadgeAnimatorSet;
+    private boolean mIsMenuBadgeAnimationRunning;
 
     /**
      * Constructor used to inflate from XML.
@@ -160,7 +164,7 @@ public class LocationBarPhone extends LocationBarLayout {
 
         if (percent > 0f && !hasVisibleViewsAfterUrlBarWhenUnfocused()) {
             mUrlActionsContainer.setVisibility(VISIBLE);
-        } else if (percent == 0f && !mUrlFocusChangeInProgress
+        } else if (percent == 0f && !isUrlFocusChangeInProgress()
                 && !hasVisibleViewsAfterUrlBarWhenUnfocused()) {
             // If a URL focus change is in progress, then it will handle setting the visibility
             // correctly after it completes.  If done here, it would cause the URL to jump due
@@ -172,7 +176,7 @@ public class LocationBarPhone extends LocationBarLayout {
         mMicButton.setAlpha(percent);
         if (showMenuButtonInOmnibox()) mMenuButtonWrapper.setAlpha(1f - percent);
 
-        updateDeleteButtonVisibility();
+        updateButtonVisibility();
     }
 
     @Override
@@ -187,7 +191,7 @@ public class LocationBarPhone extends LocationBarLayout {
             setFocusable(false);
             setFocusableInTouchMode(false);
         }
-        mUrlFocusChangeInProgress = true;
+        setUrlFocusChangeInProgress(true);
         super.onUrlFocusChange(hasFocus);
     }
 
@@ -213,11 +217,6 @@ public class LocationBarPhone extends LocationBarLayout {
             canvas.restore();
         }
         return retVal;
-    }
-
-    @Override
-    protected boolean isUrlFocusChangeInProgress() {
-        return mUrlFocusChangeInProgress;
     }
 
     /**
@@ -288,8 +287,7 @@ public class LocationBarPhone extends LocationBarLayout {
                 getSuggestionList().invalidateSuggestionViews();
             }
         }
-        mUrlFocusChangeInProgress = false;
-        updateDeleteButtonVisibility();
+        setUrlFocusChangeInProgress(false);
 
         NewTabPage ntp = getToolbarDataProvider().getNewTabPageForCurrentTab();
         if (hasFocus && ntp != null && ntp.isLocationBarShownInNTP()) {
@@ -298,27 +296,9 @@ public class LocationBarPhone extends LocationBarLayout {
     }
 
     @Override
-    protected boolean shouldShowDeleteButton() {
-        boolean hasText = !TextUtils.isEmpty(mUrlBar.getText());
-        return hasText && (mUrlBar.hasFocus() || mUrlFocusChangeInProgress);
-    }
-
-    @Override
-    protected void updateDeleteButtonVisibility() {
-        boolean enabled = shouldShowDeleteButton();
-        mDeleteButton.setEnabled(enabled);
-        mDeleteButton.setVisibility(enabled ? VISIBLE : INVISIBLE);
-
-        boolean showMicButton = mVoiceSearchEnabled && !enabled
-                && (mUrlBar.hasFocus() || mUrlFocusChangeInProgress
-                        || mUrlFocusChangePercent > 0f);
-        mMicButton.setVisibility(showMicButton ? VISIBLE : INVISIBLE);
-    }
-
-    @Override
-    public void updateMicButtonState() {
-        mVoiceSearchEnabled = isVoiceSearchEnabled();
+    protected void updateButtonVisibility() {
         updateDeleteButtonVisibility();
+        updateMicButtonVisiblity(mUrlFocusChangePercent);
     }
 
     @Override
@@ -350,23 +330,23 @@ public class LocationBarPhone extends LocationBarLayout {
         updateIncognitoBadgePadding();
 
         if (showMenuButtonInOmnibox()) {
-            boolean useLightDrawables = isIncognito;
-            if (getToolbarDataProvider().isUsingBrandColor()) {
-                int currentPrimaryColor = getToolbarDataProvider().getPrimaryColor();
-                useLightDrawables |=
-                        ColorUtils.shoudUseLightForegroundOnBackground(currentPrimaryColor);
-            }
+            boolean useLightDrawables = shouldUseLightDrawables();
             ColorStateList dark = ApiCompatibilityUtils.getColorStateList(getResources(),
                     R.color.dark_mode_tint);
             ColorStateList white = ApiCompatibilityUtils.getColorStateList(getResources(),
                     R.color.light_mode_tint);
             mMenuButton.setTint(useLightDrawables ? white : dark);
+
+            if (mShowMenuBadge) {
+                mMenuBadge.setImageResource(useLightDrawables ? R.drawable.badge_update_light
+                        : R.drawable.badge_update_dark);
+            }
         }
     }
 
     @Override
     protected boolean shouldAnimateIconChanges() {
-        return super.shouldAnimateIconChanges() || mUrlFocusChangeInProgress;
+        return super.shouldAnimateIconChanges() || isUrlFocusChangeInProgress();
     }
 
     @Override
@@ -378,16 +358,108 @@ public class LocationBarPhone extends LocationBarLayout {
     /**
      * Displays the update app menu badge.
      */
-    public void showAppMenuUpdateBadge() {
+    public void showAppMenuUpdateBadge(boolean animate) {
+        if (!showMenuButtonInOmnibox()) return;
+
+        mShowMenuBadge = true;
+        mMenuBadge.setImageResource(shouldUseLightDrawables()
+                ? R.drawable.badge_update_light : R.drawable.badge_update_dark);
+        mMenuButton.setContentDescription(getResources().getString(
+                R.string.accessibility_toolbar_btn_menu_update));
+
+        if (!animate || mIsMenuBadgeAnimationRunning) {
+            mMenuBadge.setVisibility(View.VISIBLE);
+            return;
+        }
+
+        // Set initial states.
+        mMenuBadge.setAlpha(0.f);
         mMenuBadge.setVisibility(View.VISIBLE);
-        mMenuButton.setImageBitmap(
-                UpdateMenuItemHelper.getInstance().getBadgedMenuButtonBitmap(getContext()));
+
+        mMenuBadgeAnimatorSet = UpdateMenuItemHelper.createShowUpdateBadgeAnimation(
+                mMenuButton, mMenuBadge);
+
+        mMenuBadgeAnimatorSet.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationStart(Animator animation) {
+                mIsMenuBadgeAnimationRunning = true;
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                mIsMenuBadgeAnimationRunning = false;
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                mIsMenuBadgeAnimationRunning = false;
+            }
+        });
+
+        mMenuBadgeAnimatorSet.start();
     }
 
     /**
      * Remove the update menu app menu badge.
      */
-    public void removeAppMenuUpdateBadge() {
-        mMenuBadge.setVisibility(View.GONE);
+    public void removeAppMenuUpdateBadge(boolean animate) {
+        boolean wasShowingMenuBadge = mShowMenuBadge;
+        mShowMenuBadge = false;
+        mMenuButton.setContentDescription(getResources().getString(
+                R.string.accessibility_toolbar_btn_menu));
+
+        if (!animate || !wasShowingMenuBadge) {
+            if (showMenuButtonInOmnibox()) {
+                mMenuBadge.setVisibility(View.GONE);
+            }
+            return;
+        }
+
+        if (mIsMenuBadgeAnimationRunning && mMenuBadgeAnimatorSet != null) {
+            mMenuBadgeAnimatorSet.cancel();
+        }
+
+        // Set initial states.
+        mMenuButton.setAlpha(0.f);
+
+        mMenuBadgeAnimatorSet = UpdateMenuItemHelper.createHideUpdateBadgeAnimation(
+                mMenuButton, mMenuBadge);
+
+        mMenuBadgeAnimatorSet.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationStart(Animator animation) {
+                mIsMenuBadgeAnimationRunning = true;
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                mIsMenuBadgeAnimationRunning = false;
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                mIsMenuBadgeAnimationRunning = false;
+            }
+        });
+
+        mMenuBadgeAnimatorSet.start();
+    }
+
+    public void cancelAppMenuUpdateBadgeAnimation() {
+        if (mIsMenuBadgeAnimationRunning && mMenuBadgeAnimatorSet != null) {
+            mMenuBadgeAnimatorSet.cancel();
+        }
+    }
+
+    private boolean shouldUseLightDrawables() {
+        Tab tab = getCurrentTab();
+        boolean isIncognito = tab != null && tab.isIncognito();
+        boolean useLightDrawables = isIncognito;
+        if (getToolbarDataProvider().isUsingBrandColor()) {
+            int currentPrimaryColor = getToolbarDataProvider().getPrimaryColor();
+            useLightDrawables |=
+                    ColorUtils.shoudUseLightForegroundOnBackground(currentPrimaryColor);
+        }
+        return useLightDrawables;
     }
 }

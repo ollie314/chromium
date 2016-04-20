@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -14,6 +13,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/common/page_zoom.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
@@ -31,21 +31,21 @@ SettingsPrivateDelegate::SettingsPrivateDelegate(Profile* profile)
 SettingsPrivateDelegate::~SettingsPrivateDelegate() {
 }
 
-scoped_ptr<base::Value> SettingsPrivateDelegate::GetPref(
+std::unique_ptr<base::Value> SettingsPrivateDelegate::GetPref(
     const std::string& name) {
-  scoped_ptr<api::settings_private::PrefObject> pref =
+  std::unique_ptr<api::settings_private::PrefObject> pref =
       prefs_util_->GetPref(name);
   if (!pref)
     return base::Value::CreateNullValue();
   return pref->ToValue();
 }
 
-scoped_ptr<base::Value> SettingsPrivateDelegate::GetAllPrefs() {
-  scoped_ptr<base::ListValue> prefs(new base::ListValue());
+std::unique_ptr<base::Value> SettingsPrivateDelegate::GetAllPrefs() {
+  std::unique_ptr<base::ListValue> prefs(new base::ListValue());
 
   const TypedPrefMap& keys = prefs_util_->GetWhitelistedKeys();
   for (const auto& it : keys) {
-    scoped_ptr<base::Value> pref = GetPref(it.first);
+    std::unique_ptr<base::Value> pref = GetPref(it.first);
     if (!pref->IsType(base::Value::TYPE_NULL))
       prefs->Append(pref.release());
   }
@@ -58,10 +58,10 @@ PrefsUtil::SetPrefResult SettingsPrivateDelegate::SetPref(
   return prefs_util_->SetPref(pref_name, value);
 }
 
-scoped_ptr<base::Value> SettingsPrivateDelegate::GetDefaultZoomPercent() {
+std::unique_ptr<base::Value> SettingsPrivateDelegate::GetDefaultZoomPercent() {
   double zoom = content::ZoomLevelToZoomFactor(
       profile_->GetZoomLevelPrefs()->GetDefaultZoomLevelPref()) * 100;
-  scoped_ptr<base::Value> value(new base::FundamentalValue(zoom));
+  std::unique_ptr<base::Value> value(new base::FundamentalValue(zoom));
   return value;
 }
 

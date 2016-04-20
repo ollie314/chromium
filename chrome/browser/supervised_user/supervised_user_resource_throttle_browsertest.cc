@@ -5,7 +5,6 @@
 #include "chrome/browser/supervised_user/supervised_user_resource_throttle.h"
 
 #include "base/command_line.h"
-#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
@@ -16,6 +15,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_type.h"
@@ -57,10 +57,10 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserResourceThrottleTest,
       SupervisedUserSettingsServiceFactory::GetForProfile(profile);
   supervised_user_settings_service->SetLocalSetting(
       supervised_users::kContentPackDefaultFilteringBehavior,
-      scoped_ptr<base::Value>(
+      std::unique_ptr<base::Value>(
           new base::FundamentalValue(SupervisedUserURLFilter::BLOCK)));
 
-  scoped_ptr<WebContents> web_contents(
+  std::unique_ptr<WebContents> web_contents(
       WebContents::Create(WebContents::CreateParams(profile)));
   NavigationController& controller = web_contents->GetController();
   content::TestNavigationObserver observer(web_contents.get());

@@ -34,21 +34,21 @@
 
 namespace blink {
 
-PassOwnPtrWillBeRawPtr<MutationObserverInterestGroup> MutationObserverInterestGroup::createIfNeeded(Node& target, MutationObserver::MutationType type, MutationRecordDeliveryOptions oldValueFlag, const QualifiedName* attributeName)
+MutationObserverInterestGroup* MutationObserverInterestGroup::createIfNeeded(Node& target, MutationObserver::MutationType type, MutationRecordDeliveryOptions oldValueFlag, const QualifiedName* attributeName)
 {
-    ASSERT((type == MutationObserver::Attributes && attributeName) || !attributeName);
-    WillBeHeapHashMap<RefPtrWillBeMember<MutationObserver>, MutationRecordDeliveryOptions> observers;
+    DCHECK((type == MutationObserver::Attributes && attributeName) || !attributeName);
+    HeapHashMap<Member<MutationObserver>, MutationRecordDeliveryOptions> observers;
     target.getRegisteredMutationObserversOfType(observers, type, attributeName);
     if (observers.isEmpty())
         return nullptr;
 
-    return adoptPtrWillBeNoop(new MutationObserverInterestGroup(observers, oldValueFlag));
+    return new MutationObserverInterestGroup(observers, oldValueFlag);
 }
 
-MutationObserverInterestGroup::MutationObserverInterestGroup(WillBeHeapHashMap<RefPtrWillBeMember<MutationObserver>, MutationRecordDeliveryOptions>& observers, MutationRecordDeliveryOptions oldValueFlag)
+MutationObserverInterestGroup::MutationObserverInterestGroup(HeapHashMap<Member<MutationObserver>, MutationRecordDeliveryOptions>& observers, MutationRecordDeliveryOptions oldValueFlag)
     : m_oldValueFlag(oldValueFlag)
 {
-    ASSERT(!observers.isEmpty());
+    DCHECK(!observers.isEmpty());
     m_observers.swap(observers);
 }
 
@@ -61,10 +61,9 @@ bool MutationObserverInterestGroup::isOldValueRequested()
     return false;
 }
 
-void MutationObserverInterestGroup::enqueueMutationRecord(PassRefPtrWillBeRawPtr<MutationRecord> prpMutation)
+void MutationObserverInterestGroup::enqueueMutationRecord(MutationRecord* mutation)
 {
-    RefPtrWillBeRawPtr<MutationRecord> mutation = prpMutation;
-    RefPtrWillBeRawPtr<MutationRecord> mutationWithNullOldValue = nullptr;
+    MutationRecord* mutationWithNullOldValue = nullptr;
     for (auto& iter : m_observers) {
         MutationObserver* observer = iter.key.get();
         if (hasOldValue(iter.value)) {
@@ -75,7 +74,7 @@ void MutationObserverInterestGroup::enqueueMutationRecord(PassRefPtrWillBeRawPtr
             if (mutation->oldValue().isNull())
                 mutationWithNullOldValue = mutation;
             else
-                mutationWithNullOldValue = MutationRecord::createWithNullOldValue(mutation).get();
+                mutationWithNullOldValue = MutationRecord::createWithNullOldValue(mutation);
         }
         observer->enqueueMutationRecord(mutationWithNullOldValue);
     }
@@ -83,9 +82,7 @@ void MutationObserverInterestGroup::enqueueMutationRecord(PassRefPtrWillBeRawPtr
 
 DEFINE_TRACE(MutationObserverInterestGroup)
 {
-#if ENABLE(OILPAN)
     visitor->trace(m_observers);
-#endif
 }
 
 } // namespace blink

@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_SEARCH_THUMBNAIL_SOURCE_H_
 #define CHROME_BROWSER_SEARCH_THUMBNAIL_SOURCE_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
@@ -70,7 +71,7 @@ class ThumbnailSource : public content::URLDataSource {
   scoped_refptr<thumbnails::ThumbnailService> thumbnail_service_;
 
   // ImageFetcher.
-  scoped_ptr<suggestions::ImageFetcher> image_fetcher_;
+  std::unique_ptr<suggestions::ImageFetcher> image_fetcher_;
 
   // Indicate that, when a URL for which we don't have a thumbnail is requested
   // from this source, then Chrome should capture a thumbnail next time it

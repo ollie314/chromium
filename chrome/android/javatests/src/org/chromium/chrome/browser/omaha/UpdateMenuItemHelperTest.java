@@ -4,8 +4,6 @@
 
 package org.chromium.chrome.browser.omaha;
 
-import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_PHONE;
-
 import android.content.Context;
 import android.test.suitebuilder.annotation.MediumTest;
 import android.view.View;
@@ -17,6 +15,7 @@ import org.chromium.base.test.util.Restriction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.test.ChromeTabbedActivityTestBase;
+import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.chrome.test.util.OverviewModeBehaviorWatcher;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
@@ -125,7 +124,7 @@ public class UpdateMenuItemHelperTest extends ChromeTabbedActivityTestBase {
     }
 
     private void versionNumbersQueried() throws Exception {
-        CriteriaHelper.pollForCriteria(
+        CriteriaHelper.pollInstrumentationThread(
                 new Criteria() {
                     @Override
                     public boolean isSatisfied() {
@@ -186,7 +185,7 @@ public class UpdateMenuItemHelperTest extends ChromeTabbedActivityTestBase {
 
     @MediumTest
     @Feature({"Omaha"})
-    @Restriction(RESTRICTION_TYPE_PHONE)
+    @Restriction(ChromeRestriction.RESTRICTION_TYPE_PHONE)
     public void testMenuItemNotShownInOverview() throws Exception {
         checkUpdateMenuItemIsShowing("0.0.0.0", "1.2.3.4");
 
@@ -213,7 +212,7 @@ public class UpdateMenuItemHelperTest extends ChromeTabbedActivityTestBase {
                 getActivity().getAppMenuHandler().showAppMenu(null, false);
             }
         });
-        CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 return  getActivity().getAppMenuHandler().isAppMenuShowing();
@@ -228,7 +227,7 @@ public class UpdateMenuItemHelperTest extends ChromeTabbedActivityTestBase {
                 getActivity().getAppMenuHandler().hideAppMenu();
             }
         });
-        CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 return  !getActivity().getAppMenuHandler().isAppMenuShowing();

@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/location.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -32,13 +33,20 @@
 #include "extensions/common/extension.h"
 
 #if !defined(OS_MACOSX)
-#include "base/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #endif
 
 using base::UserMetricsAction;
 using content::RenderViewHost;
 using content::WebContents;
+
+namespace {
+
+const char kBubbleReshowsHistogramName[] =
+    "ExclusiveAccess.BubbleReshowsPerSession.Fullscreen";
+
+}  // namespace
 
 FullscreenController::FullscreenController(ExclusiveAccessManager* manager)
     : ExclusiveAccessControllerBase(manager),
@@ -93,13 +101,14 @@ bool FullscreenController::IsUserAcceptedFullscreen() const {
 
 bool FullscreenController::IsFullscreenForTabOrPending(
     const WebContents* web_contents) const {
+  if (IsFullscreenForCapturedTab(web_contents))
+    return true;
   if (web_contents == exclusive_access_tab()) {
     DCHECK(web_contents ==
            exclusive_access_manager()->context()->GetActiveWebContents());
-    DCHECK(web_contents->GetCapturerCount() == 0);
     return true;
   }
-  return IsFullscreenForCapturedTab(web_contents);
+  return false;
 }
 
 bool FullscreenController::IsFullscreenCausedByTab() const {
@@ -121,15 +130,6 @@ void FullscreenController::EnterFullscreenModeForTab(WebContents* web_contents,
       IsWindowFullscreenForTabOrPending()) {
       return;
   }
-
-#if defined(OS_WIN)
-  // For now, avoid breaking when initiating full screen tab mode while in
-  // a metro snap.
-  // TODO(robertshield): Find a way to reconcile tab-initiated fullscreen
-  //                     modes with metro snap.
-  if (IsInMetroSnapMode())
-    return;
-#endif
 
   SetTabWithExclusiveAccess(web_contents);
   fullscreened_origin_ = origin;
@@ -177,15 +177,6 @@ void FullscreenController::ExitFullscreenModeForTab(WebContents* web_contents) {
     return;
   }
 
-#if defined(OS_WIN)
-  // For now, avoid breaking when initiating full screen tab mode while in
-  // a metro snap.
-  // TODO(robertshield): Find a way to reconcile tab-initiated fullscreen
-  //                     modes with metro snap.
-  if (IsInMetroSnapMode())
-    return;
-#endif
-
   ExclusiveAccessContext* exclusive_access_context =
       exclusive_access_manager()->context();
 
@@ -221,24 +212,6 @@ void FullscreenController::ExitFullscreenModeForTab(WebContents* web_contents) {
   PostFullscreenChangeNotification(true);
 }
 
-#if defined(OS_WIN)
-bool FullscreenController::IsInMetroSnapMode() {
-  return exclusive_access_manager()->context()->IsInMetroSnapMode();
-}
-
-void FullscreenController::SetMetroSnapMode(bool enable) {
-  reentrant_window_state_change_call_check_ = false;
-
-  toggled_into_fullscreen_ = false;
-  exclusive_access_manager()->context()->SetMetroSnapMode(enable);
-
-  // FullscreenController unit tests for metro snap assume that on Windows calls
-  // to WindowFullscreenStateChanged are reentrant. If that assumption is
-  // invalidated, the tests must be updated to maintain coverage.
-  CHECK(reentrant_window_state_change_call_check_);
-}
-#endif  // defined(OS_WIN)
-
 void FullscreenController::OnTabDetachedFromView(WebContents* old_contents) {
   if (!IsFullscreenForCapturedTab(old_contents))
     return;
@@ -272,11 +245,11 @@ void FullscreenController::OnTabDetachedFromView(WebContents* old_contents) {
 }
 
 void FullscreenController::OnTabClosing(WebContents* web_contents) {
-  if (IsFullscreenForCapturedTab(web_contents)) {
-    web_contents->ExitFullscreen();
-  } else {
+  if (IsFullscreenForCapturedTab(web_contents))
+    web_contents->ExitFullscreen(
+        /* will_cause_resize */ IsFullscreenCausedByTab());
+  else
     ExclusiveAccessControllerBase::OnTabClosing(web_contents);
-  }
 }
 
 void FullscreenController::WindowFullscreenStateChanged() {
@@ -300,14 +273,16 @@ bool FullscreenController::HandleUserPressedEscape() {
   WebContents* const active_web_contents =
       exclusive_access_manager()->context()->GetActiveWebContents();
   if (IsFullscreenForCapturedTab(active_web_contents)) {
-    active_web_contents->ExitFullscreen();
-    return true;
-  } else if (IsWindowFullscreenForTabOrPending()) {
-    ExitExclusiveAccessIfNecessary();
+    active_web_contents->ExitFullscreen(
+        /* will_cause_resize */ IsFullscreenCausedByTab());
     return true;
   }
 
-  return false;
+  if (!IsWindowFullscreenForTabOrPending())
+    return false;
+
+  ExitExclusiveAccessIfNecessary();
+  return true;
 }
 
 void FullscreenController::ExitExclusiveAccessToPreviousState() {
@@ -341,25 +316,17 @@ bool FullscreenController::OnAcceptExclusiveAccessPermission() {
     // embeds youtube.com in an iframe, which is then ALLOWED to go fullscreen.
     GURL requester = GetRequestingOrigin();
     GURL embedder = GetEmbeddingOrigin();
-    ContentSettingsPattern primary_pattern =
-        ContentSettingsPattern::FromURLNoWildcard(requester);
-    ContentSettingsPattern secondary_pattern =
-        ContentSettingsPattern::FromURLNoWildcard(embedder);
 
-    // ContentSettings requires valid patterns and the patterns might be invalid
-    // in some edge cases like if the current frame is about:blank.
-    //
     // Do not store preference on file:// URLs, they don't have a clean
     // origin policy.
     // TODO(estark): Revisit this when crbug.com/455882 is fixed.
-    if (!requester.SchemeIsFile() && !embedder.SchemeIsFile() &&
-        primary_pattern.IsValid() && secondary_pattern.IsValid()) {
+    if (!requester.SchemeIsFile() && !embedder.SchemeIsFile()) {
       HostContentSettingsMap* settings_map =
           HostContentSettingsMapFactory::GetForProfile(
               exclusive_access_manager()->context()->GetProfile());
-      settings_map->SetContentSetting(
-          primary_pattern, secondary_pattern, CONTENT_SETTINGS_TYPE_FULLSCREEN,
-          std::string(), CONTENT_SETTING_ALLOW);
+      settings_map->SetContentSettingDefaultScope(
+          requester, embedder, CONTENT_SETTINGS_TYPE_FULLSCREEN, std::string(),
+          CONTENT_SETTING_ALLOW);
     }
     tab_fullscreen_accepted_ = true;
     return true;
@@ -409,21 +376,21 @@ void FullscreenController::NotifyTabExclusiveAccessLost() {
     WebContents* web_contents = exclusive_access_tab();
     SetTabWithExclusiveAccess(nullptr);
     fullscreened_origin_ = GURL();
+    bool will_cause_resize = IsFullscreenCausedByTab();
     state_prior_to_tab_fullscreen_ = STATE_INVALID;
     tab_fullscreen_accepted_ = false;
-    web_contents->ExitFullscreen();
+    web_contents->ExitFullscreen(will_cause_resize);
     exclusive_access_manager()->UpdateExclusiveAccessExitBubbleContent();
   }
 }
 
+void FullscreenController::RecordBubbleReshowsHistogram(
+    int bubble_reshow_count) {
+  UMA_HISTOGRAM_COUNTS_100(kBubbleReshowsHistogramName, bubble_reshow_count);
+}
+
 void FullscreenController::ToggleFullscreenModeInternal(
     FullscreenInternalOption option) {
-#if defined(OS_WIN)
-  // When in Metro snap mode, toggling in and out of fullscreen is prevented.
-  if (IsInMetroSnapMode())
-    return;
-#endif
-
   ExclusiveAccessContext* const exclusive_access_context =
       exclusive_access_manager()->context();
   bool enter_fullscreen = !exclusive_access_context->IsFullscreen();
@@ -432,7 +399,8 @@ void FullscreenController::ToggleFullscreenModeInternal(
   // FullscreenWithoutChrome and FullscreenWithToolbar.
   if (exclusive_access_context->IsFullscreen() &&
       !IsWindowFullscreenForTabOrPending() &&
-      exclusive_access_context->SupportsFullscreenWithToolbar()) {
+      exclusive_access_context->SupportsFullscreenWithToolbar() &&
+      IsExtensionFullscreenOrPending()) {
     if (option == BROWSER_WITH_TOOLBAR) {
       enter_fullscreen = enter_fullscreen ||
                          !exclusive_access_context->IsFullscreenWithToolbar();
@@ -494,6 +462,7 @@ void FullscreenController::EnterFullscreenModeInternal(
 }
 
 void FullscreenController::ExitFullscreenModeInternal() {
+  RecordExitingUMA();
   toggled_into_fullscreen_ = false;
 #if defined(OS_MACOSX)
   // Mac windows report a state change instantly, and so we must also clear
@@ -536,8 +505,9 @@ ContentSetting FullscreenController::GetFullscreenSetting() const {
     return CONTENT_SETTING_ALLOW;
   }
 
-  // See the comment above the call to |SetContentSetting()| for how the
-  // requesting and embedding origins interact with each other wrt permissions.
+  // See the comment above the call to |SetContentSettingDefaultScope()| for how
+  // the requesting and embedding origins interact with each other wrt
+  // permissions.
   return HostContentSettingsMapFactory::GetForProfile(
       exclusive_access_manager()->context()->GetProfile())
           ->GetContentSetting(url, GetEmbeddingOrigin(),

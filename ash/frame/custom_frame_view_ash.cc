@@ -17,6 +17,7 @@
 #include "ash/shell_observer.h"
 #include "ash/wm/immersive_fullscreen_controller.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_state_delegate.h"
 #include "ash/wm/window_state_observer.h"
 #include "base/command_line.h"
@@ -63,12 +64,12 @@ class CustomFrameViewAshWindowStateDelegate
     // TODO(pkotwicz): This is a hack. Remove ASAP. http://crbug.com/319048
     window_state_ = window_state;
     window_state_->AddObserver(this);
-    window_state_->window()->AddObserver(this);
+    window_state_->aura_window()->AddObserver(this);
   }
   ~CustomFrameViewAshWindowStateDelegate() override {
     if (window_state_) {
       window_state_->RemoveObserver(this);
-      window_state_->window()->RemoveObserver(this);
+      window_state_->aura_window()->RemoveObserver(this);
     }
   }
  private:
@@ -76,8 +77,8 @@ class CustomFrameViewAshWindowStateDelegate
   bool ToggleFullscreen(ash::wm::WindowState* window_state) override {
     bool enter_fullscreen = !window_state->IsFullscreen();
     if (enter_fullscreen) {
-      window_state->window()->SetProperty(aura::client::kShowStateKey,
-                                           ui::SHOW_STATE_FULLSCREEN);
+      window_state->aura_window()->SetProperty(aura::client::kShowStateKey,
+                                               ui::SHOW_STATE_FULLSCREEN);
     } else {
       window_state->Restore();
     }
@@ -91,7 +92,7 @@ class CustomFrameViewAshWindowStateDelegate
   // Overridden from aura::WindowObserver:
   void OnWindowDestroying(aura::Window* window) override {
     window_state_->RemoveObserver(this);
-    window_state_->window()->RemoveObserver(this);
+    window_state_->aura_window()->RemoveObserver(this);
     window_state_ = NULL;
   }
   // Overridden from ash::wm::WindowStateObserver:
@@ -108,7 +109,7 @@ class CustomFrameViewAshWindowStateDelegate
   }
 
   ash::wm::WindowState* window_state_;
-  scoped_ptr<ash::ImmersiveFullscreenController>
+  std::unique_ptr<ash::ImmersiveFullscreenController>
       immersive_fullscreen_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(CustomFrameViewAshWindowStateDelegate);
@@ -182,7 +183,7 @@ class CustomFrameViewAsh::HeaderView
   views::Widget* frame_;
 
   // Helper for painting the header.
-  scoped_ptr<DefaultHeaderPainter> header_painter_;
+  std::unique_ptr<DefaultHeaderPainter> header_painter_;
 
   views::ImageView* avatar_icon_;
 
@@ -322,7 +323,7 @@ void CustomFrameViewAsh::HeaderView::OnMaximizeModeEnded() {
 void CustomFrameViewAsh::HeaderView::OnImmersiveRevealStarted() {
   fullscreen_visible_fraction_ = 0;
   SetPaintToLayer(true);
-  SetFillsBoundsOpaquely(false);
+  layer()->SetFillsBoundsOpaquely(false);
   parent()->Layout();
 }
 
@@ -387,7 +388,7 @@ CustomFrameViewAsh::OverlayView::OverlayView(HeaderView* header_view)
     : header_view_(header_view) {
   AddChildView(header_view);
   SetEventTargeter(
-      scoped_ptr<views::ViewTargeter>(new views::ViewTargeter(this)));
+      std::unique_ptr<views::ViewTargeter>(new views::ViewTargeter(this)));
 }
 
 CustomFrameViewAsh::OverlayView::~OverlayView() {
@@ -442,9 +443,8 @@ CustomFrameViewAsh::CustomFrameViewAsh(views::Widget* frame)
   // be set. This is the case for packaged apps.
   wm::WindowState* window_state = wm::GetWindowState(frame->GetNativeWindow());
   if (!window_state->HasDelegate()) {
-    window_state->SetDelegate(scoped_ptr<wm::WindowStateDelegate>(
-        new CustomFrameViewAshWindowStateDelegate(
-            window_state, this)));
+    window_state->SetDelegate(std::unique_ptr<wm::WindowStateDelegate>(
+        new CustomFrameViewAshWindowStateDelegate(window_state, this)));
   }
 }
 

@@ -9,8 +9,6 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
@@ -19,6 +17,8 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
@@ -104,7 +104,7 @@ void IntranetRedirectDetector::OnURLFetchComplete(
   Fetchers::iterator fetcher = fetchers_.find(
       const_cast<net::URLFetcher*>(source));
   DCHECK(fetcher != fetchers_.end());
-  scoped_ptr<net::URLFetcher> clean_up_fetcher(*fetcher);
+  std::unique_ptr<net::URLFetcher> clean_up_fetcher(*fetcher);
   fetchers_.erase(fetcher);
 
   // If any two fetches result in the same domain/host, we set the redirect

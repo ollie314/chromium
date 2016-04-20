@@ -1,3 +1,4 @@
+CONSOLE WARNING: The <keygen> element is deprecated and will be removed in M54, around October 2016. See https://www.chromestatus.com/features/5716060992962560 for more details.
 This test documents all properties on all element instances.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -76,6 +77,7 @@ namespace http://www.w3.org/1999/xhtml
     property insertAdjacentHTML
     property insertAdjacentText
     property insertBefore
+    property isConnected
     property isContentEditable
     property isDefaultNamespace
     property isEqualNode
@@ -191,6 +193,7 @@ namespace http://www.w3.org/1999/xhtml
     property removeEventListener
     property replaceChild
     property requestPointerLock
+    property rootNode
     property scrollHeight
     property scrollIntoView
     property scrollIntoViewIfNeeded
@@ -229,6 +232,7 @@ html element a
     property ping
     property port
     property protocol
+    property referrerpolicy
     property rel
     property rev
     property search
@@ -255,6 +259,7 @@ html element area
     property ping
     property port
     property protocol
+    property referrerpolicy
     property search
     property shape
     property target
@@ -304,6 +309,7 @@ html element audio
     property setSinkId
     property sinkId
     property src
+    property srcObject
     property textTracks
     property volume
     property webkitAudioDecodedByteCount
@@ -361,8 +367,10 @@ html element button
     property value
     property willValidate
 html element canvas
+    property captureStream
     property getContext
     property height
+    property toBlob
     property toDataURL
     property width
 html element caption
@@ -517,6 +525,7 @@ html element iframe
     property marginHeight
     property marginWidth
     property name
+    property referrerpolicy
     property sandbox
     property scrolling
     property src
@@ -538,6 +547,7 @@ html element img
     property name
     property naturalHeight
     property naturalWidth
+    property referrerpolicy
     property sizes
     property src
     property srcset
@@ -636,6 +646,7 @@ html element li
     property type
     property value
 html element link
+    property as
     property charset
     property crossOrigin
     property disabled
@@ -645,6 +656,7 @@ html element link
     property integrity
     property media
     property rel
+    property relList
     property rev
     property sheet
     property sizes
@@ -1022,6 +1034,7 @@ html element video
     property setSinkId
     property sinkId
     property src
+    property srcObject
     property textTracks
     property videoHeight
     property videoWidth
@@ -1113,6 +1126,7 @@ namespace http://www.w3.org/2000/svg
     property insertAdjacentHTML
     property insertAdjacentText
     property insertBefore
+    property isConnected
     property isContentEditable
     property isDefaultNamespace
     property isEqualNode
@@ -1228,6 +1242,7 @@ namespace http://www.w3.org/2000/svg
     property removeEventListener
     property replaceChild
     property requestPointerLock
+    property rootNode
     property scrollHeight
     property scrollIntoView
     property scrollIntoViewIfNeeded
@@ -1266,6 +1281,7 @@ svg element a
     property ping
     property port
     property protocol
+    property referrerpolicy
     property rel
     property rev
     property search

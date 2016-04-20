@@ -37,25 +37,21 @@ WebGLContextObject::WebGLContextObject(WebGLRenderingContextBase* context)
 
 WebGLContextObject::~WebGLContextObject()
 {
-#if !ENABLE(OILPAN)
-    if (m_context)
-        m_context->removeContextObject(this);
-#endif
 }
 
 void WebGLContextObject::detachContext()
 {
     detach();
     if (m_context) {
-        deleteObject(m_context->webContext());
+        deleteObject(m_context->contextGL());
         m_context->removeContextObject(this);
         m_context = nullptr;
     }
 }
 
-WebGraphicsContext3D* WebGLContextObject::getAWebGraphicsContext3D() const
+gpu::gles2::GLES2Interface* WebGLContextObject::getAGLInterface() const
 {
-    return m_context ? m_context->webContext() : nullptr;
+    return m_context->contextGL();
 }
 
 DEFINE_TRACE(WebGLContextObject)

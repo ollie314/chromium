@@ -135,7 +135,7 @@
         "name": "setComposition",
         "type": "function",
         "description": "Set the current composition. If this extension does not own the active IME, this fails.",
-        "platforms": ["chromeos"],
+        "platforms": ["chromeos", "win", "linux"],
         "parameters": [
           {
             "name": "parameters",
@@ -235,7 +235,7 @@
         "name": "commitText",
         "type": "function",
         "description": "Commits the provided text to the current input.",
-        "platforms": ["chromeos"],
+        "platforms": ["chromeos", "win", "linux"],
         "parameters": [
           {
             "name": "parameters",
@@ -269,7 +269,7 @@
         "name": "sendKeyEvents",
         "type": "function",
         "description": "Sends the key events.  This function is expected to be used by virtual keyboards.  When key(s) on a virtual keyboard is pressed by a user, this function is used to propagate that event to the system.",
-        "platforms": ["chromeos"],
+        "platforms": ["chromeos", "win", "linux"],
         "parameters": [
           {
             "name": "parameters",
@@ -593,9 +593,79 @@
                 "name": "windowObject",
                 "type": "object",
                 "isInstanceOf": "Window",
-                "description": "The JavaScript 'window' object of the newly created IME window."
+                "description": "The JavaScript 'window' object of the newly created IME window. It contains the additional 'id' property for the parameters of the other functions like showWindow/hideWindow."
               }
             ]
+           }
+         ]
+      },
+      {
+        "name": "showWindow",
+        "type": "function",
+        "description": "Shows the IME window. This makes the hidden window visible.",
+        "platforms": ["win", "linux"],
+        "parameters": [
+          {
+            "type": "integer",
+            "name": "windowId",
+            "description": "The ID of the IME window."
+          },
+          {
+            "type": "function",
+            "name": "callback",
+            "optional": true,
+            "description": "Called when the operation completes.",
+            "parameters": []
+           }
+         ]
+      },
+      {
+        "name": "hideWindow",
+        "type": "function",
+        "description": "Hides the IME window. This doesn't close the window. Instead, it makes the window invisible. The extension can cache the window and show/hide it for better performance.",
+        "platforms": ["win", "linux"],
+        "parameters": [
+          {
+            "type": "integer",
+            "name": "windowId",
+            "description": "The ID of the IME window."
+          },
+          {
+            "type": "function",
+            "name": "callback",
+            "optional": true,
+            "description": "Called when the operation completes.",
+            "parameters": []
+           }
+         ]
+      },
+      {
+        "name": "activate",
+        "type": "function",
+        "description": "Activates the IME extension so that it can receive events.",
+        "platforms": ["win", "linux"],
+        "parameters": [
+          {
+            "type": "function",
+            "name": "callback",
+            "optional": true,
+            "description": "Called when the operation completes.",
+            "parameters": []
+          }
+        ]
+      },
+      {
+        "name": "deactivate",
+        "type": "function",
+        "description": "Deactivates the IME extension so that it cannot receive events.",
+        "platforms": ["win", "linux"],
+        "parameters": [
+          {
+            "type": "function",
+            "name": "callback",
+            "optional": true,
+            "description": "Called when the operation completes.",
+            "parameters": []
           }
         ]
       }
@@ -605,7 +675,7 @@
         "name": "onActivate",
         "type": "function",
         "description": "This event is sent when an IME is activated. It signals that the IME will be receiving onKeyPress events.",
-        "platforms": ["chromeos"],
+        "platforms": ["chromeos", "win", "linux"],
         "parameters": [
           {
             "type": "string",
@@ -674,7 +744,7 @@
       {
         "name": "onKeyEvent",
         "type": "function",
-        "description": "This event is sent if this extension owns the active IME.",
+        "description": "Fired when a key event is sent from the operating system. The event will be sent to the extension if this extension owns the active IME.",
         "platforms": ["chromeos", "win", "linux"],
         "options": {
           "supportsFilters": false,
@@ -798,6 +868,20 @@
             "type": "string",
             "name": "engineID",
             "description": "ID of the engine receiving the event"
+          }
+        ]
+      },
+      {
+        "name": "onCompositionBoundsChanged",
+        "type": "function",
+        "description": "Triggered when the bounds of the IME composition text or cursor are changed. The IME composition text is the instance of text produced in the input method editor.",
+        "platforms": ["win", "linux"],
+        "parameters": [
+          {
+            "type": "array",
+            "name": "boundsList",
+            "description": "List of bounds information for each character on IME composition text. If there's no composition text in the editor, this array contains the bound information of the cursor.",
+            "items": { "$ref": "Bounds" }
           }
         ]
       }

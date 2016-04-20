@@ -24,12 +24,10 @@
 #include "platform/heap/Handle.h"
 #include "wtf/Allocator.h"
 #include "wtf/Vector.h"
-#include "wtf/text/Unicode.h"
 
 namespace blink {
 
 class LayoutBoxModelObject;
-class LayoutSVGInlineText;
 class LayoutSVGText;
 class SVGTextPositioningElement;
 
@@ -40,20 +38,13 @@ class SVGTextPositioningElement;
 // The first layout phase only extracts the relevant information needed in LayoutBlockFlowLine
 // to create the InlineBox tree based on text chunk boundaries & BiDi information.
 // The second layout phase is carried out by SVGTextLayoutEngine.
-
 class SVGTextLayoutAttributesBuilder {
-    DISALLOW_NEW();
+    STACK_ALLOCATED();
     WTF_MAKE_NONCOPYABLE(SVGTextLayoutAttributesBuilder);
 public:
-    SVGTextLayoutAttributesBuilder();
-    bool buildLayoutAttributesForForSubtree(LayoutSVGText&);
-    void buildLayoutAttributesForText(LayoutSVGInlineText*);
+    explicit SVGTextLayoutAttributesBuilder(LayoutSVGText&);
 
-    void rebuildMetricsForTextLayoutObject(LayoutSVGInlineText*);
-
-    // Invoked whenever the underlying DOM tree changes, so that m_textPositions is rebuild.
-    void clearTextPositioningElements() { m_textPositions.clear(); }
-    unsigned numberOfTextPositioningElements() const { return m_textPositions.size(); }
+    void buildLayoutAttributes();
 
     struct TextPosition {
         DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
@@ -67,19 +58,20 @@ public:
 
         DECLARE_TRACE();
 
-        RawPtrWillBeMember<SVGTextPositioningElement> element;
+        Member<SVGTextPositioningElement> element;
         unsigned start;
         unsigned length;
     };
 
 private:
     void buildCharacterDataMap(LayoutSVGText&);
-    void collectTextPositioningElements(LayoutBoxModelObject&, UChar& lastCharacter);
+    void buildLayoutAttributes(LayoutSVGText&) const;
+    void collectTextPositioningElements(LayoutBoxModelObject&);
     void fillCharacterDataMap(const TextPosition&);
 
-private:
-    unsigned m_textLength;
-    WillBePersistentHeapVector<TextPosition> m_textPositions;
+    LayoutSVGText& m_textRoot;
+    unsigned m_characterCount;
+    HeapVector<TextPosition> m_textPositions;
     SVGCharacterDataMap m_characterDataMap;
 };
 

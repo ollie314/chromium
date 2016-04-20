@@ -7,11 +7,11 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
@@ -29,6 +29,7 @@ namespace syncer {
 namespace syncable {
 
 SYNC_EXPORT extern const int32_t kCurrentDBVersion;
+SYNC_EXPORT extern const int32_t kCurrentPageSizeKB;
 
 struct ColumnSpec;
 
@@ -96,6 +97,9 @@ class SYNC_EXPORT DirectoryBackingStore : public base::NonThreadSafe {
   // |catastrophic_error_handler|.
   virtual void SetCatastrophicErrorHandler(
       const base::Closure& catastrophic_error_handler);
+
+  // Returns true on success, false on error.
+  bool GetDatabasePageSize(int* page_size);
 
  protected:
   // For test classes.
@@ -185,8 +189,8 @@ class SYNC_EXPORT DirectoryBackingStore : public base::NonThreadSafe {
   void ResetAndCreateConnection();
 
  private:
-  friend class TestDirectoryBackingStore;
   friend class DirectoryBackingStoreTest;
+  friend class TestDirectoryBackingStore;
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest,
                            IncreaseDatabasePageSizeFrom4KTo32K);
   FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest,
@@ -196,6 +200,7 @@ class SYNC_EXPORT DirectoryBackingStore : public base::NonThreadSafe {
   FRIEND_TEST_ALL_PREFIXES(
       DirectoryBackingStoreTest,
       CatastrophicErrorHandler_InvocationDuringSaveChanges);
+  FRIEND_TEST_ALL_PREFIXES(MigrationTest, ToCurrentVersion);
 
   // Drop all tables in preparation for reinitialization.
   void DropAllTables();
@@ -235,10 +240,7 @@ class SYNC_EXPORT DirectoryBackingStore : public base::NonThreadSafe {
   bool Vacuum();
 
   // Returns true on success, false on error.
-  bool IncreasePageSizeTo32K();
-
-  // Returns true on success, false on error.
-  bool GetDatabasePageSize(int* page_size);
+  bool UpdatePageSizeIfNecessary();
 
   // Prepares |save_statement| for saving entries in |table|.
   void PrepareSaveEntryStatement(EntryTable table,
@@ -247,7 +249,7 @@ class SYNC_EXPORT DirectoryBackingStore : public base::NonThreadSafe {
   const std::string dir_name_;
   const int database_page_size_;
 
-  scoped_ptr<sql::Connection> db_;
+  std::unique_ptr<sql::Connection> db_;
   sql::Statement save_meta_statement_;
   sql::Statement save_delete_journal_statement_;
 

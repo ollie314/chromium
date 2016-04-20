@@ -5,8 +5,9 @@
 #ifndef CONTENT_PUBLIC_BROWSER_SCREEN_ORIENTATION_PROVIDER_H_
 #define CONTENT_PUBLIC_BROWSER_SCREEN_ORIENTATION_PROVIDER_H_
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationLockType.h"
@@ -41,7 +42,8 @@ class CONTENT_EXPORT ScreenOrientationProvider : public WebContentsObserver {
   static void SetDelegate(ScreenOrientationDelegate* delegate_);
 
   // WebContentsObserver
-  void DidToggleFullscreenModeForTab(bool entered_fullscreen) override;
+  void DidToggleFullscreenModeForTab(bool entered_fullscreen,
+                                     bool will_cause_resize) override;
 
  private:
   struct LockInformation {
@@ -70,7 +72,7 @@ class CONTENT_EXPORT ScreenOrientationProvider : public WebContentsObserver {
 
   // Locks that require orientation changes are not completed until
   // OnOrientationChange.
-  scoped_ptr<LockInformation> pending_lock_;
+  std::unique_ptr<LockInformation> pending_lock_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenOrientationProvider);
 };

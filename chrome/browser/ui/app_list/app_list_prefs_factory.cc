@@ -6,10 +6,10 @@
 
 #include <utility>
 
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_prefs.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
 #include "extensions/browser/extensions_browser_client.h"
 
@@ -29,7 +29,7 @@ AppListPrefsFactory* AppListPrefsFactory::GetInstance() {
 
 void AppListPrefsFactory::SetInstanceForTesting(
     content::BrowserContext* context,
-    scoped_ptr<AppListPrefs> prefs) {
+    std::unique_ptr<AppListPrefs> prefs) {
   Associate(context, std::move(prefs));
 }
 

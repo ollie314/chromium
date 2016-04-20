@@ -38,11 +38,12 @@
             'remoting_client',
             'remoting_jni_headers',
             'remoting_protocol',
-            '../google_apis/google_apis.gyp:google_apis',
             '../ui/events/events.gyp:dom_keycode_converter',
             '../ui/gfx/gfx.gyp:gfx',
           ],
           'sources': [
+            'client/audio_player_android.cc',
+            'client/audio_player_android.h',
             'client/jni/android_keymap.cc',
             'client/jni/android_keymap.h',
             'client/jni/chromoting_jni_instance.cc',
@@ -59,6 +60,18 @@
             'client/jni/remoting_jni_registrar.cc',
             'client/jni/remoting_jni_registrar.h',
           ],
+          'conditions': [
+            ['buildtype!="Official"', {
+              'defines': [
+                'ENABLE_WEBRTC_REMOTING_CLIENT'
+              ]
+            }]
+          ],
+          'link_settings': {
+            'libraries': [
+              '-lOpenSLES',
+            ],
+          },
         },  # end of target 'remoting_client_jni'
         {
           'target_name': 'remoting_android_resources',
@@ -128,15 +141,6 @@
             '<(remoting_android_google_play_services_javalib)',
           ],
           'includes': [ '../build/java.gypi' ],
-          'conditions' : [
-            ['enable_cast==1', {
-              'variables': {
-                'additional_src_dirs': [
-                  'android/cast',
-                ],
-              },
-            }],
-          ],
         },  # end of target 'remoting_android_client_java'
         {
           # TODO(lambroslambrou): Move some of this to third_party/cardboard-java/ in case it is
@@ -179,7 +183,7 @@
           },
           'includes': [ '../build/java_apk.gypi' ],
           'conditions': [
-            ['target_arch == "arm"', {
+            ['enable_cardboard == 1 and target_arch == "arm"', {
               'dependencies': [ 'remoting_cardboard_extract_native_lib' ],
               'variables': {
                 'extra_native_libs': [ '<(SHARED_LIB_DIR)/libvrtoolkit.so' ],

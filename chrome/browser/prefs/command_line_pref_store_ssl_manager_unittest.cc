@@ -6,11 +6,11 @@
 
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/testing_pref_store.h"
 #include "base/thread_task_runner_handle.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/testing_pref_store.h"
 #include "components/ssl_config/ssl_config_prefs.h"
 #include "components/ssl_config/ssl_config_switches.h"
 #include "components/syncable_prefs/pref_service_mock_factory.h"
@@ -43,11 +43,11 @@ TEST_F(CommandLinePrefStoreSSLManagerTest, CommandLinePrefs) {
   factory.set_user_prefs(local_state_store);
   factory.set_command_line_prefs(new CommandLinePrefStore(&command_line));
   scoped_refptr<PrefRegistrySimple> registry = new PrefRegistrySimple;
-  scoped_ptr<PrefService> local_state(factory.Create(registry.get()));
+  std::unique_ptr<PrefService> local_state(factory.Create(registry.get()));
 
   SSLConfigServiceManager::RegisterPrefs(registry.get());
 
-  scoped_ptr<SSLConfigServiceManager> config_manager(
+  std::unique_ptr<SSLConfigServiceManager> config_manager(
       SSLConfigServiceManager::CreateDefaultManager(
           local_state.get(), base::ThreadTaskRunnerHandle::Get()));
   ASSERT_TRUE(config_manager.get());

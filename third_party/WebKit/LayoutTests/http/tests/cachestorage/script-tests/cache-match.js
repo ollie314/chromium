@@ -29,6 +29,23 @@ prepopulated_cache_test(simple_entries, function(cache, entries) {
   }, 'Cache.match with Request');
 
 prepopulated_cache_test(simple_entries, function(cache, entries) {
+    var alt_response = new Response('', {status: 201});
+
+    return self.caches.open('second_matching_cache')
+      .then(function(cache) {
+          return cache.put(entries.a.request, alt_response.clone());
+        })
+      .then(function() {
+          return cache.match(entries.a.request)
+        })
+      .then(function(result) {
+          assert_response_equals(
+            result, entries.a.response,
+            'Cache.match should match the first cache.');
+        });
+  }, 'Cache.match with multiple cache hits');
+
+prepopulated_cache_test(simple_entries, function(cache, entries) {
     return cache.match(new Request(entries.a.request.url))
       .then(function(result) {
           assert_response_equals(result, entries.a.response,
@@ -158,6 +175,36 @@ cache_test(function(cache) {
                         'valid body each time it is called.');
         });
   }, 'Cache.match invoked multiple times for the same Request/Response');
+
+cache_test(function(cache) {
+    var request_url = new URL('../resources/simple.txt', location.href).href;
+    return fetch(request_url)
+      .then(function(fetch_result) {
+          return cache.put(new Request(request_url), fetch_result);
+        })
+      .then(function() {
+          return cache.match(request_url);
+        })
+      .then(function(result) {
+          return result.blob();
+        })
+      .then(function(blob) {
+          sliced = blob.slice(2,8);
+
+          return new Promise(function (resolve, reject) {
+              reader = new FileReader();
+              reader.onloadend = function(event) {
+                resolve(event.target.result);
+              }
+              reader.readAsText(sliced);
+            });
+        })
+      .then(function(text) {
+          assert_equals(text, 'simple',
+                        'A Response blob returned by Cache.match should be ' +
+                        'sliceable.' );
+        });
+  }, 'Cache.match blob should be sliceable');
 
 prepopulated_cache_test(simple_entries, function(cache, entries) {
     var request = new Request(entries.a.request.clone(), {method: 'POST'});

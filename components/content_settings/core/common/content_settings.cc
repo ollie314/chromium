@@ -34,6 +34,7 @@ ContentSettingsType kHistogramOrder[] = {
     CONTENT_SETTINGS_TYPE_FULLSCREEN,
     CONTENT_SETTINGS_TYPE_MOUSELOCK,
     CONTENT_SETTINGS_TYPE_MIXEDSCRIPT,
+    CONTENT_SETTINGS_TYPE_DEFAULT,  // MEDIASTREAM (removed).
     CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
     CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
     CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS,
@@ -52,6 +53,8 @@ ContentSettingsType kHistogramOrder[] = {
     CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT,
     CONTENT_SETTINGS_TYPE_DURABLE_STORAGE,
     CONTENT_SETTINGS_TYPE_KEYGEN,
+    CONTENT_SETTINGS_TYPE_BLUETOOTH_GUARD,
+    CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC,
 };
 
 int ContentSettingTypeToHistogramValue(ContentSettingsType content_setting,
@@ -86,6 +89,9 @@ ContentSettingPatternSource::ContentSettingPatternSource(
 ContentSettingPatternSource::ContentSettingPatternSource()
     : setting(CONTENT_SETTING_DEFAULT), incognito(false) {
 }
+
+ContentSettingPatternSource::ContentSettingPatternSource(
+    const ContentSettingPatternSource& other) = default;
 
 RendererContentSettingRules::RendererContentSettingRules() {}
 

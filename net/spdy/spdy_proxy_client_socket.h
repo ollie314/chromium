@@ -70,7 +70,6 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   void SetSubresourceSpeculation() override;
   void SetOmniboxSpeculation() override;
   bool WasEverUsed() const override;
-  bool UsingTCPFastOpen() const override;
   bool WasNpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
   bool GetSSLInfo(SSLInfo* ssl_info) override;
@@ -95,7 +94,7 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   void OnRequestHeadersSent() override;
   SpdyResponseHeadersStatus OnResponseHeadersUpdated(
       const SpdyHeaderBlock& response_headers) override;
-  void OnDataReceived(scoped_ptr<SpdyBuffer> buffer) override;
+  void OnDataReceived(std::unique_ptr<SpdyBuffer> buffer) override;
   void OnDataSent() override;
   void OnTrailers(const SpdyHeaderBlock& trailers) override;
   void OnClose(int status) override;

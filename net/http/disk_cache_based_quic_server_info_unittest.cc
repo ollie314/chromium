@@ -8,6 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "net/base/net_errors.h"
 #include "net/http/mock_http_cache.h"
@@ -86,9 +87,9 @@ TEST(DiskCacheBasedQuicServerInfo, DeleteInCallback) {
   // Use the blocking mock backend factory to force asynchronous completion
   // of quic_server_info->WaitForDataReady(), so that the callback will run.
   MockBlockingBackendFactory* factory = new MockBlockingBackendFactory();
-  MockHttpCache cache(make_scoped_ptr(factory));
+  MockHttpCache cache(base::WrapUnique(factory));
   QuicServerId server_id("www.verisign.com", 443, PRIVACY_MODE_DISABLED);
-  scoped_ptr<QuicServerInfo> quic_server_info(
+  std::unique_ptr<QuicServerInfo> quic_server_info(
       new DiskCacheBasedQuicServerInfo(server_id, cache.http_cache()));
   quic_server_info->Start();
   TestCompletionCallback callback;
@@ -106,7 +107,7 @@ TEST(DiskCacheBasedQuicServerInfo, Update) {
   TestCompletionCallback callback;
 
   QuicServerId server_id("www.google.com", 443, PRIVACY_MODE_DISABLED);
-  scoped_ptr<QuicServerInfo> quic_server_info(
+  std::unique_ptr<QuicServerInfo> quic_server_info(
       new DiskCacheBasedQuicServerInfo(server_id, cache.http_cache()));
   quic_server_info->Start();
   int rv = quic_server_info->WaitForDataReady(callback.callback());
@@ -116,12 +117,16 @@ TEST(DiskCacheBasedQuicServerInfo, Update) {
   EXPECT_TRUE(state->certs.empty());
   const string server_config_a = "server_config_a";
   const string source_address_token_a = "source_address_token_a";
+  const string cert_sct_a = "cert_sct_a";
+  const string chlo_hash_a = "chlo_hash_a";
   const string server_config_sig_a = "server_config_sig_a";
   const string cert_a = "cert_a";
   const string cert_b = "cert_b";
 
   state->server_config = server_config_a;
   state->source_address_token = source_address_token_a;
+  state->cert_sct = cert_sct_a;
+  state->chlo_hash = chlo_hash_a;
   state->server_config_sig = server_config_sig_a;
   state->certs.push_back(cert_a);
   quic_server_info->Persist();
@@ -156,6 +161,8 @@ TEST(DiskCacheBasedQuicServerInfo, Update) {
   const QuicServerInfo::State& state1 = quic_server_info->state();
   EXPECT_EQ(server_config_a, state1.server_config);
   EXPECT_EQ(source_address_token_a, state1.source_address_token);
+  EXPECT_EQ(cert_sct_a, state1.cert_sct);
+  EXPECT_EQ(chlo_hash_a, state1.chlo_hash);
   EXPECT_EQ(server_config_sig_a, state1.server_config_sig);
   EXPECT_EQ(2U, state1.certs.size());
   EXPECT_EQ(cert_a, state1.certs[0]);
@@ -173,7 +180,7 @@ TEST(DiskCacheBasedQuicServerInfo, UpdateDifferentPorts) {
 
   // Persist data for port 443.
   QuicServerId server_id1("www.google.com", 443, PRIVACY_MODE_DISABLED);
-  scoped_ptr<QuicServerInfo> quic_server_info1(
+  std::unique_ptr<QuicServerInfo> quic_server_info1(
       new DiskCacheBasedQuicServerInfo(server_id1, cache.http_cache()));
   quic_server_info1->Start();
   int rv = quic_server_info1->WaitForDataReady(callback.callback());
@@ -183,11 +190,15 @@ TEST(DiskCacheBasedQuicServerInfo, UpdateDifferentPorts) {
   EXPECT_TRUE(state1->certs.empty());
   const string server_config_a = "server_config_a";
   const string source_address_token_a = "source_address_token_a";
+  const string cert_sct_a = "cert_sct_a";
+  const string chlo_hash_a = "chlo_hash_a";
   const string server_config_sig_a = "server_config_sig_a";
   const string cert_a = "cert_a";
 
   state1->server_config = server_config_a;
   state1->source_address_token = source_address_token_a;
+  state1->cert_sct = cert_sct_a;
+  state1->chlo_hash = chlo_hash_a;
   state1->server_config_sig = server_config_sig_a;
   state1->certs.push_back(cert_a);
   quic_server_info1->Persist();
@@ -197,7 +208,7 @@ TEST(DiskCacheBasedQuicServerInfo, UpdateDifferentPorts) {
 
   // Persist data for port 80.
   QuicServerId server_id2("www.google.com", 80, PRIVACY_MODE_DISABLED);
-  scoped_ptr<QuicServerInfo> quic_server_info2(
+  std::unique_ptr<QuicServerInfo> quic_server_info2(
       new DiskCacheBasedQuicServerInfo(server_id2, cache.http_cache()));
   quic_server_info2->Start();
   rv = quic_server_info2->WaitForDataReady(callback.callback());
@@ -207,11 +218,15 @@ TEST(DiskCacheBasedQuicServerInfo, UpdateDifferentPorts) {
   EXPECT_TRUE(state2->certs.empty());
   const string server_config_b = "server_config_b";
   const string source_address_token_b = "source_address_token_b";
+  const string cert_sct_b = "cert_sct_b";
+  const string chlo_hash_b = "chlo_hash_b";
   const string server_config_sig_b = "server_config_sig_b";
   const string cert_b = "cert_b";
 
   state2->server_config = server_config_b;
   state2->source_address_token = source_address_token_b;
+  state2->cert_sct = cert_sct_b;
+  state2->chlo_hash = chlo_hash_b;
   state2->server_config_sig = server_config_sig_b;
   state2->certs.push_back(cert_b);
   quic_server_info2->Persist();
@@ -220,7 +235,7 @@ TEST(DiskCacheBasedQuicServerInfo, UpdateDifferentPorts) {
   base::MessageLoop::current()->RunUntilIdle();
 
   // Verify the stored QuicServerInfo for port 443.
-  scoped_ptr<QuicServerInfo> quic_server_info(
+  std::unique_ptr<QuicServerInfo> quic_server_info(
       new DiskCacheBasedQuicServerInfo(server_id1, cache.http_cache()));
   quic_server_info->Start();
   rv = quic_server_info->WaitForDataReady(callback.callback());
@@ -230,6 +245,8 @@ TEST(DiskCacheBasedQuicServerInfo, UpdateDifferentPorts) {
   const QuicServerInfo::State& state_a = quic_server_info->state();
   EXPECT_EQ(server_config_a, state_a.server_config);
   EXPECT_EQ(source_address_token_a, state_a.source_address_token);
+  EXPECT_EQ(cert_sct_a, state_a.cert_sct);
+  EXPECT_EQ(chlo_hash_a, state_a.chlo_hash);
   EXPECT_EQ(server_config_sig_a, state_a.server_config_sig);
   EXPECT_EQ(1U, state_a.certs.size());
   EXPECT_EQ(cert_a, state_a.certs[0]);
@@ -245,6 +262,8 @@ TEST(DiskCacheBasedQuicServerInfo, UpdateDifferentPorts) {
   const QuicServerInfo::State& state_b = quic_server_info->state();
   EXPECT_EQ(server_config_b, state_b.server_config);
   EXPECT_EQ(source_address_token_b, state_b.source_address_token);
+  EXPECT_EQ(cert_sct_b, state_b.cert_sct);
+  EXPECT_EQ(chlo_hash_b, state_b.chlo_hash);
   EXPECT_EQ(server_config_sig_b, state_b.server_config_sig);
   EXPECT_EQ(1U, state_b.certs.size());
   EXPECT_EQ(cert_b, state_b.certs[0]);
@@ -260,7 +279,7 @@ TEST(DiskCacheBasedQuicServerInfo, IsReadyToPersist) {
   TestCompletionCallback callback;
 
   QuicServerId server_id("www.google.com", 443, PRIVACY_MODE_DISABLED);
-  scoped_ptr<QuicServerInfo> quic_server_info(
+  std::unique_ptr<QuicServerInfo> quic_server_info(
       new DiskCacheBasedQuicServerInfo(server_id, cache.http_cache()));
   EXPECT_FALSE(quic_server_info->IsDataReady());
   quic_server_info->Start();
@@ -272,11 +291,15 @@ TEST(DiskCacheBasedQuicServerInfo, IsReadyToPersist) {
   EXPECT_TRUE(state->certs.empty());
   const string server_config_a = "server_config_a";
   const string source_address_token_a = "source_address_token_a";
+  const string cert_sct_a = "cert_sct_a";
+  const string chlo_hash_a = "chlo_hash_a";
   const string server_config_sig_a = "server_config_sig_a";
   const string cert_a = "cert_a";
 
   state->server_config = server_config_a;
   state->source_address_token = source_address_token_a;
+  state->cert_sct = cert_sct_a;
+  state->chlo_hash = chlo_hash_a;
   state->server_config_sig = server_config_sig_a;
   state->certs.push_back(cert_a);
   EXPECT_TRUE(quic_server_info->IsReadyToPersist());
@@ -302,6 +325,8 @@ TEST(DiskCacheBasedQuicServerInfo, IsReadyToPersist) {
   const QuicServerInfo::State& state1 = quic_server_info->state();
   EXPECT_EQ(server_config_a, state1.server_config);
   EXPECT_EQ(source_address_token_a, state1.source_address_token);
+  EXPECT_EQ(cert_sct_a, state1.cert_sct);
+  EXPECT_EQ(chlo_hash_a, state1.chlo_hash);
   EXPECT_EQ(server_config_sig_a, state1.server_config_sig);
   EXPECT_EQ(1U, state1.certs.size());
   EXPECT_EQ(cert_a, state1.certs[0]);
@@ -316,7 +341,7 @@ TEST(DiskCacheBasedQuicServerInfo, MultiplePersist) {
   TestCompletionCallback callback;
 
   QuicServerId server_id("www.google.com", 443, PRIVACY_MODE_DISABLED);
-  scoped_ptr<QuicServerInfo> quic_server_info(
+  std::unique_ptr<QuicServerInfo> quic_server_info(
       new DiskCacheBasedQuicServerInfo(server_id, cache.http_cache()));
   EXPECT_FALSE(quic_server_info->IsDataReady());
   quic_server_info->Start();
@@ -329,11 +354,15 @@ TEST(DiskCacheBasedQuicServerInfo, MultiplePersist) {
   EXPECT_TRUE(state->certs.empty());
   const string server_config_init = "server_config_init";
   const string source_address_token_init = "source_address_token_init";
+  const string cert_sct_init = "cert_sct_init";
+  const string chlo_hash_init = "chlo_hash_init";
   const string server_config_sig_init = "server_config_sig_init";
   const string cert_init = "cert_init";
 
   state->server_config = server_config_init;
   state->source_address_token = source_address_token_init;
+  state->cert_sct = cert_sct_init;
+  state->chlo_hash = chlo_hash_init;
   state->server_config_sig = server_config_sig_init;
   state->certs.push_back(cert_init);
   EXPECT_TRUE(quic_server_info->IsReadyToPersist());
@@ -352,11 +381,15 @@ TEST(DiskCacheBasedQuicServerInfo, MultiplePersist) {
   // doing another Start() and WaitForDataReady.
   const string server_config_a = "server_config_a";
   const string source_address_token_a = "source_address_token_a";
+  const string cert_sct_a = "cert_sct_a";
+  const string chlo_hash_a = "chlo_hash_a";
   const string server_config_sig_a = "server_config_sig_a";
   const string cert_a = "cert_a";
 
   state->server_config = server_config_a;
   state->source_address_token = source_address_token_a;
+  state->cert_sct = cert_sct_a;
+  state->chlo_hash = chlo_hash_a;
   state->server_config_sig = server_config_sig_a;
   state->certs.push_back(cert_a);
   EXPECT_TRUE(quic_server_info->IsReadyToPersist());
@@ -382,6 +415,8 @@ TEST(DiskCacheBasedQuicServerInfo, MultiplePersist) {
   const QuicServerInfo::State& state1 = quic_server_info->state();
   EXPECT_EQ(server_config_a, state1.server_config);
   EXPECT_EQ(source_address_token_a, state1.source_address_token);
+  EXPECT_EQ(cert_sct_a, state1.cert_sct);
+  EXPECT_EQ(chlo_hash_a, state1.chlo_hash);
   EXPECT_EQ(server_config_sig_a, state1.server_config_sig);
   EXPECT_EQ(1U, state1.certs.size());
   EXPECT_EQ(cert_a, state1.certs[0]);
@@ -391,10 +426,10 @@ TEST(DiskCacheBasedQuicServerInfo, MultiplePersist) {
 
 TEST(DiskCacheBasedQuicServerInfo, CancelWaitForDataReady) {
   MockBlockingBackendFactory* factory = new MockBlockingBackendFactory();
-  MockHttpCache cache(make_scoped_ptr(factory));
+  MockHttpCache cache(base::WrapUnique(factory));
   TestCompletionCallback callback;
   QuicServerId server_id("www.google.com", 443, PRIVACY_MODE_DISABLED);
-  scoped_ptr<QuicServerInfo> quic_server_info(
+  std::unique_ptr<QuicServerInfo> quic_server_info(
       new DiskCacheBasedQuicServerInfo(server_id, cache.http_cache()));
   EXPECT_FALSE(quic_server_info->IsDataReady());
   quic_server_info->Start();
@@ -414,7 +449,7 @@ TEST(DiskCacheBasedQuicServerInfo, CancelWaitForDataReadyButDataIsReady) {
   TestCompletionCallback callback;
 
   QuicServerId server_id("www.google.com", 443, PRIVACY_MODE_DISABLED);
-  scoped_ptr<QuicServerInfo> quic_server_info(
+  std::unique_ptr<QuicServerInfo> quic_server_info(
       new DiskCacheBasedQuicServerInfo(server_id, cache.http_cache()));
   EXPECT_FALSE(quic_server_info->IsDataReady());
   quic_server_info->Start();
@@ -426,7 +461,7 @@ TEST(DiskCacheBasedQuicServerInfo, CancelWaitForDataReadyButDataIsReady) {
 }
 
 TEST(DiskCacheBasedQuicServerInfo, CancelWaitForDataReadyAfterDeleteCache) {
-  scoped_ptr<QuicServerInfo> quic_server_info;
+  std::unique_ptr<QuicServerInfo> quic_server_info;
   {
     MockHttpCache cache;
     AddMockTransaction(&kHostInfoTransaction1);
@@ -453,7 +488,7 @@ TEST(DiskCacheBasedQuicServerInfo, StartAndPersist) {
   AddMockTransaction(&kHostInfoTransaction1);
 
   QuicServerId server_id("www.google.com", 443, PRIVACY_MODE_DISABLED);
-  scoped_ptr<QuicServerInfo> quic_server_info(
+  std::unique_ptr<QuicServerInfo> quic_server_info(
       new DiskCacheBasedQuicServerInfo(server_id, cache.http_cache()));
   EXPECT_FALSE(quic_server_info->IsDataReady());
   quic_server_info->Start();
@@ -466,11 +501,15 @@ TEST(DiskCacheBasedQuicServerInfo, StartAndPersist) {
   EXPECT_TRUE(state->certs.empty());
   const string server_config_a = "server_config_a";
   const string source_address_token_a = "source_address_token_a";
+  const string cert_sct_a = "cert_sct_a";
+  const string chlo_hash_a = "chlo_hash_a";
   const string server_config_sig_a = "server_config_sig_a";
   const string cert_a = "cert_a";
 
   state->server_config = server_config_a;
   state->source_address_token = source_address_token_a;
+  state->cert_sct = cert_sct_a;
+  state->chlo_hash = chlo_hash_a;
   state->server_config_sig = server_config_sig_a;
   state->certs.push_back(cert_a);
   EXPECT_TRUE(quic_server_info->IsReadyToPersist());
@@ -498,6 +537,8 @@ TEST(DiskCacheBasedQuicServerInfo, StartAndPersist) {
   const QuicServerInfo::State& state1 = quic_server_info->state();
   EXPECT_EQ(server_config_a, state1.server_config);
   EXPECT_EQ(source_address_token_a, state1.source_address_token);
+  EXPECT_EQ(cert_sct_a, state1.cert_sct);
+  EXPECT_EQ(chlo_hash_a, state1.chlo_hash);
   EXPECT_EQ(server_config_sig_a, state1.server_config_sig);
   EXPECT_EQ(1U, state1.certs.size());
   EXPECT_EQ(cert_a, state1.certs[0]);
@@ -509,12 +550,12 @@ TEST(DiskCacheBasedQuicServerInfo, StartAndPersist) {
 // persists the data when Start() finishes.
 TEST(DiskCacheBasedQuicServerInfo, PersistWhenNotReadyToPersist) {
   MockBlockingBackendFactory* factory = new MockBlockingBackendFactory();
-  MockHttpCache cache(make_scoped_ptr(factory));
+  MockHttpCache cache(base::WrapUnique(factory));
   AddMockTransaction(&kHostInfoTransaction1);
   TestCompletionCallback callback;
 
   QuicServerId server_id("www.google.com", 443, PRIVACY_MODE_DISABLED);
-  scoped_ptr<QuicServerInfo> quic_server_info(
+  std::unique_ptr<QuicServerInfo> quic_server_info(
       new DiskCacheBasedQuicServerInfo(server_id, cache.http_cache()));
   EXPECT_FALSE(quic_server_info->IsDataReady());
   // We do a Start(), but don't call WaitForDataReady(). Because we haven't
@@ -527,11 +568,15 @@ TEST(DiskCacheBasedQuicServerInfo, PersistWhenNotReadyToPersist) {
   EXPECT_TRUE(state->certs.empty());
   const string server_config_init = "server_config_init";
   const string source_address_token_init = "source_address_token_init";
+  const string cert_sct_init = "cert_sct_init";
+  const string chlo_hash_init = "chlo_hash_init";
   const string server_config_sig_init = "server_config_sig_init";
   const string cert_init = "cert_init";
 
   state->server_config = server_config_init;
   state->source_address_token = source_address_token_init;
+  state->cert_sct = cert_sct_init;
+  state->chlo_hash = chlo_hash_init;
   state->server_config_sig = server_config_sig_init;
   state->certs.push_back(cert_init);
   EXPECT_FALSE(quic_server_info->IsReadyToPersist());
@@ -556,6 +601,8 @@ TEST(DiskCacheBasedQuicServerInfo, PersistWhenNotReadyToPersist) {
   const QuicServerInfo::State& state1 = quic_server_info->state();
   EXPECT_EQ(server_config_init, state1.server_config);
   EXPECT_EQ(source_address_token_init, state1.source_address_token);
+  EXPECT_EQ(cert_sct_init, state1.cert_sct);
+  EXPECT_EQ(chlo_hash_init, state1.chlo_hash);
   EXPECT_EQ(server_config_sig_init, state1.server_config_sig);
   EXPECT_EQ(1U, state1.certs.size());
   EXPECT_EQ(cert_init, state1.certs[0]);
@@ -569,7 +616,7 @@ TEST(DiskCacheBasedQuicServerInfo, MultiplePersistsWithoutWaiting) {
   TestCompletionCallback callback;
 
   QuicServerId server_id("www.google.com", 443, PRIVACY_MODE_DISABLED);
-  scoped_ptr<QuicServerInfo> quic_server_info(
+  std::unique_ptr<QuicServerInfo> quic_server_info(
       new DiskCacheBasedQuicServerInfo(server_id, cache.http_cache()));
   EXPECT_FALSE(quic_server_info->IsDataReady());
   quic_server_info->Start();
@@ -582,11 +629,15 @@ TEST(DiskCacheBasedQuicServerInfo, MultiplePersistsWithoutWaiting) {
   EXPECT_TRUE(state->certs.empty());
   const string server_config_init = "server_config_init";
   const string source_address_token_init = "source_address_token_init";
+  const string cert_sct_init = "cert_sct_init";
+  const string chlo_hash_init = "chlo_hash_init";
   const string server_config_sig_init = "server_config_sig_init";
   const string cert_init = "cert_init";
 
   state->server_config = server_config_init;
   state->source_address_token = source_address_token_init;
+  state->cert_sct = cert_sct_init;
+  state->chlo_hash = chlo_hash_init;
   state->server_config_sig = server_config_sig_init;
   state->certs.push_back(cert_init);
   EXPECT_TRUE(quic_server_info->IsReadyToPersist());
@@ -600,11 +651,15 @@ TEST(DiskCacheBasedQuicServerInfo, MultiplePersistsWithoutWaiting) {
   // doing another Start() and WaitForDataReady.
   const string server_config_a = "server_config_a";
   const string source_address_token_a = "source_address_token_a";
+  const string cert_sct_a = "cert_sct_a";
+  const string chlo_hash_a = "chlo_hash_a";
   const string server_config_sig_a = "server_config_sig_a";
   const string cert_a = "cert_a";
 
   state->server_config = server_config_a;
   state->source_address_token = source_address_token_a;
+  state->cert_sct = cert_sct_a;
+  state->chlo_hash = chlo_hash_a;
   state->server_config_sig = server_config_sig_a;
   state->certs.push_back(cert_a);
   EXPECT_FALSE(quic_server_info->IsReadyToPersist());
@@ -627,6 +682,8 @@ TEST(DiskCacheBasedQuicServerInfo, MultiplePersistsWithoutWaiting) {
   const QuicServerInfo::State& state1 = quic_server_info->state();
   EXPECT_EQ(server_config_a, state1.server_config);
   EXPECT_EQ(source_address_token_a, state1.source_address_token);
+  EXPECT_EQ(cert_sct_a, state1.cert_sct);
+  EXPECT_EQ(chlo_hash_a, state1.chlo_hash);
   EXPECT_EQ(server_config_sig_a, state1.server_config_sig);
   EXPECT_EQ(1U, state1.certs.size());
   EXPECT_EQ(cert_a, state1.certs[0]);
@@ -640,7 +697,7 @@ TEST(DiskCacheBasedQuicServerInfo, DeleteServerInfoInCallback) {
   // Use the blocking mock backend factory to force asynchronous completion
   // of quic_server_info->WaitForDataReady(), so that the callback will run.
   MockBlockingBackendFactory* factory = new MockBlockingBackendFactory();
-  MockHttpCache cache(make_scoped_ptr(factory));
+  MockHttpCache cache(base::WrapUnique(factory));
   QuicServerId server_id("www.verisign.com", 443, PRIVACY_MODE_DISABLED);
   QuicServerInfo* quic_server_info =
       new DiskCacheBasedQuicServerInfo(server_id, cache.http_cache());

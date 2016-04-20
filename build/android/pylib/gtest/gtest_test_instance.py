@@ -29,7 +29,8 @@ _DEFAULT_ISOLATE_FILE_PATHS = {
     'base_unittests': 'base/base_unittests.isolate',
     'blink_heap_unittests':
       'third_party/WebKit/Source/platform/heap/BlinkHeapUnitTests.isolate',
-    'breakpad_unittests': 'breakpad/breakpad_unittests.isolate',
+    'blink_platform_unittests':
+      'third_party/WebKit/Source/platform/blink_platform_unittests.isolate',
     'cc_perftests': 'cc/cc_perftests.isolate',
     'components_browsertests': 'components/components_browsertests.isolate',
     'components_unittests': 'components/components_unittests.isolate',
@@ -86,10 +87,15 @@ _EXTRA_SHARD_SIZE_LIMIT = (
 # TODO(jbudorick): Remove these once we're no longer parsing stdout to generate
 # results.
 _RE_TEST_STATUS = re.compile(
-    r'\[ +((?:RUN)|(?:FAILED)|(?:OK)) +\] ?([^ ]+)(?: \((\d+) ms\))?$')
+    r'\[ +((?:RUN)|(?:FAILED)|(?:OK)|(?:CRASHED)) +\]'
+    r' ?([^ ]+)?(?: \((\d+) ms\))?$')
 _RE_TEST_RUN_STATUS = re.compile(
     r'\[ +(PASSED|RUNNER_FAILED|CRASHED) \] ?[^ ]+')
-
+# Crash detection constants.
+_RE_TEST_ERROR = re.compile(r'FAILURES!!! Tests run: \d+,'
+                                    r' Failures: \d+, Errors: 1')
+_RE_TEST_CURRENTLY_RUNNING = re.compile(r'\[ERROR:.*?\]'
+                                    r' Currently running: (.*)')
 
 # TODO(jbudorick): Make this a class method of GtestTestInstance once
 # test_package_apk and test_package_exe are gone.
@@ -133,16 +139,32 @@ class GtestTestInstance(test_instance.TestInstance):
     # TODO(jbudorick): Support multiple test suites.
     if len(args.suite_name) > 1:
       raise ValueError('Platform mode currently supports only 1 gtest suite')
-    self._suite = args.suite_name[0]
-
+    self._extract_test_list_from_filter = args.extract_test_list_from_filter
     self._shard_timeout = args.shard_timeout
+    self._skip_clear_data = args.skip_clear_data
+    self._suite = args.suite_name[0]
+    self._exe_dist_dir = None
 
-    incremental_part = '_incremental' if args.incremental_install else ''
+    # GYP:
+    if args.executable_dist_dir:
+      self._exe_dist_dir = os.path.abspath(args.executable_dist_dir)
+    else:
+      # TODO(agrieve): Remove auto-detection once recipes pass flag explicitly.
+      exe_dist_dir = os.path.join(constants.GetOutDirectory(),
+                                  '%s__dist' % self._suite)
+
+      if os.path.exists(exe_dist_dir):
+        self._exe_dist_dir = exe_dist_dir
+
+    incremental_part = ''
+    if args.test_apk_incremental_install_script:
+      incremental_part = '_incremental'
+
     apk_path = os.path.join(
         constants.GetOutDirectory(), '%s_apk' % self._suite,
         '%s-debug%s.apk' % (self._suite, incremental_part))
-    self._exe_path = os.path.join(constants.GetOutDirectory(),
-                                  self._suite)
+    self._test_apk_incremental_install_script = (
+        args.test_apk_incremental_install_script)
     if not os.path.exists(apk_path):
       self._apk_helper = None
     else:
@@ -157,9 +179,7 @@ class GtestTestInstance(test_instance.TestInstance):
         self._extras[EXTRA_SHARD_NANO_TIMEOUT] = int(1e9 * self._shard_timeout)
         self._shard_timeout = 900
 
-    if not os.path.exists(self._exe_path):
-      self._exe_path = None
-    if not self._apk_helper and not self._exe_path:
+    if not self._apk_helper and not self._exe_dist_dir:
       error_func('Could not find apk or executable for %s' % self._suite)
 
     self._data_deps = []
@@ -220,8 +240,8 @@ class GtestTestInstance(test_instance.TestInstance):
     return self._app_data_files
 
   @property
-  def exe(self):
-    return self._exe_path
+  def exe_dist_dir(self):
+    return self._exe_dist_dir
 
   @property
   def extras(self):
@@ -248,12 +268,24 @@ class GtestTestInstance(test_instance.TestInstance):
     return self._shard_timeout
 
   @property
+  def skip_clear_data(self):
+    return self._skip_clear_data
+
+  @property
   def suite(self):
     return self._suite
 
   @property
+  def test_apk_incremental_install_script(self):
+    return self._test_apk_incremental_install_script
+
+  @property
   def test_arguments(self):
     return self._test_arguments
+
+  @property
+  def extract_test_list_from_filter(self):
+    return self._extract_test_list_from_filter
 
   #override
   def TestType(self):
@@ -268,8 +300,6 @@ class GtestTestInstance(test_instance.TestInstance):
       self._isolate_delegate.PurgeExcluded(_DEPS_EXCLUSION_LIST)
       self._isolate_delegate.MoveOutputDeps()
       dest_dir = None
-      if self._suite == 'breakpad_unittests':
-        dest_dir = '/data/local/tmp/'
       self._data_deps.extend([
           (self._isolate_delegate.isolate_deps_dir, dest_dir)])
 
@@ -336,23 +366,34 @@ class GtestTestInstance(test_instance.TestInstance):
     log = []
     result_type = None
     results = []
+    test_name = None
     for l in output:
       logging.info(l)
       matcher = _RE_TEST_STATUS.match(l)
       if matcher:
+        # Be aware that test name and status might not appear on same line.
+        test_name = matcher.group(2) if matcher.group(2) else test_name
+        duration = int(matcher.group(3)) if matcher.group(3) else 0
         if matcher.group(1) == 'RUN':
           log = []
         elif matcher.group(1) == 'OK':
           result_type = base_test_result.ResultType.PASS
         elif matcher.group(1) == 'FAILED':
           result_type = base_test_result.ResultType.FAIL
+        elif matcher.group(1) == 'CRASHED':
+          result_type = base_test_result.ResultType.CRASH
+
+      # Needs another matcher here to match crashes, like those of DCHECK.
+      matcher = _RE_TEST_CURRENTLY_RUNNING.match(l)
+      if matcher:
+        test_name = matcher.group(1)
+        result_type = base_test_result.ResultType.CRASH
+        duration = 0 # Don't know.
 
       if log is not None:
         log.append(l)
 
       if result_type:
-        test_name = matcher.group(2)
-        duration = int(matcher.group(3)) if matcher.group(3) else 0
         results.append(base_test_result.BaseTestResult(
             test_name, result_type, duration,
             log=('\n'.join(log) if log else '')))

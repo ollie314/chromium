@@ -61,17 +61,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionTagsTest, Basic) {
   EXPECT_EQ(1U, tracked_tags().size());
 }
 
-#if defined(OS_WIN) || defined(OS_LINUX)
-// Test disabled due to flakiness on Windows XP and Linux.
-// See bug: http://crbug.com/519333
-#define MAYBE_PreAndPostExistingTaskProviding \
-    DISABLED_PreAndPostExistingTaskProviding
-#else
-#define MAYBE_PreAndPostExistingTaskProviding PreAndPostExistingTaskProviding
-#endif
-
+// Test disabled due to flakiness. See bug: http://crbug.com/519333
 IN_PROC_BROWSER_TEST_F(ExtensionTagsTest,
-                       MAYBE_PreAndPostExistingTaskProviding) {
+                       DISABLED_PreAndPostExistingTaskProviding) {
   // Browser tests start with a single tab.
   EXPECT_EQ(1U, tracked_tags().size());
   MockWebContentsTaskManager task_manager;
@@ -117,7 +109,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTagsTest,
   // Reload the extension, the task manager should show it again.
   ReloadExtension(extension->id());
   EXPECT_EQ(2U, tracked_tags().size());
-  EXPECT_EQ(2U, task_manager.tasks().size());
+  ASSERT_EQ(2U, task_manager.tasks().size());
   EXPECT_EQ(Task::EXTENSION, task_manager.tasks().back()->GetType());
 }
 

@@ -4,14 +4,16 @@
 
 #include "net/quic/crypto/proof_verifier_chromium.h"
 
+#include <memory>
+
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_data_directory.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_log_verifier.h"
 #include "net/cert/ct_policy_enforcer.h"
+#include "net/cert/ct_policy_status.h"
 #include "net/cert/ct_serialization.h"
 #include "net/cert/ct_verify_result.h"
 #include "net/cert/mock_cert_verifier.h"
@@ -43,7 +45,7 @@ class FailsTestCertVerifier : public CertVerifier {
              CRLSet* crl_set,
              CertVerifyResult* verify_result,
              const CompletionCallback& callback,
-             scoped_ptr<CertVerifier::Request>* out_req,
+             std::unique_ptr<CertVerifier::Request>* out_req,
              const BoundNetLog& net_log) override {
     ADD_FAILURE() << "CertVerifier::Verify() should not be called";
     return ERR_FAILED;
@@ -56,13 +58,14 @@ class FailsTestCTPolicyEnforcer : public CTPolicyEnforcer {
   FailsTestCTPolicyEnforcer() {}
   ~FailsTestCTPolicyEnforcer() override {}
 
-  bool DoesConformToCTEVPolicy(X509Certificate* cert,
-                               const ct::EVCertsWhitelist* ev_whitelist,
-                               const ct::CTVerifyResult& ct_result,
-                               const BoundNetLog& net_log) override {
+  ct::EVPolicyCompliance DoesConformToCTEVPolicy(
+      X509Certificate* cert,
+      const ct::EVCertsWhitelist* ev_whitelist,
+      const ct::SCTList& verified_scts,
+      const BoundNetLog& net_log) override {
     ADD_FAILURE() << "CTPolicyEnforcer::DoesConformToCTEVPolicy() should "
                   << "not be called";
-    return false;
+    return ct::EVPolicyCompliance::EV_POLICY_DOES_NOT_APPLY;
   }
 };
 
@@ -73,11 +76,13 @@ class MockCTPolicyEnforcer : public CTPolicyEnforcer {
   MockCTPolicyEnforcer(bool is_ev) : is_ev_(is_ev) {}
   ~MockCTPolicyEnforcer() override {}
 
-  bool DoesConformToCTEVPolicy(X509Certificate* cert,
-                               const ct::EVCertsWhitelist* ev_whitelist,
-                               const ct::CTVerifyResult& ct_result,
-                               const BoundNetLog& net_log) override {
-    return is_ev_;
+  ct::EVPolicyCompliance DoesConformToCTEVPolicy(
+      X509Certificate* cert,
+      const ct::EVCertsWhitelist* ev_whitelist,
+      const ct::SCTList& verified_scts,
+      const BoundNetLog& net_log) override {
+    return is_ev_ ? ct::EVPolicyCompliance::EV_POLICY_COMPLIES_VIA_SCTS
+                  : ct::EVPolicyCompliance::EV_POLICY_NOT_ENOUGH_SCTS;
   }
 
  private:
@@ -91,12 +96,13 @@ class DummyProofVerifierCallback : public ProofVerifierCallback {
 
   void Run(bool ok,
            const std::string& error_details,
-           scoped_ptr<ProofVerifyDetails>* details) override {
+           std::unique_ptr<ProofVerifyDetails>* details) override {
     // Do nothing
   }
 };
 
 const char kTestHostname[] = "test.example.com";
+const uint16_t kTestPort = 8443;
 const char kTestConfig[] = "server config bytes";
 const char kLogDescription[] = "somelog";
 
@@ -183,41 +189,15 @@ class ProofVerifierChromiumTest : public ::testing::Test {
     certs->push_back(der_bytes);
   }
 
-  std::string GetSCTListForTesting() {
-    const std::string sct = ct::GetTestSignedCertificateTimestamp();
-    std::string sct_list;
-    ct::EncodeSCTListForTesting(sct, &sct_list);
-    return sct_list;
-  }
-
-  std::string GetCorruptSCTListForTesting() {
-    std::string sct = ct::GetTestSignedCertificateTimestamp();
-    sct[15] = 't';  // Corrupt a byte inside SCT.
-    std::string sct_list;
-    ct::EncodeSCTListForTesting(sct, &sct_list);
-    return sct_list;
-  }
-
-  bool CheckForSingleVerifiedSCTInResult(const ct::CTVerifyResult& result) {
-    return (result.verified_scts.size() == 1U) && result.invalid_scts.empty() &&
-           result.unknown_logs_scts.empty() &&
-           result.verified_scts[0]->log_description == kLogDescription;
-  }
-
-  bool CheckForSCTOrigin(const ct::CTVerifyResult& result,
-                         ct::SignedCertificateTimestamp::Origin origin) {
-    return (result.verified_scts.size() > 0) &&
-           (result.verified_scts[0]->origin == origin);
-  }
-
   void CheckSCT(bool sct_expected_ok) {
     ProofVerifyDetailsChromium* proof_details =
         reinterpret_cast<ProofVerifyDetailsChromium*>(details_.get());
     const ct::CTVerifyResult& ct_verify_result =
         proof_details->ct_verify_result;
     if (sct_expected_ok) {
-      ASSERT_TRUE(CheckForSingleVerifiedSCTInResult(ct_verify_result));
-      ASSERT_TRUE(CheckForSCTOrigin(
+      ASSERT_TRUE(ct::CheckForSingleVerifiedSCTInResult(ct_verify_result,
+                                                        kLogDescription));
+      ASSERT_TRUE(ct::CheckForSCTOrigin(
           ct_verify_result,
           ct::SignedCertificateTimestamp::SCT_FROM_TLS_EXTENSION));
     } else {
@@ -226,10 +206,10 @@ class ProofVerifierChromiumTest : public ::testing::Test {
   }
 
  protected:
-  scoped_ptr<MultiLogCTVerifier> ct_verifier_;
+  std::unique_ptr<MultiLogCTVerifier> ct_verifier_;
   std::vector<scoped_refptr<const CTLogVerifier>> log_verifiers_;
-  scoped_ptr<ProofVerifyContext> verify_context_;
-  scoped_ptr<ProofVerifyDetails> details_;
+  std::unique_ptr<ProofVerifyContext> verify_context_;
+  std::unique_ptr<ProofVerifyDetails> details_;
   std::string error_details_;
   std::vector<std::string> certs_;
 };
@@ -241,11 +221,12 @@ TEST_F(ProofVerifierChromiumTest, FailsIfCertFails) {
   ProofVerifierChromium proof_verifier(&dummy_verifier, nullptr, nullptr,
                                        ct_verifier_.get());
 
-  scoped_ptr<DummyProofVerifierCallback> callback(
+  std::unique_ptr<DummyProofVerifierCallback> callback(
       new DummyProofVerifierCallback);
   QuicAsyncStatus status = proof_verifier.VerifyProof(
-      kTestHostname, kTestConfig, certs_, "", GetTestSignature(),
-      verify_context_.get(), &error_details_, &details_, callback.get());
+      kTestHostname, kTestPort, kTestConfig, QUIC_VERSION_25, "", certs_, "",
+      GetTestSignature(), verify_context_.get(), &error_details_, &details_,
+      callback.get());
   ASSERT_EQ(QUIC_FAILURE, status);
 }
 
@@ -258,11 +239,12 @@ TEST_F(ProofVerifierChromiumTest, ValidSCTList) {
   ProofVerifierChromium proof_verifier(&cert_verifier, nullptr, nullptr,
                                        ct_verifier_.get());
 
-  scoped_ptr<DummyProofVerifierCallback> callback(
+  std::unique_ptr<DummyProofVerifierCallback> callback(
       new DummyProofVerifierCallback);
   QuicAsyncStatus status = proof_verifier.VerifyProof(
-      kTestHostname, kTestConfig, certs_, GetSCTListForTesting(), "",
-      verify_context_.get(), &error_details_, &details_, callback.get());
+      kTestHostname, kTestPort, kTestConfig, QUIC_VERSION_25, "", certs_,
+      ct::GetSCTListForTesting(), "", verify_context_.get(), &error_details_,
+      &details_, callback.get());
   ASSERT_EQ(QUIC_FAILURE, status);
   CheckSCT(/*sct_expected_ok=*/true);
 }
@@ -276,11 +258,12 @@ TEST_F(ProofVerifierChromiumTest, InvalidSCTList) {
   ProofVerifierChromium proof_verifier(&cert_verifier, nullptr, nullptr,
                                        ct_verifier_.get());
 
-  scoped_ptr<DummyProofVerifierCallback> callback(
+  std::unique_ptr<DummyProofVerifierCallback> callback(
       new DummyProofVerifierCallback);
   QuicAsyncStatus status = proof_verifier.VerifyProof(
-      kTestHostname, kTestConfig, certs_, GetCorruptSCTListForTesting(), "",
-      verify_context_.get(), &error_details_, &details_, callback.get());
+      kTestHostname, kTestPort, kTestConfig, QUIC_VERSION_25, "", certs_,
+      ct::GetSCTListWithInvalidSCT(), "", verify_context_.get(),
+      &error_details_, &details_, callback.get());
   ASSERT_EQ(QUIC_FAILURE, status);
   CheckSCT(/*sct_expected_ok=*/false);
 }
@@ -292,11 +275,12 @@ TEST_F(ProofVerifierChromiumTest, FailsIfSignatureFails) {
   ProofVerifierChromium proof_verifier(&cert_verifier, nullptr, nullptr,
                                        ct_verifier_.get());
 
-  scoped_ptr<DummyProofVerifierCallback> callback(
+  std::unique_ptr<DummyProofVerifierCallback> callback(
       new DummyProofVerifierCallback);
   QuicAsyncStatus status = proof_verifier.VerifyProof(
-      kTestHostname, kTestConfig, certs_, "", kTestConfig,
-      verify_context_.get(), &error_details_, &details_, callback.get());
+      kTestHostname, kTestPort, kTestConfig, QUIC_VERSION_25, "", certs_, "",
+      kTestConfig, verify_context_.get(), &error_details_, &details_,
+      callback.get());
   ASSERT_EQ(QUIC_FAILURE, status);
 }
 
@@ -316,11 +300,12 @@ TEST_F(ProofVerifierChromiumTest, PreservesEVIfNoPolicy) {
   ProofVerifierChromium proof_verifier(&dummy_verifier, nullptr, nullptr,
                                        ct_verifier_.get());
 
-  scoped_ptr<DummyProofVerifierCallback> callback(
+  std::unique_ptr<DummyProofVerifierCallback> callback(
       new DummyProofVerifierCallback);
   QuicAsyncStatus status = proof_verifier.VerifyProof(
-      kTestHostname, kTestConfig, certs_, "", GetTestSignature(),
-      verify_context_.get(), &error_details_, &details_, callback.get());
+      kTestHostname, kTestPort, kTestConfig, QUIC_VERSION_25, "", certs_, "",
+      GetTestSignature(), verify_context_.get(), &error_details_, &details_,
+      callback.get());
   ASSERT_EQ(QUIC_SUCCESS, status);
 
   ASSERT_TRUE(details_.get());
@@ -348,11 +333,12 @@ TEST_F(ProofVerifierChromiumTest, PreservesEVIfAllowed) {
   ProofVerifierChromium proof_verifier(&dummy_verifier, &policy_enforcer,
                                        nullptr, ct_verifier_.get());
 
-  scoped_ptr<DummyProofVerifierCallback> callback(
+  std::unique_ptr<DummyProofVerifierCallback> callback(
       new DummyProofVerifierCallback);
   QuicAsyncStatus status = proof_verifier.VerifyProof(
-      kTestHostname, kTestConfig, certs_, "", GetTestSignature(),
-      verify_context_.get(), &error_details_, &details_, callback.get());
+      kTestHostname, kTestPort, kTestConfig, QUIC_VERSION_25, "", certs_, "",
+      GetTestSignature(), verify_context_.get(), &error_details_, &details_,
+      callback.get());
   ASSERT_EQ(QUIC_SUCCESS, status);
 
   ASSERT_TRUE(details_.get());
@@ -380,11 +366,12 @@ TEST_F(ProofVerifierChromiumTest, StripsEVIfNotAllowed) {
   ProofVerifierChromium proof_verifier(&dummy_verifier, &policy_enforcer,
                                        nullptr, ct_verifier_.get());
 
-  scoped_ptr<DummyProofVerifierCallback> callback(
+  std::unique_ptr<DummyProofVerifierCallback> callback(
       new DummyProofVerifierCallback);
   QuicAsyncStatus status = proof_verifier.VerifyProof(
-      kTestHostname, kTestConfig, certs_, "", GetTestSignature(),
-      verify_context_.get(), &error_details_, &details_, callback.get());
+      kTestHostname, kTestPort, kTestConfig, QUIC_VERSION_25, "", certs_, "",
+      GetTestSignature(), verify_context_.get(), &error_details_, &details_,
+      callback.get());
   ASSERT_EQ(QUIC_SUCCESS, status);
 
   ASSERT_TRUE(details_.get());
@@ -413,11 +400,12 @@ TEST_F(ProofVerifierChromiumTest, IgnoresPolicyEnforcerIfNotEV) {
   ProofVerifierChromium proof_verifier(&dummy_verifier, &policy_enforcer,
                                        nullptr, ct_verifier_.get());
 
-  scoped_ptr<DummyProofVerifierCallback> callback(
+  std::unique_ptr<DummyProofVerifierCallback> callback(
       new DummyProofVerifierCallback);
   QuicAsyncStatus status = proof_verifier.VerifyProof(
-      kTestHostname, kTestConfig, certs_, "", GetTestSignature(),
-      verify_context_.get(), &error_details_, &details_, callback.get());
+      kTestHostname, kTestPort, kTestConfig, QUIC_VERSION_25, "", certs_, "",
+      GetTestSignature(), verify_context_.get(), &error_details_, &details_,
+      callback.get());
   ASSERT_EQ(QUIC_SUCCESS, status);
 
   ASSERT_TRUE(details_.get());

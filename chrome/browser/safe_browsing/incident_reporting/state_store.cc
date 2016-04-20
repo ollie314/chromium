@@ -7,13 +7,13 @@
 #include <utility>
 
 #include "base/metrics/histogram_macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident.h"
 #include "chrome/browser/safe_browsing/incident_reporting/platform_state_store.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 
 namespace safe_browsing {
 
@@ -104,7 +104,7 @@ base::DictionaryValue* StateStore::Transaction::GetPrefDict() {
 }
 
 void StateStore::Transaction::ReplacePrefDict(
-    scoped_ptr<base::DictionaryValue> pref_dict) {
+    std::unique_ptr<base::DictionaryValue> pref_dict) {
   GetPrefDict()->Swap(pref_dict.get());
 }
 
@@ -127,7 +127,7 @@ StateStore::StateStore(Profile* profile)
 
   // Apply the platform data.
   Transaction transaction(this);
-  scoped_ptr<base::DictionaryValue> value_dict(
+  std::unique_ptr<base::DictionaryValue> value_dict(
       platform_state_store::Load(profile_));
 
   InitializationResult state_store_init_result = PSS_MATCHES;

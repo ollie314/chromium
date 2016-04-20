@@ -215,7 +215,7 @@ bool VTTParser::hasRequiredFileIdentifier(const String& line)
 void VTTParser::collectMetadataHeader(const String& line)
 {
     // WebVTT header parsing (WebVTT parser algorithm step 12)
-    DEFINE_STATIC_LOCAL(const AtomicString, regionHeaderName, ("Region", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(const AtomicString, regionHeaderName, ("Region"));
 
     // The only currently supported header is the "Region" header.
     if (!RuntimeEnabledFeatures::webVTTRegionsEnabled())
@@ -321,25 +321,25 @@ public:
     explicit VTTTreeBuilder(Document& document)
         : m_document(&document) { }
 
-    PassRefPtrWillBeRawPtr<DocumentFragment> buildFromString(const String& cueText);
+    DocumentFragment* buildFromString(const String& cueText);
 
 private:
     void constructTreeFromToken(Document&);
     Document& document() const { return *m_document; }
 
     VTTToken m_token;
-    RefPtrWillBeMember<ContainerNode> m_currentNode;
+    Member<ContainerNode> m_currentNode;
     Vector<AtomicString> m_languageStack;
-    RawPtrWillBeMember<Document> m_document;
+    Member<Document> m_document;
 };
 
-PassRefPtrWillBeRawPtr<DocumentFragment> VTTTreeBuilder::buildFromString(const String& cueText)
+DocumentFragment* VTTTreeBuilder::buildFromString(const String& cueText)
 {
     // Cue text processing based on
     // 5.4 WebVTT cue text parsing rules, and
     // 5.5 WebVTT cue text DOM construction rules
 
-    RefPtrWillBeRawPtr<DocumentFragment> fragment = DocumentFragment::create(document());
+    DocumentFragment* fragment = DocumentFragment::create(document());
 
     if (cueText.isEmpty()) {
         fragment->parserAppendChild(Text::create(document(), ""));
@@ -354,10 +354,10 @@ PassRefPtrWillBeRawPtr<DocumentFragment> VTTTreeBuilder::buildFromString(const S
     while (tokenizer.nextToken(m_token))
         constructTreeFromToken(document());
 
-    return fragment.release();
+    return fragment;
 }
 
-PassRefPtrWillBeRawPtr<DocumentFragment> VTTParser::createDocumentFragmentFromCueText(Document& document, const String& cueText)
+DocumentFragment* VTTParser::createDocumentFragmentFromCueText(Document& document, const String& cueText)
 {
     VTTTreeBuilder treeBuilder(document);
     return treeBuilder.buildFromString(cueText);
@@ -503,7 +503,7 @@ void VTTTreeBuilder::constructTreeFromToken(Document& document)
         if (nodeType == VTTNodeTypeRubyText && currentType != VTTNodeTypeRuby)
             break;
 
-        RefPtrWillBeRawPtr<VTTElement> child = VTTElement::create(nodeType, &document);
+        VTTElement* child = VTTElement::create(nodeType, &document);
         if (!m_token.classes().isEmpty())
             child->setAttribute(classAttr, m_token.classes());
 
@@ -561,8 +561,9 @@ void VTTTreeBuilder::constructTreeFromToken(Document& document)
 DEFINE_TRACE(VTTParser)
 {
     visitor->trace(m_document);
+    visitor->trace(m_client);
     visitor->trace(m_cueList);
     visitor->trace(m_regionList);
 }
 
-}
+} // namespace blink

@@ -11,7 +11,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/gpu_export.h"
 
@@ -56,7 +55,10 @@ class GPU_EXPORT VertexArrayManager {
   // Info for each vertex array in the system.
   typedef base::hash_map<GLuint, scoped_refptr<VertexAttribManager> >
       VertexAttribManagerMap;
-  VertexAttribManagerMap vertex_attrib_managers_;
+  VertexAttribManagerMap client_vertex_attrib_managers_;
+
+  // Vertex attrib managers for emulation purposes, not visible to clients.
+  std::vector<scoped_refptr<VertexAttribManager>> other_vertex_attrib_managers_;
 
   // Counts the number of VertexArrayInfo allocated with 'this' as its manager.
   // Allows to check no VertexArrayInfo will outlive this.

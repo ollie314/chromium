@@ -4,6 +4,8 @@
 
 #include "cc/surfaces/surface_factory.h"
 
+#include <utility>
+
 #include "base/trace_event/trace_event.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/copy_output_request.h"
@@ -27,37 +29,34 @@ SurfaceFactory::~SurfaceFactory() {
                << " entries in map on destruction.";
   }
   DestroyAll();
-  client_->SetBeginFrameSource(SurfaceId(), nullptr);
 }
 
 void SurfaceFactory::DestroyAll() {
-  for (auto it = surface_map_.begin(); it != surface_map_.end(); ++it)
-    manager_->Destroy(surface_map_.take(it));
+  for (auto& pair : surface_map_)
+    manager_->Destroy(std::move(pair.second));
   surface_map_.clear();
 }
 
 void SurfaceFactory::Create(SurfaceId surface_id) {
-  scoped_ptr<Surface> surface(new Surface(surface_id, this));
+  std::unique_ptr<Surface> surface(new Surface(surface_id, this));
   manager_->RegisterSurface(surface.get());
   DCHECK(!surface_map_.count(surface_id));
-  surface_map_.add(surface_id, std::move(surface));
+  surface_map_[surface_id] = std::move(surface);
 }
 
 void SurfaceFactory::Destroy(SurfaceId surface_id) {
   OwningSurfaceMap::iterator it = surface_map_.find(surface_id);
   DCHECK(it != surface_map_.end());
   DCHECK(it->second->factory().get() == this);
-  manager_->Destroy(surface_map_.take_and_erase(it));
+  std::unique_ptr<Surface> surface(std::move(it->second));
+  surface_map_.erase(it);
+  manager_->Destroy(std::move(surface));
 }
 
-void SurfaceFactory::SetBeginFrameSource(SurfaceId surface_id,
-                                         BeginFrameSource* begin_frame_source) {
-  client_->SetBeginFrameSource(surface_id, begin_frame_source);
-}
-
-void SurfaceFactory::SubmitCompositorFrame(SurfaceId surface_id,
-                                           scoped_ptr<CompositorFrame> frame,
-                                           const DrawCallback& callback) {
+void SurfaceFactory::SubmitCompositorFrame(
+    SurfaceId surface_id,
+    std::unique_ptr<CompositorFrame> frame,
+    const DrawCallback& callback) {
   TRACE_EVENT0("cc", "SurfaceFactory::SubmitCompositorFrame");
   OwningSurfaceMap::iterator it = surface_map_.find(surface_id);
   DCHECK(it != surface_map_.end());
@@ -71,7 +70,7 @@ void SurfaceFactory::SubmitCompositorFrame(SurfaceId surface_id,
 
 void SurfaceFactory::RequestCopyOfSurface(
     SurfaceId surface_id,
-    scoped_ptr<CopyOutputRequest> copy_request) {
+    std::unique_ptr<CopyOutputRequest> copy_request) {
   OwningSurfaceMap::iterator it = surface_map_.find(surface_id);
   if (it == surface_map_.end()) {
     copy_request->SendEmptyResult();

@@ -309,6 +309,10 @@ class VectorIconSource : public CanvasImageSource {
   ~VectorIconSource() override {}
 
   // CanvasImageSource:
+  bool HasRepresentationAtAllScales() const override {
+    return id_ != VectorIconId::VECTOR_ICON_NONE;
+  }
+
   void Draw(gfx::Canvas* canvas) override {
     if (path_.empty()) {
       PaintVectorIcon(canvas, id_, size_.width(), color_);
@@ -401,7 +405,10 @@ ImageSkia CreateVectorIconWithBadge(VectorIconId id,
                                     size_t dip_size,
                                     SkColor color,
                                     VectorIconId badge_id) {
-  return g_icon_cache.Get().GetOrCreateIcon(id, dip_size, color, badge_id);
+  return (id == VectorIconId::VECTOR_ICON_NONE)
+             ? gfx::ImageSkia()
+             : g_icon_cache.Get().GetOrCreateIcon(id, dip_size, color,
+                                                  badge_id);
 }
 
 ImageSkia CreateVectorIconFromSource(const std::string& source,

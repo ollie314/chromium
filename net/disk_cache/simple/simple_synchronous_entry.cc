@@ -111,6 +111,18 @@ bool CanOmitEmptyFile(int file_index) {
   return file_index == disk_cache::simple_util::GetFileIndexFromStreamIndex(2);
 }
 
+bool TruncatePath(const FilePath& filename_to_truncate) {
+  File file_to_truncate;
+  int flags = File::FLAG_OPEN | File::FLAG_READ | File::FLAG_WRITE |
+              File::FLAG_SHARE_DELETE;
+  file_to_truncate.Initialize(filename_to_truncate, flags);
+  if (!file_to_truncate.IsValid())
+    return false;
+  if (!file_to_truncate.SetLength(0))
+    return false;
+  return true;
+}
+
 }  // namespace
 
 namespace disk_cache {
@@ -260,6 +272,13 @@ void SimpleSynchronousEntry::CreateEntry(
 int SimpleSynchronousEntry::DoomEntry(const FilePath& path,
                                       uint64_t entry_hash) {
   const bool deleted_well = DeleteFilesForEntryHash(path, entry_hash);
+  return deleted_well ? net::OK : net::ERR_FAILED;
+}
+
+// static
+int SimpleSynchronousEntry::TruncateEntryFiles(const base::FilePath& path,
+                                               uint64_t entry_hash) {
+  const bool deleted_well = TruncateFilesForEntryHash(path, entry_hash);
   return deleted_well ? net::OK : net::ERR_FAILED;
 }
 
@@ -621,7 +640,7 @@ void SimpleSynchronousEntry::CheckEOFRecord(int index,
 
 void SimpleSynchronousEntry::Close(
     const SimpleEntryStat& entry_stat,
-    scoped_ptr<std::vector<CRCRecord> > crc32s_to_write,
+    std::unique_ptr<std::vector<CRCRecord>> crc32s_to_write,
     net::GrowableIOBuffer* stream_0_data) {
   DCHECK(stream_0_data);
   // Write stream 0 data.
@@ -766,8 +785,9 @@ bool SimpleSynchronousEntry::OpenFiles(
   for (int i = 0; i < kSimpleEntryFileCount; ++i) {
     File::Error error;
     if (!MaybeOpenFile(i, &error)) {
-      // TODO(ttuttle,gavinp): Remove one each of these triplets of histograms.
-      // We can calculate the third as the sum or difference of the other two.
+      // TODO(juliatuttle,gavinp): Remove one each of these triplets of
+      // histograms. We can calculate the third as the sum or difference of the
+      // other two.
       RecordSyncOpenResult(
           cache_type_, OPEN_ENTRY_PLATFORM_FILE_ERROR, had_index);
       SIMPLE_CACHE_UMA(ENUMERATION,
@@ -846,8 +866,9 @@ bool SimpleSynchronousEntry::CreateFiles(
   for (int i = 0; i < kSimpleEntryFileCount; ++i) {
     File::Error error;
     if (!MaybeCreateFile(i, FILE_NOT_REQUIRED, &error)) {
-      // TODO(ttuttle,gavinp): Remove one each of these triplets of histograms.
-      // We can calculate the third as the sum or difference of the other two.
+      // TODO(juliatuttle,gavinp): Remove one each of these triplets of
+      // histograms. We can calculate the third as the sum or difference of the
+      // other two.
       RecordSyncCreateResult(CREATE_ENTRY_PLATFORM_FILE_ERROR, had_index);
       SIMPLE_CACHE_UMA(ENUMERATION,
                        "SyncCreatePlatformFileError", cache_type_,
@@ -936,7 +957,7 @@ int SimpleSynchronousEntry::InitializeForOpen(
       return net::ERR_FAILED;
     }
 
-    scoped_ptr<char[]> key(new char[header.key_length]);
+    std::unique_ptr<char[]> key(new char[header.key_length]);
     int key_read_result = files_[i].Read(sizeof(header), key.get(),
                                          header.key_length);
     if (key_read_result != base::checked_cast<int>(header.key_length)) {
@@ -1160,6 +1181,23 @@ bool SimpleSynchronousEntry::DeleteFilesForEntryHash(
   return result;
 }
 
+// static
+bool SimpleSynchronousEntry::TruncateFilesForEntryHash(
+    const FilePath& path,
+    const uint64_t entry_hash) {
+  bool result = true;
+  for (int i = 0; i < kSimpleEntryFileCount; ++i) {
+    FilePath filename_to_truncate =
+        path.AppendASCII(GetFilenameFromEntryHashAndFileIndex(entry_hash, i));
+    if (!TruncatePath(filename_to_truncate))
+      result = false;
+  }
+  FilePath to_delete =
+      path.AppendASCII(GetSparseFilenameFromEntryHash(entry_hash));
+  TruncatePath(to_delete);
+  return result;
+}
+
 void SimpleSynchronousEntry::RecordSyncCreateResult(CreateEntryResult result,
                                                     bool had_index) {
   DCHECK_LT(result, CREATE_ENTRY_MAX);
@@ -1345,7 +1383,7 @@ bool SimpleSynchronousEntry::ReadSparseRange(const SparseRange* range,
       return false;
     }
   }
-  // TODO(ttuttle): Incremental crc32 calculation?
+  // TODO(juliatuttle): Incremental crc32 calculation?
 
   return true;
 }

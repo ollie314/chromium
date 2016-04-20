@@ -18,9 +18,9 @@ class NinePieceImageGridTest : public RenderingTest {
 public:
     NinePieceImageGridTest() { }
 
-    PassRefPtrWillBeRawPtr<StyleImage> generatedImage()
+    StyleImage* generatedImage()
     {
-        RefPtrWillBeRawPtr<CSSLinearGradientValue> gradient = CSSLinearGradientValue::create(Repeating);
+        CSSLinearGradientValue* gradient = CSSLinearGradientValue::create(Repeating);
         return StyleGeneratedImage::create(*gradient);
     }
 

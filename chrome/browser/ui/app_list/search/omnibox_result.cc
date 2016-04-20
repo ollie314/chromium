@@ -17,7 +17,7 @@
 #include "components/omnibox/browser/autocomplete_match_type.h"
 #include "grit/theme_resources.h"
 #include "ui/app_list/app_list_constants.h"
-#include "ui/base/resource/material_design/material_design_controller.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/vector_icons_public.h"
@@ -159,10 +159,10 @@ void OmniboxResult::Open(int event_flags) {
                             ui::DispositionFromEventFlags(event_flags));
 }
 
-scoped_ptr<SearchResult> OmniboxResult::Duplicate() const {
-  return scoped_ptr<SearchResult>(new OmniboxResult(profile_, list_controller_,
-                                                    autocomplete_controller_,
-                                                    is_voice_query_, match_));
+std::unique_ptr<SearchResult> OmniboxResult::Duplicate() const {
+  return std::unique_ptr<SearchResult>(
+      new OmniboxResult(profile_, list_controller_, autocomplete_controller_,
+                        is_voice_query_, match_));
 }
 
 void OmniboxResult::UpdateIcon() {

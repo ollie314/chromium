@@ -10,32 +10,28 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "extensions/common/extension.h"
+#include "ui/app_list/presenter/app_list_presenter_impl.h"
 #include "ui/app_list/views/app_list_view.h"
 
-AppListControllerDelegateAsh::AppListControllerDelegateAsh() {}
+AppListControllerDelegateAsh::AppListControllerDelegateAsh(
+    app_list::AppListPresenterImpl* app_list_presenter)
+    : app_list_presenter_(app_list_presenter) {}
 
 AppListControllerDelegateAsh::~AppListControllerDelegateAsh() {}
 
 void AppListControllerDelegateAsh::DismissView() {
-  DCHECK(ash::Shell::HasInstance());
-  ash::Shell::GetInstance()->DismissAppList();
+  app_list_presenter_->Dismiss();
 }
 
 gfx::NativeWindow AppListControllerDelegateAsh::GetAppListWindow() {
-  DCHECK(ash::Shell::HasInstance());
-  return ash::Shell::GetInstance()->GetAppListWindow();
+  return app_list_presenter_->GetWindow();
 }
 
 gfx::Rect AppListControllerDelegateAsh::GetAppListBounds() {
-  app_list::AppListView* app_list_view =
-      ash::Shell::GetInstance()->GetAppListView();
+  app_list::AppListView* app_list_view = app_list_presenter_->GetView();
   if (app_list_view)
     return app_list_view->GetBoundsInScreen();
   return gfx::Rect();
-}
-
-gfx::ImageSkia AppListControllerDelegateAsh::GetWindowIcon() {
-  return gfx::ImageSkia();
 }
 
 bool AppListControllerDelegateAsh::IsAppPinned(
@@ -59,15 +55,13 @@ AppListControllerDelegate::Pinnable AppListControllerDelegateAsh::GetPinnable(
 }
 
 void AppListControllerDelegateAsh::OnShowChildDialog() {
-  app_list::AppListView* app_list_view =
-      ash::Shell::GetInstance()->GetAppListView();
+  app_list::AppListView* app_list_view = app_list_presenter_->GetView();
   if (app_list_view)
     app_list_view->SetAppListOverlayVisible(true);
 }
 
 void AppListControllerDelegateAsh::OnCloseChildDialog() {
-  app_list::AppListView* app_list_view =
-      ash::Shell::GetInstance()->GetAppListView();
+  app_list::AppListView* app_list_view = app_list_presenter_->GetView();
   if (app_list_view)
     app_list_view->SetAppListOverlayVisible(false);
 }

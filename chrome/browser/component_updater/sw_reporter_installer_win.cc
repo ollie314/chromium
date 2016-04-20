@@ -8,6 +8,7 @@
 
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/base_paths.h"
@@ -17,7 +18,6 @@
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_registry_simple.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
@@ -31,6 +31,7 @@
 #include "components/component_updater/default_component_installer.h"
 #include "components/component_updater/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "components/update_client/update_client.h"
 #include "components/update_client/utils.h"
 #include "content/public/browser/browser_thread.h"
@@ -68,33 +69,6 @@ const wchar_t kVersionValueName[] = L"Version";
 void SRTHasCompleted(SRTCompleted value) {
   UMA_HISTOGRAM_ENUMERATION("SoftwareReporter.Cleaner.HasCompleted", value,
                             SRT_COMPLETED_MAX);
-}
-
-void ReportVersionWithUma(const base::Version& version) {
-  DCHECK(!version.components().empty());
-  // The minor version is the 2nd last component of the version,
-  // or just the first component if there is only 1.
-  uint32_t minor_version = 0;
-  if (version.components().size() > 1)
-    minor_version = version.components()[version.components().size() - 2];
-  else
-    minor_version = version.components()[0];
-  UMA_HISTOGRAM_SPARSE_SLOWLY("SoftwareReporter.MinorVersion", minor_version);
-
-  // The major version for X.Y.Z is X*256^3+Y*256+Z. If there are additional
-  // components, only the first three count, and if there are less than 3, the
-  // missing values are just replaced by zero. So 1 is equivalent 1.0.0.
-  DCHECK_LT(version.components()[0], 0x100U);
-  uint32_t major_version = 0x1000000 * version.components()[0];
-  if (version.components().size() >= 2) {
-    DCHECK_LT(version.components()[1], 0x10000U);
-    major_version += 0x100 * version.components()[1];
-  }
-  if (version.components().size() >= 3) {
-    DCHECK_LT(version.components()[2], 0x100U);
-    major_version += version.components()[2];
-  }
-  UMA_HISTOGRAM_SPARSE_SLOWLY("SoftwareReporter.MajorVersion", major_version);
 }
 
 void ReportUploadsWithUma(const base::string16& upload_results) {
@@ -141,19 +115,20 @@ class SwReporterInstallerTraits : public ComponentInstallerTraits {
 
   bool CanAutoUpdate() const override { return true; }
 
+  bool RequiresNetworkEncryption() const override { return false; }
+
   bool OnCustomInstall(const base::DictionaryValue& manifest,
                        const base::FilePath& install_dir) override {
     return true;
   }
 
-  void ComponentReady(const base::Version& version,
-                      const base::FilePath& install_dir,
-                      scoped_ptr<base::DictionaryValue> manifest) override {
+  void ComponentReady(
+      const base::Version& version,
+      const base::FilePath& install_dir,
+      std::unique_ptr<base::DictionaryValue> manifest) override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-    ReportVersionWithUma(version);
     safe_browsing::RunSwReporter(install_dir.Append(kSwReporterExeName),
-                                 version.GetString(),
-                                 base::ThreadTaskRunnerHandle::Get(),
+                                 version, base::ThreadTaskRunnerHandle::Get(),
                                  base::WorkerPool::GetTaskRunner(true));
   }
 
@@ -162,6 +137,8 @@ class SwReporterInstallerTraits : public ComponentInstallerTraits {
   void GetHash(std::vector<uint8_t>* hash) const override { GetPkHash(hash); }
 
   std::string GetName() const override { return "Software Reporter Tool"; }
+
+  std::string GetAp() const override { return std::string(); }
 
   static base::FilePath install_dir() {
     // The base directory on windows looks like:
@@ -264,10 +241,11 @@ void RegisterSwReporterComponent(ComponentUpdateService* cus) {
   }
 
   // Install the component.
-  scoped_ptr<ComponentInstallerTraits> traits(new SwReporterInstallerTraits());
+  std::unique_ptr<ComponentInstallerTraits> traits(
+      new SwReporterInstallerTraits());
   // |cus| will take ownership of |installer| during installer->Register(cus).
   DefaultComponentInstaller* installer =
-      new DefaultComponentInstaller(traits.Pass());
+      new DefaultComponentInstaller(std::move(traits));
   installer->Register(cus, base::Closure());
 }
 

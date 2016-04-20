@@ -16,6 +16,7 @@
 namespace base {
 class Pickle;
 class PickleIterator;
+class PickleSizer;
 }
 
 namespace mojo {
@@ -31,7 +32,10 @@ class PickledStructBlink {
  public:
   PickledStructBlink();
   PickledStructBlink(int foo, int bar);
+  PickledStructBlink(PickledStructBlink&& other) = default;
   ~PickledStructBlink();
+
+  PickledStructBlink& operator=(PickledStructBlink&& other) = default;
 
   int foo() const { return foo_; }
   void set_foo(int foo) {
@@ -61,7 +65,7 @@ template <>
 struct ParamTraits<mojo::test::PickledStructBlink> {
   using param_type = mojo::test::PickledStructBlink;
 
-  static size_t GetSize(const param_type& p) { return 8; }
+  static void GetSize(base::PickleSizer* sizer, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,

@@ -41,6 +41,9 @@
 #include "core/editing/VisibleUnits.h"
 #include "core/editing/iterators/TextIterator.h"
 #include "core/editing/serializers/HTMLInterchange.h"
+#include "core/editing/state_machines/BackspaceStateMachine.h"
+#include "core/editing/state_machines/BackwardGraphemeBoundaryStateMachine.h"
+#include "core/editing/state_machines/ForwardGraphemeBoundaryStateMachine.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLBRElement.h"
@@ -55,10 +58,24 @@
 #include "wtf/Assertions.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/text/StringBuilder.h"
+#include "wtf/text/Unicode.h"
 
 namespace blink {
 
 using namespace HTMLNames;
+
+namespace {
+std::ostream& operator<<(std::ostream& os, PositionMoveType type)
+{
+    static const char* const texts[] = {
+        "CodeUnit", "BackwardDeletion", "GraphemeCluster"
+    };
+    const auto& it = std::begin(texts) + static_cast<size_t>(type);
+    DCHECK_GE(it, std::begin(texts)) << "Unknown PositionMoveType value";
+    DCHECK_LT(it, std::end(texts)) << "Unknown PositionMoveType value";
+    return os << *it;
+}
+} // namespace
 
 // Atomic means that the node has no children, or has children which are ignored for the
 // purposes of editing.
@@ -70,8 +87,8 @@ bool isAtomicNode(const Node *node)
 template <typename Traversal>
 static int comparePositions(Node* containerA, int offsetA, Node* containerB, int offsetB, bool* disconnected)
 {
-    ASSERT(containerA);
-    ASSERT(containerB);
+    DCHECK(containerA);
+    DCHECK(containerB);
 
     if (disconnected)
         *disconnected = false;
@@ -167,30 +184,30 @@ int comparePositionsInDOMTree(Node* containerA, int offsetA, Node* containerB, i
     return comparePositions<NodeTraversal>(containerA, offsetA, containerB, offsetB, disconnected);
 }
 
-int comparePositionsInComposedTree(Node* containerA, int offsetA, Node* containerB, int offsetB, bool* disconnected)
+int comparePositionsInFlatTree(Node* containerA, int offsetA, Node* containerB, int offsetB, bool* disconnected)
 {
-    return comparePositions<ComposedTreeTraversal>(containerA, offsetA, containerB, offsetB, disconnected);
+    return comparePositions<FlatTreeTraversal>(containerA, offsetA, containerB, offsetB, disconnected);
 }
 
 // Compare two positions, taking into account the possibility that one or both
 // could be inside a shadow tree. Only works for non-null values.
 int comparePositions(const Position& a, const Position& b)
 {
-    ASSERT(a.isNotNull());
-    ASSERT(b.isNotNull());
+    DCHECK(a.isNotNull());
+    DCHECK(b.isNotNull());
     const TreeScope* commonScope = Position::commonAncestorTreeScope(a, b);
 
-    ASSERT(commonScope);
+    DCHECK(commonScope);
     if (!commonScope)
         return 0;
 
     Node* nodeA = commonScope->ancestorInThisScope(a.computeContainerNode());
-    ASSERT(nodeA);
+    DCHECK(nodeA);
     bool hasDescendentA = nodeA != a.computeContainerNode();
     int offsetA = hasDescendentA ? 0 : a.computeOffsetInContainerNode();
 
     Node* nodeB = commonScope->ancestorInThisScope(b.computeContainerNode());
-    ASSERT(nodeB);
+    DCHECK(nodeB);
     bool hasDescendentB = nodeB != b.computeContainerNode();
     int offsetB = hasDescendentB ? 0 : b.computeOffsetInContainerNode();
 
@@ -221,7 +238,7 @@ ContainerNode* highestEditableRoot(const Position& position, EditableType editab
     if (position.isNull())
         return 0;
 
-    ContainerNode* highestRoot = editableRootForPosition(position, editableType);
+    ContainerNode* highestRoot = rootEditableElementOf(position, editableType);
     if (!highestRoot)
         return 0;
 
@@ -240,7 +257,7 @@ ContainerNode* highestEditableRoot(const Position& position, EditableType editab
     return highestRoot;
 }
 
-ContainerNode* highestEditableRoot(const PositionInComposedTree& position, EditableType editableType)
+ContainerNode* highestEditableRoot(const PositionInFlatTree& position, EditableType editableType)
 {
     return highestEditableRoot(toPositionInDOMTree(position), editableType);
 }
@@ -253,15 +270,17 @@ bool isEditablePosition(const Position& p, EditableType editableType, EUpdateSty
     if (updateStyle == UpdateStyle)
         node->document().updateLayoutIgnorePendingStylesheets();
     else
-        ASSERT(updateStyle == DoNotUpdateStyle);
+        DCHECK_EQ(updateStyle, DoNotUpdateStyle);
 
-    if (isRenderedHTMLTableElement(node))
+    if (isDisplayInsideTable(node))
         node = node->parentNode();
 
+    if (node->isDocumentNode())
+        return false;
     return node->hasEditableStyle(editableType);
 }
 
-bool isEditablePosition(const PositionInComposedTree& p, EditableType editableType, EUpdateStyle updateStyle)
+bool isEditablePosition(const PositionInFlatTree& p, EditableType editableType, EUpdateStyle updateStyle)
 {
     return isEditablePosition(toPositionInDOMTree(p), editableType, updateStyle);
 }
@@ -269,7 +288,7 @@ bool isEditablePosition(const PositionInComposedTree& p, EditableType editableTy
 bool isAtUnsplittableElement(const Position& pos)
 {
     Node* node = pos.anchorNode();
-    return (node == editableRootForPosition(pos) || node == enclosingNodeOfType(pos, &isTableCell));
+    return (node == rootEditableElementOf(pos) || node == enclosingNodeOfType(pos, &isTableCell));
 }
 
 
@@ -279,27 +298,27 @@ bool isRichlyEditablePosition(const Position& p, EditableType editableType)
     if (!node)
         return false;
 
-    if (isRenderedHTMLTableElement(node))
+    if (isDisplayInsideTable(node))
         node = node->parentNode();
 
     return node->layoutObjectIsRichlyEditable(editableType);
 }
 
-Element* editableRootForPosition(const Position& p, EditableType editableType)
+Element* rootEditableElementOf(const Position& p, EditableType editableType)
 {
     Node* node = p.computeContainerNode();
     if (!node)
         return 0;
 
-    if (isRenderedHTMLTableElement(node))
+    if (isDisplayInsideTable(node))
         node = node->parentNode();
 
     return node->rootEditableElement(editableType);
 }
 
-Element* editableRootForPosition(const PositionInComposedTree& p, EditableType editableType)
+Element* rootEditableElementOf(const PositionInFlatTree& p, EditableType editableType)
 {
-    return editableRootForPosition(toPositionInDOMTree(p), editableType);
+    return rootEditableElementOf(toPositionInDOMTree(p), editableType);
 }
 
 // TODO(yosin) This does not handle [table, 0] correctly.
@@ -320,7 +339,7 @@ Element* unsplittableElementForPosition(const Position& p)
     if (enclosingCell)
         return enclosingCell;
 
-    return editableRootForPosition(p);
+    return rootEditableElementOf(p);
 }
 
 template <typename Strategy>
@@ -346,9 +365,9 @@ Position nextCandidate(const Position& position)
     return nextCandidateAlgorithm<EditingStrategy>(position);
 }
 
-PositionInComposedTree nextCandidate(const PositionInComposedTree& position)
+PositionInFlatTree nextCandidate(const PositionInFlatTree& position)
 {
-    return nextCandidateAlgorithm<EditingInComposedTreeStrategy>(position);
+    return nextCandidateAlgorithm<EditingInFlatTreeStrategy>(position);
 }
 
 // |nextVisuallyDistinctCandidate| is similar to |nextCandidate| except
@@ -381,9 +400,9 @@ Position nextVisuallyDistinctCandidate(const Position& position)
     return nextVisuallyDistinctCandidateAlgorithm<EditingStrategy>(position);
 }
 
-PositionInComposedTree nextVisuallyDistinctCandidate(const PositionInComposedTree& position)
+PositionInFlatTree nextVisuallyDistinctCandidate(const PositionInFlatTree& position)
 {
-    return nextVisuallyDistinctCandidateAlgorithm<EditingInComposedTreeStrategy>(position);
+    return nextVisuallyDistinctCandidateAlgorithm<EditingInFlatTreeStrategy>(position);
 }
 
 template <typename Strategy>
@@ -409,9 +428,9 @@ Position previousCandidate(const Position& position)
     return previousCandidateAlgorithm<EditingStrategy>(position);
 }
 
-PositionInComposedTree previousCandidate(const PositionInComposedTree& position)
+PositionInFlatTree previousCandidate(const PositionInFlatTree& position)
 {
-    return previousCandidateAlgorithm<EditingInComposedTreeStrategy>(position);
+    return previousCandidateAlgorithm<EditingInFlatTreeStrategy>(position);
 }
 
 // |previousVisuallyDistinctCandidate| is similar to |previousCandidate| except
@@ -444,9 +463,9 @@ Position previousVisuallyDistinctCandidate(const Position& position)
     return previousVisuallyDistinctCandidateAlgorithm<EditingStrategy>(position);
 }
 
-PositionInComposedTree previousVisuallyDistinctCandidate(const PositionInComposedTree& position)
+PositionInFlatTree previousVisuallyDistinctCandidate(const PositionInFlatTree& position)
 {
-    return previousVisuallyDistinctCandidateAlgorithm<EditingInComposedTreeStrategy>(position);
+    return previousVisuallyDistinctCandidateAlgorithm<EditingInFlatTreeStrategy>(position);
 }
 
 VisiblePosition firstEditableVisiblePositionAfterPositionInRoot(const Position& position, ContainerNode& highestRoot)
@@ -454,7 +473,7 @@ VisiblePosition firstEditableVisiblePositionAfterPositionInRoot(const Position& 
     return createVisiblePosition(firstEditablePositionAfterPositionInRoot(position, highestRoot));
 }
 
-VisiblePositionInComposedTree firstEditableVisiblePositionAfterPositionInRoot(const PositionInComposedTree& position, ContainerNode& highestRoot)
+VisiblePositionInFlatTree firstEditableVisiblePositionAfterPositionInRoot(const PositionInFlatTree& position, ContainerNode& highestRoot)
 {
     return createVisiblePosition(firstEditablePositionAfterPositionInRoot(position, highestRoot));
 }
@@ -490,9 +509,9 @@ Position firstEditablePositionAfterPositionInRoot(const Position& position, Node
     return firstEditablePositionAfterPositionInRootAlgorithm<EditingStrategy>(position, highestRoot);
 }
 
-PositionInComposedTree firstEditablePositionAfterPositionInRoot(const PositionInComposedTree& position, Node& highestRoot)
+PositionInFlatTree firstEditablePositionAfterPositionInRoot(const PositionInFlatTree& position, Node& highestRoot)
 {
-    return firstEditablePositionAfterPositionInRootAlgorithm<EditingInComposedTreeStrategy>(position, highestRoot);
+    return firstEditablePositionAfterPositionInRootAlgorithm<EditingInFlatTreeStrategy>(position, highestRoot);
 }
 
 VisiblePosition lastEditableVisiblePositionBeforePositionInRoot(const Position& position, ContainerNode& highestRoot)
@@ -500,7 +519,7 @@ VisiblePosition lastEditableVisiblePositionBeforePositionInRoot(const Position& 
     return createVisiblePosition(lastEditablePositionBeforePositionInRoot(position, highestRoot));
 }
 
-VisiblePositionInComposedTree lastEditableVisiblePositionBeforePositionInRoot(const PositionInComposedTree& position, ContainerNode& highestRoot)
+VisiblePositionInFlatTree lastEditableVisiblePositionBeforePositionInRoot(const PositionInFlatTree& position, ContainerNode& highestRoot)
 {
     return createVisiblePosition(lastEditablePositionBeforePositionInRoot(position, highestRoot));
 }
@@ -535,24 +554,73 @@ Position lastEditablePositionBeforePositionInRoot(const Position& position, Node
     return lastEditablePositionBeforePositionInRootAlgorithm<EditingStrategy>(position, highestRoot);
 }
 
-PositionInComposedTree lastEditablePositionBeforePositionInRoot(const PositionInComposedTree& position, Node& highestRoot)
+PositionInFlatTree lastEditablePositionBeforePositionInRoot(const PositionInFlatTree& position, Node& highestRoot)
 {
-    return lastEditablePositionBeforePositionInRootAlgorithm<EditingInComposedTreeStrategy>(position, highestRoot);
+    return lastEditablePositionBeforePositionInRootAlgorithm<EditingInFlatTreeStrategy>(position, highestRoot);
 }
 
-int uncheckedPreviousOffset(const Node* n, int current)
+template<typename StateMachine>
+int findNextBoundaryOffset(const String& str, int current)
 {
-    return n->layoutObject() ? n->layoutObject()->previousOffset(current) : current - 1;
+    StateMachine machine;
+    TextSegmentationMachineState state = TextSegmentationMachineState::Invalid;
+
+    for (int i = current - 1; i >= 0; --i) {
+        state = machine.feedPrecedingCodeUnit(str[i]);
+        if (state != TextSegmentationMachineState::NeedMoreCodeUnit)
+            break;
+    }
+    if (current == 0 || state == TextSegmentationMachineState::NeedMoreCodeUnit)
+        state = machine.tellEndOfPrecedingText();
+    if (state == TextSegmentationMachineState::Finished)
+        return current + machine.finalizeAndGetBoundaryOffset();
+    const int length = str.length();
+    DCHECK_EQ(TextSegmentationMachineState::NeedFollowingCodeUnit, state);
+    for (int i = current; i < length; ++i) {
+        state = machine.feedFollowingCodeUnit(str[i]);
+        if (state != TextSegmentationMachineState::NeedMoreCodeUnit)
+            break;
+    }
+    return current + machine.finalizeAndGetBoundaryOffset();
 }
 
-static int uncheckedPreviousOffsetForBackwardDeletion(const Node* n, int current)
+int previousGraphemeBoundaryOf(const Node* node, int current)
 {
-    return n->layoutObject() ? n->layoutObject()->previousOffsetForBackwardDeletion(current) : current - 1;
+    // TODO(yosin): Need to support grapheme crossing |Node| boundary.
+    DCHECK_GE(current, 0);
+    if (current <= 1 || !node->isTextNode())
+        return current - 1;
+    const String& text = toText(node)->data();
+    // TODO(yosin): Replace with DCHECK for out-of-range request.
+    if (static_cast<unsigned>(current) > text.length())
+        return current - 1;
+    return findNextBoundaryOffset<BackwardGraphemeBoundaryStateMachine>(text, current);
 }
 
-int uncheckedNextOffset(const Node* n, int current)
+static int previousBackwardDeletionOffsetOf(const Node* node, int current)
 {
-    return n->layoutObject() ? n->layoutObject()->nextOffset(current) : current + 1;
+    DCHECK_GE(current, 0);
+    if (current <= 1)
+        return 0;
+    if (!node->isTextNode())
+        return current - 1;
+
+    const String& text = toText(node)->data();
+    DCHECK_LT(static_cast<unsigned>(current - 1), text.length());
+    return findNextBoundaryOffset<BackspaceStateMachine>(text, current);
+}
+
+int nextGraphemeBoundaryOf(const Node* node, int current)
+{
+    // TODO(yosin): Need to support grapheme crossing |Node| boundary.
+    if (!node->isTextNode())
+        return current + 1;
+    const String& text = toText(node)->data();
+    const int length = text.length();
+    DCHECK_LE(current, length);
+    if (current >= length - 1)
+        return current + 1;
+    return findNextBoundaryOffset<ForwardGraphemeBoundaryStateMachine>(text, current);
 }
 
 template <typename Strategy>
@@ -577,12 +645,14 @@ PositionTemplate<Strategy> previousPositionOfAlgorithm(const PositionTemplate<St
         //   2) The old offset was a bogus offset like (<br>, 1), and there is
         //      no child. Going from 1 to 0 is correct.
         switch (moveType) {
-        case PositionMoveType::CodePoint:
+        case PositionMoveType::CodeUnit:
             return PositionTemplate<Strategy>(node, offset - 1);
-        case PositionMoveType::Character:
-            return PositionTemplate<Strategy>(node, uncheckedPreviousOffset(node, offset));
         case PositionMoveType::BackwardDeletion:
-            return PositionTemplate<Strategy>(node, uncheckedPreviousOffsetForBackwardDeletion(node, offset));
+            return PositionTemplate<Strategy>(node, previousBackwardDeletionOffsetOf(node, offset));
+        case PositionMoveType::GraphemeCluster:
+            return PositionTemplate<Strategy>(node, previousGraphemeBoundaryOf(node, offset));
+        default:
+            NOTREACHED() << "Unhandled moveType: " << moveType;
         }
     }
 
@@ -601,15 +671,16 @@ Position previousPositionOf(const Position& position, PositionMoveType moveType)
     return previousPositionOfAlgorithm<EditingStrategy>(position, moveType);
 }
 
-PositionInComposedTree previousPositionOf(const PositionInComposedTree& position, PositionMoveType moveType)
+PositionInFlatTree previousPositionOf(const PositionInFlatTree& position, PositionMoveType moveType)
 {
-    return previousPositionOfAlgorithm<EditingInComposedTreeStrategy>(position, moveType);
+    return previousPositionOfAlgorithm<EditingInFlatTreeStrategy>(position, moveType);
 }
 
 template <typename Strategy>
 PositionTemplate<Strategy> nextPositionOfAlgorithm(const PositionTemplate<Strategy>& position, PositionMoveType moveType)
 {
-    ASSERT(moveType != PositionMoveType::BackwardDeletion);
+    // TODO(yosin): We should have printer for PositionMoveType.
+    DCHECK(moveType != PositionMoveType::BackwardDeletion);
 
     Node* node = position.anchorNode();
     if (!node)
@@ -629,7 +700,19 @@ PositionTemplate<Strategy> nextPositionOfAlgorithm(const PositionTemplate<Strate
         //      is correct.
         //   2) The new offset is a bogus offset like (<br>, 1), and there is no
         //      child. Going from 0 to 1 is correct.
-        return PositionTemplate<Strategy>::editingPositionOf(node, (moveType == PositionMoveType::Character) ? uncheckedNextOffset(node, offset) : offset + 1);
+        switch (moveType) {
+        case PositionMoveType::CodeUnit:
+            return PositionTemplate<Strategy>::editingPositionOf(node, offset + 1);
+        case PositionMoveType::BackwardDeletion:
+            NOTREACHED()
+                << "BackwardDeletion is only available for prevPositionOf "
+                << "functions.";
+            return PositionTemplate<Strategy>::editingPositionOf(node, offset + 1);
+        case PositionMoveType::GraphemeCluster:
+            return PositionTemplate<Strategy>::editingPositionOf(node, nextGraphemeBoundaryOf(node, offset));
+        default:
+            NOTREACHED() << "Unhandled moveType: " << moveType;
+        }
     }
 
     if (ContainerNode* parent = Strategy::parent(*node))
@@ -642,9 +725,9 @@ Position nextPositionOf(const Position& position, PositionMoveType moveType)
     return nextPositionOfAlgorithm<EditingStrategy>(position, moveType);
 }
 
-PositionInComposedTree nextPositionOf(const PositionInComposedTree& position, PositionMoveType moveType)
+PositionInFlatTree nextPositionOf(const PositionInFlatTree& position, PositionMoveType moveType)
 {
-    return nextPositionOfAlgorithm<EditingInComposedTreeStrategy>(position, moveType);
+    return nextPositionOfAlgorithm<EditingInFlatTreeStrategy>(position, moveType);
 }
 
 bool isEnclosingBlock(const Node* node)
@@ -680,26 +763,21 @@ Element* enclosingBlock(const Position& position, EditingBoundaryCrossingRule ru
     return enclosingBlockAlgorithm<EditingStrategy>(position, rule);
 }
 
-Element* enclosingBlock(const PositionInComposedTree& position, EditingBoundaryCrossingRule rule)
+Element* enclosingBlock(const PositionInFlatTree& position, EditingBoundaryCrossingRule rule)
 {
-    return enclosingBlockAlgorithm<EditingInComposedTreeStrategy>(position, rule);
+    return enclosingBlockAlgorithm<EditingInFlatTreeStrategy>(position, rule);
 }
 
-Element* enclosingBlockFlowElement(Node& node)
+Element* enclosingBlockFlowElement(const Node& node)
 {
     if (isBlockFlowElement(node))
-        return &toElement(node);
+        return const_cast<Element*>(&toElement(node));
 
     for (Node* n = node.parentNode(); n; n = n->parentNode()) {
         if (isBlockFlowElement(*n) || isHTMLBodyElement(*n))
             return toElement(n);
     }
-    return 0;
-}
-
-bool inSameContainingBlockFlowElement(Node* a, Node* b)
-{
-    return a && b && enclosingBlockFlowElement(*a) == enclosingBlockFlowElement(*b);
+    return nullptr;
 }
 
 bool nodeIsUserSelectAll(const Node* node)
@@ -723,9 +801,9 @@ TextDirection directionOfEnclosingBlock(const Position& position)
     return directionOfEnclosingBlockAlgorithm<EditingStrategy>(position);
 }
 
-TextDirection directionOfEnclosingBlock(const PositionInComposedTree& position)
+TextDirection directionOfEnclosingBlock(const PositionInFlatTree& position)
 {
-    return directionOfEnclosingBlockAlgorithm<EditingInComposedTreeStrategy>(position);
+    return directionOfEnclosingBlockAlgorithm<EditingInFlatTreeStrategy>(position);
 }
 
 TextDirection primaryDirectionOf(const Node& node)
@@ -766,7 +844,7 @@ String stringWithRebalancedWhitespace(const String& string, bool startIsStartOfP
         }
     }
 
-    ASSERT(rebalancedString.length() == length);
+    DCHECK_EQ(rebalancedString.length(), length);
 
     return rebalancedString.toString();
 }
@@ -813,7 +891,7 @@ static HTMLElement* firstInSpecialElement(const Position& pos)
             HTMLElement* specialElement = toHTMLElement(n);
             VisiblePosition vPos = createVisiblePosition(pos);
             VisiblePosition firstInElement = createVisiblePosition(firstPositionInOrBeforeNode(specialElement));
-            if (isRenderedTableElement(specialElement) && vPos.deepEquivalent() == nextPositionOf(firstInElement).deepEquivalent())
+            if (isDisplayInsideTable(specialElement) && vPos.deepEquivalent() == nextPositionOf(firstInElement).deepEquivalent())
                 return specialElement;
             if (vPos.deepEquivalent() == firstInElement.deepEquivalent())
                 return specialElement;
@@ -830,7 +908,7 @@ static HTMLElement* lastInSpecialElement(const Position& pos)
             HTMLElement* specialElement = toHTMLElement(n);
             VisiblePosition vPos = createVisiblePosition(pos);
             VisiblePosition lastInElement = createVisiblePosition(lastPositionInOrAfterNode(specialElement));
-            if (isRenderedTableElement(specialElement) && vPos.deepEquivalent() == previousPositionOf(lastInElement).deepEquivalent())
+            if (isDisplayInsideTable(specialElement) && vPos.deepEquivalent() == previousPositionOf(lastInElement).deepEquivalent())
                 return specialElement;
             if (vPos.deepEquivalent() == lastInElement.deepEquivalent())
                 return specialElement;
@@ -869,7 +947,7 @@ template <typename Strategy>
 static Element* isFirstPositionAfterTableAlgorithm(const VisiblePositionTemplate<Strategy>& visiblePosition)
 {
     const PositionTemplate<Strategy> upstream(mostBackwardCaretPosition(visiblePosition.deepEquivalent()));
-    if (isRenderedTableElement(upstream.anchorNode()) && upstream.atLastEditingPositionForNode())
+    if (isDisplayInsideTable(upstream.anchorNode()) && upstream.atLastEditingPositionForNode())
         return toElement(upstream.anchorNode());
 
     return nullptr;
@@ -880,15 +958,15 @@ Element* isFirstPositionAfterTable(const VisiblePosition& visiblePosition)
     return isFirstPositionAfterTableAlgorithm<EditingStrategy>(visiblePosition);
 }
 
-Element* isFirstPositionAfterTable(const VisiblePositionInComposedTree& visiblePosition)
+Element* isFirstPositionAfterTable(const VisiblePositionInFlatTree& visiblePosition)
 {
-    return isFirstPositionAfterTableAlgorithm<EditingInComposedTreeStrategy>(visiblePosition);
+    return isFirstPositionAfterTableAlgorithm<EditingInFlatTreeStrategy>(visiblePosition);
 }
 
 Element* isLastPositionBeforeTable(const VisiblePosition& visiblePosition)
 {
     Position downstream(mostForwardCaretPosition(visiblePosition.deepEquivalent()));
-    if (isRenderedTableElement(downstream.anchorNode()) && downstream.atFirstEditingPositionForNode())
+    if (isDisplayInsideTable(downstream.anchorNode()) && downstream.atFirstEditingPositionForNode())
         return toElement(downstream.anchorNode());
 
     return 0;
@@ -946,8 +1024,8 @@ VisiblePosition visiblePositionBeforeNode(Node& node)
 {
     if (node.hasChildren())
         return createVisiblePosition(firstPositionInOrBeforeNode(&node));
-    ASSERT(node.parentNode());
-    ASSERT(!node.parentNode()->isShadowRoot());
+    DCHECK(node.parentNode()) << node;
+    DCHECK(!node.parentNode()->isShadowRoot()) << node.parentNode();
     return createVisiblePosition(positionInParentBeforeNode(node));
 }
 
@@ -956,8 +1034,8 @@ VisiblePosition visiblePositionAfterNode(Node& node)
 {
     if (node.hasChildren())
         return createVisiblePosition(lastPositionInOrAfterNode(&node));
-    ASSERT(node.parentNode());
-    ASSERT(!node.parentNode()->isShadowRoot());
+    DCHECK(node.parentNode()) << node.parentNode();
+    DCHECK(!node.parentNode()->isShadowRoot()) << node.parentNode();
     return createVisiblePosition(positionInParentAfterNode(node));
 }
 
@@ -1003,7 +1081,7 @@ template <typename Strategy>
 static Node* enclosingNodeOfTypeAlgorithm(const PositionTemplate<Strategy>& p, bool (*nodeIsOfType)(const Node*), EditingBoundaryCrossingRule rule)
 {
     // TODO(yosin) support CanSkipCrossEditingBoundary
-    ASSERT(rule == CanCrossEditingBoundary || rule == CannotCrossEditingBoundary);
+    DCHECK(rule == CanCrossEditingBoundary || rule == CannotCrossEditingBoundary) << rule;
     if (p.isNull())
         return nullptr;
 
@@ -1027,9 +1105,9 @@ Node* enclosingNodeOfType(const Position& p, bool (*nodeIsOfType)(const Node*), 
     return enclosingNodeOfTypeAlgorithm<EditingStrategy>(p, nodeIsOfType, rule);
 }
 
-Node* enclosingNodeOfType(const PositionInComposedTree& p, bool (*nodeIsOfType)(const Node*), EditingBoundaryCrossingRule rule)
+Node* enclosingNodeOfType(const PositionInFlatTree& p, bool (*nodeIsOfType)(const Node*), EditingBoundaryCrossingRule rule)
 {
-    return enclosingNodeOfTypeAlgorithm<EditingInComposedTreeStrategy>(p, nodeIsOfType, rule);
+    return enclosingNodeOfTypeAlgorithm<EditingInFlatTreeStrategy>(p, nodeIsOfType, rule);
 }
 
 Node* highestEnclosingNodeOfType(const Position& p, bool (*nodeIsOfType)(const Node*), EditingBoundaryCrossingRule rule, Node* stayWithin)
@@ -1180,12 +1258,7 @@ bool canMergeLists(Element* firstList, Element* secondList)
     // Make sure there is no visible content between this li and the previous list
 }
 
-bool isRenderedHTMLTableElement(const Node* node)
-{
-    return isHTMLTableElement(*node) && node->layoutObject();
-}
-
-bool isRenderedTableElement(const Node* node)
+bool isDisplayInsideTable(const Node* node)
 {
     if (!node || !node->isElementNode())
         return false;
@@ -1196,7 +1269,7 @@ bool isRenderedTableElement(const Node* node)
 
 bool isTableCell(const Node* node)
 {
-    ASSERT(node);
+    DCHECK(node);
     LayoutObject* r = node->layoutObject();
     return r ? r->isTableCell() : isHTMLTableCellElement(*node);
 }
@@ -1234,7 +1307,7 @@ bool isEmptyTableCell(const Node* node)
     return !childLayoutObject->nextSibling();
 }
 
-PassRefPtrWillBeRawPtr<HTMLElement> createDefaultParagraphElement(Document& document)
+HTMLElement* createDefaultParagraphElement(Document& document)
 {
     switch (document.frame()->editor().defaultParagraphSeparator()) {
     case EditorParagraphSeparatorIsDiv:
@@ -1247,7 +1320,7 @@ PassRefPtrWillBeRawPtr<HTMLElement> createDefaultParagraphElement(Document& docu
     return nullptr;
 }
 
-PassRefPtrWillBeRawPtr<HTMLElement> createHTMLElement(Document& document, const QualifiedName& name)
+HTMLElement* createHTMLElement(Document& document, const QualifiedName& name)
 {
     return HTMLElementFactory::createHTMLElement(name.localName(), document, 0, false);
 }
@@ -1270,12 +1343,10 @@ HTMLSpanElement* tabSpanElement(const Node* node)
     return isTabHTMLSpanElementTextNode(node) ? toHTMLSpanElement(node->parentNode()) : 0;
 }
 
-static PassRefPtrWillBeRawPtr<HTMLSpanElement> createTabSpanElement(Document& document, PassRefPtrWillBeRawPtr<Text> prpTabTextNode)
+static HTMLSpanElement* createTabSpanElement(Document& document, Text* tabTextNode)
 {
-    RefPtrWillBeRawPtr<Text> tabTextNode = prpTabTextNode;
-
     // Make the span to hold the tab.
-    RefPtrWillBeRawPtr<HTMLSpanElement> spanElement = HTMLSpanElement::create(document);
+    HTMLSpanElement* spanElement = HTMLSpanElement::create(document);
     spanElement->setAttribute(classAttr, AppleTabSpanClass);
     spanElement->setAttribute(styleAttr, "white-space:pre");
 
@@ -1283,19 +1354,19 @@ static PassRefPtrWillBeRawPtr<HTMLSpanElement> createTabSpanElement(Document& do
     if (!tabTextNode)
         tabTextNode = document.createEditingTextNode("\t");
 
-    spanElement->appendChild(tabTextNode.release());
+    spanElement->appendChild(tabTextNode);
 
-    return spanElement.release();
+    return spanElement;
 }
 
-PassRefPtrWillBeRawPtr<HTMLSpanElement> createTabSpanElement(Document& document, const String& tabText)
+HTMLSpanElement* createTabSpanElement(Document& document, const String& tabText)
 {
     return createTabSpanElement(document, document.createTextNode(tabText));
 }
 
-PassRefPtrWillBeRawPtr<HTMLSpanElement> createTabSpanElement(Document& document)
+HTMLSpanElement* createTabSpanElement(Document& document)
 {
-    return createTabSpanElement(document, PassRefPtrWillBeRawPtr<Text>(nullptr));
+    return createTabSpanElement(document, nullptr);
 }
 
 bool isNodeRendered(const Node& node)
@@ -1323,7 +1394,7 @@ static Position previousCharacterPosition(const Position& position, TextAffinity
         // TODO(yosin) When we use |previousCharacterPosition()| other than
         // finding leading whitespace, we should use |Character| instead of
         // |CodePoint|.
-        currentPos = previousPositionOf(currentPos, PositionMoveType::CodePoint);
+        currentPos = previousPositionOf(currentPos, PositionMoveType::CodeUnit);
 
         if (currentPos.anchorNode()->rootEditableElement() != fromRootEditableElement)
             return position;
@@ -1342,29 +1413,35 @@ static Position previousCharacterPosition(const Position& position, TextAffinity
 // This assumes that it starts in editable content.
 Position leadingWhitespacePosition(const Position& position, TextAffinity affinity, WhitespacePositionOption option)
 {
-    ASSERT(isEditablePosition(position, ContentIsEditable, DoNotUpdateStyle));
+    DCHECK(isEditablePosition(position, ContentIsEditable, DoNotUpdateStyle)) << position;
     if (position.isNull())
         return Position();
 
     if (isHTMLBRElement(*mostBackwardCaretPosition(position).anchorNode()))
         return Position();
 
-    Position prev = previousCharacterPosition(position, affinity);
-    if (prev != position && inSameContainingBlockFlowElement(prev.anchorNode(), position.anchorNode()) && prev.anchorNode()->isTextNode()) {
-        String string = toText(prev.anchorNode())->data();
-        UChar previousCharacter = string[prev.computeOffsetInContainerNode()];
-        bool isSpace = option == ConsiderNonCollapsibleWhitespace ? (isSpaceOrNewline(previousCharacter) || previousCharacter == noBreakSpaceCharacter) : isCollapsibleWhitespace(previousCharacter);
-        if (isSpace && isEditablePosition(prev))
-            return prev;
-    }
-
-    return Position();
+    const Position& prev = previousCharacterPosition(position, affinity);
+    if (prev == position)
+        return Position();
+    const Node* const anchorNode = prev.anchorNode();
+    if (!anchorNode || !anchorNode->isTextNode())
+        return Position();
+    if (enclosingBlockFlowElement(*anchorNode) != enclosingBlockFlowElement(*position.anchorNode()))
+        return Position();
+    if (option == NotConsiderNonCollapsibleWhitespace && anchorNode->layoutObject() && !anchorNode->layoutObject()->style()->collapseWhiteSpace())
+        return Position();
+    const String& string = toText(anchorNode)->data();
+    const UChar previousCharacter = string[prev.computeOffsetInContainerNode()];
+    const bool isSpace = option == ConsiderNonCollapsibleWhitespace ? (isSpaceOrNewline(previousCharacter) || previousCharacter == noBreakSpaceCharacter) : isCollapsibleWhitespace(previousCharacter);
+    if (!isSpace || !isEditablePosition(prev))
+        return Position();
+    return prev;
 }
 
 // This assumes that it starts in editable content.
 Position trailingWhitespacePosition(const Position& position, TextAffinity, WhitespacePositionOption option)
 {
-    ASSERT(isEditablePosition(position, ContentIsEditable, DoNotUpdateStyle));
+    DCHECK(isEditablePosition(position, ContentIsEditable, DoNotUpdateStyle)) << position;
     if (position.isNull())
         return Position();
 
@@ -1393,25 +1470,25 @@ void updatePositionForNodeRemoval(Position& position, Node& node)
         return;
     switch (position.anchorType()) {
     case PositionAnchorType::BeforeChildren:
-        if (node.containsIncludingShadowDOM(position.computeContainerNode()))
+        if (node.isShadowIncludingInclusiveAncestorOf(position.computeContainerNode()))
             position = positionInParentBeforeNode(node);
         break;
     case PositionAnchorType::AfterChildren:
-        if (node.containsIncludingShadowDOM(position.computeContainerNode()))
+        if (node.isShadowIncludingInclusiveAncestorOf(position.computeContainerNode()))
             position = positionInParentAfterNode(node);
         break;
     case PositionAnchorType::OffsetInAnchor:
         if (position.computeContainerNode() == node.parentNode() && static_cast<unsigned>(position.offsetInContainerNode()) > node.nodeIndex())
             position = Position(position.computeContainerNode(), position.offsetInContainerNode() - 1);
-        else if (node.containsIncludingShadowDOM(position.computeContainerNode()))
+        else if (node.isShadowIncludingInclusiveAncestorOf(position.computeContainerNode()))
             position = positionInParentBeforeNode(node);
         break;
     case PositionAnchorType::AfterAnchor:
-        if (node.containsIncludingShadowDOM(position.anchorNode()))
+        if (node.isShadowIncludingInclusiveAncestorOf(position.anchorNode()))
             position = positionInParentAfterNode(node);
         break;
     case PositionAnchorType::BeforeAnchor:
-        if (node.containsIncludingShadowDOM(position.anchorNode()))
+        if (node.isShadowIncludingInclusiveAncestorOf(position.anchorNode()))
             position = positionInParentBeforeNode(node);
         break;
     }
@@ -1486,7 +1563,7 @@ VisibleSelection selectionForParagraphIteration(const VisibleSelection& original
 // opertion is unreliable. TextIterator's TextIteratorEmitsCharactersBetweenAllVisiblePositions mode needs to be fixed,
 // or these functions need to be changed to iterate using actual VisiblePositions.
 // FIXME: Deploy these functions everywhere that TextIterators are used to convert between VisiblePositions and indices.
-int indexForVisiblePosition(const VisiblePosition& visiblePosition, RefPtrWillBeRawPtr<ContainerNode>& scope)
+int indexForVisiblePosition(const VisiblePosition& visiblePosition, ContainerNode*& scope)
 {
     if (visiblePosition.isNull())
         return 0;
@@ -1500,7 +1577,7 @@ int indexForVisiblePosition(const VisiblePosition& visiblePosition, RefPtrWillBe
     else
         scope = document.documentElement();
 
-    RefPtrWillBeRawPtr<Range> range = Range::create(document, firstPositionInNode(scope.get()), p.parentAnchoredEquivalent());
+    Range* range = Range::create(document, firstPositionInNode(scope), p.parentAnchoredEquivalent());
 
     return TextIterator::rangeLength(range->startPosition(), range->endPosition(), true);
 }
@@ -1521,7 +1598,7 @@ EphemeralRange makeRange(const VisiblePosition &start, const VisiblePosition &en
 template <typename Strategy>
 static EphemeralRangeTemplate<Strategy> normalizeRangeAlgorithm(const EphemeralRangeTemplate<Strategy>& range)
 {
-    ASSERT(range.isNotNull());
+    DCHECK(range.isNotNull());
     range.document().updateLayoutIgnorePendingStylesheets();
 
     // TODO(yosin) We should not call |parentAnchoredEquivalent()|, it is
@@ -1540,9 +1617,9 @@ EphemeralRange normalizeRange(const EphemeralRange& range)
     return normalizeRangeAlgorithm<EditingStrategy>(range);
 }
 
-EphemeralRangeInComposedTree normalizeRange(const EphemeralRangeInComposedTree& range)
+EphemeralRangeInFlatTree normalizeRange(const EphemeralRangeInFlatTree& range)
 {
-    return normalizeRangeAlgorithm<EditingInComposedTreeStrategy>(range);
+    return normalizeRangeAlgorithm<EditingInFlatTreeStrategy>(range);
 }
 
 VisiblePosition visiblePositionForIndex(int index, ContainerNode* scope)
@@ -1584,17 +1661,20 @@ bool isRenderedAsNonInlineTableImageOrHR(const Node* node)
     return layoutObject && ((layoutObject->isTable() && !layoutObject->isInline()) || (layoutObject->isImage() && !layoutObject->isInline()) || layoutObject->isHR());
 }
 
-bool areIdenticalElements(const Node* first, const Node* second)
+bool areIdenticalElements(const Node& first, const Node& second)
 {
-    if (!first->isElementNode() || !second->isElementNode())
+    if (!first.isElementNode() || !second.isElementNode())
         return false;
 
-    const Element* firstElement = toElement(first);
-    const Element* secondElement = toElement(second);
-    if (!firstElement->hasTagName(secondElement->tagQName()))
+    const Element& firstElement = toElement(first);
+    const Element& secondElement = toElement(second);
+    if (!firstElement.hasTagName(secondElement.tagQName()))
         return false;
 
-    return firstElement->hasEquivalentAttributes(secondElement);
+    if (!firstElement.hasEquivalentAttributes(&secondElement))
+        return false;
+
+    return firstElement.hasEditableStyle() && secondElement.hasEditableStyle();
 }
 
 bool isNonTableCellHTMLBlockElement(const Node* node)

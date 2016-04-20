@@ -8,6 +8,7 @@
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shelf/shelf_layout_manager_observer.h"
+#include "ash/shelf/shelf_util.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
@@ -22,6 +23,7 @@
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "grit/ash_strings.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -102,8 +104,8 @@ class WebNotificationBubbleWrapper {
   views::TrayBubbleView* bubble_view() const { return bubble_->bubble_view(); }
 
  private:
-  scoped_ptr<message_center::MessageBubbleBase> bubble_;
-  scoped_ptr<TrayBubbleWrapper> bubble_wrapper_;
+  std::unique_ptr<message_center::MessageBubbleBase> bubble_;
+  std::unique_ptr<TrayBubbleWrapper> bubble_wrapper_;
 
   DISALLOW_COPY_AND_ASSIGN(WebNotificationBubbleWrapper);
 };
@@ -181,7 +183,8 @@ WebNotificationTray::WebNotificationTray(StatusAreaWidget* status_area_widget)
   message_center_tray_.reset(new message_center::MessageCenterTray(
       this,
       message_center::MessageCenter::Get()));
-  popup_alignment_delegate_.reset(new AshPopupAlignmentDelegate());
+  popup_alignment_delegate_.reset(new AshPopupAlignmentDelegate(
+      status_area_widget->shelf_widget()->shelf_layout_manager()));
   popup_collection_.reset(new message_center::MessagePopupCollection(
       ash::Shell::GetContainer(
           status_area_widget->GetNativeView()->GetRootWindow(),
@@ -189,9 +192,10 @@ WebNotificationTray::WebNotificationTray(StatusAreaWidget* status_area_widget)
       message_center(),
       message_center_tray_.get(),
       popup_alignment_delegate_.get()));
-  const gfx::Display& display = Shell::GetScreen()->GetDisplayNearestWindow(
-      status_area_widget->GetNativeView());
-  popup_alignment_delegate_->StartObserving(Shell::GetScreen(), display);
+  const gfx::Display& display =
+      gfx::Screen::GetScreen()->GetDisplayNearestWindow(
+          status_area_widget->GetNativeView());
+  popup_alignment_delegate_->StartObserving(gfx::Screen::GetScreen(), display);
   OnMessageCenterTrayChanged();
 }
 
@@ -215,33 +219,14 @@ bool WebNotificationTray::ShowMessageCenterInternal(bool show_settings) {
           message_center_tray_.get(),
           true);
 
-  int max_height = 0;
+  // Assume the status area and bubble bottoms are aligned when vertical.
   aura::Window* status_area_window = status_area_widget()->GetNativeView();
-  switch (GetShelfLayoutManager()->GetAlignment()) {
-    case SHELF_ALIGNMENT_BOTTOM: {
-      gfx::Rect shelf_bounds = GetShelfLayoutManager()->GetIdealBounds();
-      max_height = shelf_bounds.y();
-      break;
-    }
-    case SHELF_ALIGNMENT_TOP: {
-      aura::Window* root = status_area_window->GetRootWindow();
-      max_height =
-          root->bounds().height() - status_area_window->bounds().height();
-      break;
-    }
-    case SHELF_ALIGNMENT_LEFT:
-    case SHELF_ALIGNMENT_RIGHT: {
-      // Assume that the bottom line of the status area widget and the bubble
-      // are aligned.
-      max_height = status_area_window->GetBoundsInRootWindow().bottom();
-      break;
-    }
-    default:
-      NOTREACHED();
-  }
+  const int max_height =
+      IsHorizontalAlignment(GetShelfLayoutManager()->GetAlignment())
+          ? GetShelfLayoutManager()->GetIdealBounds().y()
+          : status_area_window->GetBoundsInRootWindow().bottom();
 
-  message_center_bubble->SetMaxHeight(std::max(0,
-                                               max_height - kTraySpacing));
+  message_center_bubble->SetMaxHeight(std::max(0, max_height - kTraySpacing));
   if (show_settings)
     message_center_bubble->SetSettingsVisible();
   message_center_bubble_.reset(
@@ -444,7 +429,7 @@ void WebNotificationTray::OnMessageCenterTrayChanged() {
   // consecutively, and calling Update in the middle of those events will show
   // intermediate unread counts for a moment.
   should_update_tray_content_ = true;
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&WebNotificationTray::UpdateTrayContent, AsWeakPtr()));
 }

@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "content/public/browser/resource_request_info.h"
 #include "extensions/browser/info_map.h"
 #include "extensions/shell/browser/shell_network_delegate.h"
@@ -17,16 +17,16 @@ ShellURLRequestContextGetter::ShellURLRequestContextGetter(
     content::BrowserContext* browser_context,
     bool ignore_certificate_errors,
     const base::FilePath& base_path,
-    base::MessageLoop* io_loop,
-    base::MessageLoop* file_loop,
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors,
     net::NetLog* net_log,
     InfoMap* extension_info_map)
     : content::ShellURLRequestContextGetter(ignore_certificate_errors,
                                             base_path,
-                                            io_loop,
-                                            file_loop,
+                                            std::move(io_task_runner),
+                                            std::move(file_task_runner),
                                             protocol_handlers,
                                             std::move(request_interceptors),
                                             net_log),
@@ -36,9 +36,9 @@ ShellURLRequestContextGetter::ShellURLRequestContextGetter(
 ShellURLRequestContextGetter::~ShellURLRequestContextGetter() {
 }
 
-scoped_ptr<net::NetworkDelegate>
+std::unique_ptr<net::NetworkDelegate>
 ShellURLRequestContextGetter::CreateNetworkDelegate() {
-  return make_scoped_ptr(
+  return base::WrapUnique(
       new ShellNetworkDelegate(browser_context_, extension_info_map_));
 }
 

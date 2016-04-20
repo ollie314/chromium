@@ -41,8 +41,11 @@ if (enable_extensions) {
 buildflag_header("features") {
   header = "features.h"
   flags = [
-    "ENABLE_GOOGLE_NOW=$enable_google_now",
     "ANDROID_JAVA_UI=$android_java_ui",
+    "ENABLE_BACKGROUND=$enable_background",
+    "ENABLE_GOOGLE_NOW=$enable_google_now",
+    "ENABLE_ONE_CLICK_SIGNIN=$enable_one_click_signin",
+    "ENABLE_PACKAGE_MASH_SERVICES=$enable_package_mash_services",
     "USE_VULCANIZE=$use_vulcanize",
   ]
 }
@@ -62,7 +65,6 @@ static_library("common") {
     "//base:base",
     "//base:base_static",
     "//base:i18n",
-    "//base:prefs",
     "//chrome:resources",
     "//chrome:strings",
     "//chrome/app/theme:theme_resources",
@@ -85,8 +87,11 @@ static_library("common") {
     "//components/metrics:net",
     "//components/nacl/common:process_type",
     "//components/nacl/common:switches",
+    "//components/offline_pages:switches",
     "//components/omnibox/common",
+    "//components/policy",
     "//components/policy:policy_component_common",
+    "//components/prefs",
     "//components/strings",
     "//components/translate/core/common",
     "//components/url_formatter",
@@ -107,6 +112,7 @@ static_library("common") {
     "//ui/accessibility",
     "//ui/base",
     "//ui/gfx/ipc",
+    "//ui/gfx/ipc/skia",
     "//ui/gl",
     "//ui/message_center",
     "//ui/resources:resources",
@@ -133,7 +139,7 @@ static_library("common") {
       "//chrome/common/net",
       "//components/autofill/content/common",
       "//components/autofill/core/common",
-      "//components/password_manager/content/common",
+      "//components/password_manager/content/public/interfaces",
       "//components/password_manager/core/common",
       "//components/signin/core/common",
       "//components/translate/content/common",
@@ -184,8 +190,6 @@ static_library("common") {
     public_deps += [ "//third_party/boringssl" ]
   }
   if (is_mac) {
-    sources +=
-        rebase_path(gypi_values.chrome_common_mac_sources, ".", "//chrome")
     public_deps += [ ":app_mode_app_support" ]
   }
   if (is_chromeos) {
@@ -210,6 +214,14 @@ static_library("common") {
       sources += rebase_path(gypi_values.chrome_common_service_process_sources,
                              ".",
                              "//chrome")
+
+      if (is_win) {
+        deps = [
+          # TODO(fdoray): Remove this once the PreRead field trial has expired.
+          # crbug.com/577698
+          "//components/startup_metric_utils/common",
+        ]
+      }
     }
   }
 
@@ -233,6 +245,8 @@ static_library("common") {
       "//components/dom_distiller/core",  # Needed by chrome_content_client.cc.
       "//third_party/wtl",
     ]
+
+    libs = [ "wintrust.lib" ]
   }
 
   if (is_mac) {
@@ -260,9 +274,6 @@ static_library("common") {
   }
   if (!enable_webrtc) {
     sources -= [ "media/webrtc_logging_messages.h" ]
-  }
-  if (enable_configuration_policy) {
-    public_deps += [ "//components/policy" ]
   }
 
   if (safe_browsing_mode == 1) {
@@ -340,6 +351,21 @@ static_library("constants") {
   }
 }
 
+if (is_win) {
+  # GYP version: chrome/chrome_common.gypi:metrics_constants_util_win
+  source_set("metrics_constants_util_win") {
+    sources = [
+      "metrics_constants_util_win.cc",
+      "metrics_constants_util_win.h",
+    ]
+
+    deps = [
+      "//base",
+      "//chrome/installer/util:with_no_strings",
+    ]
+  }
+}
+
 source_set("test_support") {
   testonly = true
   visibility = [ "//chrome/test:test_support" ]
@@ -371,8 +397,8 @@ source_set("test_support") {
   }
 }
 
-# GN version: chrome/chrome.gyp:app_mode_app_support
-static_library("app_mode_app_support") {
+# GYP version: chrome/chrome.gyp:app_mode_app_support
+source_set("app_mode_app_support") {
   sources = [
     "mac/app_mode_chrome_locator.h",
     "mac/app_mode_chrome_locator.mm",
@@ -388,6 +414,11 @@ static_library("app_mode_app_support") {
 
 mojom("mojo_bindings") {
   sources = [
+    "image_decoder.mojom",
     "resource_usage_reporter.mojom",
+  ]
+
+  public_deps = [
+    "//skia/public/interfaces",
   ]
 }

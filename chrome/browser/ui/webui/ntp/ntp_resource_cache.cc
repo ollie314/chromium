@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include "base/command_line.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -19,7 +18,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -32,9 +30,8 @@
 #include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
 #include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/webui/app_launcher_login_handler.h"
-#include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
+#include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
-#include "chrome/browser/web_resource/notification_promo_helper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -44,8 +41,9 @@
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/web_resource/notification_promo.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -172,15 +170,6 @@ NTPResourceCache::NTPResourceCache(Profile* profile)
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(
                      ThemeServiceFactory::GetForProfile(profile)));
-  registrar_.Add(this, chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
-                 content::NotificationService::AllSources());
-
-  web_resource::PromoResourceService* promo_service =
-      g_browser_process->promo_resource_service();
-  if (promo_service) {
-    promo_resource_subscription_ = promo_service->RegisterStateChangedCallback(
-        base::Bind(&NTPResourceCache::Invalidate, base::Unretained(this)));
-  }
 
   base::Closure callback = base::Bind(&NTPResourceCache::OnPreferenceChanged,
                                       base::Unretained(this));
@@ -282,12 +271,10 @@ void NTPResourceCache::Observe(int type,
                                const content::NotificationSource& source,
                                const content::NotificationDetails& details) {
   // Invalidate the cache.
-  if (chrome::NOTIFICATION_BROWSER_THEME_CHANGED == type ||
-      chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED == type) {
+  if (chrome::NOTIFICATION_BROWSER_THEME_CHANGED == type)
     Invalidate();
-  } else {
+  else
     NOTREACHED();
-  }
 }
 
 void NTPResourceCache::OnPreferenceChanged() {
@@ -298,11 +285,11 @@ void NTPResourceCache::OnPreferenceChanged() {
   new_tab_css_ = NULL;
 }
 
+// TODO(dbeam): why must Invalidate() and OnPreferenceChanged() both exist?
 void NTPResourceCache::Invalidate() {
   new_tab_incognito_html_ = nullptr;
   new_tab_html_ = nullptr;
   new_tab_incognito_css_ = nullptr;
-  // TODO(dbeam): Check if it is necessary to clear the CSS on promo changes.
   new_tab_css_ = nullptr;
 }
 
@@ -492,7 +479,7 @@ void NTPResourceCache::CreateNewTabHTML() {
   load_time_data.SetBoolean("canShowAppInfoDialog",
                             CanShowAppInfoDialog());
 
-  NewTabPageHandler::GetLocalizedValues(profile_, &load_time_data);
+  AppLauncherHandler::GetLocalizedValues(profile_, &load_time_data);
   AppLauncherLoginHandler::GetLocalizedValues(profile_, &load_time_data);
 
   webui::SetLoadTimeDataDefaults(app_locale, &load_time_data);
@@ -500,33 +487,6 @@ void NTPResourceCache::CreateNewTabHTML() {
   // Control fade and resize animations.
   load_time_data.SetBoolean("anim",
                             gfx::Animation::ShouldRenderRichAnimation());
-
-  // Disable the promo if this is the first run, otherwise set the promo string
-  // for display if there is a valid outstanding promo.
-  if (first_run::IsChromeFirstRun()) {
-    web_resource::HandleNotificationPromoClosed(
-        web_resource::NotificationPromo::NTP_NOTIFICATION_PROMO);
-  } else {
-    web_resource::NotificationPromo notification_promo(
-        g_browser_process->local_state());
-    notification_promo.InitFromPrefs(
-        web_resource::NotificationPromo::NTP_NOTIFICATION_PROMO);
-    if (notification_promo.CanShow()) {
-      load_time_data.SetString("notificationPromoText",
-                               notification_promo.promo_text());
-      DVLOG(1) << "Notification promo:" << notification_promo.promo_text();
-    }
-
-    web_resource::NotificationPromo bubble_promo(
-        g_browser_process->local_state());
-    bubble_promo.InitFromPrefs(
-        web_resource::NotificationPromo::NTP_BUBBLE_PROMO);
-    if (bubble_promo.CanShow()) {
-      load_time_data.SetString("bubblePromoText",
-                               bubble_promo.promo_text());
-      DVLOG(1) << "Bubble promo:" << bubble_promo.promo_text();
-    }
-  }
 
   load_time_data.SetBoolean(
       "isUserSignedIn",
@@ -553,7 +513,7 @@ void NTPResourceCache::CreateNewTabIncognitoCSS() {
           : SkColorSetRGB(0x32, 0x32, 0x32);
 
   // Generate the replacements.
-  std::map<base::StringPiece, std::string> substitutions;
+  ui::TemplateReplacements substitutions;
 
   // Cache-buster for background.
   substitutions["themeId"] =
@@ -605,7 +565,7 @@ void NTPResourceCache::CreateNewTabCSS() {
                      SkColorGetB(color_header));
 
   // Generate the replacements.
-  std::map<base::StringPiece, std::string> substitutions;
+  ui::TemplateReplacements substitutions;
 
   // Cache-buster for background.
   substitutions["themeId"] =

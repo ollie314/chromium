@@ -32,9 +32,9 @@ class SVGElement;
 
 class CSSCursorImageValue : public CSSValue {
 public:
-    static PassRefPtrWillBeRawPtr<CSSCursorImageValue> create(PassRefPtrWillBeRawPtr<CSSValue> imageValue, bool hotSpotSpecified, const IntPoint& hotSpot)
+    static CSSCursorImageValue* create(CSSValue* imageValue, bool hotSpotSpecified, const IntPoint& hotSpot)
     {
-        return adoptRefWillBeNoop(new CSSCursorImageValue(imageValue, hotSpotSpecified, hotSpot));
+        return new CSSCursorImageValue(imageValue, hotSpotSpecified, hotSpot);
     }
 
     ~CSSCursorImageValue();
@@ -50,31 +50,23 @@ public:
     StyleImage* cachedImage(float deviceScaleFactor) const;
     StyleImage* cacheImage(Document*, float deviceScaleFactor);
 
-#if !ENABLE(OILPAN)
-    void removeReferencedElement(SVGElement*);
-#endif
-
     bool equals(const CSSCursorImageValue&) const;
 
     DECLARE_TRACE_AFTER_DISPATCH();
 
 private:
-    CSSCursorImageValue(PassRefPtrWillBeRawPtr<CSSValue> imageValue, bool hotSpotSpecified, const IntPoint& hotSpot);
+    CSSCursorImageValue(CSSValue* imageValue, bool hotSpotSpecified, const IntPoint& hotSpot);
 
     bool isSVGCursor() const;
     String cachedImageURL();
     void clearImageResource();
 
-    RefPtrWillBeMember<CSSValue> m_imageValue;
+    Member<CSSValue> m_imageValue;
 
     bool m_hotSpotSpecified;
     IntPoint m_hotSpot;
     bool m_isCachePending;
-    RefPtrWillBeMember<StyleImage> m_cachedImage;
-
-#if !ENABLE(OILPAN)
-    HashSet<SVGElement*> m_referencedElements;
-#endif
+    Member<StyleImage> m_cachedImage;
 };
 
 DEFINE_CSS_VALUE_TYPE_CASTS(CSSCursorImageValue, isCursorImageValue());

@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_GEOLOCATION_GEOLOCATION_PROVIDER_IMPL_H_
 
 #include <list>
+#include <memory>
 #include <vector>
 
 #include "base/callback_forward.h"
@@ -28,9 +29,9 @@ class CONTENT_EXPORT GeolocationProviderImpl
       public base::Thread {
  public:
   // GeolocationProvider implementation:
-  scoped_ptr<GeolocationProvider::Subscription> AddLocationUpdateCallback(
+  std::unique_ptr<GeolocationProvider::Subscription> AddLocationUpdateCallback(
       const LocationUpdateCallback& callback,
-      bool use_high_accuracy) override;
+      bool enable_high_accuracy) override;
   void UserDidOptIntoLocationServices() override;
   void OverrideLocationForTesting(const Geoposition& position) override;
 
@@ -53,7 +54,8 @@ class CONTENT_EXPORT GeolocationProviderImpl
   ~GeolocationProviderImpl() override;
 
   // Useful for injecting mock geolocation arbitrator in tests.
-  virtual LocationArbitrator* CreateArbitrator();
+  // TODO(mvanouwerkerk): Use something like SetArbitratorForTesting instead.
+  virtual std::unique_ptr<LocationArbitrator> CreateArbitrator();
 
  private:
   bool OnGeolocationThread() const;
@@ -68,7 +70,7 @@ class CONTENT_EXPORT GeolocationProviderImpl
 
   // Starts the geolocation providers or updates their options (delegates to
   // arbitrator).
-  void StartProviders(bool use_high_accuracy);
+  void StartProviders(bool enable_high_accuracy);
 
   // Updates the providers on the geolocation thread, which must be running.
   void InformProvidersPermissionGranted();
@@ -90,7 +92,7 @@ class CONTENT_EXPORT GeolocationProviderImpl
   bool ignore_location_updates_;
 
   // Only to be used on the geolocation thread.
-  LocationArbitrator* arbitrator_;
+  std::unique_ptr<LocationArbitrator> arbitrator_;
 
   DISALLOW_COPY_AND_ASSIGN(GeolocationProviderImpl);
 };

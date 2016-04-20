@@ -14,13 +14,13 @@
 #include "base/path_service.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
-#include "content/public/browser/background_sync_controller.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
 #include "content/shell/browser/shell_download_manager_delegate.h"
 #include "content/shell/browser/shell_permission_manager.h"
 #include "content/shell/common/shell_switches.h"
+#include "content/test/mock_background_sync_controller.h"
 
 #if defined(OS_WIN)
 #include "base/base_paths_win.h"
@@ -74,13 +74,14 @@ void ShellBrowserContext::InitWhileIOAllowed() {
     ignore_certificate_errors_ = true;
   if (cmd_line->HasSwitch(switches::kContentShellDataPath)) {
     path_ = cmd_line->GetSwitchValuePath(switches::kContentShellDataPath);
+    BrowserContext::Initialize(this, path_);
     return;
   }
 #if defined(OS_WIN)
   CHECK(PathService::Get(base::DIR_LOCAL_APP_DATA, &path_));
   path_ = path_.Append(std::wstring(L"content_shell"));
 #elif defined(OS_LINUX)
-  scoped_ptr<base::Environment> env(base::Environment::Create());
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
   base::FilePath config_dir(
       base::nix::GetXDGDirectory(env.get(),
                                  base::nix::kXdgConfigHomeEnvVar,
@@ -98,11 +99,12 @@ void ShellBrowserContext::InitWhileIOAllowed() {
 
   if (!base::PathExists(path_))
     base::CreateDirectory(path_);
+  BrowserContext::Initialize(this, path_);
 }
 
-scoped_ptr<ZoomLevelDelegate> ShellBrowserContext::CreateZoomLevelDelegate(
+std::unique_ptr<ZoomLevelDelegate> ShellBrowserContext::CreateZoomLevelDelegate(
     const base::FilePath&) {
-  return scoped_ptr<ZoomLevelDelegate>();
+  return std::unique_ptr<ZoomLevelDelegate>();
 }
 
 base::FilePath ShellBrowserContext::GetPath() const {
@@ -123,18 +125,14 @@ DownloadManagerDelegate* ShellBrowserContext::GetDownloadManagerDelegate()  {
   return download_manager_delegate_.get();
 }
 
-net::URLRequestContextGetter* ShellBrowserContext::GetRequestContext()  {
-  return GetDefaultStoragePartition(this)->GetURLRequestContext();
-}
-
 ShellURLRequestContextGetter*
 ShellBrowserContext::CreateURLRequestContextGetter(
     ProtocolHandlerMap* protocol_handlers,
     URLRequestInterceptorScopedVector request_interceptors) {
   return new ShellURLRequestContextGetter(
       ignore_certificate_errors_, GetPath(),
-      BrowserThread::UnsafeGetMessageLoopForThread(BrowserThread::IO),
-      BrowserThread::UnsafeGetMessageLoopForThread(BrowserThread::FILE),
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
       protocol_handlers, std::move(request_interceptors), net_log_);
 }
 
@@ -149,36 +147,25 @@ net::URLRequestContextGetter* ShellBrowserContext::CreateRequestContext(
 }
 
 net::URLRequestContextGetter*
-    ShellBrowserContext::GetRequestContextForRenderProcess(
-        int renderer_child_id)  {
-  return GetRequestContext();
-}
-
-net::URLRequestContextGetter*
-    ShellBrowserContext::GetMediaRequestContext()  {
-  return GetRequestContext();
-}
-
-net::URLRequestContextGetter*
-    ShellBrowserContext::GetMediaRequestContextForRenderProcess(
-        int renderer_child_id)  {
-  return GetRequestContext();
-}
-
-net::URLRequestContextGetter*
-    ShellBrowserContext::GetMediaRequestContextForStoragePartition(
-        const base::FilePath& partition_path,
-        bool in_memory) {
-  return GetRequestContext();
-}
-
-net::URLRequestContextGetter*
 ShellBrowserContext::CreateRequestContextForStoragePartition(
     const base::FilePath& partition_path,
     bool in_memory,
     ProtocolHandlerMap* protocol_handlers,
     URLRequestInterceptorScopedVector request_interceptors) {
-  return NULL;
+  return nullptr;
+}
+
+net::URLRequestContextGetter*
+    ShellBrowserContext::CreateMediaRequestContext()  {
+  DCHECK(url_request_getter_.get());
+  return url_request_getter_.get();
+}
+
+net::URLRequestContextGetter*
+    ShellBrowserContext::CreateMediaRequestContextForStoragePartition(
+        const base::FilePath& partition_path,
+        bool in_memory) {
+  return nullptr;
 }
 
 ResourceContext* ShellBrowserContext::GetResourceContext()  {
@@ -209,7 +196,7 @@ PermissionManager* ShellBrowserContext::GetPermissionManager() {
 
 BackgroundSyncController* ShellBrowserContext::GetBackgroundSyncController() {
   if (!background_sync_controller_)
-    background_sync_controller_.reset(new BackgroundSyncController());
+    background_sync_controller_.reset(new MockBackgroundSyncController());
   return background_sync_controller_.get();
 }
 

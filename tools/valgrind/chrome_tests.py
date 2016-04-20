@@ -111,6 +111,11 @@ class ChromeTests:
       if os.path.exists(platform_suppression_file):
         cmd.append("--suppressions=%s" % platform_suppression_file)
 
+    if tool_name == "drmemory":
+      if self._options.drmemory_ops:
+        # prepending " " to avoid Dr. Memory's option confusing optparse
+        cmd += ["--drmemory_ops", " " + self._options.drmemory_ops]
+
     if self._options.valgrind_tool_flags:
       cmd += self._options.valgrind_tool_flags.split(" ")
     if self._options.keep_logs:
@@ -331,9 +336,6 @@ class ChromeTests:
   def TestChromeOS(self):
     return self.SimpleTest("chromeos", "chromeos_unittests")
 
-  def TestCloudPrint(self):
-    return self.SimpleTest("cloud_print", "cloud_print_unittests")
-
   def TestComponents(self):
     return self.SimpleTest("components", "components_unittests")
 
@@ -408,10 +410,6 @@ class ChromeTests:
     return self.SimpleTest("mojo_public_bindings",
                            "mojo_public_bindings_unittests")
 
-  def TestMojoPublicEnv(self):
-    return self.SimpleTest("mojo_public_env",
-                           "mojo_public_environment_unittests")
-
   def TestMojoPublicSystem(self):
     return self.SimpleTest("mojo_public_system",
                            "mojo_public_system_unittests")
@@ -419,10 +417,6 @@ class ChromeTests:
   def TestMojoPublicSysPerf(self):
     return self.SimpleTest("mojo_public_sysperf",
                            "mojo_public_system_perftests")
-
-  def TestMojoPublicUtility(self):
-    return self.SimpleTest("mojo_public_utility",
-                           "mojo_public_utility_unittests")
 
   def TestMojoSystem(self):
     return self.SimpleTest("mojo_system", "mojo_system_unittests")
@@ -511,11 +505,6 @@ class ChromeTests:
     return self.SimpleTest("chrome", "interactive_ui_tests",
                            valgrind_test_args=self.UI_VALGRIND_ARGS,
                            cmd_args=self.UI_TEST_ARGS)
-
-  def TestSafeBrowsing(self):
-    return self.SimpleTest("chrome", "safe_browsing_tests",
-                           valgrind_test_args=self.UI_VALGRIND_ARGS,
-                           cmd_args=(["--ui-test-action-max-timeout=450000"]))
 
   def TestSyncIntegration(self):
     return self.SimpleTest("chrome", "sync_integration_tests",
@@ -668,8 +657,6 @@ class ChromeTests:
     "chrome_elf": TestChromeElf,
     "chromedriver": TestChromeDriver,
     "chromeos": TestChromeOS,    "chromeos_unittests": TestChromeOS,
-    "cloud_print": TestCloudPrint,
-    "cloud_print_unittests": TestCloudPrint,
     "components": TestComponents,"components_unittests": TestComponents,
     "compositor": TestCompositor,"compositor_unittests": TestCompositor,
     "content": TestContent,      "content_unittests": TestContent,
@@ -688,6 +675,7 @@ class ChromeTests:
     "gpu": TestGPU,              "gpu_unittests": TestGPU,
     "ipc": TestIpc,              "ipc_tests": TestIpc,
     "installer_util": TestInstallerUtil,
+    "installer_util_unittests": TestInstallerUtil,
     "interactive_ui": TestInteractiveUI,
     "jingle": TestJingle,        "jingle_unittests": TestJingle,
     "keyboard": TestKeyboard,    "keyboard_unittests": TestKeyboard,
@@ -697,11 +685,13 @@ class ChromeTests:
     "message_center_unittests" : TestMessageCenter,
     "midi": TestMidi,             "midi_unittests": TestMidi,
     "mojo_common": TestMojoCommon,
+    "mojo_common_unittests": TestMojoCommon,
     "mojo_system": TestMojoSystem,
+    "mojo_system_unittests": TestMojoSystem,
     "mojo_public_system": TestMojoPublicSystem,
-    "mojo_public_utility": TestMojoPublicUtility,
+    "mojo_public_system_unittests": TestMojoPublicSystem,
     "mojo_public_bindings": TestMojoPublicBindings,
-    "mojo_public_env": TestMojoPublicEnv,
+    "mojo_public_bindings_unittests": TestMojoPublicBindings,
     "mojo_public_sysperf": TestMojoPublicSysPerf,
     "net": TestNet,              "net_unittests": TestNet,
     "net_perf": TestNetPerf,     "net_perftests": TestNetPerf,
@@ -710,7 +700,6 @@ class ChromeTests:
     "ppapi": TestPPAPI,          "ppapi_unittests": TestPPAPI,
     "printing": TestPrinting,    "printing_unittests": TestPrinting,
     "remoting": TestRemoting,    "remoting_unittests": TestRemoting,
-    "safe_browsing": TestSafeBrowsing, "safe_browsing_tests": TestSafeBrowsing,
     "sandbox": TestLinuxSandbox, "sandbox_linux_unittests": TestLinuxSandbox,
     "skia": TestSkia,            "skia_unittests": TestSkia,
     "sql": TestSql,              "sql_unittests": TestSql,
@@ -771,6 +760,8 @@ def _main():
                     help="run the tests with --test-launcher-total-shards")
   parser.add_option("--test-launcher-shard-index", type=int,
                     help="run the tests with --test-launcher-shard-index")
+  parser.add_option("--drmemory_ops",
+                    help="extra options passed to Dr. Memory")
 
   options, args = parser.parse_args()
 

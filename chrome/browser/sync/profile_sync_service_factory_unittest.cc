@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/sync/profile_sync_service_factory.h"
+
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/command_line.h"
-#include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/browser_sync/common/browser_sync_switches.h"
@@ -28,7 +30,7 @@ class ProfileSyncServiceFactoryTest : public testing::Test {
     std::vector<syncer::ModelType> datatypes;
 
     // Desktop types.
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
     datatypes.push_back(syncer::APPS);
 #if defined(ENABLE_APP_LIST)
     if (app_list::switches::IsAppListSyncEnabled())
@@ -45,7 +47,7 @@ class ProfileSyncServiceFactoryTest : public testing::Test {
     datatypes.push_back(syncer::THEMES);
     datatypes.push_back(syncer::SUPERVISED_USERS);
     datatypes.push_back(syncer::SUPERVISED_USER_SHARED_SETTINGS);
-#endif // !OS_ANDROID && !OS_IOS
+#endif // !OS_ANDROID
 
     // Common types.
     datatypes.push_back(syncer::AUTOFILL);
@@ -98,7 +100,7 @@ class ProfileSyncServiceFactoryTest : public testing::Test {
 
  private:
   content::TestBrowserThreadBundle thread_bundle_;
-  scoped_ptr<Profile> profile_;
+  std::unique_ptr<Profile> profile_;
 };
 
 // Verify that the disable sync flag disables creation of the sync service.

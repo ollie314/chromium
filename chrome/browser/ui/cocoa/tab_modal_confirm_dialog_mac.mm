@@ -94,7 +94,7 @@ TabModalConfirmDialogMac::TabModalConfirmDialogMac(
   base::scoped_nsobject<CustomConstrainedWindowSheet> sheet(
       [[CustomConstrainedWindowSheet alloc]
           initWithCustomWindow:[alert_ window]]);
-  window_.reset(new ConstrainedWindowMac(this, web_contents, sheet));
+  window_ = CreateAndShowWebModalDialogMac(this, web_contents, sheet);
   delegate_->set_close_delegate(this);
 }
 
@@ -122,7 +122,7 @@ void TabModalConfirmDialogMac::OnConstrainedWindowClosed(
   // prevent a double-delete by moving delegate_ to a stack variable.
   if (!delegate_)
     return;
-  scoped_ptr<TabModalConfirmDialogDelegate> delegate(std::move(delegate_));
+  std::unique_ptr<TabModalConfirmDialogDelegate> delegate(std::move(delegate_));
   // Provide a disposition in case the dialog was closed without accepting or
   // cancelling.
   delegate->Close();

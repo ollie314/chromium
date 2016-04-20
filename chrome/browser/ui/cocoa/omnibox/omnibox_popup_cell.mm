@@ -65,10 +65,10 @@ NSColor* DimTextColor() {
   return [NSColor darkGrayColor];
 }
 NSColor* PositiveTextColor() {
-  return skia::SkColorToCalibratedNSColor(SkColorSetRGB(0x0b, 0x80, 0x43));
+  return skia::SkColorToCalibratedNSColor(SkColorSetRGB(0x3d, 0x94, 0x00));
 }
 NSColor* NegativeTextColor() {
-  return skia::SkColorToCalibratedNSColor(SkColorSetRGB(0xc5, 0x39, 0x29));
+  return skia::SkColorToCalibratedNSColor(SkColorSetRGB(0xdd, 0x4b, 0x39));
 }
 NSColor* URLTextColor() {
   return [NSColor colorWithCalibratedRed:0.0 green:0.55 blue:0.0 alpha:1.0];
@@ -104,29 +104,11 @@ NSAttributedString* CreateAnswerStringHelper(const base::string16& text,
                                              bool is_bold) {
   NSDictionary* answer_style = nil;
   switch (style_type) {
-    case SuggestionAnswer::ANSWER:
-      answer_style = @{
-        NSForegroundColorAttributeName : ContentTextColor(),
-        NSFontAttributeName : LargeFont()
-      };
-      break;
-    case SuggestionAnswer::HEADLINE:
-      answer_style = @{
-        NSForegroundColorAttributeName : DimTextColor(),
-        NSFontAttributeName : LargeFont()
-      };
-      break;
     case SuggestionAnswer::TOP_ALIGNED:
       answer_style = @{
         NSForegroundColorAttributeName : DimTextColor(),
         NSFontAttributeName : LargeSuperscriptFont(),
         NSSuperscriptAttributeName : @1
-      };
-      break;
-    case SuggestionAnswer::DESCRIPTION:
-      answer_style = @{
-        NSForegroundColorAttributeName : DimTextColor(),
-        NSFontAttributeName : FieldFont()
       };
       break;
     case SuggestionAnswer::DESCRIPTION_NEGATIVE:
@@ -141,45 +123,40 @@ NSAttributedString* CreateAnswerStringHelper(const base::string16& text,
         NSFontAttributeName : LargeSuperscriptFont()
       };
       break;
-    case SuggestionAnswer::MORE_INFO:
+    case SuggestionAnswer::PERSONALIZED_SUGGESTION:
+      answer_style = @{
+        NSForegroundColorAttributeName : ContentTextColor(),
+        NSFontAttributeName : FieldFont()
+      };
+      break;
+    case SuggestionAnswer::ANSWER_TEXT_MEDIUM:
+      answer_style = @{
+        NSForegroundColorAttributeName : ContentTextColor(),
+        NSFontAttributeName : FieldFont()
+      };
+      break;
+    case SuggestionAnswer::ANSWER_TEXT_LARGE:
+      answer_style = @{
+        NSForegroundColorAttributeName : ContentTextColor(),
+        NSFontAttributeName : LargeFont()
+      };
+      break;
+    case SuggestionAnswer::SUGGESTION_SECONDARY_TEXT_SMALL:
       answer_style = @{
         NSForegroundColorAttributeName : DimTextColor(),
         NSFontAttributeName : SmallFont()
       };
       break;
-    case SuggestionAnswer::SUGGESTION:
-      answer_style = @{
-        NSForegroundColorAttributeName : ContentTextColor(),
-        NSFontAttributeName : FieldFont()
-      };
-      break;
-    case SuggestionAnswer::SUGGESTION_POSITIVE:
-      answer_style = @{
-        NSForegroundColorAttributeName : PositiveTextColor(),
-        NSFontAttributeName : FieldFont()
-      };
-      break;
-    case SuggestionAnswer::SUGGESTION_NEGATIVE:
-      answer_style = @{
-        NSForegroundColorAttributeName : NegativeTextColor(),
-        NSFontAttributeName : FieldFont()
-      };
-      break;
-    case SuggestionAnswer::SUGGESTION_LINK:
-      answer_style = @{
-        NSForegroundColorAttributeName : URLTextColor(),
-        NSFontAttributeName : FieldFont()
-      };
-      break;
-    case SuggestionAnswer::STATUS:
+    case SuggestionAnswer::SUGGESTION_SECONDARY_TEXT_MEDIUM:
       answer_style = @{
         NSForegroundColorAttributeName : DimTextColor(),
-        NSFontAttributeName : LargeSuperscriptFont()
+        NSFontAttributeName : FieldFont()
       };
       break;
-    case SuggestionAnswer::PERSONALIZED_SUGGESTION:
+    case SuggestionAnswer::SUGGESTION:  // Fall through.
+    default:
       answer_style = @{
-        NSForegroundColorAttributeName : ContentTextColor(),
+        NSForegroundColorAttributeName : ContentTextColor (),
         NSFontAttributeName : FieldFont()
       };
       break;
@@ -388,7 +365,7 @@ NSAttributedString* CreateClassifiedAttributedString(
                                     kACMatchPropertyContentsPrefix)),
                                 ContentTextColor(), textAlignment) retain];
 
-    isAnswer_ = match.answer;
+    isAnswer_ = !!match.answer;
     if (isAnswer_) {
       contents_ = [CreateAnswerLine(match.answer->first_line()) retain];
       description_ = [CreateAnswerLine(match.answer->second_line()) retain];
@@ -446,7 +423,9 @@ NSAttributedString* CreateClassifiedAttributedString(
   OmniboxPopupModel::ComputeMatchMaxWidths(
       ceilf(contentsWidth), ceilf(separatorWidth), ceilf(descriptionWidth),
       ceilf(remainingWidth),
-      !AutocompleteMatch::IsSearchType([cellData matchType]), &contentsMaxWidth,
+      [cellData isAnswer],
+      !AutocompleteMatch::IsSearchType([cellData matchType]),
+      &contentsMaxWidth,
       &descriptionMaxWidth);
 
   NSRect imageRect = cellFrame;

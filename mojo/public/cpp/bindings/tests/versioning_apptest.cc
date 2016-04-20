@@ -5,10 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "mojo/public/cpp/system/macros.h"
+#include "base/macros.h"
 #include "mojo/public/interfaces/bindings/tests/versioning_test_client.mojom.h"
-#include "mojo/shell/public/cpp/application_impl.h"
-#include "mojo/shell/public/cpp/application_test_base.h"
+#include "services/shell/public/cpp/application_test_base.h"
+#include "services/shell/public/cpp/connector.h"
 
 namespace mojo {
 namespace test {
@@ -24,14 +24,13 @@ class VersioningApplicationTest : public ApplicationTestBase {
   void SetUp() override {
     ApplicationTestBase::SetUp();
 
-    application_impl()->ConnectToService("mojo:versioning_test_service",
-                                         &database_);
+    connector()->ConnectToInterface("mojo:versioning_test_service", &database_);
   }
 
   HumanResourceDatabasePtr database_;
 
  private:
-  MOJO_DISALLOW_COPY_AND_ASSIGN(VersioningApplicationTest);
+  DISALLOW_COPY_AND_ASSIGN(VersioningApplicationTest);
 };
 
 TEST_F(VersioningApplicationTest, Struct) {

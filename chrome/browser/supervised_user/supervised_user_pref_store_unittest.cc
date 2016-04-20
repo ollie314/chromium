@@ -6,12 +6,12 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "base/prefs/testing_pref_store.h"
 #include "base/values.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/browser/supervised_user/supervised_user_pref_store.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/testing_pref_store.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::DictionaryValue;
@@ -130,12 +130,11 @@ TEST_F(SupervisedUserPrefStoreTest, ConfigureSettings) {
   EXPECT_EQ(0u, fixture.changed_prefs()->size());
 
   // kSupervisedModeManualHosts can be configured by the custodian.
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
   dict->SetBoolean("example.com", true);
   dict->SetBoolean("moose.org", false);
-  service_.SetLocalSetting(
-      supervised_users::kContentPackManualBehaviorHosts,
-      scoped_ptr<base::Value>(dict->DeepCopy()));
+  service_.SetLocalSetting(supervised_users::kContentPackManualBehaviorHosts,
+                           std::unique_ptr<base::Value>(dict->DeepCopy()));
   EXPECT_EQ(1u, fixture.changed_prefs()->size());
   ASSERT_TRUE(fixture.changed_prefs()->GetDictionary(
       prefs::kSupervisedUserManualHosts, &manual_hosts));
@@ -146,7 +145,7 @@ TEST_F(SupervisedUserPrefStoreTest, ConfigureSettings) {
   fixture.changed_prefs()->Clear();
   service_.SetLocalSetting(
       supervised_users::kForceSafeSearch,
-      scoped_ptr<base::Value>(new base::FundamentalValue(false)));
+      std::unique_ptr<base::Value>(new base::FundamentalValue(false)));
   EXPECT_EQ(1u, fixture.changed_prefs()->size());
   EXPECT_TRUE(fixture.changed_prefs()->GetBoolean(prefs::kForceGoogleSafeSearch,
                                                   &force_google_safesearch));

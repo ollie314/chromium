@@ -60,14 +60,19 @@ void MenuRunnerImpl::Release() {
       empty_delegate_.reset(new MenuDelegate());
     menu_->set_delegate(empty_delegate_.get());
 
-    DCHECK(controller_);
-    // Release is invoked when MenuRunner is destroyed. Assume this is happening
-    // because the object referencing the menu has been destroyed and the menu
-    // button is no longer valid.
-    controller_->Cancel(MenuController::EXIT_DESTROYED);
-  } else {
-    delete this;
+    // Verify that the MenuController is still active. It may have been
+    // destroyed out of order.
+    if (MenuController::GetActiveInstance()) {
+      DCHECK(controller_);
+      // Release is invoked when MenuRunner is destroyed. Assume this is
+      // happening because the object referencing the menu has been destroyed
+      // and the menu button is no longer valid.
+      controller_->Cancel(MenuController::EXIT_DESTROYED);
+      return;
+    }
   }
+
+  delete this;
 }
 
 MenuRunner::RunResult MenuRunnerImpl::RunMenuAt(Widget* parent,
@@ -88,8 +93,12 @@ MenuRunner::RunResult MenuRunnerImpl::RunMenuAt(Widget* parent,
       if (!controller->IsBlockingRun()) {
         controller->CancelAll();
         controller = NULL;
+      } else {
+        // Only nest the delegate when not cancelling drag-and-drop. When
+        // cancelling this will become the root delegate of the new
+        // MenuController
+        controller->AddNestedDelegate(this);
       }
-      controller->AddNestedDelegate(this);
     } else {
       // There's some other menu open and we're not nested. Cancel the menu.
       controller->CancelAll();

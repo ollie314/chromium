@@ -10,8 +10,8 @@
 
 #include "base/command_line.h"
 #include "base/debug/debugging_flags.h"
+#include "base/debug/profiler.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
@@ -41,6 +41,7 @@
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/dom_distiller/core/dom_distiller_switches.h"
+#include "components/prefs/pref_service.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "content/public/browser/native_web_keyboard_event.h"
@@ -92,10 +93,6 @@ enum WindowState {
 
   // Fullscreen mode, occupying the whole screen.
   WINDOW_STATE_FULLSCREEN,
-
-  // Fullscreen mode for metro snap, occupying the full height and 20% of
-  // the screen width.
-  WINDOW_STATE_METRO_SNAP,
 };
 
 // Returns |true| if entry has an internal chrome:// URL, |false| otherwise.
@@ -330,8 +327,8 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_RELOAD_CLEARING_CACHE:
       ClearCache(browser_);
       // FALL THROUGH
-    case IDC_RELOAD_IGNORING_CACHE:
-      ReloadIgnoringCache(browser_, disposition);
+    case IDC_RELOAD_BYPASSING_CACHE:
+      ReloadBypassingCache(browser_, disposition);
       break;
     case IDC_HOME:
       Home(browser_, disposition);
@@ -423,9 +420,6 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
 #endif
 
 #if defined(OS_MACOSX)
-    case IDC_PRESENTATION_MODE:
-      chrome::ToggleFullscreenMode(browser_);
-      break;
     case IDC_TOGGLE_FULLSCREEN_TOOLBAR:
       chrome::ToggleFullscreenToolbar(browser_);
       break;
@@ -791,7 +785,7 @@ void BrowserCommandController::InitCommandState() {
 
   // Navigation commands
   command_updater_.UpdateCommandEnabled(IDC_RELOAD, true);
-  command_updater_.UpdateCommandEnabled(IDC_RELOAD_IGNORING_CACHE, true);
+  command_updater_.UpdateCommandEnabled(IDC_RELOAD_BYPASSING_CACHE, true);
   command_updater_.UpdateCommandEnabled(IDC_RELOAD_CLEARING_CACHE, true);
 
   // Window management commands
@@ -800,12 +794,7 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_CLOSE_TAB, true);
   command_updater_.UpdateCommandEnabled(IDC_DUPLICATE_TAB, true);
   UpdateTabRestoreCommandState();
-#if defined(OS_WIN) && defined(USE_ASH)
-  if (browser_->host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH)
-    command_updater_.UpdateCommandEnabled(IDC_EXIT, true);
-#else
   command_updater_.UpdateCommandEnabled(IDC_EXIT, true);
-#endif
   command_updater_.UpdateCommandEnabled(IDC_DEBUG_FRAME_TOGGLE, true);
 #if defined(USE_ASH)
   command_updater_.UpdateCommandEnabled(IDC_MINIMIZE_WINDOW, true);
@@ -992,7 +981,7 @@ void BrowserCommandController::UpdateCommandsForTabState() {
   command_updater_.UpdateCommandEnabled(IDC_BACK, CanGoBack(browser_));
   command_updater_.UpdateCommandEnabled(IDC_FORWARD, CanGoForward(browser_));
   command_updater_.UpdateCommandEnabled(IDC_RELOAD, CanReload(browser_));
-  command_updater_.UpdateCommandEnabled(IDC_RELOAD_IGNORING_CACHE,
+  command_updater_.UpdateCommandEnabled(IDC_RELOAD_BYPASSING_CACHE,
                                         CanReload(browser_));
   command_updater_.UpdateCommandEnabled(IDC_RELOAD_CLEARING_CACHE,
                                         CanReload(browser_));
@@ -1112,10 +1101,6 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode() {
   WindowState window_state = WINDOW_STATE_NOT_FULLSCREEN;
   if (window() && window()->IsFullscreen()) {
     window_state = WINDOW_STATE_FULLSCREEN;
-#if defined(OS_WIN)
-    if (window()->IsInMetroSnapMode())
-      window_state = WINDOW_STATE_METRO_SNAP;
-#endif
   }
   bool show_main_ui = IsShowingMainUI();
   bool main_not_fullscreen =
@@ -1166,12 +1151,11 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode() {
   command_updater_.UpdateCommandEnabled(IDC_VIEW_PASSWORDS, show_main_ui);
   command_updater_.UpdateCommandEnabled(IDC_ABOUT, show_main_ui);
   command_updater_.UpdateCommandEnabled(IDC_SHOW_APP_MENU, show_main_ui);
-#if BUILDFLAG(ENABLE_PROFILING) && !defined(NO_TCMALLOC)
-  command_updater_.UpdateCommandEnabled(IDC_PROFILING_ENABLED, show_main_ui);
-#endif
 
-  // Disable explicit fullscreen toggling when in metro snap mode.
-  bool fullscreen_enabled = window_state != WINDOW_STATE_METRO_SNAP;
+  if (base::debug::IsProfilingSupported())
+    command_updater_.UpdateCommandEnabled(IDC_PROFILING_ENABLED, show_main_ui);
+
+  bool fullscreen_enabled = true;
 #if !defined(OS_MACOSX)
   if (window_state == WINDOW_STATE_NOT_FULLSCREEN &&
       !profile()->GetPrefs()->GetBoolean(prefs::kFullscreenAllowed)) {
@@ -1181,8 +1165,6 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode() {
 #endif
 
   command_updater_.UpdateCommandEnabled(IDC_FULLSCREEN, fullscreen_enabled);
-  command_updater_.UpdateCommandEnabled(IDC_PRESENTATION_MODE,
-                                        fullscreen_enabled);
   command_updater_.UpdateCommandEnabled(IDC_TOGGLE_FULLSCREEN_TOOLBAR,
                                         fullscreen_enabled);
 

@@ -4,6 +4,7 @@
 
 #include "chrome/renderer/plugins/chrome_plugin_placeholder.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/command_line.h"
@@ -19,11 +20,13 @@
 #include "chrome/renderer/plugins/plugin_preroller.h"
 #include "chrome/renderer/plugins/plugin_uma.h"
 #include "components/content_settings/content/common/content_settings_messages.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/context_menu_params.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "gin/object_template_builder.h"
+#include "third_party/WebKit/public/platform/URLConversion.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -258,11 +261,12 @@ void ChromePluginPlaceholder::PluginListChanged() {
 
   ChromeViewHostMsg_GetPluginInfo_Output output;
   std::string mime_type(GetPluginParams().mimeType.utf8());
-  blink::WebString top_origin = GetFrame()->top()->securityOrigin().toString();
+  blink::WebString top_origin =
+      GetFrame()->top()->getSecurityOrigin().toString();
   render_frame()->Send(
       new ChromeViewHostMsg_GetPluginInfo(routing_id(),
                                           GURL(GetPluginParams().url),
-                                          GURL(top_origin),
+                                          blink::WebStringToGURL(top_origin),
                                           mime_type,
                                           &output));
   if (output.status == status_)
@@ -351,7 +355,7 @@ void ChromePluginPlaceholder::ShowContextMenu(
 }
 
 blink::WebPlugin* ChromePluginPlaceholder::CreatePlugin() {
-  scoped_ptr<content::PluginInstanceThrottler> throttler;
+  std::unique_ptr<content::PluginInstanceThrottler> throttler;
   // If the plugin has already been marked essential in its placeholder form,
   // we shouldn't create a new throttler and start the process all over again.
   if (power_saver_enabled()) {

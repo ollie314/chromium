@@ -53,21 +53,21 @@ LocalFileSystemClient::~LocalFileSystemClient()
 
 bool LocalFileSystemClient::requestFileSystemAccessSync(ExecutionContext* context)
 {
-    ASSERT(context);
+    DCHECK(context);
     if (context->isDocument()) {
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         return false;
     }
 
-    ASSERT(context->isWorkerGlobalScope());
+    DCHECK(context->isWorkerGlobalScope());
     return WorkerContentSettingsClient::from(*toWorkerGlobalScope(context))->requestFileSystemAccessSync();
 }
 
 void LocalFileSystemClient::requestFileSystemAccessAsync(ExecutionContext* context, PassOwnPtr<ContentSettingCallbacks> callbacks)
 {
-    ASSERT(context);
+    DCHECK(context);
     if (!context->isDocument()) {
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         return;
     }
 

@@ -27,6 +27,10 @@ void ContentBrowserClient::PostAfterStartupTask(
   task_runner->PostTask(from_here, task);
 }
 
+bool ContentBrowserClient::IsBrowserStartupComplete() {
+  return true;
+}
+
 WebContentsViewDelegate* ContentBrowserClient::GetWebContentsViewDelegate(
     WebContents* web_contents) {
   return nullptr;
@@ -55,23 +59,6 @@ bool ContentBrowserClient::ShouldLockToOrigin(BrowserContext* browser_context,
 
 bool ContentBrowserClient::LogWebUIUrl(const GURL& web_ui_url) const {
   return false;
-}
-
-net::URLRequestContextGetter* ContentBrowserClient::CreateRequestContext(
-    BrowserContext* browser_context,
-    ProtocolHandlerMap* protocol_handlers,
-    URLRequestInterceptorScopedVector request_interceptors) {
-  return nullptr;
-}
-
-net::URLRequestContextGetter*
-ContentBrowserClient::CreateRequestContextForStoragePartition(
-    BrowserContext* browser_context,
-    const base::FilePath& partition_path,
-    bool in_memory,
-    ProtocolHandlerMap* protocol_handlers,
-    URLRequestInterceptorScopedVector request_interceptors) {
-  return nullptr;
 }
 
 bool ContentBrowserClient::IsHandledURL(const GURL& url) {
@@ -115,7 +102,7 @@ bool ContentBrowserClient::ShouldSwapBrowsingInstancesForNavigation(
   return false;
 }
 
-scoped_ptr<media::CdmFactory> ContentBrowserClient::CreateCdmFactory() {
+std::unique_ptr<media::CdmFactory> ContentBrowserClient::CreateCdmFactory() {
   return nullptr;
 }
 
@@ -161,6 +148,10 @@ bool ContentBrowserClient::AllowServiceWorker(const GURL& scope,
   return true;
 }
 
+bool ContentBrowserClient::IsDataSaverEnabled(BrowserContext* context) {
+  return false;
+}
+
 bool ContentBrowserClient::AllowGetCookie(const GURL& url,
                                           const GURL& first_party,
                                           const net::CookieList& cookie_list,
@@ -181,16 +172,6 @@ bool ContentBrowserClient::AllowSetCookie(const GURL& url,
 }
 
 bool ContentBrowserClient::AllowSaveLocalState(ResourceContext* context) {
-  return true;
-}
-
-bool ContentBrowserClient::AllowWorkerDatabase(
-    const GURL& url,
-    const base::string16& name,
-    const base::string16& display_name,
-    unsigned long estimated_size,
-    ResourceContext* context,
-    const std::vector<std::pair<int, int> >& render_frames) {
   return true;
 }
 
@@ -223,21 +204,32 @@ bool ContentBrowserClient::AllowKeygen(const GURL& url,
   return true;
 }
 
+ContentBrowserClient::AllowWebBluetoothResult
+ContentBrowserClient::AllowWebBluetooth(
+    content::BrowserContext* browser_context,
+    const url::Origin& requesting_origin,
+    const url::Origin& embedding_origin) {
+  return AllowWebBluetoothResult::ALLOW;
+}
+
+std::string ContentBrowserClient::GetWebBluetoothBlacklist() {
+  return std::string();
+}
+
 QuotaPermissionContext* ContentBrowserClient::CreateQuotaPermissionContext() {
   return nullptr;
 }
 
-scoped_ptr<storage::QuotaEvictionPolicy>
+std::unique_ptr<storage::QuotaEvictionPolicy>
 ContentBrowserClient::GetTemporaryStorageEvictionPolicy(
     content::BrowserContext* context) {
-  return scoped_ptr<storage::QuotaEvictionPolicy>();
+  return std::unique_ptr<storage::QuotaEvictionPolicy>();
 }
 
 void ContentBrowserClient::SelectClientCertificate(
     WebContents* web_contents,
     net::SSLCertRequestInfo* cert_request_info,
-    scoped_ptr<ClientCertificateDelegate> delegate) {
-}
+    std::unique_ptr<ClientCertificateDelegate> delegate) {}
 
 net::URLRequestContext* ContentBrowserClient::OverrideRequestContextForURL(
     const GURL& url, ResourceContext* context) {
@@ -358,10 +350,6 @@ TracingDelegate* ContentBrowserClient::GetTracingDelegate() {
   return nullptr;
 }
 
-bool ContentBrowserClient::IsNPAPIEnabled() {
-  return false;
-}
-
 bool ContentBrowserClient::IsPluginAllowedToCallRequestOSFileHandle(
     BrowserContext* browser_context,
     const GURL& url) {
@@ -411,7 +399,18 @@ base::string16 ContentBrowserClient::GetAppContainerSidForSandboxType(
       L"S-1-15-2-3251537155-1984446955-2931258699-841473695-1938553385-"
       L"924012148-129201922");
 }
-#endif
+
+bool ContentBrowserClient::IsWin32kLockdownEnabledForMimeType(
+    const std::string& mime_type) const {
+  // TODO(wfh): Enable this by default once Win32k lockdown for PPAPI processes
+  // is enabled by default in Chrome. See crbug.com/523278.
+  return false;
+}
+
+bool ContentBrowserClient::ShouldUseWindowsPrefetchArgument() const {
+  return true;
+}
+#endif  // defined(OS_WIN)
 
 #if defined(VIDEO_HOLE)
 ExternalVideoSurfaceContainer*

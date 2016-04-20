@@ -1,3 +1,4 @@
+CONSOLE WARNING: The <keygen> element is deprecated and will be removed in M54, around October 2016. See https://www.chromestatus.com/features/5716060992962560 for more details.
 This test documents all properties on all element instances.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -82,6 +83,7 @@ namespace http://www.w3.org/1999/xhtml
     property insertAdjacentHTML
     property insertAdjacentText
     property insertBefore
+    property isConnected
     property isContentEditable
     property isDefaultNamespace
     property isEqualNode
@@ -200,6 +202,7 @@ namespace http://www.w3.org/1999/xhtml
     property replaceChild
     property requestFullscreen
     property requestPointerLock
+    property rootNode
     property scroll
     property scrollBy
     property scrollHeight
@@ -217,6 +220,7 @@ namespace http://www.w3.org/1999/xhtml
     property slot
     property spellcheck
     property style
+    property styleMap
     property tabIndex
     property tagName
     property textContent
@@ -269,6 +273,7 @@ html element area
     property ping
     property port
     property protocol
+    property referrerpolicy
     property search
     property shape
     property target
@@ -290,6 +295,7 @@ html element audio
     property autoplay
     property buffered
     property canPlayType
+    property captureStream
     property controls
     property crossOrigin
     property currentSrc
@@ -306,10 +312,6 @@ html element audio
     property muted
     property networkState
     property onencrypted
-    property onwebkitkeyadded
-    property onwebkitkeyerror
-    property onwebkitkeymessage
-    property onwebkitneedkey
     property pause
     property paused
     property play
@@ -317,19 +319,18 @@ html element audio
     property played
     property preload
     property readyState
+    property remote
     property seekable
     property seeking
     property setMediaKeys
     property setSinkId
     property sinkId
     property src
+    property srcObject
     property textTracks
     property videoTracks
     property volume
-    property webkitAddKey
     property webkitAudioDecodedByteCount
-    property webkitCancelKeyRequest
-    property webkitGenerateKeyRequest
     property webkitVideoDecodedByteCount
 html element b
 html element base
@@ -389,6 +390,7 @@ html element canvas
     property height
     property toBlob
     property toDataURL
+    property transferControlToOffscreen
     property width
 html element caption
     property align
@@ -677,6 +679,7 @@ html element link
     property rel
     property relList
     property rev
+    property scope
     property sheet
     property sizes
     property target
@@ -855,8 +858,7 @@ html element select
 html element shadow
     property getDistributedNodes
 html element slot
-    property getAssignedNodes
-    property getDistributedNodes
+    property assignedNodes
     property name
 html element small
 html element source
@@ -1037,6 +1039,7 @@ html element video
     property autoplay
     property buffered
     property canPlayType
+    property captureStream
     property controls
     property crossOrigin
     property currentSrc
@@ -1055,10 +1058,6 @@ html element video
     property muted
     property networkState
     property onencrypted
-    property onwebkitkeyadded
-    property onwebkitkeyerror
-    property onwebkitkeymessage
-    property onwebkitneedkey
     property pause
     property paused
     property play
@@ -1067,20 +1066,20 @@ html element video
     property poster
     property preload
     property readyState
+    property remote
     property seekable
     property seeking
     property setMediaKeys
     property setSinkId
     property sinkId
     property src
+    property srcObject
     property textTracks
     property videoHeight
     property videoTracks
     property videoWidth
     property volume
-    property webkitAddKey
     property webkitAudioDecodedByteCount
-    property webkitCancelKeyRequest
     property webkitDecodedFrameCount
     property webkitDisplayingFullscreen
     property webkitDroppedFrameCount
@@ -1088,7 +1087,6 @@ html element video
     property webkitEnterFullscreen
     property webkitExitFullScreen
     property webkitExitFullscreen
-    property webkitGenerateKeyRequest
     property webkitSupportsFullscreen
     property webkitVideoDecodedByteCount
     property width
@@ -1174,6 +1172,7 @@ namespace http://www.w3.org/2000/svg
     property insertAdjacentHTML
     property insertAdjacentText
     property insertBefore
+    property isConnected
     property isContentEditable
     property isDefaultNamespace
     property isEqualNode
@@ -1292,6 +1291,7 @@ namespace http://www.w3.org/2000/svg
     property replaceChild
     property requestFullscreen
     property requestPointerLock
+    property rootNode
     property scroll
     property scrollBy
     property scrollHeight
@@ -1309,6 +1309,7 @@ namespace http://www.w3.org/2000/svg
     property slot
     property spellcheck
     property style
+    property styleMap
     property tabIndex
     property tagName
     property textContent

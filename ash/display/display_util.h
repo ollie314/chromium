@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "ash/ash_export.h"
-#include "ash/display/display_layout.h"
+#include "ui/display/manager/display_layout.h"
 
 namespace gfx {
 class Display;
@@ -62,11 +62,10 @@ ASH_EXPORT bool SetDisplayUIScale(int64_t display_id, float scale);
 // Tests if the |info| has display mode that matches |ui_scale|.
 bool HasDisplayModeForUIScale(const DisplayInfo& info, float ui_scale);
 
-// Computes the bounds that defines the bounds between two displays
-// based on the layout |position|.
-void ComputeBoundary(const gfx::Display& primary_display,
+// Computes the bounds that defines the bounds between two displays.
+// Returns false if two displays do not intersect.
+bool ComputeBoundary(const gfx::Display& primary_display,
                      const gfx::Display& secondary_display,
-                     DisplayLayout::Position position,
                      gfx::Rect* primary_edge_in_screen,
                      gfx::Rect* secondary_edge_in_screen);
 
@@ -89,9 +88,36 @@ ASH_EXPORT int FindDisplayIndexContainingPoint(
     const std::vector<gfx::Display>& displays,
     const gfx::Point& point_in_screen);
 
-// Creates the DisplayIdPair where ids are sorted using |CompareDisplayIds|
-// below.
-ASH_EXPORT DisplayIdPair CreateDisplayIdPair(int64_t id1, int64_t id2);
+// Sorts id list using |CompareDisplayIds| below.
+ASH_EXPORT void SortDisplayIdList(display::DisplayIdList* list);
+
+// Default id generator.
+class DefaultDisplayIdGenerator {
+ public:
+  int64_t operator()(int64_t id) { return id; }
+};
+
+// Generate sorted display::DisplayIdList from iterators.
+template <class ForwardIterator, class Generator = DefaultDisplayIdGenerator>
+display::DisplayIdList GenerateDisplayIdList(
+    ForwardIterator first,
+    ForwardIterator last,
+    Generator generator = Generator()) {
+  display::DisplayIdList list;
+  while (first != last) {
+    list.push_back(generator(*first));
+    ++first;
+  }
+  SortDisplayIdList(&list);
+  return list;
+}
+
+// Creates sorted display::DisplayIdList.
+ASH_EXPORT display::DisplayIdList CreateDisplayIdList(
+    const display::DisplayList& list);
+
+ASH_EXPORT std::string DisplayIdListToString(
+    const display::DisplayIdList& list);
 
 // Returns true if one of following conditinos is met.
 // 1) id1 is internal.

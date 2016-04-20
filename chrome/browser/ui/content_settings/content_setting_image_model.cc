@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -15,7 +16,7 @@
 #include "content/public/browser/web_contents.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/material_design/material_design_controller.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
@@ -228,19 +229,19 @@ void ContentSettingSimpleImageModel::SetAnimationHasRun(
 }
 
 // static
-scoped_ptr<ContentSettingImageModel>
-    ContentSettingSimpleImageModel::CreateForContentTypeForTesting(
-        ContentSettingsType content_settings_type) {
+std::unique_ptr<ContentSettingImageModel>
+ContentSettingSimpleImageModel::CreateForContentTypeForTesting(
+    ContentSettingsType content_settings_type) {
   if (content_settings_type == CONTENT_SETTINGS_TYPE_GEOLOCATION)
-    return make_scoped_ptr(new ContentSettingGeolocationImageModel());
+    return base::WrapUnique(new ContentSettingGeolocationImageModel());
 
   if (content_settings_type == CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS)
-    return make_scoped_ptr(new ContentSettingRPHImageModel());
+    return base::WrapUnique(new ContentSettingRPHImageModel());
 
   if (content_settings_type == CONTENT_SETTINGS_TYPE_MIDI_SYSEX)
-    return make_scoped_ptr(new ContentSettingMIDISysExImageModel());
+    return base::WrapUnique(new ContentSettingMIDISysExImageModel());
 
-  return make_scoped_ptr(
+  return base::WrapUnique(
       new ContentSettingBlockedImageModel(content_settings_type));
 }
 

@@ -12,9 +12,6 @@
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_member.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -26,10 +23,12 @@
 #include "chrome/browser/chromeos/input_method/input_method_syncer.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/net/wake_on_wifi_manager.h"
+#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
+#include "chrome/browser/chromeos/system/timezone_resolver_manager.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/system/statistics_provider.h"
@@ -37,6 +36,9 @@
 #include "components/drive/drive_pref_names.h"
 #include "components/feedback/tracing_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_member.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user.h"
@@ -92,9 +94,14 @@ void Preferences::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kOwnerTapToClickEnabled, true);
   registry->RegisterBooleanPref(prefs::kAccessibilityVirtualKeyboardEnabled,
                                 false);
+  registry->RegisterBooleanPref(prefs::kAccessibilityMonoAudioEnabled,
+                                false);
   registry->RegisterStringPref(prefs::kLogoutStartedLast, std::string());
   registry->RegisterBooleanPref(prefs::kResolveDeviceTimezoneByGeolocation,
                                 true);
+  registry->RegisterIntegerPref(
+      prefs::kSystemTimezoneAutomaticDetectionPolicy,
+      enterprise_management::SystemTimezoneProto::USERS_DECIDE);
 }
 
 // static
@@ -177,8 +184,26 @@ void Preferences::RegisterProfilePrefs(
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kShouldAlwaysShowAccessibilityMenu,
+      prefs::kAccessibilityMonoAudioEnabled,
       false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kAccessibilityCaretHighlightEnabled, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kAccessibilityCursorHighlightEnabled, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kAccessibilityFocusHighlightEnabled, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kAccessibilitySelectToSpeakEnabled, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kAccessibilitySwitchAccessEnabled, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kShouldAlwaysShowAccessibilityMenu, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterIntegerPref(
       prefs::kMouseSensitivity,
@@ -286,7 +311,7 @@ void Preferences::RegisterProfilePrefs(
 
   registry->RegisterBooleanPref(prefs::kForceMaximizeOnFirstRun, false);
 
-  registry->RegisterBooleanPref(prefs::kLangugaeImeMenuActivated, false);
+  registry->RegisterBooleanPref(prefs::kLanguageImeMenuActivated, false);
 }
 
 void Preferences::InitUserPrefs(syncable_prefs::PrefServiceSyncable* prefs) {
@@ -319,7 +344,11 @@ void Preferences::InitUserPrefs(syncable_prefs::PrefServiceSyncable* prefs) {
                              prefs, callback);
   previous_input_method_.Init(prefs::kLanguagePreviousInputMethod,
                               prefs, callback);
-  ime_menu_activated_.Init(prefs::kLangugaeImeMenuActivated, prefs, callback);
+  ime_menu_activated_.Init(prefs::kLanguageImeMenuActivated, prefs, callback);
+  // Notifies the system tray to remove the IME items.
+  if (base::FeatureList::IsEnabled(features::kOptInImeMenu) &&
+      ime_menu_activated_.GetValue())
+    input_method::InputMethodManager::Get()->ImeMenuActivationChanged(true);
 
   xkb_auto_repeat_enabled_.Init(
       prefs::kLanguageXkbAutoRepeatEnabled, prefs, callback);
@@ -354,6 +383,12 @@ void Preferences::Init(Profile* profile, const user_manager::User* user) {
   UserSessionManager* session_manager = UserSessionManager::GetInstance();
   DCHECK(session_manager);
   ime_state_ = session_manager->GetDefaultIMEState(profile);
+
+  if (user_is_primary_) {
+    g_browser_process->platform_part()
+        ->GetTimezoneResolverManager()
+        ->SetPrimaryUserPrefs(prefs_);
+  }
 
   // Initialize preferences to currently saved state.
   ApplyPreferences(REASON_INITIALIZATION, "");
@@ -585,14 +620,12 @@ void Preferences::ApplyPreferences(ApplyReason reason,
     ime_state_->SetEnabledExtensionImes(&split_values);
   }
 
-  if (pref_name == prefs::kLangugaeImeMenuActivated &&
-      (reason == REASON_PREF_CHANGED || reason == REASON_ACTIVE_USER_CHANGED)) {
+  if (pref_name == prefs::kLanguageImeMenuActivated &&
+      (reason == REASON_PREF_CHANGED || reason == REASON_ACTIVE_USER_CHANGED) &&
+      base::FeatureList::IsEnabled(features::kOptInImeMenu)) {
     const bool activated = ime_menu_activated_.GetValue();
-    if (activated)
-      DVLOG(1) << "IME menu is activated.";
-    else
-      DVLOG(1) << "IME menu is deactivated.";
-    // TODO(azurewei): Fire inputMethodPrivate API event.
+    input_method::InputMethodManager::Get()->ImeMenuActivationChanged(
+        activated);
   }
 
   if (user_is_active) {
@@ -624,15 +657,13 @@ void Preferences::ApplyPreferences(ApplyReason reason,
           prefs::kResolveDeviceTimezoneByGeolocation, value);
     }
     if (user_is_primary_) {
-      if (value) {
-        g_browser_process->platform_part()->GetTimezoneResolver()->Start();
-      } else {
-        g_browser_process->platform_part()->GetTimezoneResolver()->Stop();
-        if (reason == REASON_PREF_CHANGED) {
-          // Allow immediate timezone update on Stop + Start.
-          g_browser_process->local_state()->ClearPref(
-              TimeZoneResolver::kLastTimeZoneRefreshTime);
-        }
+      g_browser_process->platform_part()
+          ->GetTimezoneResolverManager()
+          ->UpdateTimezoneResolver();
+      if (!value && reason == REASON_PREF_CHANGED) {
+        // Allow immediate timezone update on Stop + Start.
+        g_browser_process->local_state()->ClearPref(
+            TimeZoneResolver::kLastTimeZoneRefreshTime);
       }
     }
   }

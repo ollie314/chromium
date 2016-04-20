@@ -5,6 +5,8 @@
 #include "components/arc/arc_bridge_bootstrap.h"
 
 #include <fcntl.h>
+#include <grp.h>
+#include <unistd.h>
 
 #include <utility>
 
@@ -12,6 +14,7 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/task_runner_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_checker.h"
@@ -20,10 +23,12 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "ipc/unix_domain_socket_util.h"
+#include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/platform_channel_pair.h"
+#include "mojo/edk/embedder/platform_channel_utils_posix.h"
+#include "mojo/edk/embedder/platform_handle_vector.h"
+#include "mojo/edk/embedder/scoped_platform_handle.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "third_party/mojo/src/mojo/edk/embedder/embedder.h"
-#include "third_party/mojo/src/mojo/edk/embedder/platform_channel_pair.h"
-#include "third_party/mojo/src/mojo/edk/embedder/scoped_platform_handle.h"
 
 namespace arc {
 
@@ -32,7 +37,7 @@ namespace {
 const base::FilePath::CharType kArcBridgeSocketPath[] =
     FILE_PATH_LITERAL("/var/run/chrome/arc_bridge.sock");
 
-void OnChannelCreated(mojo::embedder::ChannelInfo* channel) {}
+const char kArcBridgeSocketGroup[] = "arc-bridge";
 
 class ArcBridgeBootstrapImpl : public ArcBridgeBootstrap {
  public:
@@ -75,7 +80,7 @@ class ArcBridgeBootstrapImpl : public ArcBridgeBootstrap {
     // The instance has started. Waiting for it to connect to the IPC bridge.
     STARTED,
 
-    // The instance has finished booting.
+    // The instance is fully connected.
     READY,
 
     // The request to shut down the instance has been sent.
@@ -161,9 +166,28 @@ base::ScopedFD ArcBridgeBootstrapImpl::CreateSocket() {
     return base::ScopedFD();
   }
 
-  // TODO(lhchavez): Tighten the security around the socket by tying it to
-  // the user the instance will run as.
-  if (!base::SetPosixFilePermissions(socket_path, 0777)) {
+  // Change permissions on the socket.
+  struct group arc_bridge_group;
+  struct group* arc_bridge_group_res = nullptr;
+  char buf[10000];
+  if (HANDLE_EINTR(getgrnam_r(kArcBridgeSocketGroup, &arc_bridge_group, buf,
+                              sizeof(buf), &arc_bridge_group_res)) < 0) {
+    PLOG(ERROR) << "getgrnam_r";
+    return base::ScopedFD();
+  }
+
+  if (!arc_bridge_group_res) {
+    LOG(ERROR) << "Group '" << kArcBridgeSocketGroup << "' not found";
+    return base::ScopedFD();
+  }
+
+  if (HANDLE_EINTR(chown(kArcBridgeSocketPath, -1, arc_bridge_group.gr_gid)) <
+      0) {
+    PLOG(ERROR) << "chown";
+    return base::ScopedFD();
+  }
+
+  if (!base::SetPosixFilePermissions(socket_path, 0660)) {
     PLOG(ERROR) << "Could not set permissions: " << socket_path.value();
     return base::ScopedFD();
   }
@@ -224,7 +248,26 @@ base::ScopedFD ArcBridgeBootstrapImpl::AcceptInstanceConnection(
   if (!IPC::ServerAcceptConnection(socket_fd.get(), &raw_fd)) {
     return base::ScopedFD();
   }
-  return base::ScopedFD(raw_fd);
+  base::ScopedFD scoped_fd(raw_fd);
+
+  // Hardcode pid 0 since it is unused in mojo.
+  const base::ProcessHandle kUnusedChildProcessHandle = 0;
+  mojo::edk::ScopedPlatformHandle child_handle =
+      mojo::edk::ChildProcessLaunched(kUnusedChildProcessHandle);
+
+  mojo::edk::ScopedPlatformHandleVectorPtr handles(
+      new mojo::edk::PlatformHandleVector{child_handle.release()});
+
+  struct iovec iov = {const_cast<char*>(""), 1};
+  ssize_t result = mojo::edk::PlatformChannelSendmsgWithHandles(
+      mojo::edk::PlatformHandle(scoped_fd.get()), &iov, 1, handles->data(),
+      handles->size());
+  if (result == -1) {
+    PLOG(ERROR) << "sendmsg";
+    return base::ScopedFD();
+  }
+
+  return scoped_fd;
 }
 
 void ArcBridgeBootstrapImpl::OnInstanceConnected(base::ScopedFD fd) {
@@ -233,14 +276,20 @@ void ArcBridgeBootstrapImpl::OnInstanceConnected(base::ScopedFD fd) {
     VLOG(1) << "Stop() called when ARC is not running";
     return;
   }
+  if (!fd.is_valid()) {
+    LOG(ERROR) << "Invalid handle";
+    return;
+  }
+  mojo::ScopedMessagePipeHandle server_pipe = mojo::edk::CreateMessagePipe(
+      mojo::edk::ScopedPlatformHandle(mojo::edk::PlatformHandle(fd.release())));
+  if (!server_pipe.is_valid()) {
+    LOG(ERROR) << "Invalid pipe";
+    return;
+  }
   SetState(State::READY);
-  mojo::ScopedMessagePipeHandle server_pipe = mojo::embedder::CreateChannel(
-      mojo::embedder::ScopedPlatformHandle(
-          mojo::embedder::PlatformHandle(fd.release())),
-      base::Bind(&OnChannelCreated), base::ThreadTaskRunnerHandle::Get());
-  ArcBridgeInstancePtr instance;
-  instance.Bind(
-      mojo::InterfacePtrInfo<ArcBridgeInstance>(std::move(server_pipe), 0u));
+  mojom::ArcBridgeInstancePtr instance;
+  instance.Bind(mojo::InterfacePtrInfo<mojom::ArcBridgeInstance>(
+      std::move(server_pipe), 0u));
   delegate_->OnConnectionEstablished(std::move(instance));
 }
 
@@ -284,6 +333,7 @@ void ArcBridgeBootstrapImpl::SetState(State state) {
 }  // namespace
 
 ArcBridgeBootstrap::ArcBridgeBootstrap() {}
+
 ArcBridgeBootstrap::~ArcBridgeBootstrap() {}
 
 // static

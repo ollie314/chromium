@@ -7,28 +7,26 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "cc/layers/picture_layer.h"
-#include "cc/playback/display_list_recording_source.h"
+#include "cc/playback/recording_source.h"
 
 namespace cc {
 class FakePictureLayer : public PictureLayer {
  public:
-  static scoped_refptr<FakePictureLayer> Create(const LayerSettings& settings,
-                                                ContentLayerClient* client) {
-    return make_scoped_refptr(new FakePictureLayer(settings, client));
+  static scoped_refptr<FakePictureLayer> Create(ContentLayerClient* client) {
+    return make_scoped_refptr(new FakePictureLayer(client));
   }
 
   static scoped_refptr<FakePictureLayer> CreateWithRecordingSource(
-      const LayerSettings& settings,
       ContentLayerClient* client,
-      scoped_ptr<DisplayListRecordingSource> source) {
-    return make_scoped_refptr(
-        new FakePictureLayer(settings, client, std::move(source)));
+      std::unique_ptr<RecordingSource> source) {
+    return make_scoped_refptr(new FakePictureLayer(client, std::move(source)));
   }
 
-  scoped_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
+  std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
 
   int update_count() const { return update_count_; }
   void reset_update_count() { update_count_ = 0; }
@@ -45,10 +43,9 @@ class FakePictureLayer : public PictureLayer {
   void PushPropertiesTo(LayerImpl* layer) override;
 
  private:
-  FakePictureLayer(const LayerSettings& settings, ContentLayerClient* client);
-  FakePictureLayer(const LayerSettings& settings,
-                   ContentLayerClient* client,
-                   scoped_ptr<DisplayListRecordingSource> source);
+  explicit FakePictureLayer(ContentLayerClient* client);
+  FakePictureLayer(ContentLayerClient* client,
+                   std::unique_ptr<RecordingSource> source);
   ~FakePictureLayer() override;
 
   int update_count_;

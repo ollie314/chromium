@@ -32,14 +32,18 @@ class ChromeUpdateClientConfig : public UpdateClientConfig {
   std::vector<GURL> PingUrl() const override;
   base::Version GetBrowserVersion() const override;
   std::string GetChannel() const override;
+  std::string GetBrand() const override;
   std::string GetLang() const override;
   std::string GetOSLongName() const override;
   std::string ExtraRequestParams() const override;
+  std::string GetDownloadPreference() const override;
   net::URLRequestContextGetter* RequestContext() const override;
   scoped_refptr<update_client::OutOfProcessPatcher> CreateOutOfProcessPatcher()
       const override;
   bool DeltasEnabled() const override;
   bool UseBackgroundDownloader() const override;
+  bool UseCupSigning() const override;
+  PrefService* GetPrefService() const override;
 
  protected:
   friend class base::RefCountedThreadSafe<ChromeUpdateClientConfig>;

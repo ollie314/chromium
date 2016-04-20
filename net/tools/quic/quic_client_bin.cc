@@ -48,6 +48,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/privacy_mode.h"
@@ -113,7 +114,7 @@ class FakeCertVerifier : public net::CertVerifier {
              net::CRLSet* crl_set,
              net::CertVerifyResult* verify_result,
              const net::CompletionCallback& callback,
-             scoped_ptr<net::CertVerifier::Request>* out_req,
+             std::unique_ptr<net::CertVerifier::Request>* out_req,
              const net::BoundNetLog& net_log) override {
     return net::OK;
   }
@@ -158,8 +159,6 @@ int main(int argc, char* argv[]) {
   logging::LoggingSettings settings;
   settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
   CHECK(logging::InitLogging(settings));
-
-  FLAGS_quic_supports_trailers = true;
 
   if (line->HasSwitch("h") || line->HasSwitch("help") || urls.empty()) {
     const char* help_str =
@@ -241,7 +240,7 @@ int main(int argc, char* argv[]) {
   base::MessageLoopForIO message_loop;
 
   // Determine IP address to connect to from supplied hostname.
-  net::IPAddressNumber ip_addr;
+  net::IPAddress ip_addr;
 
   GURL url(urls[0]);
   string host = FLAGS_host;
@@ -252,9 +251,9 @@ int main(int argc, char* argv[]) {
   if (port == 0) {
     port = url.EffectiveIntPort();
   }
-  if (!net::ParseIPLiteralToNumber(host, &ip_addr)) {
+  if (!ip_addr.AssignFromIPLiteral(host)) {
     net::AddressList addresses;
-    int rv = net::tools::SynchronousHostResolver::Resolve(host, &addresses);
+    int rv = net::SynchronousHostResolver::Resolve(host, &addresses);
     if (rv != net::OK) {
       LOG(ERROR) << "Unable to resolve '" << host
                  << "' : " << net::ErrorToShortString(rv);
@@ -276,19 +275,19 @@ int main(int argc, char* argv[]) {
     versions.push_back(static_cast<net::QuicVersion>(FLAGS_quic_version));
   }
   // For secure QUIC we need to verify the cert chain.
-  scoped_ptr<CertVerifier> cert_verifier(CertVerifier::CreateDefault());
+  std::unique_ptr<CertVerifier> cert_verifier(CertVerifier::CreateDefault());
   if (line->HasSwitch("disable-certificate-verification")) {
     cert_verifier.reset(new FakeCertVerifier());
   }
-  scoped_ptr<TransportSecurityState> transport_security_state(
+  std::unique_ptr<TransportSecurityState> transport_security_state(
       new TransportSecurityState);
   transport_security_state.reset(new TransportSecurityState);
-  scoped_ptr<CTVerifier> ct_verifier(new MultiLogCTVerifier());
+  std::unique_ptr<CTVerifier> ct_verifier(new MultiLogCTVerifier());
   ProofVerifierChromium* proof_verifier = new ProofVerifierChromium(
       cert_verifier.get(), nullptr, transport_security_state.get(),
       ct_verifier.get());
-  net::tools::QuicClient client(net::IPEndPoint(ip_addr, FLAGS_port), server_id,
-                                versions, &epoll_server, proof_verifier);
+  net::QuicClient client(net::IPEndPoint(ip_addr, FLAGS_port), server_id,
+                         versions, &epoll_server, proof_verifier);
   client.set_initial_max_packet_length(
       FLAGS_initial_mtu != 0 ? FLAGS_initial_mtu : net::kDefaultMaxPacketSize);
   if (!client.Initialize()) {
@@ -345,7 +344,7 @@ int main(int argc, char* argv[]) {
 
   // Send the request.
   net::SpdyHeaderBlock header_block =
-      net::tools::SpdyBalsaUtils::RequestHeadersToSpdyHeaders(headers);
+      net::SpdyBalsaUtils::RequestHeadersToSpdyHeaders(headers);
   client.SendRequestAndWaitForResponse(headers, body, /*fin=*/true);
 
   // Print request and response details.

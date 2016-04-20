@@ -12,15 +12,21 @@
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
 
+#if defined(USE_OZONE)
+#include "ui/ozone/public/ozone_platform.h"
+#endif
+
 namespace mus {
 
-GpuState::GpuState(bool hardware_rendering_available)
+GpuState::GpuState()
     : gpu_thread_("gpu_thread"),
       control_thread_("gpu_command_buffer_control"),
-      hardware_rendering_available_(hardware_rendering_available) {
+      gpu_driver_bug_workarounds_(base::CommandLine::ForCurrentProcess()),
+      hardware_rendering_available_(false) {
   base::ThreadRestrictions::ScopedAllowWait allow_wait;
   gpu_thread_.Start();
   control_thread_.Start();
+  control_thread_task_runner_ = control_thread_.task_runner();
   base::WaitableEvent event(true, false);
   gpu_thread_.task_runner()->PostTask(
       FROM_HERE, base::Bind(&GpuState::InitializeOnGpuThread,
@@ -32,10 +38,17 @@ GpuState::~GpuState() {}
 
 void GpuState::StopThreads() {
   control_thread_.Stop();
+  gpu_thread_.task_runner()->PostTask(
+      FROM_HERE,
+      base::Bind(&GpuState::DestroyGpuSpecificStateOnGpuThread, this));
   gpu_thread_.Stop();
 }
 
 void GpuState::InitializeOnGpuThread(base::WaitableEvent* event) {
+#if defined(USE_OZONE)
+  ui::OzonePlatform::InitializeForGPU();
+#endif
+  hardware_rendering_available_ = gfx::GLSurface::InitializeOneOff();
   command_buffer_task_runner_ = new CommandBufferTaskRunner;
   driver_manager_.reset(new CommandBufferDriverManager);
   sync_point_manager_.reset(new gpu::SyncPointManager(true));
@@ -58,6 +71,11 @@ void GpuState::InitializeOnGpuThread(base::WaitableEvent* event) {
         << "Collect context graphics info failed!";
   }
   event->Signal();
+
+}
+
+void GpuState::DestroyGpuSpecificStateOnGpuThread() {
+  driver_manager_.reset();
 }
 
 }  // namespace mus

@@ -5,11 +5,12 @@
 #ifndef ASH_WM_WINDOW_RESIZER_H_
 #define ASH_WM_WINDOW_RESIZER_H_
 
+#include <memory>
+
 #include "ash/ash_export.h"
 #include "ash/wm/drag_details.h"
 #include "ash/wm/window_state.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/wm/public/window_move_client.h"
 
@@ -56,7 +57,7 @@ class ASH_EXPORT WindowResizer {
 
   // Returns the target window the resizer was created for.
   aura::Window* GetTarget() const {
-    return window_state_ ? window_state_->window() : NULL;
+    return window_state_ ? window_state_->aura_window() : NULL;
   }
 
   // See comment for |DragDetails::initial_location_in_parent|.
@@ -98,7 +99,8 @@ class ASH_EXPORT WindowResizer {
 
 // Creates a WindowResizer for |window|. This can return a scoped_ptr
 // initialized with NULL if |window| should not be resized nor dragged.
-ASH_EXPORT scoped_ptr<WindowResizer> CreateWindowResizer(
+// TODO(sky): move this to its own file. This is aura specific.
+ASH_EXPORT std::unique_ptr<WindowResizer> CreateWindowResizer(
     aura::Window* window,
     const gfx::Point& point_in_parent,
     int window_component,

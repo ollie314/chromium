@@ -4,6 +4,7 @@
 
 #include "chrome/common/pepper_permission_util.h"
 
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -26,13 +27,15 @@ namespace {
 scoped_refptr<Extension> CreateExtensionImportingModule(
     const std::string& import_id,
     const std::string& id) {
-  scoped_ptr<base::DictionaryValue> manifest =
+  std::unique_ptr<base::DictionaryValue> manifest =
       DictionaryBuilder()
           .Set("name", "Has Dependent Modules")
           .Set("version", "1.0")
           .Set("manifest_version", 2)
-          .Set("import", std::move(ListBuilder().Append(std::move(
-                             DictionaryBuilder().Set("id", import_id)))))
+          .Set("import",
+               ListBuilder()
+                   .Append(DictionaryBuilder().Set("id", import_id).Build())
+                   .Build())
           .Build();
 
   return ExtensionBuilder()
@@ -49,7 +52,7 @@ TEST(PepperPermissionUtilTest, ExtensionWhitelisting) {
   ExtensionSet extensions;
   std::string whitelisted_id =
       crx_file::id_util::GenerateId("whitelisted_extension");
-  scoped_ptr<base::DictionaryValue> manifest =
+  std::unique_ptr<base::DictionaryValue> manifest =
       DictionaryBuilder()
           .Set("name", "Whitelisted Extension")
           .Set("version", "1.0")
@@ -86,19 +89,19 @@ TEST(PepperPermissionUtilTest, SharedModuleWhitelisting) {
   std::string whitelisted_id = crx_file::id_util::GenerateId("extension_id");
   std::string bad_id = crx_file::id_util::GenerateId("bad_id");
 
-  scoped_ptr<base::DictionaryValue> shared_module_manifest =
+  std::unique_ptr<base::DictionaryValue> shared_module_manifest =
       DictionaryBuilder()
           .Set("name", "Whitelisted Shared Module")
           .Set("version", "1.0")
           .Set("manifest_version", 2)
           .Set("export",
-               std::move(
-                   DictionaryBuilder()
-                       .Set("resources", std::move(ListBuilder().Append("*")))
-                       // Add the extension to the whitelist.  This
-                       // restricts import to |whitelisted_id| only.
-                       .Set("whitelist",
-                            std::move(ListBuilder().Append(whitelisted_id)))))
+               DictionaryBuilder()
+                   .Set("resources", ListBuilder().Append("*").Build())
+                   // Add the extension to the whitelist.  This
+                   // restricts import to |whitelisted_id| only.
+                   .Set("whitelist",
+                        ListBuilder().Append(whitelisted_id).Build())
+                   .Build())
           .Build();
   scoped_refptr<Extension> shared_module =
       ExtensionBuilder().SetManifest(std::move(shared_module_manifest)).Build();

@@ -5,9 +5,9 @@
 #ifndef UI_OZONE_PUBLIC_OZONE_PLATFORM_H_
 #define UI_OZONE_PUBLIC_OZONE_PLATFORM_H_
 
-#include "base/files/scoped_file.h"
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "ui/ozone/ozone_export.h"
 
 namespace gfx {
@@ -64,15 +64,12 @@ class OZONE_EXPORT OzonePlatform {
   virtual ui::InputController* GetInputController() = 0;
   virtual ui::GpuPlatformSupport* GetGpuPlatformSupport() = 0;
   virtual ui::GpuPlatformSupportHost* GetGpuPlatformSupportHost() = 0;
-  virtual scoped_ptr<SystemInputInjector> CreateSystemInputInjector() = 0;
-  virtual scoped_ptr<PlatformWindow> CreatePlatformWindow(
+  virtual std::unique_ptr<SystemInputInjector> CreateSystemInputInjector() = 0;
+  virtual std::unique_ptr<PlatformWindow> CreatePlatformWindow(
       PlatformWindowDelegate* delegate,
       const gfx::Rect& bounds) = 0;
-  virtual scoped_ptr<ui::NativeDisplayDelegate>
-      CreateNativeDisplayDelegate() = 0;
-  // Open ClientNativePixmap device file for non-GPU processes to import a
-  // ClientNativePixmap.
-  virtual base::ScopedFD OpenClientNativePixmapDevice() const = 0;
+  virtual std::unique_ptr<ui::NativeDisplayDelegate>
+  CreateNativeDisplayDelegate() = 0;
 
  private:
   virtual void InitializeUI() = 0;

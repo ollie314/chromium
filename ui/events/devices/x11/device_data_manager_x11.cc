@@ -218,7 +218,6 @@ bool DeviceDataManagerX11::IsXInput2Available() const {
 void DeviceDataManagerX11::UpdateDeviceList(Display* display) {
   cmt_devices_.reset();
   touchpads_.reset();
-  scrollclass_devices_.reset();
   master_pointers_.clear();
   for (int i = 0; i < kMaxDeviceNum; ++i) {
     valuator_count_[i] = 0;
@@ -424,14 +423,13 @@ int DeviceDataManagerX11::GetScrollClassEventDetail(const XEvent& xev) const {
   XIDeviceEvent* xievent = static_cast<XIDeviceEvent*>(xev.xcookie.data);
   if (xievent->sourceid >= kMaxDeviceNum)
     return SCROLL_TYPE_NO_SCROLL;
-  if (!scrollclass_devices_[xievent->sourceid])
-    return SCROLL_TYPE_NO_SCROLL;
   int horizontal_id = scroll_data_[xievent->sourceid].horizontal.number;
   int vertical_id = scroll_data_[xievent->sourceid].vertical.number;
-  return (XIMaskIsSet(xievent->valuators.mask, horizontal_id)
+  return (horizontal_id != -1 &&
+                  XIMaskIsSet(xievent->valuators.mask, horizontal_id)
               ? SCROLL_TYPE_HORIZONTAL
               : 0) |
-         (XIMaskIsSet(xievent->valuators.mask, vertical_id)
+         (vertical_id != -1 && XIMaskIsSet(xievent->valuators.mask, vertical_id)
               ? SCROLL_TYPE_VERTICAL
               : 0);
 }
@@ -787,7 +785,6 @@ void DeviceDataManagerX11::UpdateScrollClassDevice(
       info.horizontal.seen = false;
       break;
   }
-  scrollclass_devices_[deviceid] = true;
 }
 
 double DeviceDataManagerX11::ExtractAndUpdateScrollOffset(
@@ -801,22 +798,8 @@ double DeviceDataManagerX11::ExtractAndUpdateScrollOffset(
   return offset / axis->increment;
 }
 
-bool DeviceDataManagerX11::TouchEventNeedsCalibrate(int touch_device_id) const {
-#if defined(OS_CHROMEOS)
-  if (!base::SysInfo::IsRunningOnChromeOS())
-    return false;
-
-  const std::vector<TouchscreenDevice>& touch_devices =
-      ui::DeviceDataManager::GetInstance()->touchscreen_devices();
-  std::vector<TouchscreenDevice>::const_iterator it = FindDeviceWithId(
-      touch_devices.begin(), touch_devices.end(), touch_device_id);
-  return it != touch_devices.end() && it->type == INPUT_DEVICE_INTERNAL;
-#endif  // defined(OS_CHROMEOS)
-  return false;
-}
-
 void DeviceDataManagerX11::SetDisabledKeyboardAllowedKeys(
-    scoped_ptr<std::set<KeyboardCode> > excepted_keys) {
+    std::unique_ptr<std::set<KeyboardCode>> excepted_keys) {
   DCHECK(!excepted_keys.get() ||
          !blocked_keyboard_allowed_keys_.get());
   blocked_keyboard_allowed_keys_ = std::move(excepted_keys);

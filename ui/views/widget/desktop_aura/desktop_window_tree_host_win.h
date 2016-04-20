@@ -48,8 +48,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   void Init(aura::Window* content_window,
             const Widget::InitParams& params) override;
   void OnNativeWidgetCreated(const Widget::InitParams& params) override;
-  scoped_ptr<corewm::Tooltip> CreateTooltip() override;
-  scoped_ptr<aura::client::DragDropClient> CreateDragDropClient(
+  std::unique_ptr<corewm::Tooltip> CreateTooltip() override;
+  std::unique_ptr<aura::client::DragDropClient> CreateDragDropClient(
       DesktopNativeCursorManager* cursor_manager) override;
   void Close() override;
   void CloseNow() override;
@@ -126,11 +126,12 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   void OnWindowHidingAnimationCompleted() override;
 
   // Overridden from HWNDMessageHandlerDelegate:
-  bool IsWidgetWindow() const override;
-  bool IsUsingCustomFrame() const override;
+  bool HasNonClientView() const override;
+  FrameMode GetFrameMode() const override;
+  bool HasFrame() const override;
   void SchedulePaint() override;
-  void EnableInactiveRendering() override;
-  bool IsInactiveRenderingDisabled() override;
+  void SetAlwaysRenderAsActive(bool always_render_as_active) override;
+  bool IsAlwaysRenderAsActive() override;
   bool CanResize() const override;
   bool CanMaximize() const override;
   bool CanMinimize() const override;
@@ -145,6 +146,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   bool GetClientAreaInsets(gfx::Insets* insets) const override;
   void GetMinMaxSize(gfx::Size* min_size, gfx::Size* max_size) const override;
   gfx::Size GetRootViewSize() const override;
+  gfx::Size DIPToScreenSize(const gfx::Size& dip_size) const override;
   void ResetWindowControls() override;
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
   bool ShouldHandleSystemCommands() const override;
@@ -204,8 +206,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   // Returns true if a modal window is active in the current root window chain.
   bool IsModalWindowActive() const;
 
-  scoped_ptr<HWNDMessageHandler> message_handler_;
-  scoped_ptr<aura::client::FocusClient> focus_client_;
+  std::unique_ptr<HWNDMessageHandler> message_handler_;
+  std::unique_ptr<aura::client::FocusClient> focus_client_;
 
   // TODO(beng): Consider providing an interface to DesktopNativeWidgetAura
   //             instead of providing this route back to Widget.
@@ -244,6 +246,9 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   // Init time, before the Widget has created the NonClientView.
   bool has_non_client_view_;
 
+  // True if the window should have the frame removed.
+  bool remove_standard_frame_;
+
   // Owned by TooltipController, but we need to forward events to it so we keep
   // a reference.
   corewm::TooltipWin* tooltip_;
@@ -254,7 +259,11 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   // whenever the cursor visibility state changes.
   static bool is_cursor_visible_;
 
-  scoped_ptr<aura::client::ScopedTooltipDisabler> tooltip_disabler_;
+  std::unique_ptr<aura::client::ScopedTooltipDisabler> tooltip_disabler_;
+
+  // Indicates if current window will receive mouse events when should not
+  // become activated.
+  bool wants_mouse_events_when_inactive_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopWindowTreeHostWin);
 };

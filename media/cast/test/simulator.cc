@@ -56,6 +56,7 @@
 #include "base/time/tick_clock.h"
 #include "base/values.h"
 #include "media/base/audio_bus.h"
+#include "media/base/fake_single_thread_task_runner.h"
 #include "media/base/media.h"
 #include "media/base/video_frame.h"
 #include "media/cast/cast_config.h"
@@ -68,12 +69,11 @@
 #include "media/cast/logging/proto/raw_events.pb.h"
 #include "media/cast/logging/raw_event_subscriber_bundle.h"
 #include "media/cast/logging/simple_event_subscriber.h"
+#include "media/cast/net/cast_transport.h"
 #include "media/cast/net/cast_transport_config.h"
 #include "media/cast/net/cast_transport_defines.h"
-#include "media/cast/net/cast_transport_sender.h"
-#include "media/cast/net/cast_transport_sender_impl.h"
+#include "media/cast/net/cast_transport_impl.h"
 #include "media/cast/test/fake_media_source.h"
-#include "media/cast/test/fake_single_thread_task_runner.h"
 #include "media/cast/test/loopback_transport.h"
 #include "media/cast/test/proto/network_simulation_model.pb.h"
 #include "media/cast/test/skewed_tick_clock.h"
@@ -114,10 +114,6 @@ int GetIntegerSwitchValue(const char* switch_name, int default_value) {
   return as_int;
 }
 
-void UpdateCastTransportStatus(CastTransportStatus status) {
-  LOG(INFO) << "Cast transport status: " << status;
-}
-
 void LogAudioOperationalStatus(OperationalStatus status) {
   LOG(INFO) << "Audio status: " << status;
 }
@@ -125,6 +121,44 @@ void LogAudioOperationalStatus(OperationalStatus status) {
 void LogVideoOperationalStatus(OperationalStatus status) {
   LOG(INFO) << "Video status: " << status;
 }
+
+struct PacketProxy {
+  PacketProxy() : receiver(NULL) {}
+  void ReceivePacket(scoped_ptr<Packet> packet) {
+    if (receiver)
+      receiver->ReceivePacket(std::move(packet));
+  }
+  CastReceiver* receiver;
+};
+
+class TransportClient : public CastTransport::Client {
+ public:
+  TransportClient(LogEventDispatcher* log_event_dispatcher,
+                  PacketProxy* packet_proxy)
+      : log_event_dispatcher_(log_event_dispatcher),
+        packet_proxy_(packet_proxy) {}
+
+  void OnStatusChanged(CastTransportStatus status) final {
+    LOG(INFO) << "Cast transport status: " << status;
+  };
+  void OnLoggingEventsReceived(
+      scoped_ptr<std::vector<FrameEvent>> frame_events,
+      scoped_ptr<std::vector<PacketEvent>> packet_events) final {
+    DCHECK(log_event_dispatcher_);
+    log_event_dispatcher_->DispatchBatchOfEvents(std::move(frame_events),
+                                                 std::move(packet_events));
+  };
+  void ProcessRtpPacket(scoped_ptr<Packet> packet) final {
+    if (packet_proxy_)
+      packet_proxy_->ReceivePacket(std::move(packet));
+  };
+
+ private:
+  LogEventDispatcher* const log_event_dispatcher_;  // Not owned by this class.
+  PacketProxy* const packet_proxy_;                 // Not owned by this class.
+
+  DISALLOW_COPY_AND_ASSIGN(TransportClient);
+};
 
 // Maintains a queue of encoded video frames.
 // This works by tracking FRAME_CAPTURE_END and FRAME_ENCODED events.
@@ -297,8 +331,8 @@ void RunSimulation(const base::FilePath& source_path,
   testing_clock.Advance(base::TimeDelta::FromSeconds(1));
 
   // Task runner.
-  scoped_refptr<test::FakeSingleThreadTaskRunner> task_runner =
-      new test::FakeSingleThreadTaskRunner(&testing_clock);
+  scoped_refptr<FakeSingleThreadTaskRunner> task_runner =
+      new FakeSingleThreadTaskRunner(&testing_clock);
   base::ThreadTaskRunnerHandle task_runner_handle(task_runner);
 
   // CastEnvironments.
@@ -345,33 +379,18 @@ void RunSimulation(const base::FilePath& source_path,
   video_receiver_config.rtp_max_delay_ms =
       video_sender_config.max_playout_delay.InMilliseconds();
 
-  // Loopback transport.
-  LoopBackTransport receiver_to_sender(receiver_env);
-  LoopBackTransport sender_to_receiver(sender_env);
-
-  struct PacketProxy {
-    PacketProxy() : receiver(NULL) {}
-    void ReceivePacket(scoped_ptr<Packet> packet) {
-      if (receiver)
-        receiver->ReceivePacket(std::move(packet));
-    }
-    CastReceiver* receiver;
-  };
+  // Loopback transport. Owned by CastTransport.
+  LoopBackTransport* receiver_to_sender = new LoopBackTransport(receiver_env);
+  LoopBackTransport* sender_to_receiver = new LoopBackTransport(sender_env);
 
   PacketProxy packet_proxy;
 
   // Cast receiver.
-  scoped_ptr<CastTransportSender> transport_receiver(
-      new CastTransportSenderImpl(
-          nullptr, &testing_clock, net::IPEndPoint(), net::IPEndPoint(),
-          make_scoped_ptr(new base::DictionaryValue),
-          base::Bind(&UpdateCastTransportStatus),
-          base::Bind(&LogEventDispatcher::DispatchBatchOfEvents,
-                     base::Unretained(receiver_env->logger())),
-          base::TimeDelta::FromSeconds(1), task_runner,
-          base::Bind(&PacketProxy::ReceivePacket,
-                     base::Unretained(&packet_proxy)),
-          &receiver_to_sender));
+  scoped_ptr<CastTransport> transport_receiver(
+      new CastTransportImpl(&testing_clock, base::TimeDelta::FromSeconds(1),
+                            make_scoped_ptr(new TransportClient(
+                                receiver_env->logger(), &packet_proxy)),
+                            make_scoped_ptr(receiver_to_sender), task_runner));
   scoped_ptr<CastReceiver> cast_receiver(
       CastReceiver::Create(receiver_env,
                            audio_receiver_config,
@@ -381,14 +400,10 @@ void RunSimulation(const base::FilePath& source_path,
   packet_proxy.receiver = cast_receiver.get();
 
   // Cast sender and transport sender.
-  scoped_ptr<CastTransportSender> transport_sender(new CastTransportSenderImpl(
-      nullptr, &testing_clock, net::IPEndPoint(), net::IPEndPoint(),
-      make_scoped_ptr(new base::DictionaryValue),
-      base::Bind(&UpdateCastTransportStatus),
-      base::Bind(&LogEventDispatcher::DispatchBatchOfEvents,
-                 base::Unretained(sender_env->logger())),
-      base::TimeDelta::FromSeconds(1), task_runner, PacketReceiverCallback(),
-      &sender_to_receiver));
+  scoped_ptr<CastTransport> transport_sender(new CastTransportImpl(
+      &testing_clock, base::TimeDelta::FromSeconds(1),
+      make_scoped_ptr(new TransportClient(sender_env->logger(), nullptr)),
+      make_scoped_ptr(sender_to_receiver), task_runner));
   scoped_ptr<CastSender> cast_sender(
       CastSender::Create(sender_env, transport_sender.get()));
 
@@ -406,20 +421,19 @@ void RunSimulation(const base::FilePath& source_path,
     ipp.reset(new test::InterruptedPoissonProcess(
         average_rates,
         ipp_model.coef_burstiness(), ipp_model.coef_variance(), 0));
-    receiver_to_sender.Initialize(ipp->NewBuffer(128 * 1024),
-                                  transport_sender->PacketReceiverForTesting(),
-                                  task_runner, &testing_clock);
-    sender_to_receiver.Initialize(
+    receiver_to_sender->Initialize(ipp->NewBuffer(128 * 1024),
+                                   transport_sender->PacketReceiverForTesting(),
+                                   task_runner, &testing_clock);
+    sender_to_receiver->Initialize(
         ipp->NewBuffer(128 * 1024),
         transport_receiver->PacketReceiverForTesting(), task_runner,
         &testing_clock);
   } else {
     LOG(INFO) << "No network simulation.";
-    receiver_to_sender.Initialize(
-        scoped_ptr<test::PacketPipe>(),
-        transport_sender->PacketReceiverForTesting(),
-        task_runner, &testing_clock);
-    sender_to_receiver.Initialize(
+    receiver_to_sender->Initialize(scoped_ptr<test::PacketPipe>(),
+                                   transport_sender->PacketReceiverForTesting(),
+                                   task_runner, &testing_clock);
+    sender_to_receiver->Initialize(
         scoped_ptr<test::PacketPipe>(),
         transport_receiver->PacketReceiverForTesting(), task_runner,
         &testing_clock);

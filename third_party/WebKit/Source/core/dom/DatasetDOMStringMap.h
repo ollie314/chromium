@@ -36,15 +36,10 @@ class ExceptionState;
 
 class DatasetDOMStringMap final : public DOMStringMap {
 public:
-    static PassOwnPtrWillBeRawPtr<DatasetDOMStringMap> create(Element* element)
+    static DatasetDOMStringMap* create(Element* element)
     {
-        return adoptPtrWillBeNoop(new DatasetDOMStringMap(element));
+        return new DatasetDOMStringMap(element);
     }
-
-#if !ENABLE(OILPAN)
-    void ref() override;
-    void deref() override;
-#endif
 
     void getNames(Vector<String>&) override;
     String item(const String& name) override;
@@ -62,7 +57,7 @@ private:
     {
     }
 
-    RawPtrWillBeMember<Element> m_element;
+    Member<Element> m_element;
 };
 
 } // namespace blink

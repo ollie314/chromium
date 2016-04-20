@@ -7,10 +7,10 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/memory/ref_counted_memory.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -35,7 +35,7 @@ class NavigationEntry {
  public:
   virtual ~NavigationEntry() {}
 
-  CONTENT_EXPORT static scoped_ptr<NavigationEntry> Create();
+  CONTENT_EXPORT static std::unique_ptr<NavigationEntry> Create();
 
   // Page-related stuff --------------------------------------------------------
 
@@ -109,11 +109,8 @@ class NavigationEntry {
   // Page-related helpers ------------------------------------------------------
 
   // Returns the title to be displayed on the tab. This could be the title of
-  // the page if it is available or the URL. |languages| is the list of
-  // accepted languages (e.g., prefs::kAcceptLanguages) or empty if proper
-  // URL formatting isn't needed (e.g., unit tests).
-  virtual const base::string16& GetTitleForDisplay(
-      const std::string& languages) const = 0;
+  // the page if it is available or the URL.
+  virtual const base::string16& GetTitleForDisplay() const = 0;
 
   // Returns true if the current tab is in view source mode. This will be false
   // if there is no navigation.

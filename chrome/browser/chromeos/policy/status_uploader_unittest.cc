@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "base/prefs/testing_pref_service.h"
+#include "base/memory/ptr_util.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
@@ -16,6 +16,7 @@
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
 #include "components/policy/core/common/cloud/mock_device_management_service.h"
+#include "components/prefs/testing_pref_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -62,9 +63,9 @@ class MockDeviceStatusCollector : public policy::DeviceStatusCollector {
 
   // Explicit mock implementation declared here, since gmock::Invoke can't
   // handle returning non-moveable types like scoped_ptr.
-  scoped_ptr<policy::DeviceLocalAccount> GetAutoLaunchedKioskSessionInfo()
+  std::unique_ptr<policy::DeviceLocalAccount> GetAutoLaunchedKioskSessionInfo()
       override {
-    return make_scoped_ptr(new policy::DeviceLocalAccount(
+    return base::WrapUnique(new policy::DeviceLocalAccount(
         policy::DeviceLocalAccount::TYPE_KIOSK_APP, "account_id", "app_id",
         "update_url"));
   }
@@ -130,7 +131,7 @@ class StatusUploaderTest : public testing::Test {
   content::TestBrowserThreadBundle thread_bundle_;
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
   chromeos::ScopedCrosSettingsTestHelper settings_helper_;
-  scoped_ptr<MockDeviceStatusCollector> collector_;
+  std::unique_ptr<MockDeviceStatusCollector> collector_;
   ui::UserActivityDetector detector_;
   MockCloudPolicyClient client_;
   MockDeviceManagementService device_management_service_;

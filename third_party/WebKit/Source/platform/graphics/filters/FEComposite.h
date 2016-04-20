@@ -41,7 +41,7 @@ enum CompositeOperationType {
 
 class PLATFORM_EXPORT FEComposite final : public FilterEffect {
 public:
-    static PassRefPtrWillBeRawPtr<FEComposite> create(Filter*, const CompositeOperationType&, float, float, float, float);
+    static FEComposite* create(Filter*, const CompositeOperationType&, float, float, float, float);
 
     CompositeOperationType operation() const;
     bool setOperation(CompositeOperationType);
@@ -68,9 +68,9 @@ protected:
 private:
     FEComposite(Filter*, const CompositeOperationType&, float, float, float, float);
 
-    PassRefPtr<SkImageFilter> createImageFilter(SkiaImageFilterBuilder&) override;
-    PassRefPtr<SkImageFilter> createImageFilterWithoutValidation(SkiaImageFilterBuilder&) override;
-    PassRefPtr<SkImageFilter> createImageFilterInternal(SkiaImageFilterBuilder&, bool requiresPMColorValidation);
+    sk_sp<SkImageFilter> createImageFilter() override;
+    sk_sp<SkImageFilter> createImageFilterWithoutValidation() override;
+    sk_sp<SkImageFilter> createImageFilterInternal(bool requiresPMColorValidation);
 
     CompositeOperationType m_type;
     float m_k1;

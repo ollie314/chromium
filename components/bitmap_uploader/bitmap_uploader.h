@@ -12,14 +12,15 @@
 #include "base/macros.h"
 #include "components/bitmap_uploader/bitmap_uploader_export.h"
 #include "components/mus/public/cpp/window_surface.h"
+#include "components/mus/public/cpp/window_surface_client.h"
 #include "components/mus/public/interfaces/compositor_frame.mojom.h"
 #include "components/mus/public/interfaces/gpu.mojom.h"
 #include "gpu/GLES2/gl2chromium.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "mojo/public/c/gles2/gles2.h"
 
-namespace mojo {
-class Shell;
+namespace shell {
+class Connector;
 }
 
 namespace bitmap_uploader {
@@ -29,12 +30,12 @@ BITMAP_UPLOADER_EXPORT extern const char kBitmapUploaderForAcceleratedWidget[];
 // BitmapUploader is useful if you want to draw a bitmap or color in a
 // mus::Window.
 class BITMAP_UPLOADER_EXPORT BitmapUploader
-    : NON_EXPORTED_BASE(public mus::mojom::SurfaceClient) {
+    : public NON_EXPORTED_BASE(mus::WindowSurfaceClient) {
  public:
   explicit BitmapUploader(mus::Window* window);
   ~BitmapUploader() override;
 
-  void Init(mojo::Shell* shell);
+  void Init(shell::Connector* connector);
 
   // Sets the color which is RGBA.
   void SetColor(uint32_t color);
@@ -61,8 +62,9 @@ class BITMAP_UPLOADER_EXPORT BitmapUploader
 
   void SetIdNamespace(uint32_t id_namespace);
 
-  // SurfaceClient implementation.
-  void ReturnResources(
+  // WindowSurfaceClient implementation.
+  void OnResourcesReturned(
+      mus::WindowSurface* surface,
       mojo::Array<mus::mojom::ReturnedResourcePtr> resources) override;
 
   mus::Window* window_;
@@ -79,7 +81,6 @@ class BITMAP_UPLOADER_EXPORT BitmapUploader
   uint32_t next_resource_id_;
   uint32_t id_namespace_;
   base::hash_map<uint32_t, uint32_t> resource_to_texture_id_map_;
-  mojo::Binding<mus::mojom::SurfaceClient> surface_client_binding_;
 
   DISALLOW_COPY_AND_ASSIGN(BitmapUploader);
 };

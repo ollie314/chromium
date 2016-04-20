@@ -166,7 +166,7 @@ WebInspector.NetworkPanel.prototype = {
 
         function updateAction()
         {
-            action.setState(setting.get().length ? "active" : "inactive");
+            action.setToggled(!!setting.get().length);
         }
     },
 
@@ -177,7 +177,7 @@ WebInspector.NetworkPanel.prototype = {
     {
         var toolbarItem = new WebInspector.ToolbarComboBox(null);
         toolbarItem.setMaxWidth(140);
-        new WebInspector.NetworkConditionsSelector(toolbarItem.selectElement());
+        WebInspector.NetworkConditionsSelector.decorateSelect(toolbarItem.selectElement());
         return toolbarItem;
     },
 
@@ -194,7 +194,6 @@ WebInspector.NetworkPanel.prototype = {
     _toggleRecord: function(toggled)
     {
         this._toggleRecordAction.setToggled(toggled);
-        this._toggleRecordAction.setTitle(toggled ? WebInspector.UIString("Stop recording network log") : WebInspector.UIString("Record network log"));
         this._networkLogView.setRecording(toggled);
         if (!toggled && this._filmStripRecorder)
             this._filmStripRecorder.stopRecording(this._filmStripAvailable.bind(this));

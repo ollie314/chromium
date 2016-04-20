@@ -7,7 +7,6 @@
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8BindingForTesting.h"
 #include "core/testing/GarbageCollectedScriptWrappable.h"
-#include "core/testing/RefCountedScriptWrappable.h"
 #include "platform/heap/Heap.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/Vector.h"
@@ -26,7 +25,7 @@ public:
     template<typename T>
     void testToV8(const char* expected, T value, const char* path, int lineNumber)
     {
-        v8::Local<v8::Value> actual = toV8(value, m_scope.scriptState()->context()->Global(), m_scope.isolate());
+        v8::Local<v8::Value> actual = toV8(value, m_scope.getScriptState()->context()->Global(), m_scope.isolate());
         if (actual.IsEmpty()) {
             ADD_FAILURE_AT(path, lineNumber) << "toV8 returns an empty value.";
             return;
@@ -61,21 +60,6 @@ public:
     Persistent<GarbageCollectedScriptWrappable> m_scriptWrappable;
 };
 
-TEST_F(ToV8Test, refCountedScriptWrappable)
-{
-    RefPtr<RefCountedScriptWrappable> object = RefCountedScriptWrappable::create("hello");
-
-    TEST_TOV8("hello", object);
-    TEST_TOV8("hello", object.get());
-    TEST_TOV8("hello", object.release());
-
-    ASSERT_FALSE(object);
-
-    TEST_TOV8("null", object);
-    TEST_TOV8("null", object.get());
-    TEST_TOV8("null", object.release());
-}
-
 TEST_F(ToV8Test, garbageCollectedScriptWrappable)
 {
     GarbageCollectedScriptWrappable* object = new GarbageCollectedScriptWrappable("world");
@@ -83,7 +67,6 @@ TEST_F(ToV8Test, garbageCollectedScriptWrappable)
     OffHeapGarbageCollectedHolder offHeapHolder(object);
 
     TEST_TOV8("world", object);
-    TEST_TOV8("world", RawPtr<GarbageCollectedScriptWrappable>(object));
     TEST_TOV8("world", holder.m_scriptWrappable);
     TEST_TOV8("world", offHeapHolder.m_scriptWrappable);
 
@@ -92,7 +75,6 @@ TEST_F(ToV8Test, garbageCollectedScriptWrappable)
     offHeapHolder.m_scriptWrappable = nullptr;
 
     TEST_TOV8("null", object);
-    TEST_TOV8("null", RawPtr<GarbageCollectedScriptWrappable>(object));
     TEST_TOV8("null", holder.m_scriptWrappable);
     TEST_TOV8("null", offHeapHolder.m_scriptWrappable);
 }
@@ -161,18 +143,9 @@ TEST_F(ToV8Test, undefinedType)
 
 TEST_F(ToV8Test, scriptValue)
 {
-    ScriptValue value(m_scope.scriptState(), v8::Number::New(m_scope.isolate(), 1234));
+    ScriptValue value(m_scope.getScriptState(), v8::Number::New(m_scope.isolate(), 1234));
 
     TEST_TOV8("1234", value);
-}
-
-TEST_F(ToV8Test, vector)
-{
-    Vector<RefPtr<RefCountedScriptWrappable>> v;
-    v.append(RefCountedScriptWrappable::create("foo"));
-    v.append(RefCountedScriptWrappable::create("bar"));
-
-    TEST_TOV8("foo,bar", v);
 }
 
 TEST_F(ToV8Test, stringVectors)
@@ -233,7 +206,7 @@ TEST_F(ToV8Test, dictionaryVector)
     dictionary.append(std::make_pair("one", 1));
     dictionary.append(std::make_pair("two", 2));
     TEST_TOV8("[object Object]", dictionary);
-    v8::Local<v8::Context> context = m_scope.scriptState()->context();
+    v8::Local<v8::Context> context = m_scope.getScriptState()->context();
     v8::Local<v8::Object> result = toV8(dictionary, context->Global(), m_scope.isolate())->ToObject(context).ToLocalChecked();
     v8::Local<v8::Value> one = result->Get(context, v8String(m_scope.isolate(), "one")).ToLocalChecked();
     EXPECT_EQ(1, one->NumberValue(context).FromJust());
@@ -301,6 +274,17 @@ TEST_F(ToV8Test, basicTypeHeapVectors)
     boolVector.append(true);
     boolVector.append(false);
     TEST_TOV8("true,true,false", boolVector);
+}
+
+TEST_F(ToV8Test, withScriptState)
+{
+    ScriptValue value(m_scope.getScriptState(), v8::Number::New(m_scope.isolate(), 1234.0));
+
+    v8::Local<v8::Value> actual = toV8(value, m_scope.getScriptState());
+    EXPECT_FALSE(actual.IsEmpty());
+
+    double actualAsNumber = actual.As<v8::Number>()->Value();
+    EXPECT_EQ(1234.0, actualAsNumber);
 }
 
 } // namespace

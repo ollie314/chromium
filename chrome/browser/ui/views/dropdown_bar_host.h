@@ -5,9 +5,10 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_DROPDOWN_BAR_HOST_H_
 #define CHROME_BROWSER_UI_VIEWS_DROPDOWN_BAR_HOST_H_
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/geometry/rect.h"
@@ -154,16 +155,12 @@ class DropdownBarHost : public ui::AcceleratorTarget,
   // The BrowserView that created us.
   BrowserView* browser_view_;
 
-  // A parent View to |view_| that is used to clip when animating the bar
-  // between the shown and hidden states.
-  views::View* clip_view_;
-
   // Our view, which is responsible for drawing the UI.
   views::View* view_;
   DropdownBarHostDelegate* delegate_;
 
   // The animation class to use when opening the Dropdown widget.
-  scoped_ptr<gfx::SlideAnimation> animation_;
+  std::unique_ptr<gfx::SlideAnimation> animation_;
 
   // The focus manager we register with to keep track of focus changes.
   views::FocusManager* focus_manager_;
@@ -174,11 +171,11 @@ class DropdownBarHost : public ui::AcceleratorTarget,
   // Tracks and stores the last focused view which is not the DropdownBarView
   // or any of its children. Used to restore focus once the DropdownBarView is
   // closed.
-  scoped_ptr<views::ExternalFocusTracker> focus_tracker_;
+  std::unique_ptr<views::ExternalFocusTracker> focus_tracker_;
 
   // Host is the Widget implementation that is created and maintained by the
   // dropdown bar. It contains the DropdownBarView.
-  scoped_ptr<views::Widget> host_;
+  std::unique_ptr<views::Widget> host_;
 
   // A flag to manually manage visibility. GTK/X11 is asynchronous and
   // the state of the widget can be out of sync.

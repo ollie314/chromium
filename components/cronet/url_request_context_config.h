@@ -8,9 +8,15 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/time/time.h"
 #include "net/base/hash_value.h"
+
+namespace base {
+class SequencedTaskRunner;
+}  // namespace base
 
 namespace net {
 class CertVerifier;
@@ -73,6 +79,8 @@ struct URLRequestContextConfig {
   URLRequestContextConfig(
       // Enable QUIC.
       bool enable_quic,
+      // QUIC User Agent ID.
+      const std::string& quic_user_agent_id,
       // Enable SPDY.
       bool enable_spdy,
       // Enable SDCH.
@@ -105,10 +113,13 @@ struct URLRequestContextConfig {
   // Configure |context_builder| based on |this|.
   void ConfigureURLRequestContextBuilder(
       net::URLRequestContextBuilder* context_builder,
-      net::NetLog* net_log);
+      net::NetLog* net_log,
+      const scoped_refptr<base::SequencedTaskRunner>& file_task_runner);
 
   // Enable QUIC.
   const bool enable_quic;
+  // QUIC User Agent ID.
+  const std::string quic_user_agent_id;
   // Enable SPDY.
   const bool enable_spdy;
   // Enable SDCH.

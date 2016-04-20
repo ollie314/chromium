@@ -22,6 +22,10 @@ class PageLoadMetricsObserverTestHarness
   PageLoadMetricsObserverTestHarness();
   ~PageLoadMetricsObserverTestHarness() override;
 
+  // Helper that fills in any timing fields that MWCO requires but that are
+  // currently missing.
+  static void PopulateRequiredTimingFields(PageLoadTiming* inout_timing);
+
   void SetUp() override;
 
   virtual void RegisterObservers(PageLoadTracker* tracker) {}
@@ -34,6 +38,8 @@ class PageLoadMetricsObserverTestHarness
   // to the browser process. These will update the timing information for the
   // most recently committed navigation.
   void SimulateTimingUpdate(const PageLoadTiming& timing);
+  void SimulateTimingAndMetadataUpdate(const PageLoadTiming& timing,
+                                       const PageLoadMetadata& metadata);
 
   const base::HistogramTester& histogram_tester() const;
 

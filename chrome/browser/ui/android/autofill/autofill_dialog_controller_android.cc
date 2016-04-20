@@ -13,8 +13,6 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -37,6 +35,8 @@
 #include "components/autofill/core/browser/server_field_types_util.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -465,7 +465,7 @@ void AutofillDialogControllerAndroid::DialogContinue(
   const std::string last_used_card =
       base::android::ConvertJavaStringToUTF8(env, jlast_used_card);
 
-  scoped_ptr<FullWallet> full_wallet =
+  std::unique_ptr<FullWallet> full_wallet =
       AutofillDialogResult::ConvertFromJava(env, wallet);
   FillOutputForSection(SECTION_BILLING, form_structure_, full_wallet.get(),
                        email);

@@ -43,7 +43,7 @@ SupervisedUserNavigationObserver::SupervisedUserNavigationObserver(
 void SupervisedUserNavigationObserver::OnRequestBlocked(
     const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
     const GURL& url,
-    SupervisedUserURLFilter::FilteringBehaviorReason reason,
+    supervised_user_error_page::FilteringBehaviorReason reason,
     const base::Callback<void(bool)>& callback) {
   content::WebContents* web_contents = web_contents_getter.Run();
   if (!web_contents) {
@@ -81,10 +81,10 @@ void SupervisedUserNavigationObserver::OnRequestBlockedInternal(
   if (history_service)
     history_service->AddPage(add_page_args);
 
-  scoped_ptr<NavigationEntry> entry(NavigationEntry::Create());
+  std::unique_ptr<NavigationEntry> entry(NavigationEntry::Create());
   entry->SetVirtualURL(url);
   entry->SetTimestamp(timestamp);
-  scoped_ptr<sessions::SerializedNavigationEntry> serialized_entry(
+  std::unique_ptr<sessions::SerializedNavigationEntry> serialized_entry(
       new sessions::SerializedNavigationEntry());
   *serialized_entry =
       sessions::ContentSerializedNavigationBuilder::FromNavigationEntry(
@@ -104,7 +104,7 @@ void SupervisedUserNavigationObserver::OnURLFilterChanged() {
 void SupervisedUserNavigationObserver::URLFilterCheckCallback(
     const GURL& url,
     SupervisedUserURLFilter::FilteringBehavior behavior,
-    SupervisedUserURLFilter::FilteringBehaviorReason reason,
+    supervised_user_error_page::FilteringBehaviorReason reason,
     bool uncertain) {
   // If the page has been changed in the meantime, we can exit.
   if (url != web_contents_->GetLastCommittedURL())

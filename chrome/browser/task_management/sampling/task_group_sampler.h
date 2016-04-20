@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -22,15 +24,14 @@ namespace task_management {
 // Wraps the memory usage stats values together so that it can be sent between
 // the UI and the worker threads.
 struct MemoryUsageStats {
-  int64_t private_bytes;
-  int64_t shared_bytes;
-  int64_t physical_bytes;
+  int64_t private_bytes = -1;
+  int64_t shared_bytes = -1;
+  int64_t physical_bytes = -1;
+#if defined(OS_CHROMEOS)
+  int64_t swapped_bytes = -1;
+#endif
 
-  MemoryUsageStats()
-      : private_bytes(-1),
-        shared_bytes(-1),
-        physical_bytes(-1) {
-  }
+  MemoryUsageStats() {}
 };
 
 // Defines the expensive process' stats sampler that will calculate these
@@ -81,7 +82,7 @@ class TaskGroupSampler : public base::RefCountedThreadSafe<TaskGroupSampler> {
   // creating the ProcessMetrics.
   base::Process process_;
 
-  scoped_ptr<base::ProcessMetrics> process_metrics_;
+  std::unique_ptr<base::ProcessMetrics> process_metrics_;
 
   // The specific blocking pool SequencedTaskRunner that will be used to post
   // the refresh tasks onto serially.

@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_TASK_MANAGEMENT_PROVIDERS_CHILD_PROCESS_TASK_PROVIDER_H_
 
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "base/macros.h"
@@ -52,7 +53,8 @@ class ChildProcessTaskProvider
   // When that is done, we will be notified on the UI thread by receiving a call
   // to this method.
   void ChildProcessDataCollected(
-      scoped_ptr<const std::vector<content::ChildProcessData>> child_processes);
+      std::unique_ptr<const std::vector<content::ChildProcessData>>
+          child_processes);
 
   // Creates a ChildProcessTask from the given |data| and notifies the observer
   // of its addition.
@@ -63,7 +65,7 @@ class ChildProcessTaskProvider
   void DeleteTask(base::ProcessHandle handle);
 
   // A map to track ChildProcessTask's by their handles.
-  typedef std::map<base::ProcessHandle, ChildProcessTask*> HandleToTaskMap;
+  using HandleToTaskMap = std::map<base::ProcessHandle, ChildProcessTask*>;
   HandleToTaskMap tasks_by_handle_;
 
   // A map to track ChildProcessTask's by their PIDs.
@@ -78,7 +80,7 @@ class ChildProcessTaskProvider
   // TODO(afakhry): Fix this either by keeping the handle open via
   // |base::Process|, or amending the |BrowserChildProcessObserver| interface to
   // supply the PID.
-  typedef std::map<base::ProcessId, ChildProcessTask*> PidToTaskMap;
+  using PidToTaskMap = std::map<base::ProcessId, ChildProcessTask*>;
   PidToTaskMap tasks_by_pid_;
 
   // Always keep this the last member of this class to make sure it's the

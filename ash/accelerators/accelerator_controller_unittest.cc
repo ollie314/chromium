@@ -23,11 +23,13 @@
 #include "ash/test/test_shell_delegate.h"
 #include "ash/test/test_volume_control_delegate.h"
 #include "ash/volume_control_delegate.h"
+#include "ash/wm/common/window_positioning_utils.h"
+#include "ash/wm/common/wm_event.h"
 #include "ash/wm/lock_state_controller.h"
 #include "ash/wm/panels/panel_layout_manager.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/wm_event.h"
 #include "base/command_line.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/test/test_window_delegate.h"
@@ -150,10 +152,6 @@ class DummyImeControlDelegate : public ImeControlDelegate {
   }
   int handle_switch_ime_count() const {
     return handle_switch_ime_count_;
-  }
-  ui::Accelerator RemapAccelerator(
-      const ui::Accelerator& accelerator) override {
-    return ui::Accelerator(accelerator);
   }
 
  private:
@@ -444,7 +442,7 @@ TEST_F(AcceleratorControllerTest, IsRegistered) {
 }
 
 TEST_F(AcceleratorControllerTest, WindowSnap) {
-  scoped_ptr<aura::Window> window(
+  std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
   wm::WindowState* window_state = wm::GetWindowState(window.get());
 
@@ -453,13 +451,13 @@ TEST_F(AcceleratorControllerTest, WindowSnap) {
   {
     GetController()->PerformActionIfEnabled(WINDOW_CYCLE_SNAP_DOCK_LEFT);
     gfx::Rect expected_bounds = wm::GetDefaultLeftSnappedWindowBoundsInParent(
-        window.get());
+        wm::WmWindowAura::Get(window.get()));
     EXPECT_EQ(expected_bounds.ToString(), window->bounds().ToString());
   }
   {
     GetController()->PerformActionIfEnabled(WINDOW_CYCLE_SNAP_DOCK_RIGHT);
     gfx::Rect expected_bounds = wm::GetDefaultRightSnappedWindowBoundsInParent(
-        window.get());
+        wm::WmWindowAura::Get(window.get()));
     EXPECT_EQ(expected_bounds.ToString(), window->bounds().ToString());
   }
   {
@@ -498,17 +496,17 @@ TEST_F(AcceleratorControllerTest, WindowSnap) {
 }
 
 TEST_F(AcceleratorControllerTest, WindowSnapLeftDockLeftRestore) {
-  scoped_ptr<aura::Window> window0(
+  std::unique_ptr<aura::Window> window0(
       CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
-  scoped_ptr<aura::Window> window1(
-    CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  std::unique_ptr<aura::Window> window1(
+      CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
   wm::WindowState* window1_state = wm::GetWindowState(window1.get());
   window1_state->Activate();
 
   GetController()->PerformActionIfEnabled(WINDOW_CYCLE_SNAP_DOCK_LEFT);
   gfx::Rect normal_bounds = window1_state->GetRestoreBoundsInParent();
   gfx::Rect expected_bounds = wm::GetDefaultLeftSnappedWindowBoundsInParent(
-                                window1.get());
+      wm::WmWindowAura::Get(window1.get()));
   EXPECT_EQ(expected_bounds.ToString(), window1->bounds().ToString());
   EXPECT_TRUE(window1_state->IsSnapped());
   GetController()->PerformActionIfEnabled(WINDOW_CYCLE_SNAP_DOCK_LEFT);
@@ -520,18 +518,18 @@ TEST_F(AcceleratorControllerTest, WindowSnapLeftDockLeftRestore) {
 }
 
 TEST_F(AcceleratorControllerTest, WindowSnapRightDockRightRestore) {
-  scoped_ptr<aura::Window> window0(
+  std::unique_ptr<aura::Window> window0(
       CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
-  scoped_ptr<aura::Window> window1(
-    CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  std::unique_ptr<aura::Window> window1(
+      CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
 
   wm::WindowState* window1_state = wm::GetWindowState(window1.get());
   window1_state->Activate();
 
   GetController()->PerformActionIfEnabled(WINDOW_CYCLE_SNAP_DOCK_RIGHT);
   gfx::Rect normal_bounds = window1_state->GetRestoreBoundsInParent();
-  gfx::Rect expected_bounds =
-    wm::GetDefaultRightSnappedWindowBoundsInParent(window1.get());
+  gfx::Rect expected_bounds = wm::GetDefaultRightSnappedWindowBoundsInParent(
+      wm::WmWindowAura::Get(window1.get()));
   EXPECT_EQ(expected_bounds.ToString(), window1->bounds().ToString());
   EXPECT_TRUE(window1_state->IsSnapped());
   GetController()->PerformActionIfEnabled(WINDOW_CYCLE_SNAP_DOCK_RIGHT);
@@ -543,19 +541,19 @@ TEST_F(AcceleratorControllerTest, WindowSnapRightDockRightRestore) {
 }
 
 TEST_F(AcceleratorControllerTest, WindowSnapLeftDockLeftSnapRight) {
-  scoped_ptr<aura::Window> window0(
+  std::unique_ptr<aura::Window> window0(
       CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
-  scoped_ptr<aura::Window> window1(
-    CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  std::unique_ptr<aura::Window> window1(
+      CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
 
   wm::WindowState* window1_state = wm::GetWindowState(window1.get());
   window1_state->Activate();
 
   GetController()->PerformActionIfEnabled(WINDOW_CYCLE_SNAP_DOCK_LEFT);
-  gfx::Rect expected_bounds =
-    wm::GetDefaultLeftSnappedWindowBoundsInParent(window1.get());
-  gfx::Rect expected_bounds2 =
-    wm::GetDefaultRightSnappedWindowBoundsInParent(window1.get());
+  gfx::Rect expected_bounds = wm::GetDefaultLeftSnappedWindowBoundsInParent(
+      wm::WmWindowAura::Get(window1.get()));
+  gfx::Rect expected_bounds2 = wm::GetDefaultRightSnappedWindowBoundsInParent(
+      wm::WmWindowAura::Get(window1.get()));
   EXPECT_EQ(expected_bounds.ToString(), window1->bounds().ToString());
   EXPECT_TRUE(window1_state->IsSnapped());
   GetController()->PerformActionIfEnabled(WINDOW_CYCLE_SNAP_DOCK_LEFT);
@@ -568,21 +566,21 @@ TEST_F(AcceleratorControllerTest, WindowSnapLeftDockLeftSnapRight) {
 }
 
 TEST_F(AcceleratorControllerTest, WindowDockLeftMinimizeWindowWithRestore) {
-  scoped_ptr<aura::Window> window0(
+  std::unique_ptr<aura::Window> window0(
       CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
-  scoped_ptr<aura::Window> window1(
-    CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  std::unique_ptr<aura::Window> window1(
+      CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
 
   wm::WindowState* window1_state = wm::GetWindowState(window1.get());
   window1_state->Activate();
 
-  scoped_ptr<aura::Window> window2(
-    CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  std::unique_ptr<aura::Window> window2(
+      CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
 
   wm::WindowState* window2_state = wm::GetWindowState(window2.get());
 
-  scoped_ptr<aura::Window> window3(
-    CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  std::unique_ptr<aura::Window> window3(
+      CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
 
   wm::WindowState* window3_state = wm::GetWindowState(window3.get());
   window3_state->Activate();
@@ -615,17 +613,17 @@ TEST_F(AcceleratorControllerTest, WindowDockLeftMinimizeWindowWithRestore) {
 }
 
 TEST_F(AcceleratorControllerTest, WindowPanelDockLeftDockRightRestore) {
-  scoped_ptr<aura::Window> window0(
+  std::unique_ptr<aura::Window> window0(
       CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
 
-  scoped_ptr<aura::Window> window(CreatePanel());
+  std::unique_ptr<aura::Window> window(CreatePanel());
   wm::WindowState* window_state = wm::GetWindowState(window.get());
   window_state->Activate();
 
   gfx::Rect window_restore_bounds2 = window->bounds();
   GetController()->PerformActionIfEnabled(WINDOW_CYCLE_SNAP_DOCK_LEFT);
-  gfx::Rect expected_bounds =
-      wm::GetDefaultLeftSnappedWindowBoundsInParent(window.get());
+  gfx::Rect expected_bounds = wm::GetDefaultLeftSnappedWindowBoundsInParent(
+      wm::WmWindowAura::Get(window.get()));
   gfx::Rect window_restore_bounds =
       window_state->GetRestoreBoundsInScreen();
   EXPECT_NE(expected_bounds.ToString(), window->bounds().ToString());
@@ -643,15 +641,16 @@ TEST_F(AcceleratorControllerTest, WindowPanelDockLeftDockRightRestore) {
 }
 
 TEST_F(AcceleratorControllerTest, CenterWindowAccelerator) {
-  scoped_ptr<aura::Window> window(
+  std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
   wm::WindowState* window_state = wm::GetWindowState(window.get());
   window_state->Activate();
 
   // Center the window using accelerator.
   GetController()->PerformActionIfEnabled(WINDOW_POSITION_CENTER);
-  gfx::Rect work_area =
-      Shell::GetScreen()->GetDisplayNearestWindow(window.get()).work_area();
+  gfx::Rect work_area = gfx::Screen::GetScreen()
+                            ->GetDisplayNearestWindow(window.get())
+                            .work_area();
   gfx::Rect bounds = window->GetBoundsInScreen();
   EXPECT_NEAR(bounds.x() - work_area.x(),
               work_area.right() - bounds.right(),
@@ -861,6 +860,17 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
     EXPECT_TRUE(ProcessInController(ui::Accelerator(
         ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN)));
     EXPECT_EQ(2, delegate->handle_take_screenshot_count());
+    // None active window test case.
+    EXPECT_TRUE(ProcessInController(ui::Accelerator(
+        ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_ALT_DOWN | ui::EF_CONTROL_DOWN)));
+    EXPECT_EQ(0, delegate->handle_take_window_screenshot_count());
+    // Active window test case.
+    std::unique_ptr<aura::Window> window;
+    window.reset(CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+    wm::ActivateWindow(window.get());
+    EXPECT_TRUE(ProcessInController(ui::Accelerator(
+        ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_ALT_DOWN | ui::EF_CONTROL_DOWN)));
+    EXPECT_EQ(1, delegate->handle_take_window_screenshot_count());
   }
   const ui::Accelerator volume_mute(ui::VKEY_VOLUME_MUTE, ui::EF_NONE);
   const ui::Accelerator volume_down(ui::VKEY_VOLUME_DOWN, ui::EF_NONE);
@@ -868,7 +878,7 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
   {
     TestVolumeControlDelegate* delegate = new TestVolumeControlDelegate;
     ash::Shell::GetInstance()->system_tray_delegate()->SetVolumeControlDelegate(
-        scoped_ptr<VolumeControlDelegate>(delegate));
+        std::unique_ptr<VolumeControlDelegate>(delegate));
     EXPECT_EQ(0, delegate->handle_volume_mute_count());
     EXPECT_TRUE(ProcessInController(volume_mute));
     EXPECT_EQ(1, delegate->handle_volume_mute_count());
@@ -890,7 +900,7 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
     DummyBrightnessControlDelegate* delegate =
         new DummyBrightnessControlDelegate;
     GetController()->SetBrightnessControlDelegate(
-        scoped_ptr<BrightnessControlDelegate>(delegate));
+        std::unique_ptr<BrightnessControlDelegate>(delegate));
     EXPECT_EQ(0, delegate->handle_brightness_down_count());
     EXPECT_TRUE(ProcessInController(brightness_down));
     EXPECT_EQ(1, delegate->handle_brightness_down_count());
@@ -912,7 +922,7 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
     DummyKeyboardBrightnessControlDelegate* delegate =
         new DummyKeyboardBrightnessControlDelegate;
     GetController()->SetKeyboardBrightnessControlDelegate(
-        scoped_ptr<KeyboardBrightnessControlDelegate>(delegate));
+        std::unique_ptr<KeyboardBrightnessControlDelegate>(delegate));
     EXPECT_EQ(0, delegate->handle_keyboard_brightness_down_count());
     EXPECT_TRUE(ProcessInController(alt_brightness_down));
     EXPECT_EQ(1, delegate->handle_keyboard_brightness_down_count());
@@ -1054,7 +1064,7 @@ TEST_F(AcceleratorControllerTest, ImeGlobalAccelerators) {
     EXPECT_FALSE(ProcessInController(hangul));
     DummyImeControlDelegate* delegate = new DummyImeControlDelegate;
     GetController()->SetImeControlDelegate(
-        scoped_ptr<ImeControlDelegate>(delegate));
+        std::unique_ptr<ImeControlDelegate>(delegate));
     EXPECT_EQ(0, delegate->handle_previous_ime_count());
     EXPECT_TRUE(ProcessInController(control_space_down));
     EXPECT_EQ(1, delegate->handle_previous_ime_count());
@@ -1084,7 +1094,7 @@ TEST_F(AcceleratorControllerTest, ImeGlobalAccelerators) {
 
     DummyImeControlDelegate* delegate = new DummyImeControlDelegate;
     GetController()->SetImeControlDelegate(
-        scoped_ptr<ImeControlDelegate>(delegate));
+        std::unique_ptr<ImeControlDelegate>(delegate));
     EXPECT_EQ(0, delegate->handle_next_ime_count());
     EXPECT_FALSE(ProcessInController(shift_alt_press));
     EXPECT_TRUE(ProcessInController(shift_alt));
@@ -1146,7 +1156,7 @@ TEST_F(AcceleratorControllerTest, ImeGlobalAccelerators) {
 
     DummyImeControlDelegate* delegate = new DummyImeControlDelegate;
     GetController()->SetImeControlDelegate(
-        scoped_ptr<ImeControlDelegate>(delegate));
+        std::unique_ptr<ImeControlDelegate>(delegate));
     EXPECT_EQ(0, delegate->handle_next_ime_count());
     EXPECT_FALSE(ProcessInController(shift_alt_press));
     EXPECT_TRUE(ProcessInController(shift_alt));
@@ -1192,7 +1202,7 @@ TEST_F(AcceleratorControllerTest, ImeGlobalAcceleratorsWorkaround139556) {
 TEST_F(AcceleratorControllerTest, ImeGlobalAcceleratorsNoConflict) {
   DummyImeControlDelegate* delegate = new DummyImeControlDelegate;
   GetController()->SetImeControlDelegate(
-      scoped_ptr<ImeControlDelegate>(delegate));
+      std::unique_ptr<ImeControlDelegate>(delegate));
   ui::test::EventGenerator& generator = GetEventGenerator();
 
   // Correct sequence of a conflicting accelerator must not trigger next IME.
@@ -1362,7 +1372,7 @@ TEST_F(AcceleratorControllerTest, DisallowedAtModalWindow) {
         << " not found in kAcceleratorData or kDebugAcceleratorData. "
         << "action: " << *it;
   }
-  scoped_ptr<aura::Window> window(
+  std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
   wm::ActivateWindow(window.get());
   Shell::GetInstance()->SimulateModalWindowOpenForTesting(true);
@@ -1408,7 +1418,7 @@ TEST_F(AcceleratorControllerTest, DisallowedAtModalWindow) {
     DummyBrightnessControlDelegate* delegate =
         new DummyBrightnessControlDelegate;
     GetController()->SetBrightnessControlDelegate(
-        scoped_ptr<BrightnessControlDelegate>(delegate));
+        std::unique_ptr<BrightnessControlDelegate>(delegate));
     EXPECT_EQ(0, delegate->handle_brightness_down_count());
     EXPECT_TRUE(ProcessInController(brightness_down));
     EXPECT_EQ(1, delegate->handle_brightness_down_count());
@@ -1428,7 +1438,7 @@ TEST_F(AcceleratorControllerTest, DisallowedAtModalWindow) {
     EXPECT_TRUE(ProcessInController(volume_up));
     TestVolumeControlDelegate* delegate = new TestVolumeControlDelegate;
     ash::Shell::GetInstance()->system_tray_delegate()->SetVolumeControlDelegate(
-        scoped_ptr<VolumeControlDelegate>(delegate));
+        std::unique_ptr<VolumeControlDelegate>(delegate));
     EXPECT_EQ(0, delegate->handle_volume_mute_count());
     EXPECT_TRUE(ProcessInController(volume_mute));
     EXPECT_EQ(1, delegate->handle_volume_mute_count());
@@ -1458,7 +1468,7 @@ TEST_F(AcceleratorControllerTest, DisallowedWithNoWindow) {
   }
 
   // Make sure we don't alert if we do have a window.
-  scoped_ptr<aura::Window> window;
+  std::unique_ptr<aura::Window> window;
   for (size_t i = 0; i < kActionsNeedingWindowLength; ++i) {
     window.reset(CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
     wm::ActivateWindow(window.get());
@@ -1495,7 +1505,7 @@ class DeprecatedAcceleratorTester : public AcceleratorControllerTest {
     // For testing the deprecated and new IME shortcuts.
     DummyImeControlDelegate* delegate = new DummyImeControlDelegate;
     GetController()->SetImeControlDelegate(
-        scoped_ptr<ImeControlDelegate>(delegate));
+        std::unique_ptr<ImeControlDelegate>(delegate));
   }
 
   ui::Accelerator CreateAccelerator(const AcceleratorData& data) const {
@@ -1522,7 +1532,8 @@ class DeprecatedAcceleratorTester : public AcceleratorControllerTest {
   }
 
   void RemoveAllNotifications() const {
-    message_center()->RemoveAllNotifications(false);
+    message_center()->RemoveAllNotifications(
+        false /* by_user */, message_center::MessageCenter::RemoveType::ALL);
   }
 
   message_center::MessageCenter* message_center() const {

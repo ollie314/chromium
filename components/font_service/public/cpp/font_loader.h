@@ -17,9 +17,8 @@
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "third_party/skia/include/ports/SkFontConfigInterface.h"
 
-namespace mojo {
-class ApplicationImpl;
-class Shell;
+namespace shell {
+class Connector;
 }
 
 namespace font_service {
@@ -36,8 +35,7 @@ class FontServiceThread;
 class FontLoader : public SkFontConfigInterface,
                    public internal::MappedFontFile::Observer {
  public:
-  explicit FontLoader(mojo::Shell* shell);
-  explicit FontLoader(mojo::ApplicationImpl* application_impl);
+  explicit FontLoader(shell::Connector* connector);
   ~FontLoader() override;
 
   // Shuts down the background thread.
@@ -45,10 +43,10 @@ class FontLoader : public SkFontConfigInterface,
 
   // SkFontConfigInterface:
   bool matchFamilyName(const char family_name[],
-                       SkTypeface::Style requested,
+                       SkFontStyle requested,
                        FontIdentity* out_font_identifier,
                        SkString* out_family_name,
-                       SkTypeface::Style* out_style) override;
+                       SkFontStyle* out_style) override;
   SkStreamAsset* openStream(const FontIdentity& identity) override;
 
  private:

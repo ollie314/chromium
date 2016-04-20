@@ -30,7 +30,7 @@ namespace blink {
 
 class PLATFORM_EXPORT FEBlend final : public FilterEffect {
 public:
-    static PassRefPtrWillBeRawPtr<FEBlend> create(Filter*, WebBlendMode);
+    static FEBlend* create(Filter*, WebBlendMode);
 
     WebBlendMode blendMode() const;
     bool setBlendMode(WebBlendMode);
@@ -40,7 +40,7 @@ public:
 private:
     FEBlend(Filter*, WebBlendMode);
 
-    PassRefPtr<SkImageFilter> createImageFilter(SkiaImageFilterBuilder&) override;
+    sk_sp<SkImageFilter> createImageFilter() override;
 
     WebBlendMode m_mode;
 };

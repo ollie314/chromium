@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 
+#include <utility>
+
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
@@ -101,22 +103,22 @@ class FirewallManagerLegacyImpl : public FirewallManager {
 FirewallManager::~FirewallManager() {}
 
 // static
-scoped_ptr<FirewallManager> FirewallManager::Create(
+std::unique_ptr<FirewallManager> FirewallManager::Create(
     BrowserDistribution* dist,
     const base::FilePath& chrome_path) {
   // First try to connect to "Windows Firewall with Advanced Security" (Vista+).
-  scoped_ptr<FirewallManagerAdvancedImpl> manager(
+  std::unique_ptr<FirewallManagerAdvancedImpl> manager(
       new FirewallManagerAdvancedImpl());
   if (manager->Init(dist->GetDisplayName(), chrome_path))
-    return manager.Pass();
+    return std::move(manager);
 
   // Next try to connect to "Windows Firewall for Windows XP with SP2".
-  scoped_ptr<FirewallManagerLegacyImpl> legacy_manager(
+  std::unique_ptr<FirewallManagerLegacyImpl> legacy_manager(
       new FirewallManagerLegacyImpl());
   if (legacy_manager->Init(dist->GetDisplayName(), chrome_path))
-    return legacy_manager.Pass();
+    return std::move(legacy_manager);
 
-  return scoped_ptr<FirewallManager>();
+  return nullptr;
 }
 
 FirewallManager::FirewallManager() {

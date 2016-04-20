@@ -115,6 +115,12 @@ void ContentPasswordManagerDriver::ForceSavePassword() {
   host->Send(new AutofillMsg_FindFocusedPasswordForm(host->GetRoutingID()));
 }
 
+void ContentPasswordManagerDriver::GeneratePassword() {
+  content::RenderFrameHost* host = render_frame_host_;
+  host->Send(
+      new AutofillMsg_UserTriggeredGeneratePassword(host->GetRoutingID()));
+}
+
 void ContentPasswordManagerDriver::SendLoggingAvailability() {
   render_frame_host_->Send(new AutofillMsg_SetLoggingState(
       render_frame_host_->GetRoutingID(),
@@ -145,6 +151,8 @@ bool ContentPasswordManagerDriver::HandleMessage(const IPC::Message& message) {
   IPC_MESSAGE_HANDLER(AutofillHostMsg_PasswordFormSubmitted,
                       OnPasswordFormSubmitted)
   IPC_MESSAGE_HANDLER(AutofillHostMsg_InPageNavigation, OnInPageNavigation)
+  IPC_MESSAGE_HANDLER(AutofillHostMsg_PresaveGeneratedPassword,
+                      OnPresaveGeneratedPassword)
   IPC_MESSAGE_HANDLER(AutofillHostMsg_PasswordNoLongerGenerated,
                       OnPasswordNoLongerGenerated)
   IPC_MESSAGE_HANDLER(AutofillHostMsg_FocusedPasswordFormFound,
@@ -223,6 +231,15 @@ void ContentPasswordManagerDriver::OnInPageNavigation(
           BadMessageReason::CPMD_BAD_ORIGIN_IN_PAGE_NAVIGATION))
     return;
   GetPasswordManager()->OnInPageNavigation(this, password_form);
+}
+
+void ContentPasswordManagerDriver::OnPresaveGeneratedPassword(
+    const autofill::PasswordForm& password_form) {
+  if (!CheckChildProcessSecurityPolicy(
+          password_form.origin,
+          BadMessageReason::CPMD_BAD_ORIGIN_PRESAVE_GENERATED_PASSWORD))
+    return;
+  GetPasswordManager()->OnPresaveGeneratedPassword(password_form);
 }
 
 void ContentPasswordManagerDriver::OnPasswordNoLongerGenerated(

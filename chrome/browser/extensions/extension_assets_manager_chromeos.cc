@@ -13,9 +13,6 @@
 #include "base/files/file_util.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/sequenced_task_runner.h"
 #include "base/sys_info.h"
 #include "chrome/browser/browser_process.h"
@@ -23,6 +20,9 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_prefs.h"
@@ -548,7 +548,7 @@ bool ExtensionAssetsManagerChromeOS::CleanUpExtension(
         if (!extension_prefs || extension_prefs->pref_service()->ReadOnly())
           return false;
 
-        scoped_ptr<ExtensionInfo> info =
+        std::unique_ptr<ExtensionInfo> info =
             extension_prefs->GetInstalledExtensionInfo(id);
         if (!info || info->extension_path != base::FilePath(shared_path)) {
           info = extension_prefs->GetDelayedInstallInfo(id);

@@ -25,12 +25,11 @@ class SecurityOrigin;
 // staying alive. PingLoader providing the service.
 class CORE_EXPORT BeaconLoader final : public PingLoader {
     WTF_MAKE_NONCOPYABLE(BeaconLoader);
-    USING_FAST_MALLOC_WILL_BE_REMOVED(BeaconLoader);
 public:
     ~BeaconLoader() override { }
 
     static bool sendBeacon(LocalFrame*, int, const KURL&, const String&, int&);
-    static bool sendBeacon(LocalFrame*, int, const KURL&, PassRefPtr<DOMArrayBufferView>, int&);
+    static bool sendBeacon(LocalFrame*, int, const KURL&, DOMArrayBufferView*, int&);
     static bool sendBeacon(LocalFrame*, int, const KURL&, Blob*, int&);
     static bool sendBeacon(LocalFrame*, int, const KURL&, FormData*, int&);
 

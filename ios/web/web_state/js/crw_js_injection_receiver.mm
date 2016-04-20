@@ -41,6 +41,11 @@
   [_evaluator evaluateJavaScript:script stringResultHandler:handler];
 }
 
+- (void)executeJavaScript:(NSString*)script
+        completionHandler:(web::JavaScriptResultBlock)completionHandler {
+  [_evaluator executeJavaScript:script completionHandler:completionHandler];
+}
+
 - (BOOL)scriptHasBeenInjectedForClass:(Class)jsInjectionManagerClass
                        presenceBeacon:(NSString*)beacon {
   return [_evaluator scriptHasBeenInjectedForClass:jsInjectionManagerClass
@@ -49,10 +54,6 @@
 
 - (void)injectScript:(NSString*)script forClass:(Class)jsInjectionManagerClass {
   [_evaluator injectScript:script forClass:jsInjectionManagerClass];
-}
-
-- (web::WebViewType)webViewType {
-  return [_evaluator webViewType];
 }
 
 - (CRWJSInjectionManager*)instanceOfClass:(Class)jsInjectionManagerClass {

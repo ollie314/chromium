@@ -12,6 +12,7 @@
 #include "content/public/child/child_thread.h"
 
 #if defined(OS_WIN)
+#include "base/win/current_module.h"
 #include "base/win/iat_patch_function.h"
 #endif
 
@@ -68,19 +69,11 @@ void InitializePDF() {
 #if defined(OS_WIN)
   // Need to patch a few functions for font loading to work correctly. This can
   // be removed once we switch PDF to use Skia.
-  HMODULE current_module = NULL;
-  wchar_t current_module_name[MAX_PATH];
-  CHECK(GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-                          reinterpret_cast<LPCWSTR>(InitializePDF),
-                          &current_module));
-  DWORD result = GetModuleFileNameW(current_module, current_module_name,
-                                    MAX_PATH);
-  if (!result || result == MAX_PATH)
-    return;
-  g_iat_patch_createdca.Patch(current_module_name, "gdi32.dll", "CreateDCA",
-                              CreateDCAPatch);
-  g_iat_patch_get_font_data.Patch(current_module_name, "gdi32.dll",
-                                  "GetFontData", GetFontDataPatch);
+  HMODULE current_module = CURRENT_MODULE();
+  g_iat_patch_createdca.PatchFromModule(current_module, "gdi32.dll",
+                                        "CreateDCA", CreateDCAPatch);
+  g_iat_patch_get_font_data.PatchFromModule(current_module, "gdi32.dll",
+                                            "GetFontData", GetFontDataPatch);
   g_original_get_font_data = reinterpret_cast<GetFontDataPtr>(
       g_iat_patch_get_font_data.original_function());
 #endif  // OS_WIN

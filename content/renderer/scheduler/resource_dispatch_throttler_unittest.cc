@@ -75,6 +75,7 @@ class ResourceDispatchThrottlerForTest : public ResourceDispatchThrottler {
             scheduler,
             base::TimeDelta::FromSecondsD(kFlushPeriodSeconds),
             kRequestsPerFlush),
+        now_(base::TimeTicks() + base::TimeDelta::FromDays(1)),
         flush_scheduled_(false) {}
   ~ResourceDispatchThrottlerForTest() override {}
 
@@ -187,10 +188,9 @@ class ResourceDispatchThrottlerTest : public testing::Test, public IPC::Sender {
   ScopedMessages sent_messages_;
 
  private:
-  scoped_ptr<ResourceDispatchThrottlerForTest> throttler_;
+  std::unique_ptr<ResourceDispatchThrottlerForTest> throttler_;
   RendererSchedulerForTest scheduler_;
   int last_request_id_;
-  bool flush_scheduled_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceDispatchThrottlerTest);
 };
@@ -249,6 +249,45 @@ TEST_F(ResourceDispatchThrottlerTest, NotThrottledIfSufficientTimePassed) {
     RequestResource();
     EXPECT_EQ(1U, GetAndResetSentMessageCount());
     EXPECT_FALSE(FlushScheduled());
+  }
+}
+
+TEST_F(ResourceDispatchThrottlerTest, NotThrottledIfSendRateSufficientlyLow) {
+  SetHighPriorityWorkAnticipated(true);
+
+  // Continuous dispatch of resource requests below the allowed send rate
+  // should never throttled.
+  const base::TimeDelta kAllowedContinuousSendInterval =
+      base::TimeDelta::FromSecondsD((kFlushPeriodSeconds / kRequestsPerFlush) +
+                                    .00001);
+  for (size_t i = 0; i < kRequestsPerFlush * 10; ++i) {
+    Advance(kAllowedContinuousSendInterval);
+    RequestResource();
+    EXPECT_EQ(1U, GetAndResetSentMessageCount());
+    EXPECT_FALSE(FlushScheduled());
+  }
+}
+
+TEST_F(ResourceDispatchThrottlerTest, ThrottledIfSendRateSufficientlyHigh) {
+  SetHighPriorityWorkAnticipated(true);
+
+  // Continuous dispatch of resource requests above the allowed send rate
+  // should be throttled.
+  const base::TimeDelta kThrottledContinuousSendInterval =
+      base::TimeDelta::FromSecondsD((kFlushPeriodSeconds / kRequestsPerFlush) -
+                                    .00001);
+
+  for (size_t i = 0; i < kRequestsPerFlush * 10; ++i) {
+    Advance(kThrottledContinuousSendInterval);
+    RequestResource();
+    // Only the first batch of requests under the limit should be unthrottled.
+    if (i < kRequestsPerFlush) {
+      EXPECT_EQ(1U, GetAndResetSentMessageCount());
+      EXPECT_FALSE(FlushScheduled());
+    } else {
+      EXPECT_EQ(0U, GetAndResetSentMessageCount());
+      EXPECT_TRUE(FlushScheduled());
+    }
   }
 }
 

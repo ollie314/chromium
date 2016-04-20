@@ -17,6 +17,7 @@
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/browser/service_worker/service_worker_registration_status.h"
 #include "content/browser/service_worker/service_worker_test_utils.h"
+#include "content/common/service_worker/embedded_worker_messages.h"
 #include "content/common/service_worker/service_worker_messages.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "ipc/ipc_test_sink.h"
@@ -129,10 +130,10 @@ class ServiceWorkerJobTest : public testing::Test {
   scoped_refptr<ServiceWorkerRegistration> FindRegistrationForPattern(
       const GURL& pattern,
       ServiceWorkerStatusCode expected_status = SERVICE_WORKER_OK);
-  scoped_ptr<ServiceWorkerProviderHost> CreateControllee();
+  std::unique_ptr<ServiceWorkerProviderHost> CreateControllee();
 
   TestBrowserThreadBundle browser_thread_bundle_;
-  scoped_ptr<EmbeddedWorkerTestHelper> helper_;
+  std::unique_ptr<EmbeddedWorkerTestHelper> helper_;
 };
 
 scoped_refptr<ServiceWorkerRegistration> ServiceWorkerJobTest::RunRegisterJob(
@@ -177,11 +178,14 @@ ServiceWorkerJobTest::FindRegistrationForPattern(
   return registration;
 }
 
-scoped_ptr<ServiceWorkerProviderHost> ServiceWorkerJobTest::CreateControllee() {
-  return scoped_ptr<ServiceWorkerProviderHost>(new ServiceWorkerProviderHost(
-      33 /* dummy render_process id */, MSG_ROUTING_NONE /* render_frame_id */,
-      1 /* dummy provider_id */, SERVICE_WORKER_PROVIDER_FOR_WINDOW,
-      helper_->context()->AsWeakPtr(), NULL));
+std::unique_ptr<ServiceWorkerProviderHost>
+ServiceWorkerJobTest::CreateControllee() {
+  return std::unique_ptr<ServiceWorkerProviderHost>(
+      new ServiceWorkerProviderHost(33 /* dummy render_process id */,
+                                    MSG_ROUTING_NONE /* render_frame_id */,
+                                    1 /* dummy provider_id */,
+                                    SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+                                    helper_->context()->AsWeakPtr(), NULL));
 }
 
 TEST_F(ServiceWorkerJobTest, SameDocumentSameRegistration) {
@@ -274,6 +278,8 @@ TEST_F(ServiceWorkerJobTest, Register) {
                      GURL("http://www.example.com/service_worker.js"));
 
   ASSERT_NE(scoped_refptr<ServiceWorkerRegistration>(NULL), registration);
+  EXPECT_TRUE(helper_->inner_ipc_sink()->GetUniqueMessageMatching(
+      ServiceWorkerMsg_InstallEvent::ID));
 }
 
 // Make sure registrations are cleaned up when they are unregistered.
@@ -359,7 +365,8 @@ class FailToStartWorkerTestHelper : public EmbeddedWorkerTestHelper {
   void OnStartWorker(int embedded_worker_id,
                      int64_t service_worker_version_id,
                      const GURL& scope,
-                     const GURL& script_url) override {
+                     const GURL& script_url,
+                     bool pause_after_download) override {
     EmbeddedWorkerInstance* worker = registry()->GetWorker(embedded_worker_id);
     registry()->OnWorkerStopped(worker->process_id(), embedded_worker_id);
   }
@@ -639,7 +646,8 @@ TEST_F(ServiceWorkerJobTest, UnregisterWaitingSetsRedundant) {
   scoped_refptr<ServiceWorkerVersion> version = new ServiceWorkerVersion(
       registration.get(), script_url, 1L, helper_->context()->AsWeakPtr());
   ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
-  version->StartWorker(CreateReceiverOnCurrentThread(&status));
+  version->StartWorker(ServiceWorkerMetrics::EventType::UNKNOWN,
+                       CreateReceiverOnCurrentThread(&status));
   base::RunLoop().RunUntilIdle();
   ASSERT_EQ(SERVICE_WORKER_OK, status);
 
@@ -686,7 +694,7 @@ TEST_F(ServiceWorkerJobTest,
                      GURL("http://www.example.com/service_worker.js"));
   ASSERT_TRUE(registration.get());
 
-  scoped_ptr<ServiceWorkerProviderHost> host = CreateControllee();
+  std::unique_ptr<ServiceWorkerProviderHost> host = CreateControllee();
   registration->active_version()->AddControllee(host.get());
 
   scoped_refptr<ServiceWorkerVersion> version = registration->active_version();
@@ -729,10 +737,10 @@ void WriteResponse(ServiceWorkerStorage* storage,
                    const std::string& headers,
                    IOBuffer* body,
                    int length) {
-  scoped_ptr<ServiceWorkerResponseWriter> writer =
+  std::unique_ptr<ServiceWorkerResponseWriter> writer =
       storage->CreateResponseWriter(id);
 
-  scoped_ptr<net::HttpResponseInfo> info(new net::HttpResponseInfo);
+  std::unique_ptr<net::HttpResponseInfo> info(new net::HttpResponseInfo);
   info->request_time = base::Time::Now();
   info->response_time = base::Time::Now();
   info->was_cached = false;
@@ -788,6 +796,17 @@ class UpdateJobTestHelper
     return context()->job_coordinator();
   }
 
+  bool force_bypass_cache_for_scripts() const {
+    return force_bypass_cache_for_scripts_;
+  }
+  void set_force_bypass_cache_for_scripts(bool force_bypass_cache_for_scripts) {
+    force_bypass_cache_for_scripts_ = force_bypass_cache_for_scripts;
+  }
+
+  void set_force_start_worker_failure(bool force_start_worker_failure) {
+    force_start_worker_failure_ = force_start_worker_failure;
+  }
+
   scoped_refptr<ServiceWorkerRegistration> SetupInitialRegistration(
       const GURL& test_origin) {
     scoped_refptr<ServiceWorkerRegistration> registration;
@@ -811,7 +830,8 @@ class UpdateJobTestHelper
   void OnStartWorker(int embedded_worker_id,
                      int64_t version_id,
                      const GURL& scope,
-                     const GURL& script) override {
+                     const GURL& script,
+                     bool pause_after_download) override {
     const std::string kMockScriptBody = "mock_script";
     const uint64_t kMockScriptSize = 19284;
     ServiceWorkerVersion* version = context()->GetLiveVersion(version_id);
@@ -822,6 +842,9 @@ class UpdateJobTestHelper
 
     ASSERT_TRUE(version);
     version->AddListener(this);
+
+    if (force_bypass_cache_for_scripts())
+      version->set_force_bypass_cache_for_scripts(true);
 
     if (!is_update) {
       // Spoof caching the script for the initial version.
@@ -844,8 +867,18 @@ class UpdateJobTestHelper
       version->script_cache_map()->NotifyFinishedCaching(
           script, kMockScriptSize, net::URLRequestStatus(), std::string());
     }
-    EmbeddedWorkerTestHelper::OnStartWorker(embedded_worker_id, version_id,
-                                            scope, script);
+
+    EmbeddedWorkerTestHelper::OnStartWorker(
+        embedded_worker_id, version_id, scope, script, pause_after_download);
+  }
+
+  void OnResumeAfterDownload(int embedded_worker_id) override {
+    if (!force_start_worker_failure_) {
+      EmbeddedWorkerTestHelper::OnResumeAfterDownload(embedded_worker_id);
+    } else {
+      SimulateWorkerThreadStarted(GetNextThreadId(), embedded_worker_id);
+      SimulateWorkerScriptEvaluated(embedded_worker_id, false);
+    }
   }
 
   // ServiceWorkerRegistration::Listener overrides
@@ -865,7 +898,6 @@ class UpdateJobTestHelper
   }
 
   void OnUpdateFound(ServiceWorkerRegistration* registration) override {
-    ASSERT_FALSE(update_found_);
     update_found_ = true;
   }
 
@@ -882,6 +914,8 @@ class UpdateJobTestHelper
   std::vector<AttributeChangeLogEntry> attribute_change_log_;
   std::vector<StateChangeLogEntry> state_change_log_;
   bool update_found_ = false;
+  bool force_bypass_cache_for_scripts_ = false;
+  bool force_start_worker_failure_ = false;
 };
 
 // Helper class for update tests that evicts the active version when the update
@@ -894,7 +928,8 @@ class EvictIncumbentVersionHelper : public UpdateJobTestHelper {
   void OnStartWorker(int embedded_worker_id,
                      int64_t version_id,
                      const GURL& scope,
-                     const GURL& script) override {
+                     const GURL& script,
+                     bool pause_after_download) override {
     ServiceWorkerVersion* version = context()->GetLiveVersion(version_id);
     ServiceWorkerRegistration* registration =
         context()->GetLiveRegistration(version->registration_id());
@@ -907,7 +942,7 @@ class EvictIncumbentVersionHelper : public UpdateJobTestHelper {
           make_scoped_refptr(registration->active_version()));
     }
     UpdateJobTestHelper::OnStartWorker(embedded_worker_id, version_id, scope,
-                                       script);
+                                       script, pause_after_download);
   }
 
   void OnRegistrationFailed(ServiceWorkerRegistration* registration) override {
@@ -965,16 +1000,35 @@ TEST_F(ServiceWorkerJobTest, Update_BumpLastUpdateCheckTime) {
   helper_.reset(update_helper);
   scoped_refptr<ServiceWorkerRegistration> registration =
       update_helper->SetupInitialRegistration(kNoChangeOrigin);
+  ASSERT_TRUE(registration.get());
 
-  // Run an update where the last update check was less than 24 hours ago. The
-  // check time shouldn't change, as we didn't bypass cache.
+  registration->AddListener(update_helper);
+
+  // Run an update that does not bypass the network cache. The check time
+  // should not be updated.
   registration->set_last_update_check(kToday);
   registration->active_version()->StartUpdate();
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(kToday, registration->last_update_check());
+  registration->RemoveListener(update_helper);
 
-  // Run an update where the last update check was over 24 hours ago. The
-  // check time should change, as the cache was bypassed.
+  registration = update_helper->SetupInitialRegistration(kNewVersionOrigin);
+  ASSERT_TRUE(registration.get());
+
+  registration->AddListener(update_helper);
+
+  // Run an update that bypasses the network cache. The check time should be
+  // updated.
+  update_helper->set_force_bypass_cache_for_scripts(true);
+  registration->set_last_update_check(kYesterday);
+  registration->active_version()->StartUpdate();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_LT(kYesterday, registration->last_update_check());
+
+  // Run an update to a worker that loads successfully but fails to start up
+  // (script evaluation failure). The check time should be updated.
+  update_helper->set_force_bypass_cache_for_scripts(true);
+  update_helper->set_force_start_worker_failure(true);
   registration->set_last_update_check(kYesterday);
   registration->active_version()->StartUpdate();
   base::RunLoop().RunUntilIdle();
@@ -1135,7 +1189,7 @@ TEST_F(ServiceWorkerJobTest, Update_UninstallingRegistration) {
                      GURL("http://www.example.com/service_worker.js"));
 
   // Add a controllee and queue an unregister to force the uninstalling state.
-  scoped_ptr<ServiceWorkerProviderHost> host = CreateControllee();
+  std::unique_ptr<ServiceWorkerProviderHost> host = CreateControllee();
   ServiceWorkerVersion* active_version = registration->active_version();
   active_version->AddControllee(host.get());
   job_coordinator()->Unregister(GURL("http://www.example.com/one/"),
@@ -1164,7 +1218,7 @@ TEST_F(ServiceWorkerJobTest, RegisterWhileUninstalling) {
       RunRegisterJob(pattern, script1);
 
   // Add a controllee and queue an unregister to force the uninstalling state.
-  scoped_ptr<ServiceWorkerProviderHost> host = CreateControllee();
+  std::unique_ptr<ServiceWorkerProviderHost> host = CreateControllee();
   scoped_refptr<ServiceWorkerVersion> old_version =
       registration->active_version();
   old_version->AddControllee(host.get());
@@ -1208,7 +1262,7 @@ TEST_F(ServiceWorkerJobTest, RegisterAndUnregisterWhileUninstalling) {
       RunRegisterJob(pattern, script1);
 
   // Add a controllee and queue an unregister to force the uninstalling state.
-  scoped_ptr<ServiceWorkerProviderHost> host = CreateControllee();
+  std::unique_ptr<ServiceWorkerProviderHost> host = CreateControllee();
   scoped_refptr<ServiceWorkerVersion> old_version =
       registration->active_version();
   old_version->AddControllee(host.get());
@@ -1256,7 +1310,7 @@ TEST_F(ServiceWorkerJobTest, RegisterSameScriptMultipleTimesWhileUninstalling) {
       RunRegisterJob(pattern, script1);
 
   // Add a controllee and queue an unregister to force the uninstalling state.
-  scoped_ptr<ServiceWorkerProviderHost> host = CreateControllee();
+  std::unique_ptr<ServiceWorkerProviderHost> host = CreateControllee();
   scoped_refptr<ServiceWorkerVersion> old_version =
       registration->active_version();
   old_version->AddControllee(host.get());
@@ -1301,7 +1355,7 @@ TEST_F(ServiceWorkerJobTest, RegisterMultipleTimesWhileUninstalling) {
       RunRegisterJob(pattern, script1);
 
   // Add a controllee and queue an unregister to force the uninstalling state.
-  scoped_ptr<ServiceWorkerProviderHost> host = CreateControllee();
+  std::unique_ptr<ServiceWorkerProviderHost> host = CreateControllee();
   scoped_refptr<ServiceWorkerVersion> first_version =
       registration->active_version();
   first_version->AddControllee(host.get());
@@ -1370,7 +1424,8 @@ class EventCallbackHelper : public EmbeddedWorkerTestHelper {
   void set_activate_event_result(blink::WebServiceWorkerEventResult result) {
     activate_event_result_ = result;
   }
-private:
+
+ private:
   base::Closure install_callback_;
   blink::WebServiceWorkerEventResult install_event_result_;
   blink::WebServiceWorkerEventResult activate_event_result_;
@@ -1388,7 +1443,7 @@ TEST_F(ServiceWorkerJobTest, RemoveControlleeDuringInstall) {
       RunRegisterJob(pattern, script1);
 
   // Add a controllee and queue an unregister to force the uninstalling state.
-  scoped_ptr<ServiceWorkerProviderHost> host = CreateControllee();
+  std::unique_ptr<ServiceWorkerProviderHost> host = CreateControllee();
   scoped_refptr<ServiceWorkerVersion> old_version =
       registration->active_version();
   old_version->AddControllee(host.get());
@@ -1428,7 +1483,7 @@ TEST_F(ServiceWorkerJobTest, RemoveControlleeDuringRejectedInstall) {
       RunRegisterJob(pattern, script1);
 
   // Add a controllee and queue an unregister to force the uninstalling state.
-  scoped_ptr<ServiceWorkerProviderHost> host = CreateControllee();
+  std::unique_ptr<ServiceWorkerProviderHost> host = CreateControllee();
   scoped_refptr<ServiceWorkerVersion> old_version =
       registration->active_version();
   old_version->AddControllee(host.get());
@@ -1464,7 +1519,7 @@ TEST_F(ServiceWorkerJobTest, RemoveControlleeDuringInstall_RejectActivate) {
       RunRegisterJob(pattern, script1);
 
   // Add a controllee and queue an unregister to force the uninstalling state.
-  scoped_ptr<ServiceWorkerProviderHost> host = CreateControllee();
+  std::unique_ptr<ServiceWorkerProviderHost> host = CreateControllee();
   scoped_refptr<ServiceWorkerVersion> old_version =
       registration->active_version();
   old_version->AddControllee(host.get());
@@ -1486,6 +1541,41 @@ TEST_F(ServiceWorkerJobTest, RemoveControlleeDuringInstall_RejectActivate) {
   EXPECT_EQ(ServiceWorkerVersion::REDUNDANT, old_version->status());
 
   FindRegistrationForPattern(pattern, SERVICE_WORKER_OK);
+}
+
+TEST_F(ServiceWorkerJobTest, Update_PauseAfterDownload) {
+  UpdateJobTestHelper* update_helper = new UpdateJobTestHelper;
+  helper_.reset(update_helper);
+  IPC::TestSink* sink = update_helper->ipc_sink();
+
+  // The initial version should not pause after download.
+  scoped_refptr<ServiceWorkerRegistration> registration =
+      update_helper->SetupInitialRegistration(kNewVersionOrigin);
+  {
+    const IPC::Message* start_msg =
+        sink->GetUniqueMessageMatching(EmbeddedWorkerMsg_StartWorker::ID);
+    ASSERT_TRUE(start_msg);
+    EmbeddedWorkerMsg_StartWorker::Param param;
+    EmbeddedWorkerMsg_StartWorker::Read(start_msg, &param);
+    EmbeddedWorkerMsg_StartWorker_Params start_params = base::get<0>(param);
+    EXPECT_FALSE(start_params.pause_after_download);
+    sink->ClearMessages();
+  }
+
+  // The updated version should pause after download.
+  registration->AddListener(update_helper);
+  registration->active_version()->StartUpdate();
+  base::RunLoop().RunUntilIdle();
+  {
+    const IPC::Message* start_msg =
+        sink->GetUniqueMessageMatching(EmbeddedWorkerMsg_StartWorker::ID);
+    ASSERT_TRUE(start_msg);
+    EmbeddedWorkerMsg_StartWorker::Param param;
+    EmbeddedWorkerMsg_StartWorker::Read(start_msg, &param);
+    EmbeddedWorkerMsg_StartWorker_Params start_params = base::get<0>(param);
+    EXPECT_TRUE(start_params.pause_after_download);
+    sink->ClearMessages();
+  }
 }
 
 }  // namespace content

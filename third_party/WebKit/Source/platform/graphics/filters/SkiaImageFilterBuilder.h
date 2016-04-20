@@ -27,37 +27,32 @@
 #define SkiaImageFilterBuilder_h
 
 #include "platform/PlatformExport.h"
-#include "platform/geometry/FloatSize.h"
 #include "platform/graphics/ColorSpace.h"
-#include "platform/heap/Handle.h"
-#include "public/platform/WebFilterOperations.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 
 class SkImageFilter;
 
 namespace blink {
+
 class AffineTransform;
+class BoxReflection;
+class CompositorFilterOperations;
 class FilterEffect;
 class FilterOperations;
+class Image;
 
-class PLATFORM_EXPORT SkiaImageFilterBuilder {
-    STACK_ALLOCATED();
-public:
-    ~SkiaImageFilterBuilder();
+namespace SkiaImageFilterBuilder {
 
-    PassRefPtr<SkImageFilter> build(FilterEffect*, ColorSpace, bool requiresPMColorValidation = true);
-    void buildFilterOperations(const FilterOperations&, WebFilterOperations*);
-    PassRefPtr<SkImageFilter> buildTransform(const AffineTransform&, SkImageFilter* input);
+PLATFORM_EXPORT sk_sp<SkImageFilter> build(FilterEffect*, ColorSpace, bool requiresPMColorValidation = true);
+PLATFORM_EXPORT void buildFilterOperations(const FilterOperations&, CompositorFilterOperations*);
+PLATFORM_EXPORT sk_sp<SkImageFilter> buildTransform(const AffineTransform&, sk_sp<SkImageFilter> input);
 
-    PassRefPtr<SkImageFilter> transformColorSpace(
-        SkImageFilter* input, ColorSpace srcColorSpace, ColorSpace dstColorSpace);
+PLATFORM_EXPORT sk_sp<SkImageFilter> transformColorSpace(
+    sk_sp<SkImageFilter> input, ColorSpace srcColorSpace, ColorSpace dstColorSpace);
 
-    void setCropOffset(const FloatSize& cropOffset) { m_cropOffset = cropOffset; }
-    FloatSize cropOffset() { return m_cropOffset; }
+PLATFORM_EXPORT sk_sp<SkImageFilter> buildBoxReflectFilter(const BoxReflection&, sk_sp<SkImageFilter> input);
 
-private:
-    FloatSize m_cropOffset;
-};
-
+} // namespace SkiaImageFilterBuilder
 } // namespace blink
 
 #endif

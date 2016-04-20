@@ -32,6 +32,7 @@
 #include "modules/ModulesExport.h"
 #include "modules/webdatabase/DatabaseError.h"
 #include "platform/heap/Handle.h"
+#include "wtf/Functional.h"
 #include "wtf/HashMap.h"
 #include "wtf/HashSet.h"
 #include "wtf/ThreadingPrimitives.h"
@@ -42,6 +43,7 @@ namespace blink {
 
 class Database;
 class DatabaseContext;
+class Page;
 class SecurityOrigin;
 
 class MODULES_EXPORT DatabaseTracker {
@@ -63,7 +65,10 @@ public:
 
     unsigned long long getMaxSizeForDatabase(const Database*);
 
-    void closeDatabasesImmediately(const String& originIdentifier, const String& name);
+    void closeDatabasesImmediately(SecurityOrigin*, const String& name);
+
+    using DatabaseCallback = Function<void(Database*)>;
+    void forEachOpenDatabaseInPage(Page*, PassOwnPtr<DatabaseCallback>);
 
     void prepareToOpenDatabase(Database*);
     void failedToOpenDatabase(Database*);

@@ -6,10 +6,8 @@
 
 #include <stddef.h>
 
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -19,12 +17,12 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
-
+#include "components/prefs/pref_service.h"
+#include "components/prefs/testing_pref_service.h"
 #include "net/http/http_network_session.h"
 #include "net/log/net_log.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_service.h"
-#include "net/socket/next_proto.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_interceptor.h"
@@ -98,42 +96,39 @@ class DataReductionProxyIODataTest : public testing::Test {
 };
 
 TEST_F(DataReductionProxyIODataTest, TestConstruction) {
-  scoped_ptr<DataReductionProxyIOData> io_data(new DataReductionProxyIOData(
-      Client::UNKNOWN, DataReductionProxyParams::kAllowed, net_log(),
-      task_runner(), task_runner(), false /* enabled */,
-      false /* enable_quic */, std::string() /* user_agent */));
+  std::unique_ptr<DataReductionProxyIOData> io_data(
+      new DataReductionProxyIOData(
+          Client::UNKNOWN, DataReductionProxyParams::kAllowed, net_log(),
+          task_runner(), task_runner(), false /* enabled */,
+          false /* enable_quic */, std::string() /* user_agent */));
 
   // Check that the SimpleURLRequestContextGetter uses vanilla HTTP.
   net::URLRequestContext* request_context =
       io_data->basic_url_request_context_getter_.get()->GetURLRequestContext();
   const net::HttpNetworkSession::Params* http_params =
       request_context->GetNetworkSessionParams();
-  EXPECT_TRUE(http_params->use_alternative_services);
+  EXPECT_FALSE(http_params->enable_spdy31);
+  EXPECT_FALSE(http_params->enable_http2);
+  EXPECT_FALSE(http_params->parse_alternative_services);
+  EXPECT_FALSE(http_params->enable_alternative_service_with_different_host);
   EXPECT_FALSE(http_params->enable_quic);
-  net::NextProtoVector expected_protos =
-      net::NextProtosWithSpdyAndQuic(false, false);
-  EXPECT_EQ(expected_protos.size(), http_params->next_protos.size());
-  size_t proto_index = 0;
-  for (const auto& proto : expected_protos)
-    EXPECT_EQ(proto, http_params->next_protos[proto_index++]);
 
   // Check that io_data creates an interceptor. Such an interceptor is
   // thoroughly tested by DataReductionProxyInterceptoTest.
-  scoped_ptr<net::URLRequestInterceptor> interceptor =
+  std::unique_ptr<net::URLRequestInterceptor> interceptor =
       io_data->CreateInterceptor();
   EXPECT_NE(nullptr, interceptor.get());
 
   // When creating a network delegate, expect that it properly wraps a
   // network delegate. Such a network delegate is thoroughly tested by
   // DataReductionProxyNetworkDelegateTest.
-   scoped_ptr<net::URLRequest> fake_request =
-       context().CreateRequest(
-           GURL("http://www.foo.com/"), net::IDLE, delegate());
+  std::unique_ptr<net::URLRequest> fake_request = context().CreateRequest(
+      GURL("http://www.foo.com/"), net::IDLE, delegate());
   CountingNetworkDelegate* wrapped_network_delegate =
       new CountingNetworkDelegate();
-  scoped_ptr<DataReductionProxyNetworkDelegate> network_delegate =
-      io_data->CreateNetworkDelegate(
-          make_scoped_ptr(wrapped_network_delegate), false);
+  std::unique_ptr<DataReductionProxyNetworkDelegate> network_delegate =
+      io_data->CreateNetworkDelegate(base::WrapUnique(wrapped_network_delegate),
+                                     false);
   network_delegate->NotifyBeforeURLRequest(
       fake_request.get(),
       base::Bind(&DataReductionProxyIODataTest::RequestCallback,
@@ -143,8 +138,8 @@ TEST_F(DataReductionProxyIODataTest, TestConstruction) {
 
   // Creating a second delegate with bypass statistics tracking should result
   // in usage stats being created.
-  io_data->CreateNetworkDelegate(make_scoped_ptr(new CountingNetworkDelegate()),
-                                 true);
+  io_data->CreateNetworkDelegate(
+      base::WrapUnique(new CountingNetworkDelegate()), true);
   EXPECT_NE(nullptr, io_data->bypass_stats());
 
   io_data->ShutdownOnUIThread();
@@ -152,7 +147,7 @@ TEST_F(DataReductionProxyIODataTest, TestConstruction) {
 
 TEST_F(DataReductionProxyIODataTest, TestResetBadProxyListOnDisableDataSaver) {
   net::TestURLRequestContext context(false);
-  scoped_ptr<DataReductionProxyTestContext> drp_test_context =
+  std::unique_ptr<DataReductionProxyTestContext> drp_test_context =
       DataReductionProxyTestContext::Builder()
           .WithParamsFlags(DataReductionProxyParams::kAllowed |
                            DataReductionProxyParams::kFallbackAllowed |

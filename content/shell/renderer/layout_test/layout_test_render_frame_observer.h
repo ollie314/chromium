@@ -8,15 +8,32 @@
 #include "base/macros.h"
 #include "content/public/renderer/render_frame_observer.h"
 
+namespace IPC {
+class Message;
+}  // namespace IPC
+
+namespace base {
+class DictionaryValue;
+}  // namespace
+
 namespace content {
+struct ShellTestConfiguration;
 class RenderFrame;
+struct ShellTestConfiguration;
 
 class LayoutTestRenderFrameObserver : public RenderFrameObserver {
  public:
   explicit LayoutTestRenderFrameObserver(RenderFrame* render_frame);
   ~LayoutTestRenderFrameObserver() override {}
 
+  bool OnMessageReceived(const IPC::Message& message) override;
+
  private:
+  void OnLayoutDumpRequest();
+  void OnSetTestConfiguration(const ShellTestConfiguration& test_config);
+  void OnReplicateTestConfiguration(const ShellTestConfiguration& test_config);
+  void OnSetupSecondaryRenderer();
+
   DISALLOW_COPY_AND_ASSIGN(LayoutTestRenderFrameObserver);
 };
 

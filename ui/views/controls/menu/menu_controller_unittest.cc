@@ -4,28 +4,33 @@
 
 #include "ui/views/controls/menu/menu_controller.h"
 
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "ui/aura/scoped_window_targeter.h"
 #include "ui/aura/window.h"
+#include "ui/events/event.h"
+#include "ui/events/event_constants.h"
 #include "ui/events/event_handler.h"
+#include "ui/events/event_utils.h"
 #include "ui/events/null_event_targeter.h"
 #include "ui/events/test/event_generator.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/views/controls/menu/menu_controller_delegate.h"
 #include "ui/views/controls/menu/menu_delegate.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_message_loop.h"
+#include "ui/views/controls/menu/menu_scroll_view_container.h"
 #include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/test/menu_test_utils.h"
 #include "ui/views/test/views_test_base.h"
-
-#if defined(OS_WIN)
-#include "ui/views/widget/desktop_aura/desktop_dispatcher_client.h"
-#endif
 
 #if defined(USE_AURA)
 #include "ui/aura/scoped_window_targeter.h"
 #include "ui/aura/window.h"
+#include "ui/views/controls/menu/menu_key_event_handler.h"
 #endif
 
 #if defined(USE_X11)
@@ -39,34 +44,6 @@ namespace views {
 namespace test {
 
 namespace {
-
-// Test implementation of MenuDelegate that only reports calls of OnPerformDrop.
-class TestMenuDelegate : public MenuDelegate {
- public:
-  TestMenuDelegate();
-  ~TestMenuDelegate() override;
-
-  bool on_perform_drop_called() { return on_perform_drop_called_; }
-
-  int OnPerformDrop(MenuItemView* menu,
-                    DropPosition position,
-                    const ui::DropTargetEvent& event) override;
-
- private:
-  bool on_perform_drop_called_;
-  DISALLOW_COPY_AND_ASSIGN(TestMenuDelegate);
-};
-
-TestMenuDelegate::TestMenuDelegate() : on_perform_drop_called_(false) {}
-
-TestMenuDelegate::~TestMenuDelegate() {}
-
-int TestMenuDelegate::OnPerformDrop(MenuItemView* menu,
-                                    DropPosition position,
-                                    const ui::DropTargetEvent& event) {
-  on_perform_drop_called_ = true;
-  return ui::DragDropTypes::DRAG_COPY;
-}
 
 // Test implementation of MenuControllerDelegate that only reports the values
 // called of OnMenuClosed.
@@ -87,6 +64,11 @@ class TestMenuControllerDelegate : public internal::MenuControllerDelegate {
     return on_menu_closed_mouse_event_flags_;
   }
 
+  // On a subsequent call to OnMenuClosed |controller| will be deleted.
+  void set_on_menu_closed_callback(const base::Closure& callback) {
+    on_menu_closed_callback_ = callback;
+  }
+
   // internal::MenuControllerDelegate:
   void OnMenuClosed(NotifyType type,
                     MenuItemView* menu,
@@ -102,6 +84,9 @@ class TestMenuControllerDelegate : public internal::MenuControllerDelegate {
   MenuItemView* on_menu_closed_menu_;
   int on_menu_closed_mouse_event_flags_;
 
+  // Optional callback triggered during OnMenuClosed
+  base::Closure on_menu_closed_callback_;
+
   DISALLOW_COPY_AND_ASSIGN(TestMenuControllerDelegate);
 };
 
@@ -109,7 +94,8 @@ TestMenuControllerDelegate::TestMenuControllerDelegate()
     : on_menu_closed_called_(0),
       on_menu_closed_notify_type_(NOTIFY_DELEGATE),
       on_menu_closed_menu_(nullptr),
-      on_menu_closed_mouse_event_flags_(0) {}
+      on_menu_closed_mouse_event_flags_(0),
+      on_menu_closed_callback_() {}
 
 void TestMenuControllerDelegate::OnMenuClosed(NotifyType type,
                                               MenuItemView* menu,
@@ -118,6 +104,8 @@ void TestMenuControllerDelegate::OnMenuClosed(NotifyType type,
   on_menu_closed_notify_type_ = type;
   on_menu_closed_menu_ = menu;
   on_menu_closed_mouse_event_flags_ = mouse_event_flags;
+  if (!on_menu_closed_callback_.is_null())
+    on_menu_closed_callback_.Run();
 }
 
 void TestMenuControllerDelegate::SiblingMenuCreated(MenuItemView* menu) {}
@@ -161,26 +149,29 @@ class TestEventHandler : public ui::EventHandler {
 // loop is running or not.
 class TestMenuMessageLoop : public MenuMessageLoop {
  public:
-  explicit TestMenuMessageLoop(scoped_ptr<MenuMessageLoop> original);
+  explicit TestMenuMessageLoop(std::unique_ptr<MenuMessageLoop> original);
   ~TestMenuMessageLoop() override;
 
   bool is_running() const { return is_running_; }
+
+  // MenuMessageLoop:
+  void QuitNow() override;
 
  private:
   // MenuMessageLoop:
   void Run(MenuController* controller,
            Widget* owner,
            bool nested_menu) override;
-  void QuitNow() override;
   void ClearOwner() override;
 
-  scoped_ptr<MenuMessageLoop> original_;
+  std::unique_ptr<MenuMessageLoop> original_;
   bool is_running_;
 
   DISALLOW_COPY_AND_ASSIGN(TestMenuMessageLoop);
 };
 
-TestMenuMessageLoop::TestMenuMessageLoop(scoped_ptr<MenuMessageLoop> original)
+TestMenuMessageLoop::TestMenuMessageLoop(
+    std::unique_ptr<MenuMessageLoop> original)
     : original_(std::move(original)) {
   DCHECK(original_);
 }
@@ -235,12 +226,7 @@ class MenuControllerTest : public ViewsTestBase {
 
   void TearDown() override {
     owner_->CloseNow();
-
-    menu_controller_->showing_ = false;
-    menu_controller_->owner_ = nullptr;
-    delete menu_controller_;
-    menu_controller_ = nullptr;
-
+    DestroyMenuController();
     ViewsTestBase::TearDown();
   }
 
@@ -259,7 +245,7 @@ class MenuControllerTest : public ViewsTestBase {
       // the menu to not handle the key event.
       aura::ScopedWindowTargeter scoped_targeter(
           owner()->GetNativeWindow()->GetRootWindow(),
-          scoped_ptr<ui::EventTargeter>(new ui::NullEventTargeter));
+          std::unique_ptr<ui::EventTargeter>(new ui::NullEventTargeter));
       event_generator_->PressKey(ui::VKEY_ESCAPE, 0);
       EXPECT_EQ(MenuController::EXIT_NONE, menu_exit_type());
     }
@@ -273,7 +259,7 @@ class MenuControllerTest : public ViewsTestBase {
   void TestAsynchronousNestedExitAll() {
     ASSERT_TRUE(test_message_loop_->is_running());
 
-    scoped_ptr<TestMenuControllerDelegate> nested_delegate(
+    std::unique_ptr<TestMenuControllerDelegate> nested_delegate(
         new TestMenuControllerDelegate());
 
     menu_controller()->AddNestedDelegate(nested_delegate.get());
@@ -295,7 +281,7 @@ class MenuControllerTest : public ViewsTestBase {
   void TestAsynchronousNestedExitOutermost() {
     ASSERT_TRUE(test_message_loop_->is_running());
 
-    scoped_ptr<TestMenuControllerDelegate> nested_delegate(
+    std::unique_ptr<TestMenuControllerDelegate> nested_delegate(
         new TestMenuControllerDelegate());
 
     menu_controller()->AddNestedDelegate(nested_delegate.get());
@@ -319,6 +305,17 @@ class MenuControllerTest : public ViewsTestBase {
     EXPECT_FALSE(test_message_loop_->is_running());
   }
 
+  // This nested an asynchronous delegate onto a menu with a nested message
+  // loop, then kills the loop. Simulates the loop being killed not by
+  // MenuController.
+  void TestNestedMessageLoopKillsItself(
+      TestMenuControllerDelegate* nested_delegate) {
+    menu_controller_->AddNestedDelegate(nested_delegate);
+    menu_controller_->SetAsyncRun(true);
+
+    test_message_loop_->QuitNow();
+  }
+
  protected:
   void SetPendingStateItem(MenuItemView* item) {
     menu_controller_->pending_state_.item = item;
@@ -340,6 +337,13 @@ class MenuControllerTest : public ViewsTestBase {
   void DecrementSelection() {
     menu_controller_->IncrementSelection(
         MenuController::INCREMENT_SELECTION_UP);
+  }
+
+  void DestroyMenuControllerOnMenuClosed(TestMenuControllerDelegate* delegate) {
+    // Unretained() is safe here as the test should outlive the delegate. If not
+    // we want to know.
+    delegate->set_on_menu_closed_callback(base::Bind(
+        &MenuControllerTest::DestroyMenuController, base::Unretained(this)));
   }
 
   MenuItemView* FindInitialSelectableMenuItemDown(MenuItemView* parent) {
@@ -386,7 +390,23 @@ class MenuControllerTest : public ViewsTestBase {
     menu_controller_->set_is_combobox(is_combobox);
   }
 
+  void SetSelectionOnPointerDown(SubmenuView* source,
+                                 const ui::LocatedEvent* event) {
+    menu_controller_->SetSelectionOnPointerDown(source, event);
+  }
+
+  // Note that coordinates of events passed to MenuController must be in that of
+  // the MenuScrollViewContainer.
+  void ProcessMouseMoved(SubmenuView* source, const ui::MouseEvent& event) {
+    menu_controller_->OnMouseMoved(source, event);
+  }
+
   void RunMenu() {
+#if defined(USE_AURA)
+    std::unique_ptr<MenuKeyEventHandler> key_event_handler(
+        new MenuKeyEventHandler);
+#endif
+
     menu_controller_->message_loop_depth_++;
     menu_controller_->RunMessageLoop(false);
     menu_controller_->message_loop_depth_--;
@@ -416,7 +436,46 @@ class MenuControllerTest : public ViewsTestBase {
     return menu_controller_->exit_type_;
   }
 
+  void AddButtonMenuItems() {
+    menu_item()->SetBounds(0, 0, 200, 300);
+    MenuItemView* item_view =
+        menu_item()->AppendMenuItemWithLabel(5, base::ASCIIToUTF16("Five"));
+    for (int i = 0; i < 3; ++i) {
+      LabelButton* button =
+          new LabelButton(nullptr, base::ASCIIToUTF16("Label"));
+      button->SetFocusable(true);
+      item_view->AddChildView(button);
+    }
+    menu_item()->GetSubmenu()->ShowAt(owner(), menu_item()->bounds(), false);
+  }
+
+  CustomButton* GetHotButton() {
+    return menu_controller_->hot_button_;
+  }
+
+  void SetHotTrackedButton(CustomButton* hot_button) {
+    menu_controller_->SetHotTrackedButton(hot_button);
+  }
+
+  void ExitMenuRun() {
+    menu_controller_->SetExitType(MenuController::ExitType::EXIT_OUTERMOST);
+    menu_controller_->ExitMenuRun();
+  }
+
  private:
+  void DestroyMenuController() {
+    if (!menu_controller_)
+      return;
+
+    if (!owner_->IsClosed())
+      owner_->RemoveObserver(menu_controller_);
+
+    menu_controller_->showing_ = false;
+    menu_controller_->owner_ = nullptr;
+    delete menu_controller_;
+    menu_controller_ = nullptr;
+  }
+
   void Init() {
     owner_.reset(new Widget);
     Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
@@ -426,14 +485,7 @@ class MenuControllerTest : public ViewsTestBase {
         new ui::test::EventGenerator(GetContext(), owner_->GetNativeWindow()));
     owner_->Show();
 
-#if defined(OS_WIN)
-    dispatcher_client_.reset(new DesktopDispatcherClient);
-    aura::client::SetDispatcherClient(owner_->GetNativeView()->GetRootWindow(),
-                                      dispatcher_client_.get());
-#endif
-
     SetupMenuItem();
-
     SetupMenuController();
   }
 
@@ -457,15 +509,11 @@ class MenuControllerTest : public ViewsTestBase {
     menu_item_->SetController(menu_controller_);
   }
 
-#if defined(OS_WIN)
-  scoped_ptr<aura::client::DispatcherClient> dispatcher_client_;
-#endif
-
-  scoped_ptr<Widget> owner_;
-  scoped_ptr<ui::test::EventGenerator> event_generator_;
-  scoped_ptr<TestMenuItemViewShown> menu_item_;
-  scoped_ptr<TestMenuControllerDelegate> menu_controller_delegate_;
-  scoped_ptr<MenuDelegate> menu_delegate_;
+  std::unique_ptr<Widget> owner_;
+  std::unique_ptr<ui::test::EventGenerator> event_generator_;
+  std::unique_ptr<TestMenuItemViewShown> menu_item_;
+  std::unique_ptr<TestMenuControllerDelegate> menu_controller_delegate_;
+  std::unique_ptr<MenuDelegate> menu_delegate_;
   MenuController* menu_controller_;
   TestMenuMessageLoop* test_message_loop_;
 
@@ -675,6 +723,176 @@ TEST_F(MenuControllerTest, SelectByChar) {
   ResetSelection();
 }
 
+TEST_F(MenuControllerTest, SelectChildButtonView) {
+  AddButtonMenuItems();
+  View* buttons_view = menu_item()->GetSubmenu()->child_at(4);
+  ASSERT_NE(nullptr, buttons_view);
+  CustomButton* button1 =
+      CustomButton::AsCustomButton(buttons_view->child_at(0));
+  ASSERT_NE(nullptr, button1);
+  CustomButton* button2 =
+      CustomButton::AsCustomButton(buttons_view->child_at(1));
+  ASSERT_NE(nullptr, button2);
+  CustomButton* button3 =
+      CustomButton::AsCustomButton(buttons_view->child_at(2));
+  ASSERT_NE(nullptr, button2);
+
+  // Handle searching for 'f'; should find "Four".
+  SelectByChar('f');
+  EXPECT_EQ(4, pending_state_item()->GetCommand());
+
+  EXPECT_FALSE(button1->IsHotTracked());
+  EXPECT_FALSE(button2->IsHotTracked());
+  EXPECT_FALSE(button3->IsHotTracked());
+
+  // Move selection to |button1|.
+  IncrementSelection();
+  EXPECT_EQ(5, pending_state_item()->GetCommand());
+  EXPECT_TRUE(button1->IsHotTracked());
+  EXPECT_FALSE(button2->IsHotTracked());
+  EXPECT_FALSE(button3->IsHotTracked());
+
+  // Move selection to |button2|.
+  IncrementSelection();
+  EXPECT_EQ(5, pending_state_item()->GetCommand());
+  EXPECT_FALSE(button1->IsHotTracked());
+  EXPECT_TRUE(button2->IsHotTracked());
+  EXPECT_FALSE(button3->IsHotTracked());
+
+  // Move selection to |button3|.
+  IncrementSelection();
+  EXPECT_EQ(5, pending_state_item()->GetCommand());
+  EXPECT_FALSE(button1->IsHotTracked());
+  EXPECT_FALSE(button2->IsHotTracked());
+  EXPECT_TRUE(button3->IsHotTracked());
+
+  // Move a mouse to hot track the |button1|.
+  SubmenuView* sub_menu = menu_item()->GetSubmenu();
+  gfx::Point location(button1->GetBoundsInScreen().CenterPoint());
+  View::ConvertPointFromScreen(sub_menu->GetScrollViewContainer(), &location);
+  ui::MouseEvent event(ui::ET_MOUSE_MOVED, location, location,
+                       ui::EventTimeForNow(), 0, 0);
+  ProcessMouseMoved(sub_menu, event);
+
+  // Incrementing selection should move hot tracking to the second button (next
+  // after the first button).
+  IncrementSelection();
+  EXPECT_EQ(5, pending_state_item()->GetCommand());
+  EXPECT_FALSE(button1->IsHotTracked());
+  EXPECT_TRUE(button2->IsHotTracked());
+  EXPECT_FALSE(button3->IsHotTracked());
+
+  // Increment selection twice to wrap around.
+  IncrementSelection();
+  IncrementSelection();
+  EXPECT_EQ(1, pending_state_item()->GetCommand());
+
+  // Clear references in menu controller to the menu item that is going away.
+  ResetSelection();
+}
+
+TEST_F(MenuControllerTest, DeleteChildButtonView) {
+  AddButtonMenuItems();
+
+  // Handle searching for 'f'; should find "Four".
+  SelectByChar('f');
+  EXPECT_EQ(4, pending_state_item()->GetCommand());
+
+  View* buttons_view = menu_item()->GetSubmenu()->child_at(4);
+  ASSERT_NE(nullptr, buttons_view);
+  CustomButton* button1 =
+      CustomButton::AsCustomButton(buttons_view->child_at(0));
+  ASSERT_NE(nullptr, button1);
+  CustomButton* button2 =
+      CustomButton::AsCustomButton(buttons_view->child_at(1));
+  ASSERT_NE(nullptr, button2);
+  CustomButton* button3 =
+      CustomButton::AsCustomButton(buttons_view->child_at(2));
+  ASSERT_NE(nullptr, button2);
+  EXPECT_FALSE(button1->IsHotTracked());
+  EXPECT_FALSE(button2->IsHotTracked());
+  EXPECT_FALSE(button3->IsHotTracked());
+
+  // Increment twice to move selection to |button2|.
+  IncrementSelection();
+  IncrementSelection();
+  EXPECT_EQ(5, pending_state_item()->GetCommand());
+  EXPECT_FALSE(button1->IsHotTracked());
+  EXPECT_TRUE(button2->IsHotTracked());
+  EXPECT_FALSE(button3->IsHotTracked());
+
+  // Delete |button2| while it is hot-tracked.
+  // This should update MenuController via ViewHierarchyChanged and reset
+  // |hot_button_|.
+  delete button2;
+
+  // Incrementing selection should now set hot-tracked item to |button1|.
+  // It should not crash.
+  IncrementSelection();
+  EXPECT_EQ(5, pending_state_item()->GetCommand());
+  EXPECT_TRUE(button1->IsHotTracked());
+  EXPECT_FALSE(button3->IsHotTracked());
+}
+
+// Creates a menu with CustomButton child views, simulates running a nested
+// menu and tests that existing the nested run restores hot-tracked child view.
+TEST_F(MenuControllerTest, ChildButtonHotTrackedWhenNested) {
+  AddButtonMenuItems();
+
+  // Handle searching for 'f'; should find "Four".
+  SelectByChar('f');
+  EXPECT_EQ(4, pending_state_item()->GetCommand());
+
+  View* buttons_view = menu_item()->GetSubmenu()->child_at(4);
+  ASSERT_NE(nullptr, buttons_view);
+  CustomButton* button1 =
+      CustomButton::AsCustomButton(buttons_view->child_at(0));
+  ASSERT_NE(nullptr, button1);
+  CustomButton* button2 =
+      CustomButton::AsCustomButton(buttons_view->child_at(1));
+  ASSERT_NE(nullptr, button2);
+  CustomButton* button3 =
+      CustomButton::AsCustomButton(buttons_view->child_at(2));
+  ASSERT_NE(nullptr, button2);
+  EXPECT_FALSE(button1->IsHotTracked());
+  EXPECT_FALSE(button2->IsHotTracked());
+  EXPECT_FALSE(button3->IsHotTracked());
+
+  // Increment twice to move selection to |button2|.
+  IncrementSelection();
+  IncrementSelection();
+  EXPECT_EQ(5, pending_state_item()->GetCommand());
+  EXPECT_FALSE(button1->IsHotTracked());
+  EXPECT_TRUE(button2->IsHotTracked());
+  EXPECT_FALSE(button3->IsHotTracked());
+  EXPECT_EQ(button2, GetHotButton());
+
+  MenuController* controller = menu_controller();
+  controller->SetAsyncRun(true);
+  int mouse_event_flags = 0;
+  MenuItemView* run_result =
+      controller->Run(owner(), nullptr, menu_item(), gfx::Rect(),
+                      MENU_ANCHOR_TOPLEFT, false, false, &mouse_event_flags);
+  EXPECT_EQ(run_result, nullptr);
+
+  // |button2| should stay in hot-tracked state but menu controller should not
+  // track it anymore (preventing resetting hot-tracked state when changing
+  // selection while a nested run is active).
+  EXPECT_TRUE(button2->IsHotTracked());
+  EXPECT_EQ(nullptr, GetHotButton());
+
+  // Setting hot-tracked button while nested should get reverted when nested
+  // menu run ends.
+  SetHotTrackedButton(button1);
+  EXPECT_TRUE(button1->IsHotTracked());
+  EXPECT_EQ(button1, GetHotButton());
+
+  ExitMenuRun();
+  EXPECT_FALSE(button1->IsHotTracked());
+  EXPECT_TRUE(button2->IsHotTracked());
+  EXPECT_EQ(button2, GetHotButton());
+}
+
 // Tests that a menu opened asynchronously, will notify its
 // MenuControllerDelegate when Accept is called.
 TEST_F(MenuControllerTest, AsynchronousAccept) {
@@ -728,7 +946,7 @@ TEST_F(MenuControllerTest, AsynchronousCancelAll) {
 TEST_F(MenuControllerTest, AsynchronousNestedDelegate) {
   MenuController* controller = menu_controller();
   TestMenuControllerDelegate* delegate = menu_controller_delegate();
-  scoped_ptr<TestMenuControllerDelegate> nested_delegate(
+  std::unique_ptr<TestMenuControllerDelegate> nested_delegate(
       new TestMenuControllerDelegate());
 
   ASSERT_FALSE(IsAsyncRun());
@@ -804,7 +1022,7 @@ TEST_F(MenuControllerTest, AsynchronousDragComplete) {
 TEST_F(MenuControllerTest, DoubleAsynchronousNested) {
   MenuController* controller = menu_controller();
   TestMenuControllerDelegate* delegate = menu_controller_delegate();
-  scoped_ptr<TestMenuControllerDelegate> nested_delegate(
+  std::unique_ptr<TestMenuControllerDelegate> nested_delegate(
       new TestMenuControllerDelegate());
 
   ASSERT_FALSE(IsAsyncRun());
@@ -823,6 +1041,81 @@ TEST_F(MenuControllerTest, DoubleAsynchronousNested) {
   controller->CancelAll();
   EXPECT_EQ(1, delegate->on_menu_closed_called());
   EXPECT_EQ(1, nested_delegate->on_menu_closed_called());
+}
+
+// Tests that an asynchronous menu nested within a synchronous menu does not
+// crash when trying to repost events that occur outside of the bounds of the
+// menu. Instead a proper shutdown should occur.
+TEST_F(MenuControllerTest, AsynchronousRepostEvent) {
+  MenuController* controller = menu_controller();
+  TestMenuControllerDelegate* delegate = menu_controller_delegate();
+  std::unique_ptr<TestMenuControllerDelegate> nested_delegate(
+      new TestMenuControllerDelegate());
+
+  ASSERT_FALSE(IsAsyncRun());
+
+  controller->AddNestedDelegate(nested_delegate.get());
+  controller->SetAsyncRun(true);
+
+  EXPECT_TRUE(IsAsyncRun());
+  EXPECT_EQ(nested_delegate.get(), GetCurrentDelegate());
+
+  MenuItemView* item = menu_item();
+  int mouse_event_flags = 0;
+  MenuItemView* run_result =
+      controller->Run(owner(), nullptr, item, gfx::Rect(), MENU_ANCHOR_TOPLEFT,
+                      false, false, &mouse_event_flags);
+  EXPECT_EQ(run_result, nullptr);
+
+  // Show a sub menu to target with a pointer selection. However have the event
+  // occur outside of the bounds of the entire menu.
+  SubmenuView* sub_menu = item->GetSubmenu();
+  sub_menu->ShowAt(owner(), item->bounds(), false);
+  gfx::Point location(sub_menu->bounds().bottom_right());
+  location.Offset(1, 1);
+  ui::MouseEvent event(ui::ET_MOUSE_PRESSED, location, location,
+                       ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON, 0);
+
+  // When attempting to select outside of all menus this should lead to a
+  // shutdown. This should not crash while attempting to repost the event.
+  SetSelectionOnPointerDown(sub_menu, &event);
+
+  EXPECT_FALSE(IsAsyncRun());
+  EXPECT_EQ(delegate, GetCurrentDelegate());
+  EXPECT_EQ(0, delegate->on_menu_closed_called());
+  EXPECT_EQ(1, nested_delegate->on_menu_closed_called());
+  EXPECT_EQ(nullptr, nested_delegate->on_menu_closed_menu());
+  EXPECT_EQ(0, nested_delegate->on_menu_closed_mouse_event_flags());
+  EXPECT_EQ(internal::MenuControllerDelegate::NOTIFY_DELEGATE,
+            nested_delegate->on_menu_closed_notify_type());
+  EXPECT_EQ(MenuController::EXIT_ALL, controller->exit_type());
+}
+
+// Tests that an asynchronous menu reposts touch events that occur outside of
+// the bounds of the menu, and that the menu closes.
+TEST_F(MenuControllerTest, AsynchronousTouchEventRepostEvent) {
+  MenuController* controller = menu_controller();
+  TestMenuControllerDelegate* delegate = menu_controller_delegate();
+  controller->SetAsyncRun(true);
+
+  // Show a sub menu to target with a touch event. However have the event occur
+  // outside of the bounds of the entire menu.
+  MenuItemView* item = menu_item();
+  SubmenuView* sub_menu = item->GetSubmenu();
+  sub_menu->ShowAt(owner(), item->bounds(), false);
+  gfx::Point location(sub_menu->bounds().bottom_right());
+  location.Offset(1, 1);
+  ui::TouchEvent event(ui::ET_TOUCH_PRESSED, location, 0, 0,
+                       ui::EventTimeForNow(), 0, 0, 0, 0);
+  controller->OnTouchEvent(sub_menu, &event);
+
+  EXPECT_FALSE(IsShowing());
+  EXPECT_EQ(1, delegate->on_menu_closed_called());
+  EXPECT_EQ(nullptr, delegate->on_menu_closed_menu());
+  EXPECT_EQ(0, delegate->on_menu_closed_mouse_event_flags());
+  EXPECT_EQ(internal::MenuControllerDelegate::NOTIFY_DELEGATE,
+            delegate->on_menu_closed_notify_type());
+  EXPECT_EQ(MenuController::EXIT_ALL, controller->exit_type());
 }
 
 // Tests that if you exit all menus when an asynchrnous menu is nested within a
@@ -849,6 +1142,111 @@ TEST_F(MenuControllerTest, AsynchronousNestedExitOutermost) {
                  base::Unretained(this)));
 
   RunMenu();
+}
+
+// Tests that having the MenuController deleted during RepostEvent does not
+// cause a crash. ASAN bots should not detect use-after-free in MenuController.
+TEST_F(MenuControllerTest, AsynchronousRepostEventDeletesController) {
+  MenuController* controller = menu_controller();
+  std::unique_ptr<TestMenuControllerDelegate> nested_delegate(
+      new TestMenuControllerDelegate());
+
+  ASSERT_FALSE(IsAsyncRun());
+
+  controller->AddNestedDelegate(nested_delegate.get());
+  controller->SetAsyncRun(true);
+
+  EXPECT_TRUE(IsAsyncRun());
+  EXPECT_EQ(nested_delegate.get(), GetCurrentDelegate());
+
+  MenuItemView* item = menu_item();
+  int mouse_event_flags = 0;
+  MenuItemView* run_result =
+      controller->Run(owner(), nullptr, item, gfx::Rect(), MENU_ANCHOR_TOPLEFT,
+                      false, false, &mouse_event_flags);
+  EXPECT_EQ(run_result, nullptr);
+
+  // Show a sub menu to target with a pointer selection. However have the event
+  // occur outside of the bounds of the entire menu.
+  SubmenuView* sub_menu = item->GetSubmenu();
+  sub_menu->ShowAt(owner(), item->bounds(), true);
+  gfx::Point location(sub_menu->bounds().bottom_right());
+  location.Offset(1, 1);
+  ui::MouseEvent event(ui::ET_MOUSE_PRESSED, location, location,
+                       ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON, 0);
+
+  // This will lead to MenuController being deleted during the event repost.
+  // The remainder of this test, and TearDown should not crash.
+  DestroyMenuControllerOnMenuClosed(nested_delegate.get());
+  // When attempting to select outside of all menus this should lead to a
+  // shutdown. This should not crash while attempting to repost the event.
+  SetSelectionOnPointerDown(sub_menu, &event);
+
+  // Close to remove observers before test TearDown
+  sub_menu->Close();
+  EXPECT_EQ(1, nested_delegate->on_menu_closed_called());
+}
+
+// Tests that having the MenuController deleted during OnGestureEvent does not
+// cause a crash. ASAN bots should not detect use-after-free in MenuController.
+TEST_F(MenuControllerTest, AsynchronousGestureDeletesController) {
+  MenuController* controller = menu_controller();
+  std::unique_ptr<TestMenuControllerDelegate> nested_delegate(
+      new TestMenuControllerDelegate());
+  ASSERT_FALSE(IsAsyncRun());
+
+  controller->AddNestedDelegate(nested_delegate.get());
+  controller->SetAsyncRun(true);
+
+  EXPECT_TRUE(IsAsyncRun());
+  EXPECT_EQ(nested_delegate.get(), GetCurrentDelegate());
+
+  MenuItemView* item = menu_item();
+  int mouse_event_flags = 0;
+  MenuItemView* run_result =
+      controller->Run(owner(), nullptr, item, gfx::Rect(), MENU_ANCHOR_TOPLEFT,
+                      false, false, &mouse_event_flags);
+  EXPECT_EQ(run_result, nullptr);
+
+  // Show a sub menu to target with a tap event.
+  SubmenuView* sub_menu = item->GetSubmenu();
+  sub_menu->ShowAt(owner(), gfx::Rect(0, 0, 100, 100), true);
+
+  gfx::Point location(sub_menu->bounds().CenterPoint());
+  ui::GestureEvent event(location.x(), location.y(), 0, ui::EventTimeForNow(),
+                         ui::GestureEventDetails(ui::ET_GESTURE_TAP));
+
+  // This will lead to MenuController being deleted during the processing of the
+  // gesture event. The remainder of this test, and TearDown should not crash.
+  DestroyMenuControllerOnMenuClosed(nested_delegate.get());
+  controller->OnGestureEvent(sub_menu, &event);
+
+  // Close to remove observers before test TearDown
+  sub_menu->Close();
+  EXPECT_EQ(1, nested_delegate->on_menu_closed_called());
+}
+
+// Tests that when an asynchronous menu is nested, and the nested message loop
+// is kill not by the MenuController, that the nested menu is notified of
+// destruction.
+TEST_F(MenuControllerTest, NestedMessageLoopDiesWithNestedMenu) {
+  menu_controller()->CancelAll();
+  InstallTestMenuMessageLoop();
+  std::unique_ptr<TestMenuControllerDelegate> nested_delegate(
+      new TestMenuControllerDelegate());
+  // This will nest an asynchronous menu, and then kill the nested message loop.
+  base::MessageLoopForUI::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&MenuControllerTest::TestNestedMessageLoopKillsItself,
+                 base::Unretained(this), nested_delegate.get()));
+
+  int result_event_flags = 0;
+  // This creates a nested message loop.
+  EXPECT_EQ(nullptr, menu_controller()->Run(owner(), nullptr, menu_item(),
+                                            gfx::Rect(), MENU_ANCHOR_TOPLEFT,
+                                            false, false, &result_event_flags));
+  EXPECT_FALSE(menu_controller_delegate()->on_menu_closed_called());
+  EXPECT_TRUE(nested_delegate->on_menu_closed_called());
 }
 
 }  // namespace test

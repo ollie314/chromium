@@ -13,6 +13,7 @@ package org.chromium.chrome.browser.widget.findinpage;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.os.Environment;
 import android.test.suitebuilder.annotation.MediumTest;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.text.Spannable;
@@ -28,31 +29,49 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
 import org.chromium.chrome.test.ChromeTabbedActivityTestBase;
 import org.chromium.chrome.test.util.MenuUtils;
-import org.chromium.chrome.test.util.TestHttpServerClient;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.KeyUtils;
 import org.chromium.content.browser.test.util.UiUtils;
+import org.chromium.net.test.EmbeddedTestServer;
+
+import java.util.concurrent.Callable;
 
 /**
  * Find in page tests.
  */
 public class FindTest extends ChromeTabbedActivityTestBase {
-    private static final String FILEPATH = "chrome/test/data/android/find/test.html";
+    private static final String FILEPATH = "/chrome/test/data/android/find/test.html";
+
+    private EmbeddedTestServer mTestServer;
+
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+        mTestServer = EmbeddedTestServer.createAndStartFileServer(
+                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+    }
+
+    @Override
+    protected void tearDown() throws Exception {
+        mTestServer.stopAndDestroyServer();
+        super.tearDown();
+    }
 
     /**
      * Returns the FindResults text.
      */
-    private String waitForFindResults(final String expectedResult) throws InterruptedException {
+    private String waitForFindResults(String expectedResult) throws InterruptedException {
         final TextView findResults = (TextView) getActivity().findViewById(R.id.find_status);
         assertNotNull(expectedResult);
         assertNotNull(findResults);
-        CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
-                @Override
-                public boolean isSatisfied() {
-                    return expectedResult.equals(findResults.getText());
-                }
-            });
+        CriteriaHelper.pollUiThread(
+                Criteria.equals(expectedResult, new Callable<CharSequence>() {
+                        @Override
+                        public CharSequence call() {
+                            return findResults.getText();
+                        }
+                    }));
         return findResults.getText().toString();
     }
 
@@ -69,7 +88,7 @@ public class FindTest extends ChromeTabbedActivityTestBase {
     }
 
     private void waitForFindInPageVisibility(final boolean visible) throws InterruptedException {
-        CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+        CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 FindToolbar findToolbar = (FindToolbar) getActivity().findViewById(
@@ -107,10 +126,10 @@ public class FindTest extends ChromeTabbedActivityTestBase {
 
     private void loadTestAndVerifyFindInPage(String query, String expectedResult)
             throws InterruptedException {
-        loadUrl(TestHttpServerClient.getUrl(FILEPATH));
+        loadUrl(mTestServer.getURL(FILEPATH));
         String findResults = findStringInPage(query, expectedResult);
         assertTrue("Expected: " + expectedResult + " Got: " + findResults + " for: "
-                + TestHttpServerClient.getUrl(FILEPATH),
+                + mTestServer.getURL(FILEPATH),
                 findResults.contains(expectedResult));
     }
 
@@ -202,7 +221,7 @@ public class FindTest extends ChromeTabbedActivityTestBase {
     @MediumTest
     @Feature({"FindInPage"})
     public void testResultsBarInitiallyVisible() throws InterruptedException {
-        loadUrl(TestHttpServerClient.getUrl(FILEPATH));
+        loadUrl(mTestServer.getURL(FILEPATH));
         findInPageFromMenu();
         final FindToolbar findToolbar = getFindToolbar();
         final View resultBar = findToolbar.getFindResultBar();
@@ -213,7 +232,7 @@ public class FindTest extends ChromeTabbedActivityTestBase {
     @MediumTest
     @Feature({"FindInPage"})
     public void testResultsBarVisibleAfterTypingText() throws InterruptedException {
-        loadUrl(TestHttpServerClient.getUrl(FILEPATH));
+        loadUrl(mTestServer.getURL(FILEPATH));
         findInPageFromMenu();
         final FindToolbar findToolbar = getFindToolbar();
         final View resultBar = findToolbar.getFindResultBar();
@@ -233,7 +252,7 @@ public class FindTest extends ChromeTabbedActivityTestBase {
     @MediumTest
     @Feature({"FindInPage"})
     public void testFindDismissOnEmptyString() throws InterruptedException {
-        loadUrl(TestHttpServerClient.getUrl(FILEPATH));
+        loadUrl(mTestServer.getURL(FILEPATH));
         findInPageFromMenu();
 
         final FindToolbar findToolbar = getFindToolbar();
@@ -293,7 +312,7 @@ public class FindTest extends ChromeTabbedActivityTestBase {
     @SmallTest
     @Feature({"FindInPage"})
     public void testPastedTextStylingRemoved() throws InterruptedException {
-        loadUrl(TestHttpServerClient.getUrl(FILEPATH));
+        loadUrl(mTestServer.getURL(FILEPATH));
         findInPageFromMenu();
 
         final FindToolbar findToolbar = getFindToolbar();

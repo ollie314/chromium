@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -17,7 +18,6 @@
 class GURL;
 
 namespace blink {
-class WebBatteryStatus;
 class WebDeviceMotionData;
 class WebDeviceOrientationData;
 class WebGamepad;
@@ -33,6 +33,7 @@ class BluetoothAdapter;
 }
 
 namespace test_runner {
+class WebFrameTestProxyBase;
 class WebTestProxyBase;
 }
 
@@ -52,12 +53,21 @@ void EnableBrowserLayoutTestMode();
 // Turn a renderer into layout test mode.
 void EnableRendererLayoutTestMode();
 
-// Enable injecting of a WebTestProxy between WebViews and RenderViews.
-// |callback| is invoked with a pointer to WebTestProxyBase for each created
-// WebTestProxy.
+// "Casts" |render_view| to |WebTestProxyBase|.  Caller has to ensure that prior
+// to construciton of |render_view|, EnableWebTestProxyCreation was called.
+test_runner::WebTestProxyBase* GetWebTestProxyBase(RenderView* render_view);
+
+// Enable injecting of a WebTestProxy between WebViews and RenderViews
+// and WebFrameTestProxy between WebFrames and RenderFrames.
+// |view_proxy_creation_callback| is invoked after creating WebTestProxy.
+// |frame_proxy_creation_callback| is called after creating WebFrameTestProxy.
+using ViewProxyCreationCallback =
+    base::Callback<void(RenderView*, test_runner::WebTestProxyBase*)>;
+using FrameProxyCreationCallback =
+    base::Callback<void(RenderFrame*, test_runner::WebFrameTestProxyBase*)>;
 void EnableWebTestProxyCreation(
-    const base::Callback<void(RenderView*, test_runner::WebTestProxyBase*)>&
-        callback);
+    const ViewProxyCreationCallback& view_proxy_creation_callback,
+    const FrameProxyCreationCallback& frame_proxy_creation_callback);
 
 typedef base::Callback<void(const blink::WebURLResponse& response,
                             const std::string& data)> FetchManifestCallback;
@@ -65,7 +75,7 @@ void FetchManifest(blink::WebView* view, const GURL& url,
                    const FetchManifestCallback&);
 
 // Sets gamepad provider to be used for layout tests.
-void SetMockGamepadProvider(scoped_ptr<RendererGamepadProvider> provider);
+void SetMockGamepadProvider(std::unique_ptr<RendererGamepadProvider> provider);
 
 // Sets a double that should be used when registering
 // a listener through BlinkPlatformImpl::setDeviceLightListener().
@@ -78,9 +88,6 @@ void SetMockDeviceMotionData(const blink::WebDeviceMotionData& data);
 // Sets WebDeviceOrientationData that should be used when registering
 // a listener through BlinkPlatformImpl::setDeviceOrientationListener().
 void SetMockDeviceOrientationData(const blink::WebDeviceOrientationData& data);
-
-// Notifies blink that battery status has changed.
-void MockBatteryStatusChanged(const blink::WebBatteryStatus& status);
 
 // Returns the length of the local session history of a render view.
 int GetLocalSessionHistoryLength(RenderView* render_view);
@@ -135,6 +142,9 @@ void DisableAutoResizeMode(RenderView* render_view,
 // Provides a text dump of the contents of the given page state.
 std::string DumpBackForwardList(std::vector<PageState>& page_state,
                                 size_t current_index);
+
+// Run all pending idle tasks immediately, and then invoke callback.
+void SchedulerRunIdleTasks(const base::Closure& callback);
 
 }  // namespace content
 

@@ -46,7 +46,7 @@ BMPImageDecoder::BMPImageDecoder(AlphaOption alphaOption, GammaAndColorProfileOp
 {
 }
 
-void BMPImageDecoder::onSetData(SharedBuffer* data)
+void BMPImageDecoder::onSetData(SegmentReader* data)
 {
     if (m_reader)
         m_reader->setData(data);
@@ -69,7 +69,7 @@ void BMPImageDecoder::decode(bool onlySize)
         setFailed();
     // If we're done decoding the image, we don't need the BMPImageReader
     // anymore.  (If we failed, |m_reader| has already been cleared.)
-    else if (!m_frameBufferCache.isEmpty() && (m_frameBufferCache.first().status() == ImageFrame::FrameComplete))
+    else if (!m_frameBufferCache.isEmpty() && (m_frameBufferCache.first().getStatus() == ImageFrame::FrameComplete))
         m_reader.clear();
 }
 

@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,7 +17,6 @@
 #include "base/json/json_writer.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -44,11 +44,12 @@ TEST(ExtensionAPITest, Creation) {
   ExtensionAPI* shared_instance = ExtensionAPI::GetSharedInstance();
   EXPECT_EQ(shared_instance, ExtensionAPI::GetSharedInstance());
 
-  scoped_ptr<ExtensionAPI> new_instance(
+  std::unique_ptr<ExtensionAPI> new_instance(
       ExtensionAPI::CreateWithDefaultConfiguration());
   EXPECT_NE(new_instance.get(),
-            scoped_ptr<ExtensionAPI>(
-                ExtensionAPI::CreateWithDefaultConfiguration()).get());
+            std::unique_ptr<ExtensionAPI>(
+                ExtensionAPI::CreateWithDefaultConfiguration())
+                .get());
 
   ExtensionAPI empty_instance;
 
@@ -173,8 +174,9 @@ TEST(ExtensionAPITest, APIFeatures) {
   ASSERT_TRUE(base::ReadFileToString(
       api_features_path, &api_features_str)) << "api_features.json";
 
-  scoped_ptr<base::DictionaryValue> value(static_cast<base::DictionaryValue*>(
-      base::JSONReader::Read(api_features_str).release()));
+  std::unique_ptr<base::DictionaryValue> value(
+      static_cast<base::DictionaryValue*>(
+          base::JSONReader::Read(api_features_str).release()));
   BaseFeatureProvider api_feature_provider(*value, CreateAPIFeature);
 
   for (size_t i = 0; i < arraysize(test_data); ++i) {
@@ -205,23 +207,29 @@ TEST(ExtensionAPITest, APIFeatures) {
 TEST(ExtensionAPITest, IsAnyFeatureAvailableToContext) {
   scoped_refptr<const Extension> app =
       ExtensionBuilder()
-          .SetManifest(std::move(
+          .SetManifest(
               DictionaryBuilder()
                   .Set("name", "app")
-                  .Set("app", std::move(DictionaryBuilder().Set(
-                                  "background",
-                                  std::move(DictionaryBuilder().Set(
-                                      "scripts", std::move(ListBuilder().Append(
-                                                     "background.js")))))))
+                  .Set("app",
+                       DictionaryBuilder()
+                           .Set("background",
+                                DictionaryBuilder()
+                                    .Set("scripts", ListBuilder()
+                                                        .Append("background.js")
+                                                        .Build())
+                                    .Build())
+                           .Build())
                   .Set("version", "1")
-                  .Set("manifest_version", 2)))
+                  .Set("manifest_version", 2)
+                  .Build())
           .Build();
   scoped_refptr<const Extension> extension =
       ExtensionBuilder()
-          .SetManifest(std::move(DictionaryBuilder()
-                                     .Set("name", "extension")
-                                     .Set("version", "1")
-                                     .Set("manifest_version", 2)))
+          .SetManifest(DictionaryBuilder()
+                           .Set("name", "extension")
+                           .Set("version", "1")
+                           .Set("manifest_version", 2)
+                           .Build())
           .Build();
 
   struct {
@@ -260,8 +268,9 @@ TEST(ExtensionAPITest, IsAnyFeatureAvailableToContext) {
   ASSERT_TRUE(base::ReadFileToString(
       api_features_path, &api_features_str)) << "api_features.json";
 
-  scoped_ptr<base::DictionaryValue> value(static_cast<base::DictionaryValue*>(
-      base::JSONReader::Read(api_features_str).release()));
+  std::unique_ptr<base::DictionaryValue> value(
+      static_cast<base::DictionaryValue*>(
+          base::JSONReader::Read(api_features_str).release()));
   BaseFeatureProvider api_feature_provider(*value, CreateAPIFeature);
 
   for (size_t i = 0; i < arraysize(test_data); ++i) {
@@ -286,7 +295,8 @@ TEST(ExtensionAPITest, IsAnyFeatureAvailableToContext) {
 }
 
 TEST(ExtensionAPITest, LazyGetSchema) {
-  scoped_ptr<ExtensionAPI> apis(ExtensionAPI::CreateWithDefaultConfiguration());
+  std::unique_ptr<ExtensionAPI> apis(
+      ExtensionAPI::CreateWithDefaultConfiguration());
 
   EXPECT_EQ(NULL, apis->GetSchema(std::string()));
   EXPECT_EQ(NULL, apis->GetSchema(std::string()));
@@ -312,7 +322,7 @@ scoped_refptr<Extension> CreateExtensionWithPermissions(
   manifest.SetString("version", "1.0");
   manifest.SetInteger("manifest_version", 2);
   {
-    scoped_ptr<base::ListValue> permissions_list(new base::ListValue());
+    std::unique_ptr<base::ListValue> permissions_list(new base::ListValue());
     for (std::set<std::string>::const_iterator i = permissions.begin();
         i != permissions.end(); ++i) {
       permissions_list->Append(new base::StringValue(*i));
@@ -346,7 +356,7 @@ TEST(ExtensionAPITest, ExtensionWithUnprivilegedAPIs) {
     extension = CreateExtensionWithPermissions(permissions);
   }
 
-  scoped_ptr<ExtensionAPI> extension_api(
+  std::unique_ptr<ExtensionAPI> extension_api(
       ExtensionAPI::CreateWithDefaultConfiguration());
 
   const FeatureProvider& api_features = *FeatureProvider::GetAPIFeatures();
@@ -439,7 +449,7 @@ scoped_refptr<Extension> CreatePackagedAppWithPermissions(
   app->Set("background", background);
   values.Set(manifest_keys::kApp, app);
   {
-    scoped_ptr<base::ListValue> permissions_list(new base::ListValue());
+    std::unique_ptr<base::ListValue> permissions_list(new base::ListValue());
     for (std::set<std::string>::const_iterator i = permissions.begin();
         i != permissions.end(); ++i) {
       permissions_list->Append(new base::StringValue(*i));
@@ -458,7 +468,7 @@ scoped_refptr<Extension> CreatePackagedAppWithPermissions(
 TEST(ExtensionAPITest, HostedAppPermissions) {
   scoped_refptr<Extension> extension = CreateHostedApp();
 
-  scoped_ptr<ExtensionAPI> extension_api(
+  std::unique_ptr<ExtensionAPI> extension_api(
       ExtensionAPI::CreateWithDefaultConfiguration());
 
   // "runtime" and "tabs" should not be available in hosted apps.
@@ -485,8 +495,7 @@ TEST(ExtensionAPITest, HostedAppPermissions) {
 }
 
 TEST(ExtensionAPITest, AppAndFriendsAvailability) {
-
-  scoped_ptr<ExtensionAPI> extension_api(
+  std::unique_ptr<ExtensionAPI> extension_api(
       ExtensionAPI::CreateWithDefaultConfiguration());
 
   // Make sure chrome.app.runtime and chrome.app.window are available to apps,
@@ -543,7 +552,7 @@ TEST(ExtensionAPITest, ExtensionWithDependencies) {
   {
     scoped_refptr<Extension> extension =
         CreateExtensionWithPermission("ttsEngine");
-    scoped_ptr<ExtensionAPI> api(
+    std::unique_ptr<ExtensionAPI> api(
         ExtensionAPI::CreateWithDefaultConfiguration());
     EXPECT_TRUE(api->IsAvailable("ttsEngine",
                                  extension.get(),
@@ -560,7 +569,7 @@ TEST(ExtensionAPITest, ExtensionWithDependencies) {
   {
     scoped_refptr<Extension> extension =
         CreateExtensionWithPermission("tts");
-    scoped_ptr<ExtensionAPI> api(
+    std::unique_ptr<ExtensionAPI> api(
         ExtensionAPI::CreateWithDefaultConfiguration());
     EXPECT_FALSE(api->IsAvailable("ttsEngine",
                                   extension.get(),
@@ -580,7 +589,8 @@ bool MatchesURL(
 }
 
 TEST(ExtensionAPITest, URLMatching) {
-  scoped_ptr<ExtensionAPI> api(ExtensionAPI::CreateWithDefaultConfiguration());
+  std::unique_ptr<ExtensionAPI> api(
+      ExtensionAPI::CreateWithDefaultConfiguration());
 
   // "app" API is available to all URLs that content scripts can be injected.
   EXPECT_TRUE(MatchesURL(api.get(), "app", "http://example.com/example.html"));
@@ -624,7 +634,8 @@ TEST(ExtensionAPITest, GetAPINameFromFullName) {
     { "bookmarkManagerPrivate.copy", "bookmarkManagerPrivate", "copy" }
   };
 
-  scoped_ptr<ExtensionAPI> api(ExtensionAPI::CreateWithDefaultConfiguration());
+  std::unique_ptr<ExtensionAPI> api(
+      ExtensionAPI::CreateWithDefaultConfiguration());
   for (size_t i = 0; i < arraysize(test_data); ++i) {
     std::string child_name;
     std::string api_name = api->GetAPINameFromFullName(test_data[i].input,
@@ -635,7 +646,8 @@ TEST(ExtensionAPITest, GetAPINameFromFullName) {
 }
 
 TEST(ExtensionAPITest, DefaultConfigurationFeatures) {
-  scoped_ptr<ExtensionAPI> api(ExtensionAPI::CreateWithDefaultConfiguration());
+  std::unique_ptr<ExtensionAPI> api(
+      ExtensionAPI::CreateWithDefaultConfiguration());
 
   SimpleFeature* bookmarks = static_cast<SimpleFeature*>(
       api->GetFeatureDependency("api:bookmarks"));
@@ -666,8 +678,10 @@ TEST(ExtensionAPITest, DefaultConfigurationFeatures) {
 
 TEST(ExtensionAPITest, FeaturesRequireContexts) {
   // TODO(cduvall): Make this check API featues.
-  scoped_ptr<base::DictionaryValue> api_features1(new base::DictionaryValue());
-  scoped_ptr<base::DictionaryValue> api_features2(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> api_features1(
+      new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> api_features2(
+      new base::DictionaryValue());
   base::DictionaryValue* test1 = new base::DictionaryValue();
   base::DictionaryValue* test2 = new base::DictionaryValue();
   base::ListValue* contexts = new base::ListValue();
@@ -809,7 +823,7 @@ TEST(ExtensionAPITest, NoPermissions) {
     { "runtime.connectNative", false },
   };
 
-  scoped_ptr<ExtensionAPI> extension_api(
+  std::unique_ptr<ExtensionAPI> extension_api(
       ExtensionAPI::CreateWithDefaultConfiguration());
   scoped_refptr<Extension> extension =
       BuildExtension(ExtensionBuilder()).Build();
@@ -827,13 +841,14 @@ TEST(ExtensionAPITest, NoPermissions) {
 // Tests that permissions that require manifest keys are available when those
 // keys are present.
 TEST(ExtensionAPITest, ManifestKeys) {
-  scoped_ptr<ExtensionAPI> extension_api(
+  std::unique_ptr<ExtensionAPI> extension_api(
       ExtensionAPI::CreateWithDefaultConfiguration());
 
   scoped_refptr<Extension> extension =
       BuildExtension(ExtensionBuilder())
-          .MergeManifest(
-              DictionaryBuilder().Set("browser_action", DictionaryBuilder()))
+          .MergeManifest(DictionaryBuilder()
+                             .Set("browser_action", DictionaryBuilder().Build())
+                             .Build())
           .Build();
 
   EXPECT_TRUE(extension_api->IsAvailable("browserAction",

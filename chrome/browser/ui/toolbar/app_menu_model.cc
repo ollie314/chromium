@@ -9,9 +9,9 @@
 
 #include "base/command_line.h"
 #include "base/debug/debugging_flags.h"
+#include "base/debug/profiler.h"
 #include "base/macros.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -49,6 +49,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/dom_distiller/core/dom_distiller_switches.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/ui/zoom/zoom_controller.h"
@@ -249,11 +250,8 @@ ToolsMenuModel::~ToolsMenuModel() {}
 // - Option to enable profiling.
 void ToolsMenuModel::Build(Browser* browser) {
   bool show_create_shortcuts = true;
-#if defined(OS_CHROMEOS) || defined(OS_MACOSX)
+#if defined(OS_CHROMEOS) || defined(OS_MACOSX) || defined(USE_ASH)
   show_create_shortcuts = false;
-#elif defined(USE_ASH)
-  if (browser->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
-    show_create_shortcuts = false;
 #endif
   AddItemWithStringId(IDC_SAVE_PAGE, IDS_SAVE_PAGE);
   if (extensions::util::IsNewBookmarkAppsEnabled()) {
@@ -262,8 +260,7 @@ void ToolsMenuModel::Build(Browser* browser) {
     string_id = IDS_ADD_TO_APPLICATIONS;
 #endif
 #if defined(USE_ASH)
-    if (browser->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
-      string_id = IDS_ADD_TO_SHELF;
+    string_id = IDS_ADD_TO_SHELF;
 #endif  // defined(USE_ASH)
     AddItemWithStringId(IDC_CREATE_HOSTED_APP, string_id);
   } else if (show_create_shortcuts) {
@@ -285,10 +282,10 @@ void ToolsMenuModel::Build(Browser* browser) {
   AddSeparator(ui::NORMAL_SEPARATOR);
   AddItemWithStringId(IDC_DEV_TOOLS, IDS_DEV_TOOLS);
 
-#if BUILDFLAG(ENABLE_PROFILING) && !defined(NO_TCMALLOC)
-  AddSeparator(ui::NORMAL_SEPARATOR);
-  AddCheckItemWithStringId(IDC_PROFILING_ENABLED, IDS_PROFILING_ENABLED);
-#endif
+  if (base::debug::IsProfilingSupported()) {
+    AddSeparator(ui::NORMAL_SEPARATOR);
+    AddCheckItemWithStringId(IDC_PROFILING_ENABLED, IDS_PROFILING_ENABLED);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -360,18 +357,10 @@ base::string16 AppMenuModel::GetLabelForCommandId(int command_id) const {
 }
 
 bool AppMenuModel::GetIconForCommandId(int command_id, gfx::Image* icon) const {
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  switch (command_id) {
-    case IDC_UPGRADE_DIALOG: {
-      if (UpgradeDetector::GetInstance()->notify_upgrade()) {
-        *icon = rb.GetNativeImageNamed(
-            UpgradeDetector::GetInstance()->GetIconResourceID());
-        return true;
-      }
-      return false;
-    }
-    default:
-      break;
+  if (command_id == IDC_UPGRADE_DIALOG &&
+      UpgradeDetector::GetInstance()->notify_upgrade()) {
+    *icon = UpgradeDetector::GetInstance()->GetIcon();
+    return true;
   }
   return false;
 }
@@ -392,6 +381,9 @@ void AppMenuModel::LogMenuMetrics(int command_id) {
   base::TimeDelta delta = timer_.Elapsed();
 
   switch (command_id) {
+    case IDC_UPGRADE_DIALOG:
+      LogMenuAction(MENU_ACTION_UPGRADE_DIALOG);
+      break;
     case IDC_NEW_TAB:
       if (!uma_action_recorded_)
         UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.NewTab", delta);
@@ -482,6 +474,12 @@ void AppMenuModel::LogMenuMetrics(int command_id) {
       if (!uma_action_recorded_)
         UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.Print", delta);
       LogMenuAction(MENU_ACTION_PRINT);
+      break;
+
+    case IDC_ROUTE_MEDIA:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.Cast", delta);
+      LogMenuAction(MENU_ACTION_CAST);
       break;
 
     // Edit menu.
@@ -814,10 +812,8 @@ void AppMenuModel::Build() {
 
   CreateZoomMenu();
   AddItemWithStringId(IDC_PRINT, IDS_PRINT);
-  if (!browser()->profile()->IsOffTheRecord() &&
-      media_router::MediaRouterEnabled(browser()->profile())) {
+  if (media_router::MediaRouterEnabled(browser()->profile()))
     AddItemWithStringId(IDC_ROUTE_MEDIA, IDS_MEDIA_ROUTER_MENU_ITEM_TITLE);
-  }
 
   AddItemWithStringId(IDC_FIND, IDS_FIND);
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -872,8 +868,10 @@ bool AppMenuModel::AddGlobalErrorMenuItems() {
       SetIcon(GetIndexOfCommandId(error->MenuItemCommandID()),
               error->MenuItemIcon());
       menu_items_added = true;
-      content::RecordAction(
-          base::UserMetricsAction("Signin_Impression_FromMenu"));
+      if (IDC_SHOW_SIGNIN_ERROR == error->MenuItemCommandID()) {
+        content::RecordAction(
+            base::UserMetricsAction("Signin_Impression_FromMenu"));
+      }
     }
   }
   return menu_items_added;
@@ -882,8 +880,9 @@ bool AppMenuModel::AddGlobalErrorMenuItems() {
 void AppMenuModel::CreateActionToolbarOverflowMenu() {
   // We only add the extensions overflow container if there are any icons that
   // aren't shown in the main container.
-  // browser_->window() can return null during startup.
-  if (browser_->window() &&
+  // browser_->window() can return null during startup, and
+  // GetToolbarActionsBar() can be null in testing.
+  if (browser_->window() && browser_->window()->GetToolbarActionsBar() &&
       browser_->window()->GetToolbarActionsBar()->NeedsOverflow()) {
 #if defined(OS_MACOSX)
     // There's a bug in AppKit menus, where if a menu item with a custom view

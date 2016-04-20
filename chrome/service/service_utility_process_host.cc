@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include <queue>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -33,6 +34,10 @@
 #include "sandbox/win/src/sandbox_policy.h"
 #include "sandbox/win/src/sandbox_types.h"
 #include "ui/base/ui_base_switches.h"
+
+#if defined(OS_WIN)
+#include "components/startup_metric_utils/common/pre_read_field_trial_utils_win.h"
+#endif  // defined(OS_WIN)
 
 namespace {
 
@@ -67,9 +72,10 @@ class ServiceSandboxedProcessLauncherDelegate
   ServiceSandboxedProcessLauncherDelegate() {}
 
   bool PreSpawnTarget(sandbox::TargetPolicy* policy) override {
-    // Service process may run as windows service and it fails to create a
-    // window station.
-    return policy->SetAlternateDesktop(false) == sandbox::SBOX_ALL_OK;
+    // Ignore result of SetAlternateDesktop. Service process may run as windows
+    // service and it fails to create a window station.
+    base::IgnoreResult(policy->SetAlternateDesktop(false));
+    return true;
   }
 
  private:
@@ -89,7 +95,7 @@ class ServiceUtilityProcessHost::PdfToEmfState {
     if (!temp_dir_.CreateUniqueTempDir())
       return false;
     return host_->Send(new ChromeUtilityMsg_RenderPDFPagesToMetafiles(
-        IPC::TakeFileHandleForProcess(pdf_file.Pass(), host_->handle()),
+        IPC::TakePlatformFileForTransit(std::move(pdf_file)),
         conversion_settings));
   }
 
@@ -101,8 +107,8 @@ class ServiceUtilityProcessHost::PdfToEmfState {
       emf_files_.push(CreateTempFile());
       host_->Send(new ChromeUtilityMsg_RenderPDFPagesToMetafiles_GetPage(
           current_page_++,
-          IPC::GetFileHandleForProcess(
-              emf_files_.back().GetPlatformFile(), host_->handle(), false)));
+          IPC::GetPlatformFileForTransit(
+              emf_files_.back().GetPlatformFile(), false)));
     }
   }
 
@@ -121,9 +127,9 @@ class ServiceUtilityProcessHost::PdfToEmfState {
     DCHECK(!emf_files_.empty());
     base::File file;
     if (!emf_files_.empty())
-      file = emf_files_.front().Pass();
+      file = std::move(emf_files_.front());
     emf_files_.pop();
-    return file.Pass();
+    return file;
   }
 
   void set_page_count(int page_count) { page_count_ = page_count; }
@@ -182,7 +188,7 @@ bool ServiceUtilityProcessHost::StartRenderPDFPagesToMetafile(
   waiting_for_reply_ = true;
 
   pdf_to_emf_state_.reset(new PdfToEmfState(this));
-  return pdf_to_emf_state_->Start(pdf_file.Pass(), render_settings);
+  return pdf_to_emf_state_->Start(std::move(pdf_file), render_settings);
 }
 
 bool ServiceUtilityProcessHost::StartGetPrinterCapsAndDefaults(
@@ -224,6 +230,11 @@ bool ServiceUtilityProcessHost::StartProcess(bool no_sandbox) {
   cmd_line.AppendSwitchASCII(switches::kProcessChannelID, channel_id);
   cmd_line.AppendSwitch(switches::kLang);
 
+#if defined(OS_WIN)
+  if (startup_metric_utils::GetPreReadOptions().use_prefetch_argument)
+    cmd_line.AppendArg(switches::kPrefetchArgumentOther);
+#endif  // defined(OS_WIN)
+
   if (Launch(&cmd_line, no_sandbox)) {
     ReportUmaEvent(SERVICE_UTILITY_STARTED);
     return true;
@@ -239,7 +250,8 @@ bool ServiceUtilityProcessHost::Launch(base::CommandLine* cmd_line,
     process_ = base::LaunchProcess(*cmd_line, base::LaunchOptions());
   } else {
     ServiceSandboxedProcessLauncherDelegate delegate;
-    process_ = content::StartSandboxedProcess(&delegate, cmd_line);
+    process_ = content::StartSandboxedProcess(
+        &delegate, cmd_line, base::HandlesToInheritVector());
   }
   return process_.IsValid();
 }

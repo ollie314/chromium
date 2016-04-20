@@ -20,6 +20,9 @@ import os
 
 from core import perf_benchmark
 
+from benchmarks import v8_helper
+
+from telemetry import benchmark
 from telemetry import page as page_module
 from telemetry.page import page_test
 from telemetry import story
@@ -30,13 +33,13 @@ from metrics import keychain_metric
 
 class SpeedometerMeasurement(page_test.PageTest):
   enabled_suites = [
-    'VanillaJS-TodoMVC',
-    'EmberJS-TodoMVC',
-    'BackboneJS-TodoMVC',
-    'jQuery-TodoMVC',
-    'AngularJS-TodoMVC',
-    'React-TodoMVC',
-    'FlightJS-TodoMVC'
+      'VanillaJS-TodoMVC',
+      'EmberJS-TodoMVC',
+      'BackboneJS-TodoMVC',
+      'jQuery-TodoMVC',
+      'AngularJS-TodoMVC',
+      'React-TodoMVC',
+      'FlightJS-TodoMVC'
   ]
 
   def __init__(self):
@@ -83,6 +86,7 @@ class SpeedometerMeasurement(page_test.PageTest):
               """ % suite_name), important=False))
     keychain_metric.KeychainMetric().AddResults(tab, results)
 
+
 class Speedometer(perf_benchmark.PerfBenchmark):
   test = SpeedometerMeasurement
 
@@ -99,3 +103,14 @@ class Speedometer(perf_benchmark.PerfBenchmark):
         'http://browserbench.org/Speedometer/', ps, ps.base_dir,
         make_javascript_deterministic=False))
     return ps
+
+
+@benchmark.Disabled('reference')  # crbug.com/579546
+class SpeedometerIgnition(Speedometer):
+  def SetExtraBrowserOptions(self, options):
+    super(SpeedometerIgnition, self).SetExtraBrowserOptions(options)
+    v8_helper.EnableIgnition(options)
+
+  @classmethod
+  def Name(cls):
+    return 'speedometer-ignition'

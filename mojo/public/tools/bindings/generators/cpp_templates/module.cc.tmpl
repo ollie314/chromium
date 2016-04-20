@@ -24,21 +24,24 @@
 #include <stdint.h>
 #include <utility>
 
+#include "base/logging.h"
 #include "base/trace_event/trace_event.h"
-#include "mojo/public/cpp/bindings/lib/array_serialization.h"
 #include "mojo/public/cpp/bindings/lib/bindings_serialization.h"
 #include "mojo/public/cpp/bindings/lib/bounds_checker.h"
 #include "mojo/public/cpp/bindings/lib/map_data_internal.h"
-#include "mojo/public/cpp/bindings/lib/map_serialization.h"
 #include "mojo/public/cpp/bindings/lib/message_builder.h"
-#include "mojo/public/cpp/bindings/lib/native_serialization.h"
-#include "mojo/public/cpp/bindings/lib/string_serialization.h"
 #include "mojo/public/cpp/bindings/lib/validate_params.h"
 #include "mojo/public/cpp/bindings/lib/validation_errors.h"
 #include "mojo/public/cpp/bindings/lib/validation_util.h"
-#include "mojo/public/cpp/environment/lib/scoped_task_tracking.h"
-#include "mojo/public/cpp/environment/logging.h"
 #include "mojo/public/interfaces/bindings/interface_control_messages.mojom.h"
+
+{%- if for_blink %}
+#include "mojo/public/cpp/bindings/lib/wtf_serialization.h"
+{%- endif %}
+
+{%- for header in extra_traits_headers %}
+#include "{{header}}"
+{%- endfor %}
 
 {%- for namespace in namespaces_as_array %}
 namespace {{namespace}} {
@@ -81,7 +84,9 @@ const uint32_t {{method_name}} = {{method.ordinal}};
 
 {#--- Struct definitions #}
 {%  for struct in structs %}
-{%-   include "struct_definition.tmpl" %}
+{%-   if not struct|is_native_only_kind %}
+{%-     include "struct_definition.tmpl" %}
+{%-   endif %}
 {%- endfor %}
 
 {#--- Union definitions #}
@@ -91,26 +96,22 @@ const uint32_t {{method_name}} = {{method.ordinal}};
 
 }  // namespace internal
 
-{#--- Enums #}
-{%- from "enum_macros.tmpl" import is_valid_enum_def -%}
-{%- for enum in enums -%}
-  {{is_valid_enum_def(enum, class_name='')}}
-{%- endfor %}
-
 {#--- Struct Constants #}
 {%- for struct in structs %}
 {%-   for constant in struct.constants %}
 {%-     if constant.kind|is_integral_kind %}
-MOJO_STATIC_CONST_MEMBER_DEFINITION const {{constant.kind|cpp_pod_type}} {{struct.name}}::{{constant.name}};
+const {{constant.kind|cpp_pod_type}} {{struct.name}}::{{constant.name}};
 {%-     else %}
-MOJO_STATIC_CONST_MEMBER_DEFINITION const {{constant.kind|cpp_pod_type}} {{struct.name}}::{{constant.name}} = {{constant|constant_value}};
+const {{constant.kind|cpp_pod_type}} {{struct.name}}::{{constant.name}} = {{constant|constant_value}};
 {%-     endif %}
 {%-   endfor %}
 {%- endfor %}
 
 {#--- Struct builder definitions #}
 {%- for struct in structs %}
-{%-   include "wrapper_class_definition.tmpl" %}
+{%-   if not struct|is_native_only_kind %}
+{%-     include "wrapper_class_definition.tmpl" %}
+{%-   endif %}
 {%- endfor %}
 
 {#--- Union builder definitions #}
@@ -125,7 +126,9 @@ MOJO_STATIC_CONST_MEMBER_DEFINITION const {{constant.kind|cpp_pod_type}} {{struc
 
 {#--- Struct Serialization Helpers #}
 {%- for struct in structs %}
-{%-   include "struct_serialization_definition.tmpl" %}
+{%-   if not struct|is_native_only_kind %}
+{%-     include "struct_serialization_definition.tmpl" %}
+{%-   endif %}
 {%- endfor %}
 
 {#--- Union Serialization Helpers #}

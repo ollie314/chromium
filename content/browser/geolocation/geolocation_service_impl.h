@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "content/browser/geolocation/geolocation_provider_impl.h"
-#include "content/common/geolocation_service.mojom.h"
-#include "content/public/common/mojo_geoposition.mojom.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "third_party/WebKit/public/platform/modules/geolocation/geolocation.mojom.h"
 
 #ifndef CONTENT_BROWSER_GEOLOCATION_GEOLOCATION_SERVICE_IMPL_H_
 #define CONTENT_BROWSER_GEOLOCATION_GEOLOCATION_SERVICE_IMPL_H_
@@ -18,14 +18,15 @@ class GeolocationProvider;
 class GeolocationServiceContext;
 
 // Implements the GeolocationService Mojo interface.
-class GeolocationServiceImpl : public GeolocationService {
+class GeolocationServiceImpl : public blink::mojom::GeolocationService {
  public:
   // |context| must outlive this object. |update_callback| will be called when
   // location updates are sent, allowing the client to know when the service
   // is being used.
-  GeolocationServiceImpl(mojo::InterfaceRequest<GeolocationService> request,
-                         GeolocationServiceContext* context,
-                         const base::Closure& update_callback);
+  GeolocationServiceImpl(
+      mojo::InterfaceRequest<blink::mojom::GeolocationService> request,
+      GeolocationServiceContext* context,
+      const base::Closure& update_callback);
   ~GeolocationServiceImpl() override;
 
   // Starts listening for updates.
@@ -40,9 +41,9 @@ class GeolocationServiceImpl : public GeolocationService {
   void ClearOverride();
 
  private:
-  typedef mojo::Callback<void(MojoGeopositionPtr)> PositionCallback;
+  typedef mojo::Callback<void(blink::mojom::GeopositionPtr)> PositionCallback;
 
-  // GeolocationService:
+  // blink::mojom::GeolocationService:
   void SetHighAccuracy(bool high_accuracy) override;
   void QueryNextPosition(const PositionCallback& callback) override;
 
@@ -52,11 +53,11 @@ class GeolocationServiceImpl : public GeolocationService {
   void ReportCurrentPosition();
 
   // The binding between this object and the other end of the pipe.
-  mojo::Binding<GeolocationService> binding_;
+  mojo::Binding<blink::mojom::GeolocationService> binding_;
 
   // Owns this object.
   GeolocationServiceContext* context_;
-  scoped_ptr<GeolocationProvider::Subscription> geolocation_subscription_;
+  std::unique_ptr<GeolocationProvider::Subscription> geolocation_subscription_;
 
   // Callback that allows the instantiator of this class to be notified on
   // position updates.
@@ -69,7 +70,7 @@ class GeolocationServiceImpl : public GeolocationService {
   // subsequently been called.
   Geoposition position_override_;
 
-  MojoGeoposition current_position_;
+  blink::mojom::Geoposition current_position_;
 
   // Whether this instance is currently observing location updates with high
   // accuracy.

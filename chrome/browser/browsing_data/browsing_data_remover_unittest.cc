@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -17,18 +18,20 @@
 #include "base/files/file_util.h"
 #include "base/guid.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "build/build_config.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/browsing_data/browsing_data_filter_builder.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover_factory.h"
 #include "chrome/browser/browsing_data/browsing_data_remover_test_util.h"
+#include "chrome/browser/browsing_data/registrable_domain_filter_builder.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
@@ -45,6 +48,9 @@
 #include "components/autofill/core/browser/personal_data_manager_observer.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/domain_reliability/clear_mode.h"
 #include "components/domain_reliability/monitor.h"
 #include "components/domain_reliability/service.h"
@@ -54,6 +60,7 @@
 #include "components/password_manager/core/browser/mock_password_store.h"
 #include "components/password_manager/core/browser/password_manager_test_utils.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
+#include "components/prefs/testing_pref_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/dom_storage_context.h"
@@ -74,6 +81,10 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/favicon_size.h"
 #include "url/origin.h"
+
+#if BUILDFLAG(ANDROID_JAVA_UI)
+#include "chrome/browser/android/webapps/webapp_registry.h"
+#endif
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
@@ -111,9 +122,12 @@ using testing::WithArgs;
 
 namespace {
 
-const char kTestOrigin1[] = "http://host1:1/";
-const char kTestOrigin2[] = "http://host2:1/";
-const char kTestOrigin3[] = "http://host3:1/";
+const char kTestOrigin1[] = "http://host1.com:1/";
+const char kTestRegisterableDomain1[] = "host1.com";
+const char kTestOrigin2[] = "http://host2.com:1/";
+const char kTestOrigin3[] = "http://host3.com:1/";
+const char kTestRegisterableDomain3[] = "host3.com";
+const char kTestOrigin4[] = "https://host3.com:1/";
 const char kTestOriginExt[] = "chrome-extension://abcdefghijklmnopqrstuvwxyz/";
 const char kTestOriginDevTools[] = "chrome-devtools://abcdefghijklmnopqrstuvw/";
 
@@ -124,6 +138,7 @@ const char kWebOrigin[] = "https://www.example.com/";
 const GURL kOrigin1(kTestOrigin1);
 const GURL kOrigin2(kTestOrigin2);
 const GURL kOrigin3(kTestOrigin3);
+const GURL kOrigin4(kTestOrigin4);
 const GURL kOriginExt(kTestOriginExt);
 const GURL kOriginDevTools(kTestOriginDevTools);
 
@@ -139,6 +154,12 @@ const base::FilePath::CharType kDomStorageOrigin3[] =
 const base::FilePath::CharType kDomStorageExt[] = FILE_PATH_LITERAL(
     "chrome-extension_abcdefghijklmnopqrstuvwxyz_0.localstorage");
 
+bool MatchPrimaryPattern(const ContentSettingsPattern& expected_primary,
+                         const ContentSettingsPattern& primary_pattern,
+                         const ContentSettingsPattern& secondary_pattern) {
+  return expected_primary == primary_pattern;
+}
+
 #if defined(OS_CHROMEOS)
 void FakeDBusCall(const chromeos::BoolDBusMethodCallback& callback) {
   base::MessageLoop::current()->PostTask(
@@ -150,13 +171,20 @@ void FakeDBusCall(const chromeos::BoolDBusMethodCallback& callback) {
 struct StoragePartitionRemovalData {
   uint32_t remove_mask = 0;
   uint32_t quota_storage_remove_mask = 0;
-  GURL remove_origin;
   base::Time remove_begin;
   base::Time remove_end;
   StoragePartition::OriginMatcherFunction origin_matcher;
+  StoragePartition::CookieMatcherFunction cookie_matcher;
 
   StoragePartitionRemovalData() {}
 };
+
+net::CanonicalCookie CreateCookieWithHost(const GURL& source) {
+  return net::CanonicalCookie(
+      source, "A", "1", source.host(), "/", base::Time::Now(),
+      base::Time::Now(), base::Time::Now(), false, false,
+      net::CookieSameSite::DEFAULT_MODE, net::COOKIE_PRIORITY_MEDIUM);
+}
 
 class TestStoragePartition : public StoragePartition {
  public:
@@ -188,9 +216,6 @@ class TestStoragePartition : public StoragePartition {
     return nullptr;
   }
   content::GeofencingManager* GetGeofencingManager() override {
-    return nullptr;
-  }
-  content::NavigatorConnectContext* GetNavigatorConnectContext() override {
     return nullptr;
   }
   content::PlatformNotificationContext* GetPlatformNotificationContext()
@@ -231,7 +256,6 @@ class TestStoragePartition : public StoragePartition {
     storage_partition_removal_data_.remove_mask = remove_mask;
     storage_partition_removal_data_.quota_storage_remove_mask =
         quota_storage_remove_mask;
-    storage_partition_removal_data_.remove_origin = storage_origin;
     storage_partition_removal_data_.remove_begin = begin;
     storage_partition_removal_data_.remove_end = end;
     storage_partition_removal_data_.origin_matcher = origin_matcher;
@@ -241,6 +265,27 @@ class TestStoragePartition : public StoragePartition {
         FROM_HERE,
         base::Bind(&TestStoragePartition::AsyncRunCallback,
                    base::Unretained(this), callback));
+  }
+
+  void ClearData(uint32_t remove_mask,
+                 uint32_t quota_storage_remove_mask,
+                 const OriginMatcherFunction& origin_matcher,
+                 const CookieMatcherFunction& cookie_matcher,
+                 const base::Time begin,
+                 const base::Time end,
+                 const base::Closure& callback) override {
+    // Store stuff to verify parameters' correctness later.
+    storage_partition_removal_data_.remove_mask = remove_mask;
+    storage_partition_removal_data_.quota_storage_remove_mask =
+        quota_storage_remove_mask;
+    storage_partition_removal_data_.remove_begin = begin;
+    storage_partition_removal_data_.remove_end = end;
+    storage_partition_removal_data_.origin_matcher = origin_matcher;
+    storage_partition_removal_data_.cookie_matcher = cookie_matcher;
+
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(&TestStoragePartition::AsyncRunCallback,
+                                       base::Unretained(this), callback));
   }
 
   void Flush() override {}
@@ -259,34 +304,72 @@ class TestStoragePartition : public StoragePartition {
   DISALLOW_COPY_AND_ASSIGN(TestStoragePartition);
 };
 
-// Custom matcher to verify is-same-origin relationship to given reference
-// origin.
-// (We cannot use equality-based matching because operator== is not defined for
-// Origin, and we in fact want to rely on IsSameOrigin for matching purposes.)
-class SameOriginMatcher : public MatcherInterface<const url::Origin&> {
+#if BUILDFLAG(ANDROID_JAVA_UI)
+class TestWebappRegistry : public WebappRegistry {
  public:
-  explicit SameOriginMatcher(const url::Origin& reference)
-      : reference_(reference) {}
+  TestWebappRegistry() : WebappRegistry() { }
 
-  virtual bool MatchAndExplain(const url::Origin& origin,
+  void UnregisterWebapps(const base::Closure& callback) override {
+    // Mocks out a JNI call and runs the callback as a delayed task.
+    BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE, callback,
+                                   base::TimeDelta::FromMilliseconds(10));
+  }
+
+  void ClearWebappHistory(const base::Closure& callback) override {
+    // Mocks out a JNI call and runs the callback as a delayed task.
+    BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE, callback,
+                                   base::TimeDelta::FromMilliseconds(10));
+  }
+};
+#endif
+
+// Custom matcher to test the equivalence of two URL filters. Since those are
+// blackbox predicates, we can only approximate the equivalence by testing
+// whether the filter give the same answer for several URLs. This is currently
+// good enough for our testing purposes, to distinguish whitelists
+// and blacklists, empty and non-empty filters and such.
+// TODO(msramek): BrowsingDataRemover and some of its backends support URL
+// filters, but its constructor currently only takes a single URL and constructs
+// its own url filter. If an url filter was directly passed to
+// BrowsingDataRemover (what should eventually be the case), we can use the same
+// instance in the test as well, and thus simply test base::Callback::Equals()
+// in this matcher.
+class ProbablySameFilterMatcher
+    : public MatcherInterface<const base::Callback<bool(const GURL&)>&> {
+ public:
+  explicit ProbablySameFilterMatcher(
+      const base::Callback<bool(const GURL&)>& filter)
+      : to_match_(filter) {
+  }
+
+  virtual bool MatchAndExplain(const base::Callback<bool(const GURL&)>& filter,
                                MatchResultListener* listener) const {
-    return reference_.IsSameOriginWith(origin);
+    const GURL urls_to_test_[] =
+        {kOrigin1, kOrigin2, kOrigin3, GURL("invalid spec")};
+    for (GURL url : urls_to_test_) {
+      if (filter.Run(url) != to_match_.Run(url)) {
+        *listener << "The filters differ on the URL " << url;
+        return false;
+      }
+    }
+    return true;
   }
 
   virtual void DescribeTo(::std::ostream* os) const {
-    *os << "is same origin with " << reference_;
+    *os << "is probably the same url filter as " << &to_match_;
   }
 
   virtual void DescribeNegationTo(::std::ostream* os) const {
-    *os << "is not same origin with " << reference_;
+    *os << "is definitely NOT the same url filter as " << &to_match_;
   }
 
  private:
-  const url::Origin& reference_;
+  const base::Callback<bool(const GURL&)>& to_match_;
 };
 
-inline Matcher<const url::Origin&> SameOrigin(const url::Origin& reference) {
-  return MakeMatcher(new SameOriginMatcher(reference));
+inline Matcher<const base::Callback<bool(const GURL&)>&> ProbablySameFilter(
+    const base::Callback<bool(const GURL&)>& filter) {
+  return MakeMatcher(new ProbablySameFilterMatcher(filter));
 }
 
 }  // namespace
@@ -323,8 +406,8 @@ class RemoveCookieTester {
   }
 
  protected:
-  void SetMonster(net::CookieStore* monster) {
-    cookie_store_ = monster;
+  void SetCookieStore(net::CookieStore* cookie_store) {
+    cookie_store_ = cookie_store;
   }
 
  private:
@@ -345,10 +428,17 @@ class RemoveCookieTester {
 
   bool get_cookie_success_ = false;
   base::Closure quit_closure_;
+
+  // CookieStore must out live |this|.
   net::CookieStore* cookie_store_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(RemoveCookieTester);
 };
+
+void RunClosureAfterCookiesCleared(const base::Closure& task,
+                                   int cookies_deleted) {
+  task.Run();
+}
 
 class RemoveSafeBrowsingCookieTester : public RemoveCookieTester {
  public:
@@ -360,13 +450,16 @@ class RemoveSafeBrowsingCookieTester : public RemoveCookieTester {
     sb_service->Initialize();
     base::MessageLoop::current()->RunUntilIdle();
 
-    // Create a cookiemonster that does not have persistant storage, and replace
-    // the SafeBrowsingService created one with it.
-    net::CookieStore* monster =
-        content::CreateCookieStore(content::CookieStoreConfig());
-    sb_service->url_request_context()->GetURLRequestContext()->
-        set_cookie_store(monster);
-    SetMonster(monster);
+    // Make sure the safe browsing cookie store has no cookies.
+    // TODO(mmenke): Is this really needed?
+    base::RunLoop run_loop;
+    net::URLRequestContext* request_context =
+        sb_service->url_request_context()->GetURLRequestContext();
+    request_context->cookie_store()->DeleteAllAsync(
+        base::Bind(&RunClosureAfterCookiesCleared, run_loop.QuitClosure()));
+    run_loop.Run();
+
+    SetCookieStore(request_context->cookie_store());
   }
 
   virtual ~RemoveSafeBrowsingCookieTester() {
@@ -401,9 +494,9 @@ class RemoveChannelIDTester : public net::SSLConfigService::Observer {
   void AddChannelIDWithTimes(const std::string& server_identifier,
                              base::Time creation_time) {
     GetChannelIDStore()->SetChannelID(
-        make_scoped_ptr(new net::ChannelIDStore::ChannelID(
+        base::WrapUnique(new net::ChannelIDStore::ChannelID(
             server_identifier, creation_time,
-            make_scoped_ptr(crypto::ECPrivateKey::Create()))));
+            base::WrapUnique(crypto::ECPrivateKey::Create()))));
   }
 
   // Add a server bound cert for |server|, with the current time as the
@@ -746,11 +839,11 @@ class MockDomainReliabilityService : public DomainReliabilityService {
 
   ~MockDomainReliabilityService() override {}
 
-  scoped_ptr<DomainReliabilityMonitor> CreateMonitor(
+  std::unique_ptr<DomainReliabilityMonitor> CreateMonitor(
       scoped_refptr<base::SingleThreadTaskRunner> network_task_runner)
       override {
     NOTREACHED();
-    return scoped_ptr<DomainReliabilityMonitor>();
+    return std::unique_ptr<DomainReliabilityMonitor>();
   }
 
   void ClearBrowsingData(DomainReliabilityClearMode clear_mode,
@@ -760,7 +853,7 @@ class MockDomainReliabilityService : public DomainReliabilityService {
     callback.Run();
   }
 
-  void GetWebUIData(const base::Callback<void(scoped_ptr<base::Value>)>&
+  void GetWebUIData(const base::Callback<void(std::unique_ptr<base::Value>)>&
                         callback) const override {
     NOTREACHED();
   }
@@ -797,7 +890,7 @@ struct TestingDomainReliabilityServiceFactoryUserData
 const void* TestingDomainReliabilityServiceFactoryUserData::kKey =
     &TestingDomainReliabilityServiceFactoryUserData::kKey;
 
-scoped_ptr<KeyedService> TestingDomainReliabilityServiceFactoryFunction(
+std::unique_ptr<KeyedService> TestingDomainReliabilityServiceFactoryFunction(
     content::BrowserContext* context) {
   const void* kKey = TestingDomainReliabilityServiceFactoryUserData::kKey;
 
@@ -809,7 +902,7 @@ scoped_ptr<KeyedService> TestingDomainReliabilityServiceFactoryFunction(
   EXPECT_FALSE(data->attached);
 
   data->attached = true;
-  return make_scoped_ptr(data->service);
+  return base::WrapUnique(data->service);
 }
 
 class ClearDomainReliabilityTester {
@@ -878,6 +971,29 @@ class RemoveDownloadsTester {
   DISALLOW_COPY_AND_ASSIGN(RemoveDownloadsTester);
 };
 
+class RemovePasswordsTester {
+ public:
+  explicit RemovePasswordsTester(TestingProfile* testing_profile) {
+    PasswordStoreFactory::GetInstance()->SetTestingFactoryAndUse(
+        testing_profile,
+        password_manager::BuildPasswordStore<
+            content::BrowserContext,
+            testing::NiceMock<password_manager::MockPasswordStore>>);
+
+    store_ = static_cast<password_manager::MockPasswordStore*>(
+        PasswordStoreFactory::GetInstance()
+            ->GetForProfile(testing_profile, ServiceAccessType::EXPLICIT_ACCESS)
+            .get());
+  }
+
+  password_manager::MockPasswordStore* store() { return store_; }
+
+ private:
+  password_manager::MockPasswordStore* store_;
+
+  DISALLOW_COPY_AND_ASSIGN(RemovePasswordsTester);
+};
+
 // Test Class ----------------------------------------------------------------
 
 class BrowsingDataRemoverTest : public testing::Test {
@@ -889,6 +1005,13 @@ class BrowsingDataRemoverTest : public testing::Test {
         BrowsingDataRemover::RegisterOnBrowsingDataRemovedCallback(
             base::Bind(&BrowsingDataRemoverTest::NotifyWithDetails,
                        base::Unretained(this)));
+
+#if BUILDFLAG(ANDROID_JAVA_UI)
+    BrowsingDataRemover* remover =
+        BrowsingDataRemoverFactory::GetForBrowserContext(profile_.get());
+    remover->OverrideWebappRegistryForTesting(
+        std::unique_ptr<WebappRegistry>(new TestWebappRegistry()));
+#endif
   }
 
   ~BrowsingDataRemoverTest() override {}
@@ -934,9 +1057,10 @@ class BrowsingDataRemoverTest : public testing::Test {
         storage_partition.GetStoragePartitionRemovalData();
   }
 
-  void BlockUntilOriginDataRemoved(BrowsingDataRemover::TimePeriod period,
-                                   int remove_mask,
-                                   const GURL& remove_origin) {
+  void BlockUntilOriginDataRemoved(
+      BrowsingDataRemover::TimePeriod period,
+      int remove_mask,
+      const BrowsingDataFilterBuilder& filter_builder) {
     BrowsingDataRemover* remover =
         BrowsingDataRemoverFactory::GetForBrowserContext(profile_.get());
     TestStoragePartition storage_partition;
@@ -946,7 +1070,7 @@ class BrowsingDataRemoverTest : public testing::Test {
 
     BrowsingDataRemoverCompletionObserver completion_observer(remover);
     remover->RemoveImpl(BrowsingDataRemover::Period(period), remove_mask,
-                        remove_origin, BrowsingDataHelper::UNPROTECTED_WEB);
+                        filter_builder, BrowsingDataHelper::UNPROTECTED_WEB);
     completion_observer.BlockUntilCompletion();
 
     // Save so we can verify later.
@@ -1020,11 +1144,12 @@ class BrowsingDataRemoverTest : public testing::Test {
   }
 
  protected:
-  scoped_ptr<BrowsingDataRemover::NotificationDetails> called_with_details_;
+  std::unique_ptr<BrowsingDataRemover::NotificationDetails>
+      called_with_details_;
 
  private:
   content::TestBrowserThreadBundle thread_bundle_;
-  scoped_ptr<TestingProfile> profile_;
+  std::unique_ptr<TestingProfile> profile_;
 
   StoragePartitionRemovalData storage_partition_removal_data_;
 
@@ -1056,7 +1181,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveCookieForever) {
             StoragePartition::REMOVE_DATA_MASK_COOKIES);
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
   EXPECT_EQ(removal_data.remove_begin, GetBeginTime());
 }
 
@@ -1076,8 +1200,41 @@ TEST_F(BrowsingDataRemoverTest, RemoveCookieLastHour) {
   // persistent storage data.
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             ~StoragePartition::QUOTA_MANAGED_STORAGE_MASK_PERSISTENT);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
   EXPECT_EQ(removal_data.remove_begin, GetBeginTime());
+}
+
+TEST_F(BrowsingDataRemoverTest, RemoveCookiesDomainBlacklist) {
+  RegistrableDomainFilterBuilder filter(
+      RegistrableDomainFilterBuilder::BLACKLIST);
+  filter.AddRegisterableDomain(kTestRegisterableDomain1);
+  filter.AddRegisterableDomain(kTestRegisterableDomain3);
+  BlockUntilOriginDataRemoved(BrowsingDataRemover::LAST_HOUR,
+                              BrowsingDataRemover::REMOVE_COOKIES, filter);
+
+  EXPECT_EQ(BrowsingDataRemover::REMOVE_COOKIES, GetRemovalMask());
+  EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginTypeMask());
+
+  // Verify that storage partition was instructed to remove the cookies.
+  StoragePartitionRemovalData removal_data = GetStoragePartitionRemovalData();
+  EXPECT_EQ(removal_data.remove_mask,
+            StoragePartition::REMOVE_DATA_MASK_COOKIES);
+  // Removing with time period other than EVERYTHING should not clear
+  // persistent storage data.
+  EXPECT_EQ(removal_data.quota_storage_remove_mask,
+            ~StoragePartition::QUOTA_MANAGED_STORAGE_MASK_PERSISTENT);
+  EXPECT_EQ(removal_data.remove_begin, GetBeginTime());
+  EXPECT_FALSE(removal_data.origin_matcher.Run(kOrigin1, mock_policy()));
+  EXPECT_TRUE(removal_data.origin_matcher.Run(kOrigin2, mock_policy()));
+  EXPECT_FALSE(removal_data.origin_matcher.Run(kOrigin3, mock_policy()));
+  // Even though it's a different origin, it's the same domain.
+  EXPECT_FALSE(removal_data.origin_matcher.Run(kOrigin4, mock_policy()));
+
+  EXPECT_FALSE(removal_data.cookie_matcher.Run(CreateCookieWithHost(kOrigin1)));
+  EXPECT_TRUE(removal_data.cookie_matcher.Run(CreateCookieWithHost(kOrigin2)));
+  EXPECT_FALSE(removal_data.cookie_matcher.Run(CreateCookieWithHost(kOrigin3)));
+  // This is false, because this is the same domain as 3, just with a different
+  // scheme.
+  EXPECT_FALSE(removal_data.cookie_matcher.Run(CreateCookieWithHost(kOrigin4)));
 }
 
 TEST_F(BrowsingDataRemoverTest, RemoveSafeBrowsingCookieForever) {
@@ -1108,6 +1265,29 @@ TEST_F(BrowsingDataRemoverTest, RemoveSafeBrowsingCookieLastHour) {
   // Removing with time period other than EVERYTHING should not clear safe
   // browsing cookies.
   EXPECT_TRUE(tester.ContainsCookie());
+}
+
+TEST_F(BrowsingDataRemoverTest, RemoveSafeBrowsingCookieForeverWithPredicate) {
+  RemoveSafeBrowsingCookieTester tester;
+
+  tester.AddCookie();
+  ASSERT_TRUE(tester.ContainsCookie());
+  RegistrableDomainFilterBuilder filter(
+      RegistrableDomainFilterBuilder::BLACKLIST);
+  filter.AddRegisterableDomain(kTestRegisterableDomain1);
+  BlockUntilOriginDataRemoved(BrowsingDataRemover::EVERYTHING,
+                              BrowsingDataRemover::REMOVE_COOKIES, filter);
+
+  EXPECT_EQ(BrowsingDataRemover::REMOVE_COOKIES, GetRemovalMask());
+  EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginTypeMask());
+  EXPECT_TRUE(tester.ContainsCookie());
+
+  RegistrableDomainFilterBuilder filter2(
+      RegistrableDomainFilterBuilder::WHITELIST);
+  filter2.AddRegisterableDomain(kTestRegisterableDomain1);
+  BlockUntilOriginDataRemoved(BrowsingDataRemover::EVERYTHING,
+                              BrowsingDataRemover::REMOVE_COOKIES, filter2);
+  EXPECT_FALSE(tester.ContainsCookie());
 }
 
 TEST_F(BrowsingDataRemoverTest, RemoveChannelIDForever) {
@@ -1169,7 +1349,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveUnprotectedLocalStorageForever) {
             StoragePartition::REMOVE_DATA_MASK_LOCAL_STORAGE);
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
   EXPECT_EQ(removal_data.remove_begin, GetBeginTime());
 
   // Check origin matcher.
@@ -1201,7 +1380,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveProtectedLocalStorageForever) {
             StoragePartition::REMOVE_DATA_MASK_LOCAL_STORAGE);
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
   EXPECT_EQ(removal_data.remove_begin, GetBeginTime());
 
   // Check origin matcher all http origin will match since we specified
@@ -1231,7 +1409,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveLocalStorageForLastWeek) {
   // Persistent storage won't be deleted.
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             ~StoragePartition::QUOTA_MANAGED_STORAGE_MASK_PERSISTENT);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
   EXPECT_EQ(removal_data.remove_begin, GetBeginTime());
 
   // Check origin matcher.
@@ -1437,7 +1614,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForeverBoth) {
                 StoragePartition::REMOVE_DATA_MASK_INDEXEDDB);
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
 }
 
 TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForeverOnlyTemporary) {
@@ -1476,7 +1652,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForeverOnlyTemporary) {
                 StoragePartition::REMOVE_DATA_MASK_INDEXEDDB);
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
 
   // Check that all related origin data would be removed, that is, origin
   // matcher would match these origin.
@@ -1521,7 +1696,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForeverOnlyPersistent) {
                 StoragePartition::REMOVE_DATA_MASK_INDEXEDDB);
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
 
   // Check that all related origin data would be removed, that is, origin
   // matcher would match these origin.
@@ -1566,7 +1740,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForeverNeither) {
                 StoragePartition::REMOVE_DATA_MASK_INDEXEDDB);
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
 
   // Check that all related origin data would be removed, that is, origin
   // matcher would match these origin.
@@ -1576,6 +1749,9 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForeverNeither) {
 }
 
 TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForeverSpecificOrigin) {
+  RegistrableDomainFilterBuilder builder(
+      RegistrableDomainFilterBuilder::WHITELIST);
+  builder.AddRegisterableDomain(kTestRegisterableDomain1);
   // Remove Origin 1.
   BlockUntilOriginDataRemoved(BrowsingDataRemover::EVERYTHING,
                               BrowsingDataRemover::REMOVE_APPCACHE |
@@ -1584,7 +1760,7 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForeverSpecificOrigin) {
                                   BrowsingDataRemover::REMOVE_FILE_SYSTEMS |
                                   BrowsingDataRemover::REMOVE_INDEXEDDB |
                                   BrowsingDataRemover::REMOVE_WEBSQL,
-                              kOrigin1);
+                              builder);
 
   EXPECT_EQ(BrowsingDataRemover::REMOVE_APPCACHE |
                 BrowsingDataRemover::REMOVE_SERVICE_WORKERS |
@@ -1607,7 +1783,10 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForeverSpecificOrigin) {
                 StoragePartition::REMOVE_DATA_MASK_INDEXEDDB);
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL);
-  EXPECT_EQ(removal_data.remove_origin, kOrigin1);
+  EXPECT_TRUE(removal_data.origin_matcher.Run(kOrigin1, mock_policy()));
+  EXPECT_FALSE(removal_data.origin_matcher.Run(kOrigin2, mock_policy()));
+  EXPECT_FALSE(removal_data.origin_matcher.Run(kOrigin3, mock_policy()));
+  EXPECT_FALSE(removal_data.origin_matcher.Run(kOrigin4, mock_policy()));
 }
 
 TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForLastHour) {
@@ -1646,7 +1825,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForLastHour) {
   uint32_t expected_quota_mask =
       ~StoragePartition::QUOTA_MANAGED_STORAGE_MASK_PERSISTENT;
   EXPECT_EQ(removal_data.quota_storage_remove_mask, expected_quota_mask);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
   // Check removal begin time.
   EXPECT_EQ(removal_data.remove_begin, GetBeginTime());
 }
@@ -1687,7 +1865,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForLastWeek) {
   uint32_t expected_quota_mask =
       ~StoragePartition::QUOTA_MANAGED_STORAGE_MASK_PERSISTENT;
   EXPECT_EQ(removal_data.quota_storage_remove_mask, expected_quota_mask);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
   // Check removal begin time.
   EXPECT_EQ(removal_data.remove_begin, GetBeginTime());
 }
@@ -1730,7 +1907,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedUnprotectedOrigins) {
                 StoragePartition::REMOVE_DATA_MASK_INDEXEDDB);
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
 
   // Check OriginMatcherFunction.
   EXPECT_EQ(ShouldRemoveForProtectedOriginOne(),
@@ -1746,6 +1922,10 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedProtectedSpecificOrigin) {
   policy->AddProtected(kOrigin1.GetOrigin());
 #endif
 
+  RegistrableDomainFilterBuilder builder(
+      RegistrableDomainFilterBuilder::WHITELIST);
+  builder.AddRegisterableDomain(kTestRegisterableDomain1);
+
   // Try to remove kOrigin1. Expect failure.
   BlockUntilOriginDataRemoved(BrowsingDataRemover::EVERYTHING,
                               BrowsingDataRemover::REMOVE_APPCACHE |
@@ -1754,7 +1934,7 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedProtectedSpecificOrigin) {
                                   BrowsingDataRemover::REMOVE_FILE_SYSTEMS |
                                   BrowsingDataRemover::REMOVE_INDEXEDDB |
                                   BrowsingDataRemover::REMOVE_WEBSQL,
-                              kOrigin1);
+                              builder);
 
   EXPECT_EQ(BrowsingDataRemover::REMOVE_APPCACHE |
                 BrowsingDataRemover::REMOVE_SERVICE_WORKERS |
@@ -1777,13 +1957,14 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedProtectedSpecificOrigin) {
                 StoragePartition::REMOVE_DATA_MASK_INDEXEDDB);
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL);
-  EXPECT_EQ(removal_data.remove_origin, kOrigin1);
 
   // Check OriginMatcherFunction.
   EXPECT_EQ(ShouldRemoveForProtectedOriginOne(),
             removal_data.origin_matcher.Run(kOrigin1, mock_policy()));
-  EXPECT_TRUE(removal_data.origin_matcher.Run(kOrigin2, mock_policy()));
-  EXPECT_TRUE(removal_data.origin_matcher.Run(kOrigin3, mock_policy()));
+  // Since we use the matcher function to validate origins now, this should
+  // return false for the origins we're not trying to clear.
+  EXPECT_FALSE(removal_data.origin_matcher.Run(kOrigin2, mock_policy()));
+  EXPECT_FALSE(removal_data.origin_matcher.Run(kOrigin3, mock_policy()));
 }
 
 TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedProtectedOrigins) {
@@ -1826,7 +2007,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedProtectedOrigins) {
                 StoragePartition::REMOVE_DATA_MASK_INDEXEDDB);
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
 
   // Check OriginMatcherFunction, |kOrigin1| would match mask since we
   // would have 'protected' specified in origin_type_mask.
@@ -1871,7 +2051,6 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedIgnoreExtensionsAndDevTools) {
                 StoragePartition::REMOVE_DATA_MASK_INDEXEDDB);
   EXPECT_EQ(removal_data.quota_storage_remove_mask,
             StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL);
-  EXPECT_TRUE(removal_data.remove_origin.is_empty());
 
   // Check that extension and devtools data wouldn't be removed, that is,
   // origin matcher would not match these origin.
@@ -1879,7 +2058,7 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedIgnoreExtensionsAndDevTools) {
   EXPECT_FALSE(removal_data.origin_matcher.Run(kOriginDevTools, mock_policy()));
 }
 
-TEST_F(BrowsingDataRemoverTest, OriginBasedHistoryRemoval) {
+TEST_F(BrowsingDataRemoverTest, TimeBasedHistoryRemoval) {
   RemoveHistoryTester tester;
   ASSERT_TRUE(tester.Init(GetProfile()));
 
@@ -1890,34 +2069,14 @@ TEST_F(BrowsingDataRemoverTest, OriginBasedHistoryRemoval) {
   ASSERT_TRUE(tester.HistoryContainsURL(kOrigin1));
   ASSERT_TRUE(tester.HistoryContainsURL(kOrigin2));
 
-  BlockUntilOriginDataRemoved(BrowsingDataRemover::EVERYTHING,
-      BrowsingDataRemover::REMOVE_HISTORY, kOrigin2);
-
-  EXPECT_EQ(BrowsingDataRemover::REMOVE_HISTORY, GetRemovalMask());
-  EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginTypeMask());
-
-  // Nothing should have been deleted.
-  EXPECT_TRUE(tester.HistoryContainsURL(kOrigin1));
-  EXPECT_FALSE(tester.HistoryContainsURL(kOrigin2));
-}
-
-TEST_F(BrowsingDataRemoverTest, OriginAndTimeBasedHistoryRemoval) {
-  RemoveHistoryTester tester;
-  ASSERT_TRUE(tester.Init(GetProfile()));
-
-  base::Time two_hours_ago = base::Time::Now() - base::TimeDelta::FromHours(2);
-
-  tester.AddHistory(kOrigin1, base::Time::Now());
-  tester.AddHistory(kOrigin2, two_hours_ago);
-  ASSERT_TRUE(tester.HistoryContainsURL(kOrigin1));
-  ASSERT_TRUE(tester.HistoryContainsURL(kOrigin2));
-
+  RegistrableDomainFilterBuilder builder(
+      RegistrableDomainFilterBuilder::BLACKLIST);
   BlockUntilOriginDataRemoved(BrowsingDataRemover::LAST_HOUR,
-      BrowsingDataRemover::REMOVE_HISTORY, kOrigin2);
+                              BrowsingDataRemover::REMOVE_HISTORY, builder);
 
   EXPECT_EQ(BrowsingDataRemover::REMOVE_HISTORY, GetRemovalMask());
   EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginTypeMask());
-  EXPECT_TRUE(tester.HistoryContainsURL(kOrigin1));
+  EXPECT_FALSE(tester.HistoryContainsURL(kOrigin1));
   EXPECT_TRUE(tester.HistoryContainsURL(kOrigin2));
 }
 
@@ -2062,12 +2221,12 @@ TEST_F(BrowsingDataRemoverTest, ContentProtectionPlatformKeysRemoval) {
       AccountId::FromUserEmail("test@example.com"));
   chromeos::ScopedUserManagerEnabler user_manager_enabler(mock_user_manager);
 
-  scoped_ptr<chromeos::DBusThreadManagerSetter> dbus_setter =
+  std::unique_ptr<chromeos::DBusThreadManagerSetter> dbus_setter =
       chromeos::DBusThreadManager::GetSetterForTesting();
   chromeos::MockCryptohomeClient* cryptohome_client =
       new chromeos::MockCryptohomeClient;
   dbus_setter->SetCryptohomeClient(
-      scoped_ptr<chromeos::CryptohomeClient>(cryptohome_client));
+      std::unique_ptr<chromeos::CryptohomeClient>(cryptohome_client));
 
   // Expect exactly one call.  No calls means no attempt to delete keys and more
   // than one call means a significant performance problem.
@@ -2134,7 +2293,7 @@ TEST_F(BrowsingDataRemoverTest, DomainReliability_ProtectedOrigins) {
   EXPECT_EQ(CLEAR_CONTEXTS, tester.last_clear_mode());
 }
 
-// TODO(ttuttle): This isn't actually testing the no-monitor case, since
+// TODO(juliatuttle): This isn't actually testing the no-monitor case, since
 // BrowsingDataRemoverTest now creates one unconditionally, since it's needed
 // for some unrelated test cases. This should be fixed so it tests the no-
 // monitor case again.
@@ -2145,30 +2304,220 @@ TEST_F(BrowsingDataRemoverTest, DISABLED_DomainReliability_NoMonitor) {
       BrowsingDataRemover::REMOVE_COOKIES, false);
 }
 
-TEST_F(BrowsingDataRemoverTest, RemoveSameOriginDownloads) {
+TEST_F(BrowsingDataRemoverTest, RemoveDownloadsByTimeOnly) {
   RemoveDownloadsTester tester(GetProfile());
-  const url::Origin expectedOrigin(kOrigin1);
+  base::Callback<bool(const GURL&)> filter =
+      BrowsingDataFilterBuilder::BuildNoopFilter();
 
-  EXPECT_CALL(*tester.download_manager(),
-              RemoveDownloadsByOriginAndTime(SameOrigin(expectedOrigin), _, _));
+  EXPECT_CALL(
+      *tester.download_manager(),
+      RemoveDownloadsByURLAndTime(ProbablySameFilter(filter), _, _));
+
+  BlockUntilBrowsingDataRemoved(BrowsingDataRemover::EVERYTHING,
+                                BrowsingDataRemover::REMOVE_DOWNLOADS, false);
+}
+
+TEST_F(BrowsingDataRemoverTest, RemoveDownloadsByOrigin) {
+  RemoveDownloadsTester tester(GetProfile());
+  RegistrableDomainFilterBuilder builder(
+      RegistrableDomainFilterBuilder::WHITELIST);
+  builder.AddRegisterableDomain(kTestRegisterableDomain1);
+  base::Callback<bool(const GURL&)> filter = builder.BuildGeneralFilter();
+
+  EXPECT_CALL(
+      *tester.download_manager(),
+      RemoveDownloadsByURLAndTime(ProbablySameFilter(filter), _, _));
 
   BlockUntilOriginDataRemoved(BrowsingDataRemover::EVERYTHING,
-                              BrowsingDataRemover::REMOVE_DOWNLOADS, kOrigin1);
+                              BrowsingDataRemover::REMOVE_DOWNLOADS, builder);
 }
 
 TEST_F(BrowsingDataRemoverTest, RemovePasswordStatistics) {
-  PasswordStoreFactory::GetInstance()->SetTestingFactoryAndUse(
-      GetProfile(),
-      password_manager::BuildPasswordStore<
-          content::BrowserContext, password_manager::MockPasswordStore>);
-  password_manager::MockPasswordStore* store =
-      static_cast<password_manager::MockPasswordStore*>(
-          PasswordStoreFactory::GetInstance()
-              ->GetForProfile(GetProfile(), ServiceAccessType::EXPLICIT_ACCESS)
-              .get());
-  EXPECT_CALL(*store, RemoveStatisticsCreatedBetweenImpl(base::Time(),
-                                                         base::Time::Max()));
+  RemovePasswordsTester tester(GetProfile());
+
+  EXPECT_CALL(*tester.store(), RemoveStatisticsCreatedBetweenImpl(
+                                   base::Time(), base::Time::Max()));
   BlockUntilBrowsingDataRemoved(
       BrowsingDataRemover::EVERYTHING,
       BrowsingDataRemover::REMOVE_HISTORY, false);
+}
+
+TEST_F(BrowsingDataRemoverTest, RemovePasswordsByTimeOnly) {
+  RemovePasswordsTester tester(GetProfile());
+  base::Callback<bool(const GURL&)> filter =
+      BrowsingDataFilterBuilder::BuildNoopFilter();
+
+  EXPECT_CALL(*tester.store(),
+              RemoveLoginsByURLAndTimeImpl(ProbablySameFilter(filter), _, _))
+      .WillOnce(Return(password_manager::PasswordStoreChangeList()));
+  BlockUntilBrowsingDataRemoved(BrowsingDataRemover::EVERYTHING,
+                                BrowsingDataRemover::REMOVE_PASSWORDS, false);
+}
+
+TEST_F(BrowsingDataRemoverTest, RemovePasswordsByOrigin) {
+  RemovePasswordsTester tester(GetProfile());
+  RegistrableDomainFilterBuilder builder(
+      RegistrableDomainFilterBuilder::WHITELIST);
+  builder.AddRegisterableDomain(kTestRegisterableDomain1);
+  base::Callback<bool(const GURL&)> filter = builder.BuildGeneralFilter();
+
+  EXPECT_CALL(*tester.store(),
+              RemoveLoginsByURLAndTimeImpl(ProbablySameFilter(filter), _, _))
+      .WillOnce(Return(password_manager::PasswordStoreChangeList()));
+  BlockUntilOriginDataRemoved(BrowsingDataRemover::EVERYTHING,
+                              BrowsingDataRemover::REMOVE_PASSWORDS, builder);
+}
+
+TEST_F(BrowsingDataRemoverTest, DisableAutoSignIn) {
+  RemovePasswordsTester tester(GetProfile());
+
+  EXPECT_CALL(*tester.store(), DisableAutoSignInForAllLoginsImpl())
+      .WillOnce(Return(password_manager::PasswordStoreChangeList()));
+
+  BlockUntilBrowsingDataRemoved(BrowsingDataRemover::EVERYTHING,
+                                BrowsingDataRemover::REMOVE_COOKIES, false);
+}
+
+TEST_F(BrowsingDataRemoverTest, DisableAutoSignInAfterRemovingPasswords) {
+  RemovePasswordsTester tester(GetProfile());
+
+  EXPECT_CALL(*tester.store(), RemoveLoginsByURLAndTimeImpl(_, _, _))
+      .WillOnce(Return(password_manager::PasswordStoreChangeList()));
+  EXPECT_CALL(*tester.store(), DisableAutoSignInForAllLoginsImpl())
+      .WillOnce(Return(password_manager::PasswordStoreChangeList()));
+
+  BlockUntilBrowsingDataRemoved(BrowsingDataRemover::EVERYTHING,
+                                BrowsingDataRemover::REMOVE_COOKIES |
+                                    BrowsingDataRemover::REMOVE_PASSWORDS,
+                                false);
+}
+
+TEST_F(BrowsingDataRemoverTest, RemoveContentSettingsWithBlacklist) {
+  // Add our settings.
+  HostContentSettingsMap* host_content_settings_map =
+      HostContentSettingsMapFactory::GetForProfile(GetProfile());
+  host_content_settings_map->SetWebsiteSettingDefaultScope(
+      kOrigin1, GURL(), CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT, std::string(),
+      new base::DictionaryValue());
+  host_content_settings_map->SetWebsiteSettingDefaultScope(
+      kOrigin2, GURL(), CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT, std::string(),
+      new base::DictionaryValue());
+  host_content_settings_map->SetWebsiteSettingDefaultScope(
+      kOrigin3, GURL(), CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT, std::string(),
+      new base::DictionaryValue());
+  host_content_settings_map->SetWebsiteSettingDefaultScope(
+      kOrigin4, GURL(), CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT, std::string(),
+      new base::DictionaryValue());
+
+  // Clear all except for origin1 and origin3.
+  RegistrableDomainFilterBuilder filter(
+      RegistrableDomainFilterBuilder::BLACKLIST);
+  filter.AddRegisterableDomain(kTestRegisterableDomain1);
+  filter.AddRegisterableDomain(kTestRegisterableDomain3);
+  BlockUntilOriginDataRemoved(BrowsingDataRemover::LAST_HOUR,
+                              BrowsingDataRemover::REMOVE_SITE_USAGE_DATA,
+                              filter);
+
+  EXPECT_EQ(BrowsingDataRemover::REMOVE_SITE_USAGE_DATA, GetRemovalMask());
+  EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginTypeMask());
+
+  // Verify we only have true, and they're origin1, origin3, and origin4.
+  ContentSettingsForOneType host_settings;
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT, std::string(), &host_settings);
+  EXPECT_EQ(3u, host_settings.size());
+  EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(kOrigin1),
+            host_settings[0].primary_pattern)
+      << host_settings[0].primary_pattern.ToString();
+  EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(kOrigin4),
+            host_settings[1].primary_pattern)
+      << host_settings[1].primary_pattern.ToString();
+  EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(kOrigin3),
+            host_settings[2].primary_pattern)
+      << host_settings[2].primary_pattern.ToString();
+}
+
+TEST_F(BrowsingDataRemoverTest, ClearWithPredicate) {
+  HostContentSettingsMap* host_content_settings_map =
+      HostContentSettingsMapFactory::GetForProfile(GetProfile());
+  ContentSettingsForOneType host_settings;
+
+  // Patterns with wildcards.
+  ContentSettingsPattern pattern =
+      ContentSettingsPattern::FromString("[*.]example.org");
+  ContentSettingsPattern pattern2 =
+      ContentSettingsPattern::FromString("[*.]example.net");
+
+  // Patterns without wildcards.
+  GURL url1("https://www.google.com/");
+  GURL url2("https://www.google.com/maps");
+  GURL url3("http://www.google.com/maps");
+  GURL url3_origin_only("http://www.google.com/");
+
+  host_content_settings_map->SetContentSettingCustomScope(
+      pattern2, ContentSettingsPattern::Wildcard(),
+      CONTENT_SETTINGS_TYPE_IMAGES, std::string(), CONTENT_SETTING_BLOCK);
+  host_content_settings_map->SetContentSettingCustomScope(
+      pattern, ContentSettingsPattern::Wildcard(), CONTENT_SETTINGS_TYPE_IMAGES,
+      std::string(), CONTENT_SETTING_BLOCK);
+  host_content_settings_map->SetWebsiteSettingCustomScope(
+      pattern2, ContentSettingsPattern::Wildcard(),
+      CONTENT_SETTINGS_TYPE_APP_BANNER, std::string(),
+      base::WrapUnique(new base::DictionaryValue()));
+
+  // First, test that we clear only IMAGES (not APP_BANNER), and pattern2.
+  BrowsingDataRemover::ClearSettingsForOneTypeWithPredicate(
+      host_content_settings_map, CONTENT_SETTINGS_TYPE_IMAGES,
+      base::Bind(&MatchPrimaryPattern, pattern2));
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_IMAGES, std::string(), &host_settings);
+  // |host_settings| contains default & block.
+  EXPECT_EQ(2U, host_settings.size());
+  EXPECT_EQ(pattern, host_settings[0].primary_pattern);
+  EXPECT_EQ("*", host_settings[0].secondary_pattern.ToString());
+  EXPECT_EQ("*", host_settings[1].primary_pattern.ToString());
+  EXPECT_EQ("*", host_settings[1].secondary_pattern.ToString());
+
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_APP_BANNER, std::string(), &host_settings);
+  // |host_settings| contains block.
+  EXPECT_EQ(1U, host_settings.size());
+  EXPECT_EQ(pattern2, host_settings[0].primary_pattern);
+  EXPECT_EQ("*", host_settings[0].secondary_pattern.ToString());
+
+  // Next, test that we do correct pattern matching w/ an origin policy item.
+  // We verify that we have no settings stored.
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT, std::string(), &host_settings);
+  EXPECT_EQ(0u, host_settings.size());
+  // Add settings.
+  host_content_settings_map->SetWebsiteSettingDefaultScope(
+      url1, GURL(), CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT, std::string(),
+      new base::DictionaryValue());
+  // This setting should override the one above, as it's the same origin.
+  host_content_settings_map->SetWebsiteSettingDefaultScope(
+      url2, GURL(), CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT, std::string(),
+      new base::DictionaryValue());
+  host_content_settings_map->SetWebsiteSettingDefaultScope(
+      url3, GURL(), CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT, std::string(),
+      new base::DictionaryValue());
+  // Verify we only have two.
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT, std::string(), &host_settings);
+  EXPECT_EQ(2u, host_settings.size());
+
+  // Clear the http one, which we should be able to do w/ the origin only, as
+  // the scope of CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT is
+  // REQUESTING_ORIGIN_ONLY_SCOPE.
+  ContentSettingsPattern http_pattern =
+      ContentSettingsPattern::FromURLNoWildcard(url3_origin_only);
+  BrowsingDataRemover::ClearSettingsForOneTypeWithPredicate(
+      host_content_settings_map, CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT,
+      base::Bind(&MatchPrimaryPattern, http_pattern));
+  // Verify we only have one, and it's url1.
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT, std::string(), &host_settings);
+  EXPECT_EQ(1u, host_settings.size());
+  EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(url1),
+            host_settings[0].primary_pattern);
 }

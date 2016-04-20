@@ -428,6 +428,11 @@ void WebContentsDelegateAndroid::MoveValidationMessage(
         rwhv->GetRenderWidgetHost(), anchor_in_root_view);
   }
 }
+
+void WebContentsDelegateAndroid::RequestAppBannerFromDevTools(
+    content::WebContents* web_contents) {
+}
+
 // ----------------------------------------------------------------------------
 // Native JNI methods
 // ----------------------------------------------------------------------------

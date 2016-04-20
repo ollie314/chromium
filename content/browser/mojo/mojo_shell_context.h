@@ -6,20 +6,22 @@
 #define CONTENT_BROWSER_MOJO_MOJO_SHELL_CONTEXT_H_
 
 #include <map>
+#include <memory>
 
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
-#include "mojo/shell/application_manager.h"
-#include "mojo/shell/public/interfaces/shell.mojom.h"
+#include "services/shell/public/interfaces/connector.mojom.h"
+#include "services/shell/shell.h"
 
-class GURL;
+namespace catalog {
+class Catalog;
+}
 
 namespace mojo {
-class ApplicationDelegate;
+class ShellClient;
 }
 
 namespace content {
@@ -29,40 +31,44 @@ namespace content {
 class CONTENT_EXPORT MojoShellContext {
  public:
   using StaticApplicationMap =
-      std::map<GURL, base::Callback<scoped_ptr<mojo::ApplicationDelegate>()>>;
+      std::map<std::string,
+               base::Callback<std::unique_ptr<shell::ShellClient>()>>;
 
   MojoShellContext();
   ~MojoShellContext();
 
-  // Connects an application at |url| and gets a handle to its exposed services.
-  // This is only intended for use in browser code that's not part of some Mojo
-  // application. May be called from any thread. |requestor_url| is given to
-  // the target application as the requestor's URL upon connection.
+  // Connects an application at |name| and gets a handle to its exposed
+  // services. This is only intended for use in browser code that's not part of
+  // some Mojo application. May be called from any thread. |requestor_name| is
+  // given to the target application as the requestor's name upon connection.
   static void ConnectToApplication(
-      const GURL& url,
-      const GURL& requestor_url,
-      mojo::InterfaceRequest<mojo::ServiceProvider> request,
-      mojo::ServiceProviderPtr exposed_services,
-      const mojo::shell::CapabilityFilter& filter,
-      const mojo::Shell::ConnectToApplicationCallback& callback);
+      const std::string& user_id,
+      const std::string& name,
+      const std::string& requestor_name,
+      shell::mojom::InterfaceProviderRequest request,
+      shell::mojom::InterfaceProviderPtr exposed_services,
+      const shell::mojom::Connector::ConnectCallback& callback);
 
   static void SetApplicationsForTest(const StaticApplicationMap* apps);
 
  private:
+  class BuiltinManifestProvider;
   class Proxy;
   friend class Proxy;
 
   void ConnectToApplicationOnOwnThread(
-      const GURL& url,
-      const GURL& requestor_url,
-      mojo::InterfaceRequest<mojo::ServiceProvider> request,
-      mojo::ServiceProviderPtr exposed_services,
-      const mojo::shell::CapabilityFilter& filter,
-      const mojo::Shell::ConnectToApplicationCallback& callback);
+      const std::string& user_id,
+      const std::string& name,
+      const std::string& requestor_name,
+      shell::mojom::InterfaceProviderRequest request,
+      shell::mojom::InterfaceProviderPtr exposed_services,
+      const shell::mojom::Connector::ConnectCallback& callback);
 
-  static base::LazyInstance<scoped_ptr<Proxy>> proxy_;
+  static base::LazyInstance<std::unique_ptr<Proxy>> proxy_;
 
-  scoped_ptr<mojo::shell::ApplicationManager> application_manager_;
+  std::unique_ptr<BuiltinManifestProvider> manifest_provider_;
+  std::unique_ptr<catalog::Catalog> catalog_;
+  std::unique_ptr<shell::Shell> shell_;
 
   DISALLOW_COPY_AND_ASSIGN(MojoShellContext);
 };

@@ -52,7 +52,7 @@ void createDecodingBaseline(DecoderCreator createDecoder, SharedBuffer* data, Ve
     size_t frameCount = decoder->frameCount();
     for (size_t i = 0; i < frameCount; ++i) {
         ImageFrame* frame = decoder->frameBufferAtIndex(i);
-        baselineHashes->append(hashBitmap(frame->getSkBitmap()));
+        baselineHashes->append(hashBitmap(frame->bitmap()));
     }
 }
 
@@ -87,7 +87,7 @@ void testByteByByteDecode(DecoderCreator createDecoder, const char* file, size_t
             continue;
 
         ImageFrame* frame = decoder->frameBufferAtIndex(frameCount - 1);
-        if (frame && frame->status() == ImageFrame::FrameComplete && framesDecoded < frameCount)
+        if (frame && frame->getStatus() == ImageFrame::FrameComplete && framesDecoded < frameCount)
             ++framesDecoded;
     }
 
@@ -99,7 +99,7 @@ void testByteByByteDecode(DecoderCreator createDecoder, const char* file, size_t
     ASSERT_EQ(expectedFrameCount, baselineHashes.size());
     for (size_t i = 0; i < decoder->frameCount(); i++) {
         ImageFrame* frame = decoder->frameBufferAtIndex(i);
-        EXPECT_EQ(baselineHashes[i], hashBitmap(frame->getSkBitmap()));
+        EXPECT_EQ(baselineHashes[i], hashBitmap(frame->bitmap()));
     }
 }
 
@@ -134,7 +134,7 @@ void testMergeBuffer(DecoderCreator createDecoder, const char* file)
 
     ImageFrame* frame = decoder->frameBufferAtIndex(0);
     ASSERT_FALSE(decoder->failed());
-    EXPECT_EQ(frame->status(), ImageFrame::FrameComplete);
+    EXPECT_EQ(frame->getStatus(), ImageFrame::FrameComplete);
     EXPECT_EQ(hashBitmap(frame->bitmap()), hash);
 }
 

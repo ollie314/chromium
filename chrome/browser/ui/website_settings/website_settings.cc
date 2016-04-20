@@ -41,7 +41,6 @@
 #include "chrome/browser/usb/usb_chooser_context_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/features.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -60,6 +59,9 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
+#include "grit/components_chromium_strings.h"
+#include "grit/components_google_chrome_strings.h"
+#include "grit/components_strings.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/x509_certificate.h"
 #include "net/ssl/ssl_cipher_suite_names.h"
@@ -111,6 +113,7 @@ ContentSettingsType kPermissionType[] = {
     CONTENT_SETTINGS_TYPE_PUSH_MESSAGING,
 #endif
     CONTENT_SETTINGS_TYPE_KEYGEN,
+    CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC,
 };
 
 // Determines whether to show permission |type| in the Website Settings UI. Only
@@ -183,11 +186,9 @@ WebsiteSettings::SiteIdentityStatus GetSiteIdentityStatusByCTInfo(
   return WebsiteSettings::SITE_IDENTITY_STATUS_CT_ERROR;
 }
 
-base::string16 GetSimpleSiteName(const GURL& url, Profile* profile) {
-  std::string languages;
-  if (profile)
-    languages = profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
-  return url_formatter::FormatUrlForSecurityDisplayOmitScheme(url, languages);
+base::string16 GetSimpleSiteName(const GURL& url) {
+  return url_formatter::FormatUrlForSecurityDisplay(
+      url, url_formatter::SchemeDisplay::OMIT_HTTP_AND_HTTPS);
 }
 
 ChooserContextBase* GetUsbChooserContext(Profile* profile) {
@@ -283,6 +284,8 @@ void WebsiteSettings::OnSitePermissionChanged(ContentSettingsType type,
         "WebsiteSettings.OriginInfo.PermissionChanged.Blocked", histogram_value,
         num_values);
     // Trigger Rappor sampling if it is a permission revoke action.
+    // TODO(tsergeant): Integrate this with the revocation recording performed
+    // in the permissions layer. See crbug.com/469221.
     content::PermissionType permission_type;
     if (PermissionUtil::GetPermissionType(type, &permission_type)) {
       PermissionUmaUtil::PermissionRevoked(permission_type,
@@ -309,7 +312,8 @@ void WebsiteSettings::OnSiteChosenObjectDeleted(
     const base::DictionaryValue& object) {
   // TODO(reillyg): Create metrics for revocations. crbug.com/556845
   ChooserContextBase* context = ui_info.get_context(profile_);
-  context->RevokeObjectPermission(site_url_, site_url_, object);
+  const GURL origin = site_url_.GetOrigin();
+  context->RevokeObjectPermission(origin, origin, object);
 
   show_info_bar_ = true;
 
@@ -517,7 +521,7 @@ void WebsiteSettings::Init(
   // weakly encrypted connections.
   site_connection_status_ = SITE_CONNECTION_STATUS_UNKNOWN;
 
-  base::string16 subject_name(GetSimpleSiteName(url, profile_));
+  base::string16 subject_name(GetSimpleSiteName(url));
   if (subject_name.empty()) {
     subject_name.assign(
         l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURITY_TAB_UNKNOWN_PARTY));
@@ -670,9 +674,8 @@ void WebsiteSettings::PresentSitePermissions() {
       continue;
 
     content_settings::SettingInfo info;
-    scoped_ptr<base::Value> value =
-        content_settings_->GetWebsiteSetting(
-            site_url_, site_url_, permission_info.type, std::string(), &info);
+    std::unique_ptr<base::Value> value = content_settings_->GetWebsiteSetting(
+        site_url_, site_url_, permission_info.type, std::string(), &info);
     DCHECK(value.get());
     if (value->GetType() == base::Value::TYPE_INTEGER) {
       permission_info.setting =
@@ -694,19 +697,21 @@ void WebsiteSettings::PresentSitePermissions() {
                                                       NULL);
     }
 
-    if ((permission_info.setting != CONTENT_SETTING_DEFAULT &&
-         permission_info.setting != permission_info.default_setting) ||
-        (permission_info.type == CONTENT_SETTINGS_TYPE_KEYGEN &&
-         tab_specific_content_settings()->IsContentBlocked(
-             permission_info.type))) {
-      permission_info_list.push_back(permission_info);
+    if (permission_info.type == CONTENT_SETTINGS_TYPE_KEYGEN &&
+        (permission_info.setting == CONTENT_SETTING_DEFAULT ||
+         permission_info.setting == permission_info.default_setting) &&
+        !tab_specific_content_settings()->IsContentBlocked(
+            permission_info.type)) {
+      continue;
     }
+    permission_info_list.push_back(permission_info);
   }
 
   for (const ChooserUIInfo& ui_info : kChooserUIInfo) {
     ChooserContextBase* context = ui_info.get_context(profile_);
-    auto chosen_objects = context->GetGrantedObjects(site_url_, site_url_);
-    for (scoped_ptr<base::DictionaryValue>& object : chosen_objects) {
+    const GURL origin = site_url_.GetOrigin();
+    auto chosen_objects = context->GetGrantedObjects(origin, origin);
+    for (std::unique_ptr<base::DictionaryValue>& object : chosen_objects) {
       chosen_object_info_list.push_back(
           new WebsiteSettingsUI::ChosenObjectInfo(ui_info, std::move(object)));
     }
@@ -751,7 +756,7 @@ void WebsiteSettings::PresentSiteIdentity() {
   if (site_identity_status_ == SITE_IDENTITY_STATUS_EV_CERT)
     info.site_identity = UTF16ToUTF8(organization_name());
   else
-    info.site_identity = UTF16ToUTF8(GetSimpleSiteName(site_url_, profile_));
+    info.site_identity = UTF16ToUTF8(GetSimpleSiteName(site_url_));
 
   info.connection_status = site_connection_status_;
   info.connection_status_description =

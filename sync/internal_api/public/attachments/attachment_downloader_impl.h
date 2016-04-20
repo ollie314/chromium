@@ -8,9 +8,9 @@
 #include <stdint.h>
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
-#include "base/containers/scoped_ptr_hash_map.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/threading/non_thread_safe.h"
@@ -86,12 +86,13 @@ class AttachmentDownloaderImpl : public AttachmentDownloader,
 
   struct DownloadState;
   typedef std::string AttachmentUrl;
-  typedef base::ScopedPtrHashMap<AttachmentUrl, scoped_ptr<DownloadState>>
+  typedef std::unordered_map<AttachmentUrl, std::unique_ptr<DownloadState>>
       StateMap;
   typedef std::vector<DownloadState*> StateList;
 
-  scoped_ptr<net::URLFetcher> CreateFetcher(const AttachmentUrl& url,
-                                            const std::string& access_token);
+  std::unique_ptr<net::URLFetcher> CreateFetcher(
+      const AttachmentUrl& url,
+      const std::string& access_token);
   void RequestAccessToken(DownloadState* download_state);
   void ReportResult(
       const DownloadState& download_state,
@@ -113,7 +114,7 @@ class AttachmentDownloaderImpl : public AttachmentDownloader,
   OAuth2TokenService::ScopeSet oauth2_scopes_;
   scoped_refptr<OAuth2TokenServiceRequest::TokenServiceProvider>
       token_service_provider_;
-  scoped_ptr<OAuth2TokenService::Request> access_token_request_;
+  std::unique_ptr<OAuth2TokenService::Request> access_token_request_;
   std::string raw_store_birthday_;
 
   StateMap state_map_;

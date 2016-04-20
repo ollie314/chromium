@@ -7,12 +7,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/time/tick_clock.h"
@@ -134,9 +134,6 @@ EventGenerator::EventGenerator(EventGeneratorDelegate* delegate)
 }
 
 EventGenerator::~EventGenerator() {
-  for (std::list<ui::Event*>::iterator i = pending_events_.begin();
-      i != pending_events_.end(); ++i)
-    delete *i;
   pending_events_.clear();
   delegate()->SetContext(NULL, NULL, NULL);
 }
@@ -198,7 +195,7 @@ void EventGenerator::MoveMouseToWithNative(const gfx::Point& point_in_host,
   // Create a fake event with the point in host, which will be passed
   // to the non native event, then update the native event with the native
   // (root) one.
-  scoped_ptr<ui::MouseEvent> native_event(new ui::MouseEvent(
+  std::unique_ptr<ui::MouseEvent> native_event(new ui::MouseEvent(
       ui::ET_MOUSE_MOVED, point_in_host, point_in_host, Now(), flags_, 0));
   ui::MouseEvent mouseev(native_event.get());
   native_event->set_location(point_for_native);
@@ -370,7 +367,8 @@ void EventGenerator::GestureScrollSequenceWithCallback(
     const ScrollStepCallback& callback) {
   const int kTouchId = 5;
   base::TimeDelta timestamp = Now();
-  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, start, kTouchId, timestamp);
+  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, start, 0, kTouchId,
+                       timestamp, 5.0f, 5.0f, 0.0f, 1.0f);
   Dispatch(&press);
 
   callback.Run(ui::ET_GESTURE_SCROLL_BEGIN, gfx::Vector2dF());
@@ -381,14 +379,16 @@ void EventGenerator::GestureScrollSequenceWithCallback(
   for (int i = 0; i < steps; ++i) {
     location.Offset(dx, dy);
     timestamp += step_delay;
-    ui::TouchEvent move(ui::ET_TOUCH_MOVED, gfx::Point(), kTouchId, timestamp);
+    ui::TouchEvent move(ui::ET_TOUCH_MOVED, gfx::Point(), 0, kTouchId,
+                        timestamp, 5.0f, 5.0f, 0.0f, 1.0f);
     move.set_location_f(location);
     move.set_root_location_f(location);
     Dispatch(&move);
     callback.Run(ui::ET_GESTURE_SCROLL_UPDATE, gfx::Vector2dF(dx, dy));
   }
 
-  ui::TouchEvent release(ui::ET_TOUCH_RELEASED, end, kTouchId, timestamp);
+  ui::TouchEvent release(ui::ET_TOUCH_RELEASED, end, 0, kTouchId,
+                         timestamp, 5.0f, 5.0f, 0.0f, 1.0f);
   Dispatch(&release);
 
   callback.Run(ui::ET_GESTURE_SCROLL_END, gfx::Vector2dF());
@@ -559,7 +559,7 @@ void EventGenerator::Dispatch(ui::Event* event) {
   DoDispatchEvent(event, async_);
 }
 
-void EventGenerator::SetTickClock(scoped_ptr<base::TickClock> tick_clock) {
+void EventGenerator::SetTickClock(std::unique_ptr<base::TickClock> tick_clock) {
   tick_clock_ = std::move(tick_clock);
 }
 
@@ -650,32 +650,17 @@ gfx::Point EventGenerator::CenterOfWindow(const EventTarget* window) const {
 
 void EventGenerator::DoDispatchEvent(ui::Event* event, bool async) {
   if (async) {
-    ui::Event* pending_event;
-    if (event->IsKeyEvent()) {
-      pending_event = new ui::KeyEvent(*static_cast<ui::KeyEvent*>(event));
-    } else if (event->IsMouseEvent()) {
-      pending_event = new ui::MouseEvent(*static_cast<ui::MouseEvent*>(event));
-    } else if (event->IsTouchEvent()) {
-      pending_event = new ui::TouchEvent(*static_cast<ui::TouchEvent*>(event));
-    } else if (event->IsScrollEvent()) {
-      pending_event =
-          new ui::ScrollEvent(*static_cast<ui::ScrollEvent*>(event));
-    } else {
-      NOTREACHED() << "Invalid event type";
-      return;
-    }
+    std::unique_ptr<ui::Event> pending_event = ui::Event::Clone(*event);
     if (pending_events_.empty()) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE,
           base::Bind(&EventGenerator::DispatchNextPendingEvent,
                      base::Unretained(this)));
     }
-    pending_events_.push_back(pending_event);
+    pending_events_.push_back(std::move(pending_event));
   } else {
-    if (event->IsKeyEvent()) {
-      delegate()->DispatchKeyEventToIME(current_target_,
-                                        static_cast<ui::KeyEvent*>(event));
-    }
+    if (event->IsKeyEvent())
+      delegate()->DispatchKeyEventToIME(current_target_, event->AsKeyEvent());
     if (!event->handled()) {
       ui::EventSource* event_source =
           delegate()->GetEventSource(current_target_);
@@ -689,10 +674,9 @@ void EventGenerator::DoDispatchEvent(ui::Event* event, bool async) {
 
 void EventGenerator::DispatchNextPendingEvent() {
   DCHECK(!pending_events_.empty());
-  ui::Event* event = pending_events_.front();
+  ui::Event* event = pending_events_.front().get();
   DoDispatchEvent(event, false);
   pending_events_.pop_front();
-  delete event;
   if (!pending_events_.empty()) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,

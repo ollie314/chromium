@@ -16,30 +16,38 @@
 #include "content/browser/indexed_db/indexed_db_factory_impl.h"
 #include "content/browser/indexed_db/mock_indexed_db_callbacks.h"
 #include "content/browser/indexed_db/mock_indexed_db_database_callbacks.h"
+#include "content/browser/quota/mock_quota_manager_proxy.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/mock_special_storage_policy.h"
 #include "content/public/test/test_browser_context.h"
 #include "storage/browser/quota/quota_manager.h"
 #include "storage/browser/quota/special_storage_policy.h"
-#include "storage/common/database/database_identifier.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/origin.h"
+
+using url::Origin;
 
 namespace content {
 
 class IndexedDBTest : public testing::Test {
  public:
-  const GURL kNormalOrigin;
-  const GURL kSessionOnlyOrigin;
+  const Origin kNormalOrigin;
+  const Origin kSessionOnlyOrigin;
 
   IndexedDBTest()
-      : kNormalOrigin("http://normal/"),
-        kSessionOnlyOrigin("http://session-only/"),
+      : kNormalOrigin(GURL("http://normal/")),
+        kSessionOnlyOrigin(GURL("http://session-only/")),
         task_runner_(new base::TestSimpleTaskRunner),
         special_storage_policy_(new MockSpecialStoragePolicy),
+        quota_manager_proxy_(new MockQuotaManagerProxy(nullptr, nullptr)),
         file_thread_(BrowserThread::FILE_USER_BLOCKING, &message_loop_),
         io_thread_(BrowserThread::IO, &message_loop_) {
-    special_storage_policy_->AddSessionOnly(kSessionOnlyOrigin);
+    special_storage_policy_->AddSessionOnly(
+        GURL(kSessionOnlyOrigin.Serialize()));
+  }
+  ~IndexedDBTest() override {
+    quota_manager_proxy_->SimulateQuotaManagerDestroyed();
   }
 
  protected:
@@ -48,6 +56,7 @@ class IndexedDBTest : public testing::Test {
   base::MessageLoopForIO message_loop_;
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
   scoped_refptr<MockSpecialStoragePolicy> special_storage_policy_;
+  scoped_refptr<MockQuotaManagerProxy> quota_manager_proxy_;
 
  private:
   BrowserThreadImpl file_thread_;
@@ -69,17 +78,16 @@ TEST_F(IndexedDBTest, ClearSessionOnlyDatabases) {
     scoped_refptr<IndexedDBContextImpl> idb_context =
         new IndexedDBContextImpl(temp_dir.path(),
                                  special_storage_policy_.get(),
-                                 NULL,
+                                 quota_manager_proxy_.get(),
                                  task_runner_.get());
 
-    normal_path = idb_context->GetFilePathForTesting(
-        storage::GetIdentifierFromOrigin(kNormalOrigin));
-    session_only_path = idb_context->GetFilePathForTesting(
-        storage::GetIdentifierFromOrigin(kSessionOnlyOrigin));
+    normal_path = idb_context->GetFilePathForTesting(kNormalOrigin);
+    session_only_path = idb_context->GetFilePathForTesting(kSessionOnlyOrigin);
     ASSERT_TRUE(base::CreateDirectory(normal_path));
     ASSERT_TRUE(base::CreateDirectory(session_only_path));
     FlushIndexedDBTaskRunner();
     message_loop_.RunUntilIdle();
+    quota_manager_proxy_->SimulateQuotaManagerDestroyed();
   }
 
   FlushIndexedDBTaskRunner();
@@ -103,16 +111,14 @@ TEST_F(IndexedDBTest, SetForceKeepSessionState) {
     scoped_refptr<IndexedDBContextImpl> idb_context =
         new IndexedDBContextImpl(temp_dir.path(),
                                  special_storage_policy_.get(),
-                                 NULL,
+                                 quota_manager_proxy_.get(),
                                  task_runner_.get());
 
     // Save session state. This should bypass the destruction-time deletion.
     idb_context->SetForceKeepSessionState();
 
-    normal_path = idb_context->GetFilePathForTesting(
-        storage::GetIdentifierFromOrigin(kNormalOrigin));
-    session_only_path = idb_context->GetFilePathForTesting(
-        storage::GetIdentifierFromOrigin(kSessionOnlyOrigin));
+    normal_path = idb_context->GetFilePathForTesting(kNormalOrigin);
+    session_only_path = idb_context->GetFilePathForTesting(kSessionOnlyOrigin);
     ASSERT_TRUE(base::CreateDirectory(normal_path));
     ASSERT_TRUE(base::CreateDirectory(session_only_path));
     message_loop_.RunUntilIdle();
@@ -129,17 +135,17 @@ TEST_F(IndexedDBTest, SetForceKeepSessionState) {
 class ForceCloseDBCallbacks : public IndexedDBCallbacks {
  public:
   ForceCloseDBCallbacks(scoped_refptr<IndexedDBContextImpl> idb_context,
-                        const GURL& origin_url)
+                        const Origin& origin)
       : IndexedDBCallbacks(NULL, 0, 0),
         idb_context_(idb_context),
-        origin_url_(origin_url) {}
+        origin_(origin) {}
 
   void OnSuccess() override {}
   void OnSuccess(const std::vector<base::string16>&) override {}
-  void OnSuccess(scoped_ptr<IndexedDBConnection> connection,
+  void OnSuccess(std::unique_ptr<IndexedDBConnection> connection,
                  const IndexedDBDatabaseMetadata& metadata) override {
     connection_ = std::move(connection);
-    idb_context_->ConnectionOpened(origin_url_, connection_.get());
+    idb_context_->ConnectionOpened(origin_, connection_.get());
   }
 
   IndexedDBConnection* connection() { return connection_.get(); }
@@ -149,8 +155,8 @@ class ForceCloseDBCallbacks : public IndexedDBCallbacks {
 
  private:
   scoped_refptr<IndexedDBContextImpl> idb_context_;
-  GURL origin_url_;
-  scoped_ptr<IndexedDBConnection> connection_;
+  Origin origin_;
+  std::unique_ptr<IndexedDBConnection> connection_;
   DISALLOW_COPY_AND_ASSIGN(ForceCloseDBCallbacks);
 };
 
@@ -169,12 +175,12 @@ TEST_F(IndexedDBTest, ForceCloseOpenDatabasesOnDelete) {
   {
     TestBrowserContext browser_context;
 
-    const GURL kTestOrigin("http://test/");
+    const Origin kTestOrigin(GURL("http://test/"));
 
     scoped_refptr<IndexedDBContextImpl> idb_context =
         new IndexedDBContextImpl(temp_dir.path(),
                                  special_storage_policy_.get(),
-                                 NULL,
+                                 quota_manager_proxy_.get(),
                                  task_runner_.get());
 
     scoped_refptr<ForceCloseDBCallbacks> open_callbacks =
@@ -185,36 +191,33 @@ TEST_F(IndexedDBTest, ForceCloseOpenDatabasesOnDelete) {
 
     IndexedDBFactory* factory = idb_context->GetIDBFactory();
 
-    test_path = idb_context->GetFilePathForTesting(
-        storage::GetIdentifierFromOrigin(kTestOrigin));
+    test_path = idb_context->GetFilePathForTesting(kTestOrigin);
 
     IndexedDBPendingConnection open_connection(open_callbacks,
                                                open_db_callbacks,
                                                0 /* child_process_id */,
                                                0 /* host_transaction_id */,
                                                0 /* version */);
-    factory->Open(base::ASCIIToUTF16("opendb"),
-                  open_connection,
-                  NULL /* request_context */,
-                  kTestOrigin,
+    factory->Open(base::ASCIIToUTF16("opendb"), open_connection,
+                  NULL /* request_context */, Origin(kTestOrigin),
                   idb_context->data_path());
     IndexedDBPendingConnection closed_connection(closed_callbacks,
                                                  closed_db_callbacks,
                                                  0 /* child_process_id */,
                                                  0 /* host_transaction_id */,
                                                  0 /* version */);
-    factory->Open(base::ASCIIToUTF16("closeddb"),
-                  closed_connection,
-                  NULL /* request_context */,
-                  kTestOrigin,
+    factory->Open(base::ASCIIToUTF16("closeddb"), closed_connection,
+                  NULL /* request_context */, Origin(kTestOrigin),
                   idb_context->data_path());
 
     closed_callbacks->connection()->Close();
 
+    // TODO(jsbell): Remove static_cast<> when overloads are eliminated.
     idb_context->TaskRunner()->PostTask(
         FROM_HERE,
-        base::Bind(
-            &IndexedDBContextImpl::DeleteForOrigin, idb_context, kTestOrigin));
+        base::Bind(static_cast<void (IndexedDBContextImpl::*)(const Origin&)>(
+                       &IndexedDBContextImpl::DeleteForOrigin),
+                   idb_context, kTestOrigin));
     FlushIndexedDBTaskRunner();
     message_loop_.RunUntilIdle();
   }
@@ -230,36 +233,39 @@ TEST_F(IndexedDBTest, ForceCloseOpenDatabasesOnDelete) {
 TEST_F(IndexedDBTest, DeleteFailsIfDirectoryLocked) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  const GURL kTestOrigin("http://test/");
+  const Origin kTestOrigin(GURL("http://test/"));
 
   scoped_refptr<IndexedDBContextImpl> idb_context = new IndexedDBContextImpl(
-      temp_dir.path(), special_storage_policy_.get(), NULL, task_runner_.get());
+      temp_dir.path(), special_storage_policy_.get(),
+      quota_manager_proxy_.get(), task_runner_.get());
 
-  base::FilePath test_path = idb_context->GetFilePathForTesting(
-      storage::GetIdentifierFromOrigin(kTestOrigin));
+  base::FilePath test_path = idb_context->GetFilePathForTesting(kTestOrigin);
   ASSERT_TRUE(base::CreateDirectory(test_path));
 
-  scoped_ptr<LevelDBLock> lock =
+  std::unique_ptr<LevelDBLock> lock =
       LevelDBDatabase::LockForTesting(test_path);
   ASSERT_TRUE(lock);
 
+  // TODO(jsbell): Remove static_cast<> when overloads are eliminated.
   idb_context->TaskRunner()->PostTask(
       FROM_HERE,
-      base::Bind(
-          &IndexedDBContextImpl::DeleteForOrigin, idb_context, kTestOrigin));
+      base::Bind(static_cast<void (IndexedDBContextImpl::*)(const Origin&)>(
+                     &IndexedDBContextImpl::DeleteForOrigin),
+                 idb_context, kTestOrigin));
   FlushIndexedDBTaskRunner();
 
   EXPECT_TRUE(base::DirectoryExists(test_path));
 }
 
 TEST_F(IndexedDBTest, ForceCloseOpenDatabasesOnCommitFailure) {
-  const GURL kTestOrigin("http://test/");
+  const Origin kTestOrigin(GURL("http://test/"));
 
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
-  scoped_refptr<IndexedDBContextImpl> context = new IndexedDBContextImpl(
-      temp_dir.path(), special_storage_policy_.get(), NULL, task_runner_.get());
+  scoped_refptr<IndexedDBContextImpl> context =
+      new IndexedDBContextImpl(temp_dir.path(), special_storage_policy_.get(),
+                               quota_manager_proxy_.get(), task_runner_.get());
 
   scoped_refptr<IndexedDBFactoryImpl> factory =
       static_cast<IndexedDBFactoryImpl*>(context->GetIDBFactory());
@@ -269,15 +275,10 @@ TEST_F(IndexedDBTest, ForceCloseOpenDatabasesOnCommitFailure) {
       new MockIndexedDBDatabaseCallbacks());
   const int64_t transaction_id = 1;
   IndexedDBPendingConnection connection(
-      callbacks,
-      db_callbacks,
-      0 /* child_process_id */,
-      transaction_id,
-      IndexedDBDatabaseMetadata::DEFAULT_INT_VERSION);
-  factory->Open(base::ASCIIToUTF16("db"),
-                connection,
-                NULL /* request_context */,
-                kTestOrigin,
+      callbacks, db_callbacks, 0 /* child_process_id */, transaction_id,
+      IndexedDBDatabaseMetadata::DEFAULT_VERSION);
+  factory->Open(base::ASCIIToUTF16("db"), connection,
+                NULL /* request_context */, Origin(kTestOrigin),
                 temp_dir.path());
 
   EXPECT_TRUE(callbacks->connection());

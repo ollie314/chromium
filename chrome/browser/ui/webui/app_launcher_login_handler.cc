@@ -11,13 +11,13 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -27,15 +27,14 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/profile_info_watcher.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/web_resource/promo_resource_service.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -153,10 +152,6 @@ void AppLauncherLoginHandler::HandleLoginMessageSeen(
     const base::ListValue* args) {
   Profile::FromWebUI(web_ui())->GetPrefs()->SetBoolean(
       prefs::kSignInPromoShowNTPBubble, false);
-  NewTabUI* ntp_ui = NewTabUI::FromWebUIController(web_ui()->GetController());
-  // When instant extended is enabled, there may not be a NewTabUI object.
-  if (ntp_ui)
-    ntp_ui->set_showing_sync_bubble(true);
 }
 
 void AppLauncherLoginHandler::HandleShowAdvancedLoginUI(
@@ -178,19 +173,18 @@ void AppLauncherLoginHandler::UpdateLogin() {
   std::string icon_url;
   Profile* profile = Profile::FromWebUI(web_ui());
   if (!username.empty()) {
-    ProfileInfoCache& cache =
-        g_browser_process->profile_manager()->GetProfileInfoCache();
-    size_t profile_index = cache.GetIndexOfProfileWithPath(profile->GetPath());
-    if (profile_index != std::string::npos) {
+    ProfileAttributesStorage& storage =
+        g_browser_process->profile_manager()->GetProfileAttributesStorage();
+    ProfileAttributesEntry* entry;
+    if (storage.GetProfileAttributesWithPath(profile->GetPath(), &entry)) {
       // Only show the profile picture and full name for the single profile
       // case. In the multi-profile case the profile picture is visible in the
       // title bar and the full name can be ambiguous.
-      if (cache.GetNumberOfProfiles() == 1) {
-        base::string16 name = cache.GetGAIANameOfProfileAtIndex(profile_index);
+      if (storage.GetNumberOfProfiles() == 1) {
+        base::string16 name = entry->GetGAIAName();
         if (!name.empty())
           header = CreateElementWithClass(name, "span", "profile-name", "");
-        const gfx::Image* image =
-            cache.GetGAIAPictureOfProfileAtIndex(profile_index);
+        const gfx::Image* image = entry->GetGAIAPicture();
         if (image)
           icon_url = webui::GetBitmapDataUrl(GetGAIAPictureForNTP(*image));
       }

@@ -8,7 +8,6 @@
 #include "base/macros.h"
 #include "chrome/browser/extensions/api/identity/extension_token_key.h"
 #include "chrome/browser/extensions/api/identity/web_auth_flow.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "extensions/common/manifest_handlers/oauth2_manifest_handler.h"
 #include "google_apis/gaia/ubertoken_fetcher.h"
 
@@ -82,17 +81,16 @@ class GaiaWebAuthFlow : public UbertokenConsumer, public WebAuthFlow::Delegate {
  private:
   // Creates a WebAuthFlow, which will navigate to |url|. Can override
   // for testing. Used to kick off the MergeSession (step #2).
-  virtual scoped_ptr<WebAuthFlow> CreateWebAuthFlow(GURL url);
+  virtual std::unique_ptr<WebAuthFlow> CreateWebAuthFlow(GURL url);
 
   Delegate* delegate_;
   Profile* profile_;
   std::string account_id_;
-  chrome::HostDesktopType host_desktop_type_;
   std::string redirect_scheme_;
   std::string redirect_path_prefix_;
   GURL auth_url_;
-  scoped_ptr<UbertokenFetcher> ubertoken_fetcher_;
-  scoped_ptr<WebAuthFlow> web_flow_;
+  std::unique_ptr<UbertokenFetcher> ubertoken_fetcher_;
+  std::unique_ptr<WebAuthFlow> web_flow_;
 
   DISALLOW_COPY_AND_ASSIGN(GaiaWebAuthFlow);
 };

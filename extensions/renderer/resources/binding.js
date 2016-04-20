@@ -4,6 +4,8 @@
 
 var Event = require('event_bindings').Event;
 var forEach = require('utils').forEach;
+// Note: Beware sneaky getters/setters when using GetAvailbility(). Use safe/raw
+// variables as arguments.
 var GetAvailability = requireNative('v8_context').GetAvailability;
 var exceptionHandler = require('uncaught_exception_handler');
 var lastError = require('lastError');
@@ -138,7 +140,7 @@ function getPlatform() {
   ];
 
   for (var i = 0; i < platforms.length; i++) {
-    if ($RegExp.test(platforms[i][0], navigator.appVersion)) {
+    if ($RegExp.exec(platforms[i][0], navigator.appVersion)) {
       return platforms[i][1];
     }
   }
@@ -176,18 +178,28 @@ function createCustomType(type) {
 
 var platform = getPlatform();
 
-function Binding(schema) {
-  this.schema_ = schema;
-  this.apiFunctions_ = new APIFunctions(schema.namespace);
-  this.customEvent_ = null;
+function Binding(apiName) {
+  this.apiName_ = apiName;
+  this.apiFunctions_ = new APIFunctions(apiName);
   this.customHooks_ = [];
 };
 
 Binding.create = function(apiName) {
-  return new Binding(schemaRegistry.GetSchema(apiName));
+  return new Binding(apiName);
 };
 
 Binding.prototype = {
+  // Sneaky workaround for Object.prototype getters/setters - our prototype
+  // isn't Object.prototype. SafeBuiltins (e.g. $Object.hasOwnProperty())
+  // should still work.
+  __proto__: null,
+
+  // Forward-declare properties.
+  apiName_: undefined,
+  apiFunctions_: undefined,
+  customEvent_: undefined,
+  customHooks_: undefined,
+
   // The API through which the ${api_name}_custom_bindings.js files customize
   // their API bindings beyond what can be generated.
   //
@@ -211,9 +223,9 @@ Binding.prototype = {
   },
 
   // TODO(kalman/cduvall): Refactor this so |runHooks_| is not needed.
-  runHooks_: function(api) {
+  runHooks_: function(api, schema) {
     $Array.forEach(this.customHooks_, function(hook) {
-      if (!isSchemaNodeSupported(this.schema_, platform, manifestVersion))
+      if (!isSchemaNodeSupported(schema, platform, manifestVersion))
         return;
 
       if (!hook)
@@ -221,16 +233,23 @@ Binding.prototype = {
 
       hook({
         apiFunctions: this.apiFunctions_,
-        schema: this.schema_,
+        schema: schema,
         compiledApi: api
       }, extensionId, contextType);
     }, this);
   },
 
-  // Generates the bindings from |this.schema_| and integrates any custom
-  // bindings that might be present.
+  // Generates the bindings from the schema for |this.apiName_| and integrates
+  // any custom bindings that might be present.
   generate: function() {
-    var schema = this.schema_;
+    // NB: It's important to load the schema during generation rather than
+    // setting it beforehand so that we're more confident the schema we're
+    // loading is real, and not one that was injected by a page intercepting
+    // Binding.generate.
+    // Additionally, since the schema is an object returned from a native
+    // handler, its properties don't have the custom getters/setters that a page
+    // may have put on Object.prototype, and the object is frozen by v8.
+    var schema = schemaRegistry.GetSchema(this.apiName_);
 
     function shouldCheckUnprivileged() {
       var shouldCheck = 'unprivileged' in schema;
@@ -302,15 +321,29 @@ Binding.prototype = {
                 enumValue.name : enumValue;
             if (enumValue) {  // Avoid setting any empty enums.
               // Make all properties in ALL_CAPS_STYLE.
-              // Replace myEnum-Foo with my_Enum-Foo:
-              var propertyName =
-                  $String.replace(enumValue, /([a-z])([A-Z])/g, '$1_$2');
-              // Replace my_Enum-Foo with my_Enum_Foo:
-              propertyName = $String.replace(propertyName, /\W/g, '_');
+              //
+              // The built-in versions of $String.replace call other built-ins,
+              // which may be clobbered. Instead, manually build the property
+              // name.
+              //
               // If the first character is a digit (we know it must be one of
               // a digit, a letter, or an underscore), precede it with an
               // underscore.
-              propertyName = $String.replace(propertyName, /^(\d)/g, '_$1');
+              var propertyName = ($RegExp.exec(/\d/, enumValue[0])) ? '_' : '';
+              for (var i = 0; i < enumValue.length; ++i) {
+                var next;
+                if (i > 0 && $RegExp.exec(/[a-z]/, enumValue[i-1]) &&
+                    $RegExp.exec(/[A-Z]/, enumValue[i])) {
+                  // Replace myEnum-Foo with my_Enum-Foo:
+                  next = '_' + enumValue[i];
+                } else if ($RegExp.exec(/\W/, enumValue[i])) {
+                  // Replace my_Enum-Foo with my_Enum_Foo:
+                  next = '_';
+                } else {
+                  next = enumValue[i];
+                }
+                propertyName += next;
+              }
               // Uppercase (replace my_Enum_Foo with MY_ENUM_FOO):
               propertyName = $String.toUpperCase(propertyName);
               mod[id][propertyName] = enumValue;
@@ -345,9 +378,10 @@ Binding.prototype = {
 
         var apiFunction = {};
         apiFunction.definition = functionDef;
-        apiFunction.name = schema.namespace + '.' + functionDef.name;
+        var apiFunctionName = schema.namespace + '.' + functionDef.name;
+        apiFunction.name = apiFunctionName;
 
-        if (!GetAvailability(apiFunction.name).is_available ||
+        if (!GetAvailability(apiFunctionName).is_available ||
             (checkUnprivileged && !isSchemaAccessAllowed(functionDef))) {
           this.apiFunctions_.registerUnavailable(functionDef.name);
           return;
@@ -519,7 +553,7 @@ Binding.prototype = {
       return;
     }
 
-    this.runHooks_(mod);
+    this.runHooks_(mod, schema);
     return mod;
   }
 };

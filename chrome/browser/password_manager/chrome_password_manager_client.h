@@ -5,16 +5,18 @@
 #ifndef CHROME_BROWSER_PASSWORD_MANAGER_CHROME_PASSWORD_MANAGER_CLIENT_H_
 #define CHROME_BROWSER_PASSWORD_MANAGER_CHROME_PASSWORD_MANAGER_CLIENT_H_
 
+#include <memory>
+#include <vector>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "base/prefs/pref_member.h"
 #include "components/password_manager/content/browser/content_password_manager_driver_factory.h"
-#include "components/password_manager/content/browser/credential_manager_dispatcher.h"
+#include "components/password_manager/content/browser/credential_manager_impl.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
 #include "components/password_manager/sync/browser/sync_credentials_filter.h"
+#include "components/prefs/pref_member.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "ui/gfx/geometry/rect.h"
@@ -49,22 +51,31 @@ class ChromePasswordManagerClient
   bool IsSavingAndFillingEnabledForCurrentPage() const override;
   bool IsFillingEnabledForCurrentPage() const override;
   bool PromptUserToSaveOrUpdatePassword(
-      scoped_ptr<password_manager::PasswordFormManager> form_to_save,
+      std::unique_ptr<password_manager::PasswordFormManager> form_to_save,
       password_manager::CredentialSourceType type,
       bool update_password) override;
   bool PromptUserToChooseCredentials(
       ScopedVector<autofill::PasswordForm> local_forms,
       ScopedVector<autofill::PasswordForm> federated_forms,
       const GURL& origin,
-      base::Callback<void(const password_manager::CredentialInfo&)> callback)
-      override;
+      const CredentialsCallback& callback) override;
   void ForceSavePassword() override;
+  void GeneratePassword() override;
   void NotifyUserAutoSignin(
-      ScopedVector<autofill::PasswordForm> local_forms) override;
-  void AutomaticPasswordSave(scoped_ptr<password_manager::PasswordFormManager>
-                                 saved_form_manager) override;
-  void PasswordWasAutofilled(const autofill::PasswordFormMap& best_matches,
-                             const GURL& origin) const override;
+      ScopedVector<autofill::PasswordForm> local_forms,
+      const GURL& origin) override;
+  void NotifyUserCouldBeAutoSignedIn(
+      std::unique_ptr<autofill::PasswordForm> form) override;
+  void NotifySuccessfulLoginWithExistingPassword(
+      const autofill::PasswordForm& form) override;
+  void AutomaticPasswordSave(
+      std::unique_ptr<password_manager::PasswordFormManager> saved_form_manager)
+      override;
+  void PasswordWasAutofilled(
+      const autofill::PasswordFormMap& best_matches,
+      const GURL& origin,
+      const std::vector<std::unique_ptr<autofill::PasswordForm>>*
+          federated_matches) const override;
   PrefService* GetPrefs() override;
   password_manager::PasswordStore* GetPasswordStore() const override;
   password_manager::PasswordSyncState GetPasswordSyncState() const override;
@@ -94,8 +105,9 @@ class ChromePasswordManagerClient
   // the sad old Infobar UI.
   static bool IsTheHotNewBubbleUIEnabled();
 
-  // Returns true if the password manager should be enabled during sync signin.
-  static bool EnabledForSyncSignin();
+  static void BindCredentialManager(
+      content::RenderFrameHost* render_frame_host,
+      password_manager::mojom::CredentialManagerRequest request);
 
  protected:
   // Callable for tests.
@@ -122,10 +134,15 @@ class ChromePasswordManagerClient
 
   // Causes the password generation UI to be shown for the specified form.
   // The popup will be anchored at |element_bounds|. The generated password
-  // will be no longer than |max_length|.
+  // will be no longer than |max_length|. |generation_element| should contain a
+  // name of a password field at which generation popup is attached.
+  // |is_manually_triggered| informs whether it is automatically or manually
+  // triggered generation.
   void ShowPasswordGenerationPopup(content::RenderFrameHost* render_frame_host,
                                    const gfx::RectF& bounds,
                                    int max_length,
+                                   const base::string16& generation_element,
+                                   bool is_manually_triggered,
                                    const autofill::PasswordForm& form);
 
   // Causes the password editing UI to be shown anchored at |element_bounds|.
@@ -133,9 +150,21 @@ class ChromePasswordManagerClient
                                 const gfx::RectF& bounds,
                                 const autofill::PasswordForm& form);
 
+  // Shows the dialog where the user can accept or decline the global autosignin
+  // setting as a first run experience. The dialog won't appear in Incognito or
+  // when the autosign-in is off.
+  void PromptUserToEnableAutosigninIfNecessary();
+
   // Notify the PasswordManager that generation is available for |form|. Used
   // for UMA stats.
   void GenerationAvailableForForm(const autofill::PasswordForm& form);
+
+  // Called as a response to PromptUserToChooseCredentials. nullptr in |form|
+  // means that nothing was chosen. |one_local_credential| is true if there was
+  // just one local credential to be chosen from.
+  void OnCredentialsChosen(const CredentialsCallback& callback,
+                           bool one_local_credential,
+                           const autofill::PasswordForm* form);
 
   Profile* const profile_;
 
@@ -143,8 +172,10 @@ class ChromePasswordManagerClient
 
   password_manager::ContentPasswordManagerDriverFactory* driver_factory_;
 
-  password_manager::CredentialManagerDispatcher
-      credential_manager_dispatcher_;
+  // As a mojo service, will be registered into service registry
+  // of the main frame host by ChromeContentBrowserClient
+  // once main frame host was created.
+  password_manager::CredentialManagerImpl credential_manager_impl_;
 
   // Observer for password generation popup.
   autofill::PasswordGenerationPopupObserver* observer_;
@@ -159,7 +190,11 @@ class ChromePasswordManagerClient
 
   const password_manager::SyncCredentialsFilter credentials_filter_;
 
-  scoped_ptr<password_manager::LogManager> log_manager_;
+  std::unique_ptr<password_manager::LogManager> log_manager_;
+
+  // Set during 'NotifyUserCouldBeAutoSignedIn' in order to store the
+  // form for potential use during 'NotifySuccessfulLoginWithExistingPassword'.
+  std::unique_ptr<autofill::PasswordForm> possible_auto_sign_in_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromePasswordManagerClient);
 };

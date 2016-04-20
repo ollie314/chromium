@@ -6,7 +6,9 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <queue>
+#include <tuple>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -15,9 +17,8 @@
 #include "base/json/json_string_value_serializer.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/pref_member.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
@@ -34,6 +35,7 @@
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/about_handler/about_protocol_handler.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
+#include "components/prefs/pref_member.h"
 #include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -47,7 +49,6 @@
 #include "extensions/common/features/feature.h"
 #include "net/base/auth.h"
 #include "net/base/elements_upload_data_stream.h"
-#include "net/base/net_util.h"
 #include "net/base/request_priority.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_file_element_reader.h"
@@ -128,9 +129,9 @@ void GetPartOfMessageArguments(IPC::Message* message,
                                ExtensionMsg_MessageInvoke::Param* param) {
   ASSERT_EQ(ExtensionMsg_MessageInvoke::ID, message->type());
   ASSERT_TRUE(ExtensionMsg_MessageInvoke::Read(message, param));
-  ASSERT_GE(base::get<3>(*param).GetSize(), 2u);
+  ASSERT_GE(std::get<3>(*param).GetSize(), 2u);
   const base::Value* value = NULL;
-  ASSERT_TRUE(base::get<3>(*param).Get(1, &value));
+  ASSERT_TRUE(std::get<3>(*param).Get(1, &value));
   const base::ListValue* list = NULL;
   ASSERT_TRUE(value->GetAsList(&list));
   ASSERT_EQ(1u, list->GetSize());
@@ -193,7 +194,8 @@ class ExtensionWebRequestTest : public testing::Test {
         &enable_referrers_, NULL, NULL, NULL,
         profile_.GetTestingPrefService());
     network_delegate_.reset(
-        new ChromeNetworkDelegate(event_router_.get(), &enable_referrers_));
+        new ChromeNetworkDelegate(event_router_.get(), &enable_referrers_,
+                                  metrics::UpdateUsagePrefCallbackType()));
     network_delegate_->set_profile(&profile_);
     network_delegate_->set_cookie_settings(
         CookieSettingsFactory::GetForProfile(&profile_).get());
@@ -217,8 +219,8 @@ class ExtensionWebRequestTest : public testing::Test {
   TestIPCSender ipc_sender_;
   scoped_refptr<EventRouterForwarder> event_router_;
   scoped_refptr<InfoMap> extension_info_map_;
-  scoped_ptr<ChromeNetworkDelegate> network_delegate_;
-  scoped_ptr<net::TestURLRequestContext> context_;
+  std::unique_ptr<ChromeNetworkDelegate> network_delegate_;
+  std::unique_ptr<net::TestURLRequestContext> context_;
 };
 
 // Tests that we handle disagreements among extensions about responses to
@@ -242,13 +244,13 @@ TEST_F(ExtensionWebRequestTest, BlockingEventPrecedenceRedirect) {
   net::URLRequestJobFactoryImpl job_factory;
   job_factory.SetProtocolHandler(
       url::kAboutScheme,
-      make_scoped_ptr(new about_handler::AboutProtocolHandler()));
+      base::WrapUnique(new about_handler::AboutProtocolHandler()));
   context_->set_job_factory(&job_factory);
 
   GURL redirect_url("about:redirected");
   GURL not_chosen_redirect_url("about:not_chosen");
 
-  scoped_ptr<net::URLRequest> request(context_->CreateRequest(
+  std::unique_ptr<net::URLRequest> request(context_->CreateRequest(
       GURL("about:blank"), net::DEFAULT_PRIORITY, &delegate_));
   {
     // onBeforeRequest will be dispatched twice initially. The second response -
@@ -303,7 +305,7 @@ TEST_F(ExtensionWebRequestTest, BlockingEventPrecedenceRedirect) {
   }
 
   // Now test the same thing but the extensions answer in reverse order.
-  scoped_ptr<net::URLRequest> request2(context_->CreateRequest(
+  std::unique_ptr<net::URLRequest> request2(context_->CreateRequest(
       GURL("about:blank"), net::DEFAULT_PRIORITY, &delegate_));
   {
     ExtensionWebRequestEventRouter::EventResponse* response = NULL;
@@ -377,8 +379,8 @@ TEST_F(ExtensionWebRequestTest, BlockingEventPrecedenceCancel) {
       ipc_sender_factory.GetWeakPtr());
 
   GURL request_url("about:blank");
-  scoped_ptr<net::URLRequest> request(context_->CreateRequest(
-      request_url, net::DEFAULT_PRIORITY, &delegate_));
+  std::unique_ptr<net::URLRequest> request(
+      context_->CreateRequest(request_url, net::DEFAULT_PRIORITY, &delegate_));
 
   // onBeforeRequest will be dispatched twice. The second response -
   // the redirect - would win, since it has a later |install_time|, but
@@ -445,8 +447,8 @@ TEST_F(ExtensionWebRequestTest, SimulateChancelWhileBlocked) {
       kEventName2 + "/1", filter, 0, 0, 0, ipc_sender_factory.GetWeakPtr());
 
   GURL request_url("about:blank");
-  scoped_ptr<net::URLRequest> request(context_->CreateRequest(
-      request_url, net::DEFAULT_PRIORITY, &delegate_));
+  std::unique_ptr<net::URLRequest> request(
+      context_->CreateRequest(request_url, net::DEFAULT_PRIORITY, &delegate_));
 
   ExtensionWebRequestEventRouter::EventResponse* response = NULL;
 
@@ -508,23 +510,23 @@ void ExtensionWebRequestTest::FireURLRequestWithData(
     const std::vector<char>& bytes_2) {
   // The request URL can be arbitrary but must have an HTTP or HTTPS scheme.
   GURL request_url("http://www.example.com");
-  scoped_ptr<net::URLRequest> request(context_->CreateRequest(
-      request_url, net::DEFAULT_PRIORITY, &delegate_));
+  std::unique_ptr<net::URLRequest> request(
+      context_->CreateRequest(request_url, net::DEFAULT_PRIORITY, &delegate_));
   request->set_method(method);
   if (content_type != NULL) {
     request->SetExtraRequestHeaderByName(net::HttpRequestHeaders::kContentType,
                                          content_type,
                                          true /* overwrite */);
   }
-  std::vector<scoped_ptr<net::UploadElementReader>> element_readers;
-  element_readers.push_back(make_scoped_ptr(
+  std::vector<std::unique_ptr<net::UploadElementReader>> element_readers;
+  element_readers.push_back(base::WrapUnique(
       new net::UploadBytesElementReader(&(bytes_1[0]), bytes_1.size())));
-  element_readers.push_back(make_scoped_ptr(new net::UploadFileElementReader(
+  element_readers.push_back(base::WrapUnique(new net::UploadFileElementReader(
       base::ThreadTaskRunnerHandle::Get().get(), base::FilePath(), 0, 0,
       base::Time())));
-  element_readers.push_back(make_scoped_ptr(
+  element_readers.push_back(base::WrapUnique(
       new net::UploadBytesElementReader(&(bytes_2[0]), bytes_2.size())));
-  request->set_upload(make_scoped_ptr(
+  request->set_upload(base::WrapUnique(
       new net::ElementsUploadDataStream(std::move(element_readers), 0)));
   ipc_sender_.PushTask(base::Bind(&base::DoNothing));
   request->Start();
@@ -585,7 +587,8 @@ TEST_F(ExtensionWebRequestTest, AccessRequestBodyData) {
   // Contents of formData.
   const char kFormData[] =
       "{\"A\":[\"test text\"],\"B\":[\"\"],\"C\":[\"test password\"]}";
-  scoped_ptr<const base::Value> form_data = base::JSONReader::Read(kFormData);
+  std::unique_ptr<const base::Value> form_data =
+      base::JSONReader::Read(kFormData);
   ASSERT_TRUE(form_data.get() != NULL);
   ASSERT_TRUE(form_data->GetType() == base::Value::TYPE_DICTIONARY);
   // Contents of raw.
@@ -802,7 +805,7 @@ TEST_F(ExtensionWebRequestTest, NoAccessRequestBodyData) {
   const GURL request_url("http://www.example.com");
 
   for (size_t i = 0; i < arraysize(kMethods); ++i) {
-    scoped_ptr<net::URLRequest> request(context_->CreateRequest(
+    std::unique_ptr<net::URLRequest> request(context_->CreateRequest(
         request_url, net::DEFAULT_PRIORITY, &delegate_));
     request->set_method(kMethods[i]);
     ipc_sender_.PushTask(base::Bind(&base::DoNothing));
@@ -871,7 +874,8 @@ class ExtensionWebRequestHeaderModificationTest
         &enable_referrers_, NULL, NULL, NULL,
         profile_.GetTestingPrefService());
     network_delegate_.reset(
-        new ChromeNetworkDelegate(event_router_.get(), &enable_referrers_));
+        new ChromeNetworkDelegate(event_router_.get(), &enable_referrers_,
+                                  metrics::UpdateUsagePrefCallbackType()));
     network_delegate_->set_profile(&profile_);
     network_delegate_->set_cookie_settings(
         CookieSettingsFactory::GetForProfile(&profile_).get());
@@ -891,9 +895,9 @@ class ExtensionWebRequestHeaderModificationTest
   TestIPCSender ipc_sender_;
   scoped_refptr<EventRouterForwarder> event_router_;
   scoped_refptr<InfoMap> extension_info_map_;
-  scoped_ptr<ChromeNetworkDelegate> network_delegate_;
-  scoped_ptr<net::MockHostResolver> host_resolver_;
-  scoped_ptr<net::TestURLRequestContext> context_;
+  std::unique_ptr<ChromeNetworkDelegate> network_delegate_;
+  std::unique_ptr<net::MockHostResolver> host_resolver_;
+  std::unique_ptr<net::TestURLRequestContext> context_;
 };
 
 TEST_P(ExtensionWebRequestHeaderModificationTest, TestModifications) {
@@ -923,8 +927,8 @@ TEST_P(ExtensionWebRequestHeaderModificationTest, TestModifications) {
       ipc_sender_factory.GetWeakPtr());
 
   GURL request_url("http://doesnotexist/does_not_exist.html");
-  scoped_ptr<net::URLRequest> request(context_->CreateRequest(
-      request_url, net::DEFAULT_PRIORITY, &delegate_));
+  std::unique_ptr<net::URLRequest> request(
+      context_->CreateRequest(request_url, net::DEFAULT_PRIORITY, &delegate_));
 
   // Initialize headers available before extensions are notified of the
   // onBeforeSendHeaders event.
@@ -1008,7 +1012,7 @@ TEST_P(ExtensionWebRequestHeaderModificationTest, TestModifications) {
       continue;
     ExtensionMsg_MessageInvoke::Param message_tuple;
     ExtensionMsg_MessageInvoke::Read(message, &message_tuple);
-    base::ListValue& args = base::get<3>(message_tuple);
+    base::ListValue& args = std::get<3>(message_tuple);
 
     std::string event_name;
     if (!args.GetString(0, &event_name) ||
@@ -1267,7 +1271,8 @@ TEST(ExtensionWebRequestHelpersTest, TestStringToCharList) {
   unsigned char char_value[] = {'1', '2', '3', 0xFE, 0xD1};
   std::string string_value(reinterpret_cast<char *>(char_value), 5);
 
-  scoped_ptr<base::ListValue> converted_list(StringToCharList(string_value));
+  std::unique_ptr<base::ListValue> converted_list(
+      StringToCharList(string_value));
   EXPECT_TRUE(list_value.Equals(converted_list.get()));
 
   std::string converted_string;
@@ -1278,9 +1283,8 @@ TEST(ExtensionWebRequestHelpersTest, TestStringToCharList) {
 TEST(ExtensionWebRequestHelpersTest, TestCalculateOnBeforeRequestDelta) {
   const bool cancel = true;
   const GURL localhost("http://localhost");
-  scoped_ptr<EventResponseDelta> delta(
-      CalculateOnBeforeRequestDelta("extid", base::Time::Now(),
-          cancel, localhost));
+  std::unique_ptr<EventResponseDelta> delta(CalculateOnBeforeRequestDelta(
+      "extid", base::Time::Now(), cancel, localhost));
   ASSERT_TRUE(delta.get());
   EXPECT_TRUE(delta->cancel);
   EXPECT_EQ(localhost, delta->new_url);
@@ -1298,9 +1302,9 @@ TEST(ExtensionWebRequestHelpersTest, TestCalculateOnBeforeSendHeadersDelta) {
   new_headers_added.AddHeadersFromString("key1: value1\r\n"
                                          "key3: value3\r\n"
                                          "key2: value2\r\n");
-  scoped_ptr<EventResponseDelta> delta_added(
+  std::unique_ptr<EventResponseDelta> delta_added(
       CalculateOnBeforeSendHeadersDelta("extid", base::Time::Now(), cancel,
-          &old_headers, &new_headers_added));
+                                        &old_headers, &new_headers_added));
   ASSERT_TRUE(delta_added.get());
   EXPECT_TRUE(delta_added->cancel);
   ASSERT_TRUE(delta_added->modified_request_headers.GetHeader("key3", &value));
@@ -1309,9 +1313,9 @@ TEST(ExtensionWebRequestHelpersTest, TestCalculateOnBeforeSendHeadersDelta) {
   // Test deleting a header.
   net::HttpRequestHeaders new_headers_deleted;
   new_headers_deleted.AddHeadersFromString("key1: value1\r\n");
-  scoped_ptr<EventResponseDelta> delta_deleted(
+  std::unique_ptr<EventResponseDelta> delta_deleted(
       CalculateOnBeforeSendHeadersDelta("extid", base::Time::Now(), cancel,
-          &old_headers, &new_headers_deleted));
+                                        &old_headers, &new_headers_deleted));
   ASSERT_TRUE(delta_deleted.get());
   ASSERT_EQ(1u, delta_deleted->deleted_request_headers.size());
   ASSERT_EQ("key2", delta_deleted->deleted_request_headers.front());
@@ -1320,9 +1324,9 @@ TEST(ExtensionWebRequestHelpersTest, TestCalculateOnBeforeSendHeadersDelta) {
   net::HttpRequestHeaders new_headers_modified;
   new_headers_modified.AddHeadersFromString("key1: value1\r\n"
                                             "key2: value3\r\n");
-  scoped_ptr<EventResponseDelta> delta_modified(
+  std::unique_ptr<EventResponseDelta> delta_modified(
       CalculateOnBeforeSendHeadersDelta("extid", base::Time::Now(), cancel,
-          &old_headers, &new_headers_modified));
+                                        &old_headers, &new_headers_modified));
   ASSERT_TRUE(delta_modified.get());
   EXPECT_TRUE(delta_modified->deleted_request_headers.empty());
   ASSERT_TRUE(
@@ -1336,9 +1340,9 @@ TEST(ExtensionWebRequestHelpersTest, TestCalculateOnBeforeSendHeadersDelta) {
   new_headers_modified2.AddHeadersFromString("key1: value1\r\n"
                                              "key2: value2\r\n"
                                              "key2: value3\r\n");
-  scoped_ptr<EventResponseDelta> delta_modified2(
+  std::unique_ptr<EventResponseDelta> delta_modified2(
       CalculateOnBeforeSendHeadersDelta("extid", base::Time::Now(), cancel,
-          &old_headers, &new_headers_modified));
+                                        &old_headers, &new_headers_modified));
   ASSERT_TRUE(delta_modified2.get());
   EXPECT_TRUE(delta_modified2->deleted_request_headers.empty());
   ASSERT_TRUE(
@@ -1368,13 +1372,9 @@ TEST(ExtensionWebRequestHelpersTest, TestCalculateOnHeadersReceivedDelta) {
   new_headers.push_back(ResponseHeader("Key5", "Value5, end5"));  // Unchanged
   GURL effective_new_url;
 
-  scoped_ptr<EventResponseDelta> delta(
-      CalculateOnHeadersReceivedDelta("extid",
-                                      base::Time::Now(),
-                                      cancel,
-                                      effective_new_url,
-                                      base_headers.get(),
-                                      &new_headers));
+  std::unique_ptr<EventResponseDelta> delta(CalculateOnHeadersReceivedDelta(
+      "extid", base::Time::Now(), cancel, effective_new_url, base_headers.get(),
+      &new_headers));
   ASSERT_TRUE(delta.get());
   EXPECT_TRUE(delta->cancel);
   EXPECT_EQ(2u, delta->added_response_headers.size());
@@ -1394,12 +1394,11 @@ TEST(ExtensionWebRequestHelpersTest, TestCalculateOnAuthRequiredDelta) {
 
   base::string16 username = base::ASCIIToUTF16("foo");
   base::string16 password = base::ASCIIToUTF16("bar");
-  scoped_ptr<net::AuthCredentials> credentials(
+  std::unique_ptr<net::AuthCredentials> credentials(
       new net::AuthCredentials(username, password));
 
-  scoped_ptr<EventResponseDelta> delta(
-      CalculateOnAuthRequiredDelta("extid", base::Time::Now(), cancel,
-          &credentials));
+  std::unique_ptr<EventResponseDelta> delta(CalculateOnAuthRequiredDelta(
+      "extid", base::Time::Now(), cancel, &credentials));
   ASSERT_TRUE(delta.get());
   EXPECT_TRUE(delta->cancel);
   ASSERT_TRUE(delta->auth_credentials.get());
@@ -2010,7 +2009,7 @@ TEST(ExtensionWebRequestHelpersTest,
       deltas, headers1.get(), &new_headers1, &warning_set, &net_log);
 
   EXPECT_TRUE(new_headers1->HasHeader("Foo"));
-  void* iter = NULL;
+  size_t iter = 0;
   std::string cookie_string;
   std::set<std::string> expected_cookies;
   expected_cookies.insert("name=value; domain=google.com; secure");
@@ -2090,7 +2089,7 @@ TEST(ExtensionWebRequestHelpersTest, TestMergeOnHeadersReceivedResponses) {
   EXPECT_TRUE(allowed_unsafe_redirect_url1.is_empty());
   std::multimap<std::string, std::string> expected1;
   expected1.insert(std::pair<std::string, std::string>("Key2", "Value3"));
-  void* iter = NULL;
+  size_t iter = 0;
   std::string name;
   std::string value;
   std::multimap<std::string, std::string> actual1;
@@ -2122,7 +2121,7 @@ TEST(ExtensionWebRequestHelpersTest, TestMergeOnHeadersReceivedResponses) {
                                   &net_log);
   ASSERT_TRUE(new_headers2.get());
   EXPECT_TRUE(allowed_unsafe_redirect_url2.is_empty());
-  iter = NULL;
+  iter = 0;
   std::multimap<std::string, std::string> actual2;
   while (new_headers2->EnumerateHeaderLines(&iter, &name, &value)) {
     actual2.insert(std::pair<std::string, std::string>(name, value));
@@ -2172,7 +2171,7 @@ TEST(ExtensionWebRequestHelpersTest,
   expected1.insert(std::pair<std::string, std::string>("Key1", "Value1"));
   expected1.insert(std::pair<std::string, std::string>("Key1", "Value3"));
   expected1.insert(std::pair<std::string, std::string>("Key2", "Value4"));
-  void* iter = NULL;
+  size_t iter = 0;
   std::string name;
   std::string value;
   std::multimap<std::string, std::string> actual1;

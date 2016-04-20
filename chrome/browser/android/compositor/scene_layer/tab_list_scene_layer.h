@@ -5,13 +5,13 @@
 #ifndef CHROME_BROWSER_ANDROID_COMPOSITOR_SCENE_LAYER_TAB_LIST_SCENE_LAYER_H_
 #define CHROME_BROWSER_ANDROID_COMPOSITOR_SCENE_LAYER_TAB_LIST_SCENE_LAYER_H_
 
+#include <memory>
 #include <vector>
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "cc/layers/layer.h"
 #include "chrome/browser/android/compositor/layer/layer.h"
 #include "chrome/browser/android/compositor/scene_layer/scene_layer.h"
@@ -55,6 +55,7 @@ class TabListSceneLayer : public SceneLayer {
       jint contour_resource_id,
       jint back_logo_resource_id,
       jint border_resource_id,
+      jint border_inner_shadow_resource_id,
       jboolean can_use_live_layer,
       jint tab_background_color,
       jint background_color,
@@ -82,6 +83,7 @@ class TabListSceneLayer : public SceneLayer {
       jfloat rotation_y,
       jfloat alpha,
       jfloat border_alpha,
+      jfloat border_inner_shadow_alpha,
       jfloat contour_alpha,
       jfloat shadow_alpha,
       jfloat close_alpha,

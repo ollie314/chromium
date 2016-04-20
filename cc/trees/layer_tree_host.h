@@ -9,27 +9,28 @@
 #include <stdint.h>
 
 #include <limits>
+#include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "base/cancelable_callback.h"
-#include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
-#include "cc/animation/animation.h"
+#include "cc/animation/target_property.h"
 #include "cc/base/cc_export.h"
-#include "cc/debug/frame_timing_tracker.h"
 #include "cc/debug/micro_benchmark.h"
 #include "cc/debug/micro_benchmark_controller.h"
+#include "cc/input/event_listener_properties.h"
 #include "cc/input/input_handler.h"
 #include "cc/input/layer_selection_bound.h"
 #include "cc/input/scrollbar.h"
 #include "cc/input/top_controls_state.h"
-#include "cc/layers/layer_lists.h"
+#include "cc/layers/layer_collections.h"
+#include "cc/layers/layer_list_iterator.h"
 #include "cc/output/output_surface.h"
 #include "cc/output/renderer_capabilities.h"
 #include "cc/output/swap_promise.h"
@@ -38,7 +39,6 @@
 #include "cc/surfaces/surface_sequence.h"
 #include "cc/trees/compositor_mode.h"
 #include "cc/trees/layer_tree_host_client.h"
-#include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/layer_tree_settings.h"
 #include "cc/trees/mutator_host_client.h"
 #include "cc/trees/proxy.h"
@@ -53,16 +53,17 @@ class GpuMemoryBufferManager;
 namespace cc {
 
 class AnimationEvents;
-class AnimationRegistrar;
 class AnimationHost;
 class BeginFrameSource;
 class HeadsUpDisplayLayer;
+class ImageSerializationProcessor;
 class Layer;
 class LayerTreeHostImpl;
 class LayerTreeHostImplClient;
 class LayerTreeHostSingleThreadClient;
 class PropertyTrees;
 class Region;
+class RemoteProtoChannel;
 class RenderingStatsInstrumentation;
 class ResourceProvider;
 class ResourceUpdateQueue;
@@ -89,20 +90,37 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
     TaskGraphRunner* task_graph_runner = nullptr;
     LayerTreeSettings const* settings = nullptr;
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner;
-    scoped_ptr<BeginFrameSource> external_begin_frame_source;
+    std::unique_ptr<BeginFrameSource> external_begin_frame_source;
+    ImageSerializationProcessor* image_serialization_processor = nullptr;
 
     InitParams();
     ~InitParams();
   };
 
   // The SharedBitmapManager will be used on the compositor thread.
-  static scoped_ptr<LayerTreeHost> CreateThreaded(
+  static std::unique_ptr<LayerTreeHost> CreateThreaded(
       scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
       InitParams* params);
 
-  static scoped_ptr<LayerTreeHost> CreateSingleThreaded(
+  static std::unique_ptr<LayerTreeHost> CreateSingleThreaded(
       LayerTreeHostSingleThreadClient* single_thread_client,
       InitParams* params);
+
+  static std::unique_ptr<LayerTreeHost> CreateRemoteServer(
+      RemoteProtoChannel* remote_proto_channel,
+      InitParams* params);
+
+  // The lifetime of this LayerTreeHost is tied to the lifetime of the remote
+  // server LayerTreeHost. It should be created on receiving
+  // CompositorMessageToImpl::InitializeImpl message and destroyed on receiving
+  // a CompositorMessageToImpl::CloseImpl message from the server. This ensures
+  // that the client will not send any compositor messages once the
+  // LayerTreeHost on the server is destroyed.
+  static std::unique_ptr<LayerTreeHost> CreateRemoteClient(
+      RemoteProtoChannel* remote_proto_channel,
+      scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
+      InitParams* params);
+
   virtual ~LayerTreeHost();
 
   // LayerTreeHost interface to Proxy.
@@ -116,18 +134,23 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   void FinishCommitOnImplThread(LayerTreeHostImpl* host_impl);
   void WillCommit();
   void CommitComplete();
-  void SetOutputSurface(scoped_ptr<OutputSurface> output_surface);
-  scoped_ptr<OutputSurface> ReleaseOutputSurface();
+  void SetOutputSurface(std::unique_ptr<OutputSurface> output_surface);
+  std::unique_ptr<OutputSurface> ReleaseOutputSurface();
   void RequestNewOutputSurface();
   void DidInitializeOutputSurface();
   void DidFailToInitializeOutputSurface();
-  virtual scoped_ptr<LayerTreeHostImpl> CreateLayerTreeHostImpl(
+  virtual std::unique_ptr<LayerTreeHostImpl> CreateLayerTreeHostImpl(
       LayerTreeHostImplClient* client);
   void DidLoseOutputSurface();
   bool output_surface_lost() const { return output_surface_lost_; }
   void DidCommitAndDrawFrame() { client_->DidCommitAndDrawFrame(); }
   void DidCompleteSwapBuffers() { client_->DidCompleteSwapBuffers(); }
   bool UpdateLayers();
+
+  LayerListIterator<Layer> begin();
+  LayerListIterator<Layer> end();
+  LayerListReverseIterator<Layer> rbegin();
+  LayerListReverseIterator<Layer> rend();
 
   // Called when the compositor completed page scale animation.
   void DidCompletePageScaleAnimation();
@@ -162,6 +185,8 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
 
   void SetNeedsDisplayOnAllLayers();
 
+  void SetOutputIsSecure(bool output_is_secure);
+
   void CollectRenderingStats(RenderingStats* stats) const;
 
   RenderingStatsInstrumentation* rendering_stats_instrumentation() const {
@@ -185,7 +210,7 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
 
   void SetNextCommitForcesRedraw();
 
-  void SetAnimationEvents(scoped_ptr<AnimationEvents> events);
+  void SetAnimationEvents(std::unique_ptr<AnimationEvents> events);
 
   void SetRootLayer(scoped_refptr<Layer> root_layer);
   Layer* root_layer() { return root_layer_.get(); }
@@ -206,6 +231,18 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   }
 
   void RegisterSelection(const LayerSelection& selection);
+
+  bool have_scroll_event_handlers() const {
+    return have_scroll_event_handlers_;
+  }
+  void SetHaveScrollEventHandlers(bool have_event_handlers);
+
+  void SetEventListenerProperties(EventListenerClass event_class,
+                                  EventListenerProperties event_properties);
+  EventListenerProperties event_listener_properties(
+      EventListenerClass event_class) const {
+    return event_listener_properties_[static_cast<size_t>(event_class)];
+  }
 
   const LayerTreeSettings& settings() const { return settings_; }
 
@@ -240,8 +277,6 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   void SetVisible(bool visible);
   bool visible() const { return visible_; }
 
-  void SetThrottleFrameProduction(bool throttle);
-
   void StartPageScaleAnimation(const gfx::Vector2d& target_offset,
                                bool use_anchor,
                                float scale,
@@ -264,9 +299,6 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   Proxy* proxy() const { return proxy_.get(); }
   TaskRunnerProvider* task_runner_provider() const {
     return task_runner_provider_.get();
-  }
-  AnimationRegistrar* animation_registrar() const {
-    return animation_registrar_.get();
   }
   AnimationHost* animation_host() const { return animation_host_.get(); }
 
@@ -292,10 +324,10 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
 
   // Returns the id of the benchmark on success, 0 otherwise.
   int ScheduleMicroBenchmark(const std::string& benchmark_name,
-                             scoped_ptr<base::Value> value,
+                             std::unique_ptr<base::Value> value,
                              const MicroBenchmark::DoneCallback& callback);
   // Returns true if the message was successfully delivered and handled.
-  bool SendMessageToMicroBenchmark(int id, scoped_ptr<base::Value> value);
+  bool SendMessageToMicroBenchmark(int id, std::unique_ptr<base::Value> value);
 
   // When a SwapPromiseMonitor is created on the main thread, it calls
   // InsertSwapPromiseMonitor() to register itself with LayerTreeHost.
@@ -306,7 +338,7 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
 
   // Call this function when you expect there to be a swap buffer.
   // See swap_promise.h for how to use SwapPromise.
-  void QueueSwapPromise(scoped_ptr<SwapPromise> swap_promise);
+  void QueueSwapPromise(std::unique_ptr<SwapPromise> swap_promise);
 
   void BreakSwapPromises(SwapPromise::DidNotSwapReason reason);
 
@@ -315,9 +347,6 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   void set_surface_id_namespace(uint32_t id_namespace);
   SurfaceSequence CreateSurfaceSequence();
 
-  void SetChildrenNeedBeginFrames(bool children_need_begin_frames) const;
-  void SendBeginFramesToChildren(const BeginFrameArgs& args) const;
-
   void SetAuthoritativeVSyncInterval(const base::TimeDelta& interval);
 
   PropertyTrees* property_trees() { return &property_trees_; }
@@ -325,11 +354,13 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
     return needs_meta_info_recomputation_;
   }
 
-  void RecordFrameTimingEvents(
-      scoped_ptr<FrameTimingTracker::CompositeTimingSet> composite_events,
-      scoped_ptr<FrameTimingTracker::MainFrameTimingSet> main_frame_events);
-
   Layer* LayerById(int id) const;
+
+  void AddLayerShouldPushProperties(Layer* layer);
+  void RemoveLayerShouldPushProperties(Layer* layer);
+  std::unordered_set<Layer*>& LayersThatShouldPushProperties();
+  bool LayerNeedsPushPropertiesForTesting(Layer* layer);
+
   void RegisterLayer(Layer* layer);
   void UnregisterLayer(Layer* layer);
   // LayerTreeMutatorsClient implementation.
@@ -365,42 +396,58 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   bool HasOnlyTranslationTransforms(const Layer* layer) const;
   bool MaximumTargetScale(const Layer* layer, float* max_scale) const;
   bool AnimationStartScale(const Layer* layer, float* start_scale) const;
-  bool HasAnyAnimationTargetingProperty(
-      const Layer* layer,
-      Animation::TargetProperty property) const;
+  bool HasAnyAnimationTargetingProperty(const Layer* layer,
+                                        TargetProperty::Type property) const;
   bool AnimationsPreserveAxisAlignment(const Layer* layer) const;
   bool HasAnyAnimation(const Layer* layer) const;
-  bool HasActiveAnimation(const Layer* layer) const;
+  bool HasActiveAnimationForTesting(const Layer* layer) const;
 
   // Serializes the parts of this LayerTreeHost that is needed for a commit to a
   // protobuf message. Not all members are serialized as they are not helpful
   // for remote usage.
-  void ToProtobufForCommit(proto::LayerTreeHost* proto) const;
+  void ToProtobufForCommit(proto::LayerTreeHost* proto);
 
   // Deserializes the protobuf into this LayerTreeHost before a commit. The
   // expected input is a serialized remote LayerTreeHost. After deserializing
   // the protobuf, the normal commit-flow should continue.
   void FromProtobufForCommit(const proto::LayerTreeHost& proto);
 
+  bool IsSingleThreaded() const;
+  bool IsThreaded() const;
+  bool IsRemoteServer() const;
+  bool IsRemoteClient() const;
+  void BuildPropertyTreesForTesting();
+
+  ImageSerializationProcessor* image_serialization_processor() const {
+    return image_serialization_processor_;
+  }
+
  protected:
   LayerTreeHost(InitParams* params, CompositorMode mode);
   void InitializeThreaded(
       scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
-      scoped_ptr<BeginFrameSource> external_begin_frame_source);
+      std::unique_ptr<BeginFrameSource> external_begin_frame_source);
   void InitializeSingleThreaded(
       LayerTreeHostSingleThreadClient* single_thread_client,
       scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
-      scoped_ptr<BeginFrameSource> external_begin_frame_source);
+      std::unique_ptr<BeginFrameSource> external_begin_frame_source);
+  void InitializeRemoteServer(
+      RemoteProtoChannel* remote_proto_channel,
+      scoped_refptr<base::SingleThreadTaskRunner> main_task_runner);
+  void InitializeRemoteClient(
+      RemoteProtoChannel* remote_proto_channel,
+      scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner);
   void InitializeForTesting(
-      scoped_ptr<TaskRunnerProvider> task_runner_provider,
-      scoped_ptr<Proxy> proxy_for_testing,
-      scoped_ptr<BeginFrameSource> external_begin_frame_source);
+      std::unique_ptr<TaskRunnerProvider> task_runner_provider,
+      std::unique_ptr<Proxy> proxy_for_testing,
+      std::unique_ptr<BeginFrameSource> external_begin_frame_source);
   void SetOutputSurfaceLostForTesting(bool is_lost) {
     output_surface_lost_ = is_lost;
   }
   void SetTaskRunnerProviderForTesting(
-      scoped_ptr<TaskRunnerProvider> task_runner_provider);
+      std::unique_ptr<TaskRunnerProvider> task_runner_provider);
 
   // shared_bitmap_manager(), gpu_memory_buffer_manager(), and
   // task_graph_runner() return valid values only until the LayerTreeHostImpl is
@@ -423,28 +470,25 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   friend class LayerTreeHostSerializationTest;
 
   void InitializeProxy(
-      scoped_ptr<Proxy> proxy,
-      scoped_ptr<BeginFrameSource> external_begin_frame_source);
+      std::unique_ptr<Proxy> proxy,
+      std::unique_ptr<BeginFrameSource> external_begin_frame_source);
 
   bool DoUpdateLayers(Layer* root_layer);
   void UpdateHudLayer();
 
   bool AnimateLayersRecursive(Layer* current, base::TimeTicks time);
 
-  bool IsSingleThreaded() const;
-  bool IsThreaded() const;
-
   struct UIResourceClientData {
     UIResourceClient* client;
     gfx::Size size;
   };
 
-  typedef base::hash_map<UIResourceId, UIResourceClientData>
-      UIResourceClientMap;
+  using UIResourceClientMap =
+      std::unordered_map<UIResourceId, UIResourceClientData>;
   UIResourceClientMap ui_resource_client_map_;
   int next_ui_resource_id_;
 
-  typedef std::vector<UIResourceRequest> UIResourceRequestQueue;
+  using UIResourceRequestQueue = std::vector<UIResourceRequest>;
   UIResourceRequestQueue ui_resource_request_queue_;
 
   void CalculateLCDTextMetricsCallback(Layer* layer);
@@ -459,20 +503,21 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   bool needs_meta_info_recomputation_;
 
   LayerTreeHostClient* client_;
-  scoped_ptr<Proxy> proxy_;
-  scoped_ptr<TaskRunnerProvider> task_runner_provider_;
+  std::unique_ptr<Proxy> proxy_;
+  std::unique_ptr<TaskRunnerProvider> task_runner_provider_;
 
   int source_frame_number_;
   int meta_information_sequence_number_;
-  scoped_ptr<RenderingStatsInstrumentation> rendering_stats_instrumentation_;
+  std::unique_ptr<RenderingStatsInstrumentation>
+      rendering_stats_instrumentation_;
 
   // |current_output_surface_| can't be updated until we've successfully
   // initialized a new output surface. |new_output_surface_| contains the
   // new output surface that is currently being initialized. If initialization
   // is successful then |new_output_surface_| replaces
   // |current_output_surface_|.
-  scoped_ptr<OutputSurface> new_output_surface_;
-  scoped_ptr<OutputSurface> current_output_surface_;
+  std::unique_ptr<OutputSurface> new_output_surface_;
+  std::unique_ptr<OutputSurface> current_output_surface_;
   bool output_surface_lost_;
 
   scoped_refptr<Layer> root_layer_;
@@ -503,10 +548,13 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   SkColor background_color_;
   bool has_transparent_background_;
 
-  scoped_ptr<AnimationRegistrar> animation_registrar_;
-  scoped_ptr<AnimationHost> animation_host_;
+  bool have_scroll_event_handlers_;
+  EventListenerProperties event_listener_properties_[static_cast<size_t>(
+      EventListenerClass::kNumClasses)];
 
-  scoped_ptr<PendingPageScaleAnimation> pending_page_scale_animation_;
+  std::unique_ptr<AnimationHost> animation_host_;
+
+  std::unique_ptr<PendingPageScaleAnimation> pending_page_scale_animation_;
 
   // If set, then page scale animation has completed, but the client hasn't been
   // notified about it yet.
@@ -528,13 +576,17 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
   TaskGraphRunner* task_graph_runner_;
 
-  std::vector<scoped_ptr<SwapPromise>> swap_promise_list_;
+  ImageSerializationProcessor* image_serialization_processor_;
+
+  std::vector<std::unique_ptr<SwapPromise>> swap_promise_list_;
   std::set<SwapPromiseMonitor*> swap_promise_monitor_;
 
   PropertyTrees property_trees_;
 
-  typedef base::hash_map<int, Layer*> LayerIdMap;
+  using LayerIdMap = std::unordered_map<int, Layer*>;
   LayerIdMap layer_id_map_;
+  // Set of layers that need to push properties.
+  std::unordered_set<Layer*> layers_that_should_push_properties_;
 
   uint32_t surface_id_namespace_;
   uint32_t next_surface_sequence_;

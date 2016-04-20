@@ -98,7 +98,7 @@ class MessagePopupCollectionTest : public views::ViewsTestBase {
 
   std::string AddNotification() {
     std::string id = base::IntToString(id_++);
-    scoped_ptr<Notification> notification(new Notification(
+    std::unique_ptr<Notification> notification(new Notification(
         NOTIFICATION_TYPE_BASE_FORMAT, id, base::UTF8ToUTF16("test title"),
         base::UTF8ToUTF16("test message"), gfx::Image(),
         base::string16() /* display_source */, GURL(), NotifierId(),
@@ -118,7 +118,8 @@ class MessagePopupCollectionTest : public views::ViewsTestBase {
   void CloseAllToasts() {
     // Assumes there is at least one toast to close.
     EXPECT_TRUE(GetToastCounts() > 0);
-    MessageCenter::Get()->RemoveAllNotifications(false);
+    MessageCenter::Get()->RemoveAllNotifications(
+        false /* by_user */, MessageCenter::RemoveType::ALL);
   }
 
   gfx::Rect GetToastRectAt(size_t index) {
@@ -126,8 +127,8 @@ class MessagePopupCollectionTest : public views::ViewsTestBase {
   }
 
  private:
-  scoped_ptr<MessagePopupCollection> collection_;
-  scoped_ptr<DesktopPopupAlignmentDelegate> alignment_delegate_;
+  std::unique_ptr<MessagePopupCollection> collection_;
+  std::unique_ptr<DesktopPopupAlignmentDelegate> alignment_delegate_;
   int id_;
 };
 
@@ -480,6 +481,44 @@ TEST_F(MessagePopupCollectionTest, ManyPopupNotifications) {
   WaitForTransitionsDone();
 }
 
+#if defined(OS_CHROMEOS)
+
+TEST_F(MessagePopupCollectionTest, CloseNonClosableNotifications) {
+  const char* kNotificationId = "NOTIFICATION1";
+
+  std::unique_ptr<Notification> notification(new Notification(
+      NOTIFICATION_TYPE_BASE_FORMAT, kNotificationId,
+      base::UTF8ToUTF16("test title"), base::UTF8ToUTF16("test message"),
+      gfx::Image(), base::string16() /* display_source */, GURL(),
+      NotifierId(NotifierId::APPLICATION, kNotificationId),
+      message_center::RichNotificationData(), new NotificationDelegate()));
+  notification->set_pinned(true);
+
+  // Add a pinned notification.
+  MessageCenter::Get()->AddNotification(std::move(notification));
+  WaitForTransitionsDone();
+
+  // Confirms that there is a toast.
+  EXPECT_EQ(1u, GetToastCounts());
+  EXPECT_EQ(1u, MessageCenter::Get()->NotificationCount());
+
+  // Close the toast.
+  views::WidgetDelegateView* toast1 = GetToast(kNotificationId);
+  ASSERT_TRUE(toast1 != NULL);
+  ui::MouseEvent event(ui::ET_MOUSE_MOVED, gfx::Point(), gfx::Point(),
+                       ui::EventTimeForNow(), 0, 0);
+  toast1->OnMouseEntered(event);
+  static_cast<MessageCenterObserver*>(collection())
+      ->OnNotificationRemoved(kNotificationId, true);
+  WaitForTransitionsDone();
+
+  // Confirms that there is no toast.
+  EXPECT_EQ(0u, GetToastCounts());
+  // But the notification still exists.
+  EXPECT_EQ(1u, MessageCenter::Get()->NotificationCount());
+}
+
+#endif  // defined(OS_CHROMEOS)
 
 }  // namespace test
 }  // namespace message_center

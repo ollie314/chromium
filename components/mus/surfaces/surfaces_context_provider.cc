@@ -28,16 +28,24 @@ const size_t kDefaultMaxTransferBufferSize = 16 * 1024 * 1024;
 }
 
 SurfacesContextProvider::SurfacesContextProvider(
-    SurfacesContextProviderDelegate* delegate,
     gfx::AcceleratedWidget widget,
     const scoped_refptr<GpuState>& state)
-    : delegate_(delegate), widget_(widget), command_buffer_local_(nullptr) {
-  capabilities_.gpu.image = true;
+    : delegate_(nullptr), widget_(widget), command_buffer_local_(nullptr) {
   command_buffer_local_ = new CommandBufferLocal(this, widget_, state);
 }
 
+void SurfacesContextProvider::SetDelegate(
+    SurfacesContextProviderDelegate* delegate) {
+  DCHECK(!delegate_);
+  delegate_ = delegate;
+}
+
+// This routine needs to be safe to call more than once.
 // This is called when we have an accelerated widget.
 bool SurfacesContextProvider::BindToCurrentThread() {
+  if (implementation_)
+    return true;
+
   // SurfacesContextProvider should always live on the same thread as the
   // Window Manager.
   DCHECK(CalledOnValidThread());
@@ -66,6 +74,7 @@ bool SurfacesContextProvider::BindToCurrentThread() {
 }
 
 gpu::gles2::GLES2Interface* SurfacesContextProvider::ContextGL() {
+  DCHECK(implementation_);
   return implementation_.get();
 }
 
@@ -92,7 +101,7 @@ base::Lock* SurfacesContextProvider::GetLock() {
 
 void SurfacesContextProvider::SetLostContextCallback(
     const LostContextCallback& lost_context_callback) {
-  lost_context_callback_ = lost_context_callback;
+  implementation_->SetLostContextCallback(lost_context_callback);
 }
 
 SurfacesContextProvider::~SurfacesContextProvider() {
@@ -110,8 +119,15 @@ void SurfacesContextProvider::UpdateVSyncParameters(int64_t timebase,
     delegate_->OnVSyncParametersUpdated(timebase, interval);
 }
 
-void SurfacesContextProvider::DidLoseContext() {
-  lost_context_callback_.Run();
+void SurfacesContextProvider::GpuCompletedSwapBuffers(gfx::SwapResult result) {
+  if (!swap_buffers_completion_callback_.is_null()) {
+    swap_buffers_completion_callback_.Run(result);
+  }
+}
+
+void SurfacesContextProvider::SetSwapBuffersCompletionCallback(
+    gfx::GLSurface::SwapCompletionCallback callback) {
+  swap_buffers_completion_callback_ = callback;
 }
 
 }  // namespace mus

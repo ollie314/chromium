@@ -31,8 +31,10 @@ namespace crash_reporter {
 namespace internal {
 
 base::FilePath PlatformCrashpadInitialization(bool initial_client,
-                                              bool browser_process) {
+                                              bool browser_process,
+                                              bool embedded_handler) {
   base::FilePath database_path;  // Only valid in the browser process.
+  DCHECK(!embedded_handler);  // This is not used on Mac.
 
   if (initial_client) {
     @autoreleasepool {
@@ -55,12 +57,21 @@ base::FilePath PlatformCrashpadInitialization(bool initial_client,
           [framework_bundle objectForInfoDictionaryKey:@"BreakpadVersion"]);
       NSString* url_ns = base::mac::ObjCCast<NSString>(
           [framework_bundle objectForInfoDictionaryKey:@"BreakpadURL"]);
+#if defined(GOOGLE_CHROME_BUILD)
+      NSString* channel = base::mac::ObjCCast<NSString>(
+          [base::mac::OuterBundle() objectForInfoDictionaryKey:@"KSChannelID"]);
+#else
+      NSString* channel = nil;
+#endif
 
       std::string url = base::SysNSStringToUTF8(url_ns);
 
       std::map<std::string, std::string> process_annotations;
       process_annotations["prod"] = base::SysNSStringToUTF8(product);
       process_annotations["ver"] = base::SysNSStringToUTF8(version);
+      if (channel) {
+        process_annotations["channel"] = base::SysNSStringToUTF8(channel);
+      }
       process_annotations["plat"] = std::string("OS X");
 
       crashpad::CrashpadClient crashpad_client;

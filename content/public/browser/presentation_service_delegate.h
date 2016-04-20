@@ -5,11 +5,11 @@
 #ifndef CONTENT_PUBLIC_BROWSER_PRESENTATION_SERVICE_DELEGATE_H_
 #define CONTENT_PUBLIC_BROWSER_PRESENTATION_SERVICE_DELEGATE_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/presentation_session.h"
@@ -23,14 +23,29 @@ using PresentationSessionStartedCallback =
     base::Callback<void(const PresentationSessionInfo&)>;
 using PresentationSessionErrorCallback =
     base::Callback<void(const PresentationError&)>;
-using PresentationConnectionStateChangedCallback =
-    base::Callback<void(PresentationConnectionState)>;
 
 // Param #0: a vector of messages that are received.
 // Param #1: tells the callback handler that it may reuse strings or buffers
 //           in the messages contained within param #0.
 using PresentationSessionMessageCallback = base::Callback<
     void(const ScopedVector<content::PresentationSessionMessage>&, bool)>;
+
+struct PresentationConnectionStateChangeInfo {
+  explicit PresentationConnectionStateChangeInfo(
+      PresentationConnectionState state)
+      : state(state),
+        close_reason(PRESENTATION_CONNECTION_CLOSE_REASON_CONNECTION_ERROR) {}
+  ~PresentationConnectionStateChangeInfo() = default;
+
+  PresentationConnectionState state;
+
+  // |close_reason| and |messsage| are only used for state change to CLOSED.
+  PresentationConnectionCloseReason close_reason;
+  std::string message;
+};
+
+using PresentationConnectionStateChangedCallback =
+    base::Callback<void(const PresentationConnectionStateChangeInfo&)>;
 
 // An interface implemented by embedders to handle presentation API calls
 // forwarded from PresentationServiceImpl.
@@ -171,7 +186,7 @@ class CONTENT_EXPORT PresentationServiceDelegate {
   virtual void SendMessage(int render_process_id,
                            int render_frame_id,
                            const content::PresentationSessionInfo& session,
-                           scoped_ptr<PresentationSessionMessage> message,
+                           std::unique_ptr<PresentationSessionMessage> message,
                            const SendMessageCallback& send_message_cb) = 0;
 
   // Continuously listen for state changes for a PresentationConnection in a

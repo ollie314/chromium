@@ -4,8 +4,10 @@
 
 #include "chrome/browser/extensions/api/messaging/extension_message_port.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/profiles/profile.h"
+#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -27,7 +29,7 @@ class ExtensionMessagePort::FrameTracker : public content::WebContentsObserver,
                                            public ProcessManagerObserver {
  public:
   explicit FrameTracker(ExtensionMessagePort* port)
-      : pm_observer_(this), port_(port) {}
+      : pm_observer_(this), port_(port), interstitial_frame_(nullptr) {}
   ~FrameTracker() override {}
 
   void TrackExtensionProcessFrames() {
@@ -38,16 +40,21 @@ class ExtensionMessagePort::FrameTracker : public content::WebContentsObserver,
     Observe(tab);
   }
 
+  void TrackInterstitialFrame(content::WebContents* tab,
+                              content::RenderFrameHost* interstitial_frame) {
+    // |tab| should never be nullptr, because an interstitial's lifetime is
+    // tied to a tab. This is a CHECK, not a DCHECK because we really need an
+    // observer subject to detect frame removal (via DidDetachInterstitialPage).
+    CHECK(tab);
+    DCHECK(interstitial_frame);
+    interstitial_frame_ = interstitial_frame;
+    Observe(tab);
+  }
+
  private:
   // content::WebContentsObserver overrides:
   void RenderFrameDeleted(content::RenderFrameHost* render_frame_host)
       override {
-    port_->UnregisterFrame(render_frame_host);
-  }
-
-  // TODO(robwu): This should be superfluous with RenderFrameDeleted above, but
-  // we are not entirely sure.
-  void FrameDeleted(content::RenderFrameHost* render_frame_host) override {
     port_->UnregisterFrame(render_frame_host);
   }
 
@@ -56,6 +63,11 @@ class ExtensionMessagePort::FrameTracker : public content::WebContentsObserver,
                            const content::FrameNavigateParams&) override {
     if (!details.is_in_page)
       port_->UnregisterFrame(render_frame_host);
+  }
+
+  void DidDetachInterstitialPage() override {
+    if (interstitial_frame_)
+      port_->UnregisterFrame(interstitial_frame_);
   }
 
   // extensions::ProcessManagerObserver overrides:
@@ -68,6 +80,11 @@ class ExtensionMessagePort::FrameTracker : public content::WebContentsObserver,
 
   ScopedObserver<ProcessManager, ProcessManagerObserver> pm_observer_;
   ExtensionMessagePort* port_;  // Owns this FrameTracker.
+
+  // Set to the main frame of an interstitial if we are tracking an interstitial
+  // page, because RenderFrameDeleted is never triggered for frames in an
+  // interstitial (and we only support tracking the interstitial's main frame).
+  content::RenderFrameHost* interstitial_frame_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameTracker);
 };
@@ -108,7 +125,28 @@ ExtensionMessagePort::ExtensionMessagePort(
       background_host_ptr_(nullptr),
       frame_tracker_(new FrameTracker(this)) {
   content::WebContents* tab = content::WebContents::FromRenderFrameHost(rfh);
-  CHECK(tab);
+  if (!tab) {
+    content::InterstitialPage* interstitial =
+        content::InterstitialPage::FromRenderFrameHost(rfh);
+    // A RenderFrameHost must be hosted in a WebContents or InterstitialPage.
+    CHECK(interstitial);
+
+    // Only the main frame of an interstitial is supported, because frames in
+    // the interstitial do not trigger RenderFrameCreated / RenderFrameDeleted
+    // on WebContentObservers. Consequently, (1) we cannot detect removal of
+    // RenderFrameHosts, and (2) even if the RenderFrameDeleted is propagated,
+    // then WebContentsObserverSanityChecker triggers a CHECK when it detects
+    // frame notifications without a corresponding RenderFrameCreated.
+    if (!rfh->GetParent()) {
+      // It is safe to pass the interstitial's WebContents here because we only
+      // use it to observe DidDetachInterstitialPage.
+      frame_tracker_->TrackInterstitialFrame(interstitial->GetWebContents(),
+                                             rfh);
+      RegisterFrame(rfh);
+    }
+    return;
+  }
+
   frame_tracker_->TrackTabFrames(tab);
   if (include_child_frames) {
     tab->ForEachFrame(base::Bind(&ExtensionMessagePort::RegisterFrame,
@@ -143,7 +181,7 @@ bool ExtensionMessagePort::IsValidPort() {
 
 void ExtensionMessagePort::DispatchOnConnect(
     const std::string& channel_name,
-    scoped_ptr<base::DictionaryValue> source_tab,
+    std::unique_ptr<base::DictionaryValue> source_tab,
     int source_frame_id,
     int guest_process_id,
     int guest_render_frame_routing_id,
@@ -163,19 +201,19 @@ void ExtensionMessagePort::DispatchOnConnect(
   info.guest_process_id = guest_process_id;
   info.guest_render_frame_routing_id = guest_render_frame_routing_id;
 
-  SendToPort(make_scoped_ptr(new ExtensionMsg_DispatchOnConnect(
+  SendToPort(base::WrapUnique(new ExtensionMsg_DispatchOnConnect(
       MSG_ROUTING_NONE, port_id_, channel_name, source, info, tls_channel_id)));
 }
 
 void ExtensionMessagePort::DispatchOnDisconnect(
     const std::string& error_message) {
-  SendToPort(make_scoped_ptr(new ExtensionMsg_DispatchOnDisconnect(
+  SendToPort(base::WrapUnique(new ExtensionMsg_DispatchOnDisconnect(
       MSG_ROUTING_NONE, port_id_, error_message)));
 }
 
 void ExtensionMessagePort::DispatchOnMessage(const Message& message) {
-  SendToPort(make_scoped_ptr(new ExtensionMsg_DeliverMessage(
-      MSG_ROUTING_NONE, port_id_, message)));
+  SendToPort(base::WrapUnique(
+      new ExtensionMsg_DeliverMessage(MSG_ROUTING_NONE, port_id_, message)));
 }
 
 void ExtensionMessagePort::IncrementLazyKeepaliveCount() {
@@ -239,7 +277,7 @@ void ExtensionMessagePort::UnregisterFrame(content::RenderFrameHost* rfh) {
     CloseChannel();
 }
 
-void ExtensionMessagePort::SendToPort(scoped_ptr<IPC::Message> msg) {
+void ExtensionMessagePort::SendToPort(std::unique_ptr<IPC::Message> msg) {
   DCHECK_GT(frames_.size(), 0UL);
   if (extension_process_) {
     // All extension frames reside in the same process, so we can just send a

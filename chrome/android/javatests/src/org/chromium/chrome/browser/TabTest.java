@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser;
 
+import android.app.Activity;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.ThreadUtils;
@@ -53,6 +54,16 @@ public class TabTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     @SmallTest
     @Feature({"Tab"})
+    public void testTabContext() throws Throwable {
+        assertFalse("The tab context cannot be an activity",
+                mTab.getContentViewCore().getContext() instanceof Activity);
+        assertNotSame("The tab context's theme should have been updated",
+                mTab.getContentViewCore().getContext().getTheme(),
+                getActivity().getApplication().getTheme());
+    }
+
+    @SmallTest
+    @Feature({"Tab"})
     public void testTitleDelayUpdate() throws Throwable {
         final String oldTitle = "oldTitle";
         final String newTitle = "newTitle";
@@ -97,7 +108,7 @@ public class TabTest extends ChromeActivityTestCaseBase<ChromeActivity> {
             }
         });
 
-        CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+        CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 return mTab.isHidden();
@@ -109,7 +120,7 @@ public class TabTest extends ChromeActivityTestCaseBase<ChromeActivity> {
         ApplicationTestUtils.launchChrome(getInstrumentation().getTargetContext());
 
         // The tab should be restored and visible.
-        CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+        CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 return !mTab.isHidden();

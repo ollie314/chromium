@@ -58,9 +58,11 @@
      * Selects the given value. If the `multi` property is true, then the selected state of the
      * `value` will be toggled; otherwise the `value` will be selected.
      *
-     * @param {string} value the value to select.
+     * @param {string|number} value the value to select.
      */
     select: function(value) {
+      // Cancel automatically focusing a default item if the menu received focus
+      // through a user action selecting a particular item.
       if (this._defaultFocusAsync) {
         this.cancelAsync(this._defaultFocusAsync);
         this._defaultFocusAsync = null;
@@ -223,7 +225,13 @@
         return;
       }
 
-      this.blur();
+      // Do not focus the selected tab if the deepest target is part of the
+      // menu element's local DOM and is focusable.
+      var rootTarget = /** @type {?HTMLElement} */(
+          Polymer.dom(event).rootTarget);
+      if (rootTarget !== this && typeof rootTarget.tabIndex !== "undefined" && !this.isLightDescendant(rootTarget)) {
+        return;
+      }
 
       // clear the cached focus item
       this._defaultFocusAsync = this.async(function() {
@@ -235,11 +243,10 @@
 
         if (selectedItem) {
           this._setFocusedItem(selectedItem);
-        } else {
+        } else if (this.items[0]) {
           this._setFocusedItem(this.items[0]);
         }
-      // async 1ms to wait for `select` to get called from `_itemActivate`
-      }, 1);
+      });
     },
 
     /**
@@ -250,6 +257,7 @@
     _onUpKey: function(event) {
       // up and down arrows moves the focus
       this._focusPrevious();
+      event.detail.keyboardEvent.preventDefault();
     },
 
     /**
@@ -259,6 +267,7 @@
      */
     _onDownKey: function(event) {
       this._focusNext();
+      event.detail.keyboardEvent.preventDefault();
     },
 
     /**

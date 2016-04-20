@@ -40,7 +40,7 @@ class FakeGCMDriver : public GCMDriver {
   base::Time GetLastTokenFetchTime() override;
   void SetLastTokenFetchTime(const base::Time& time) override;
   void WakeFromSuspendForHeartbeat(bool wake) override;
-  InstanceIDHandler* GetInstanceIDHandler() override;
+  InstanceIDHandler* GetInstanceIDHandlerInternal() override;
   void AddHeartbeatInterval(const std::string& scope, int interval_ms) override;
   void RemoveHeartbeatInterval(const std::string& scope) override;
 
@@ -54,6 +54,9 @@ class FakeGCMDriver : public GCMDriver {
   void SendImpl(const std::string& app_id,
                 const std::string& receiver_id,
                 const OutgoingMessage& message) override;
+  void RecordDecryptionFailure(const std::string& app_id,
+                               GCMEncryptionProvider::DecryptionResult result)
+      override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeGCMDriver);

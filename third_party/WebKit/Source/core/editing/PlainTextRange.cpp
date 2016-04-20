@@ -46,16 +46,16 @@ PlainTextRange::PlainTextRange(int location)
     : m_start(location)
     , m_end(location)
 {
-    ASSERT(location >= 0);
+    DCHECK_GE(location, 0);
 }
 
 PlainTextRange::PlainTextRange(int start, int end)
     : m_start(start)
     , m_end(end)
 {
-    ASSERT(start >= 0);
-    ASSERT(end >= 0);
-    ASSERT(start <= end);
+    DCHECK_GE(start, 0);
+    DCHECK_GE(end, 0);
+    DCHECK_LE(start, end);
 }
 
 EphemeralRange PlainTextRange::createRange(const ContainerNode& scope) const
@@ -70,7 +70,7 @@ EphemeralRange PlainTextRange::createRangeForSelection(const ContainerNode& scop
 
 EphemeralRange PlainTextRange::createRangeFor(const ContainerNode& scope, GetRangeFor getRangeFor) const
 {
-    ASSERT(isNotNull());
+    DCHECK(isNotNull());
 
     size_t docTextPosition = 0;
     bool startRangeFound = false;
@@ -107,7 +107,7 @@ EphemeralRange PlainTextRange::createRangeFor(const ContainerNode& scope, GetRan
             // FIXME: This is a workaround for the fact that the end of a run
             // is often at the wrong position for emitted '\n's or if the
             // layoutObject of the current node is a replaced element.
-            if (len == 1 && (it.text().characterAt(0) == '\n' || it.isInsideAtomicInlineElement())) {
+            if (len == 1 && (it.characterAt(0) == '\n' || it.isInsideAtomicInlineElement())) {
                 it.advance();
                 if (!it.atEnd()) {
                     textRunEndPosition = it.startPositionInCurrentContainer();
@@ -186,4 +186,4 @@ PlainTextRange PlainTextRange::create(const ContainerNode& scope, const Range& r
     return create(scope, EphemeralRange(&range));
 }
 
-}
+} // namespace blink

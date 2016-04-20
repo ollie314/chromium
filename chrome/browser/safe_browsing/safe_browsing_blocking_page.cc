@@ -13,9 +13,9 @@
 #include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
@@ -34,6 +34,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/prefs/pref_service.h"
 #include "components/security_interstitials/core/controller_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/interstitial_page.h"
@@ -179,7 +180,7 @@ SafeBrowsingBlockingPage::SafeBrowsingBlockingPage(
   reporting_info.extra_suffix = GetExtraMetricsSuffix();
   reporting_info.rappor_prefix = GetRapporPrefix();
   reporting_info.rappor_report_type = rappor::SAFEBROWSING_RAPPOR_TYPE;
-  set_metrics_helper(make_scoped_ptr(new ChromeMetricsHelper(
+  set_metrics_helper(base::WrapUnique(new ChromeMetricsHelper(
       web_contents, request_url(), reporting_info, GetSamplingEventName())));
   metrics_helper()->RecordUserDecision(
       security_interstitials::MetricsHelper::SHOW);
@@ -555,6 +556,8 @@ std::string SafeBrowsingBlockingPage::GetExtraMetricsSuffix() const {
       return "from_device";
     case safe_browsing::ThreatSource::LOCAL_PVER4:
       return "from_device_v4";
+    case safe_browsing::ThreatSource::CLIENT_SIDE_DETECTION:
+      return "from_client_side_detection";
     case safe_browsing::ThreatSource::UNKNOWN:
       break;
   }

@@ -10,10 +10,10 @@
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "base/i18n/rtl.h"
 #include "grit/ash_resources.h"
 #include "ui/aura/window.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/display.h"
@@ -337,7 +337,7 @@ TEST_F(FrameSizeButtonTest, ResetButtonsAfterClick) {
   EXPECT_EQ(CAPTION_BUTTON_ICON_RIGHT_SNAPPED, close_button()->icon());
 
   const gfx::Rect& kWorkAreaBoundsInScreen =
-      ash::Shell::GetScreen()->GetPrimaryDisplay().work_area();
+      gfx::Screen::GetScreen()->GetPrimaryDisplay().work_area();
   generator.MoveMouseTo(kWorkAreaBoundsInScreen.bottom_left());
 
   // None of the buttons should be pressed because we are really far away from
@@ -388,7 +388,7 @@ TEST_F(FrameSizeButtonTest, SizeButtonPressedWhenSnapButtonHovered) {
   // the close button (snap right button) should hover the close button and
   // keep the size button pressed.
   const gfx::Rect& kWorkAreaBoundsInScreen =
-      ash::Shell::GetScreen()->GetPrimaryDisplay().work_area();
+      gfx::Screen::GetScreen()->GetPrimaryDisplay().work_area();
   generator.MoveMouseTo(kWorkAreaBoundsInScreen.bottom_left());
   EXPECT_TRUE(AllButtonsInNormalState());
   generator.MoveMouseTo(CenterPointInScreen(close_button()));
@@ -403,7 +403,7 @@ class FrameSizeButtonTestRTL : public FrameSizeButtonTest {
   ~FrameSizeButtonTestRTL() override {}
 
   void SetUp() override {
-    original_locale_ = l10n_util::GetApplicationLocale(std::string());
+    original_locale_ = base::i18n::GetConfiguredLocale();
     base::i18n::SetICUDefaultLocale("he");
 
     FrameSizeButtonTest::SetUp();

@@ -35,13 +35,13 @@ class FakeMessageCenter : public MessageCenter {
       const std::string& id) override;
   const NotificationList::Notifications& GetVisibleNotifications() override;
   NotificationList::PopupNotifications GetPopupNotifications() override;
-  void AddNotification(scoped_ptr<Notification> notification) override;
-  void UpdateNotification(const std::string& old_id,
-                          scoped_ptr<Notification> new_notification) override;
+  void AddNotification(std::unique_ptr<Notification> notification) override;
+  void UpdateNotification(
+      const std::string& old_id,
+      std::unique_ptr<Notification> new_notification) override;
 
   void RemoveNotification(const std::string& id, bool by_user) override;
-  void RemoveAllNotifications(bool by_user) override;
-  void RemoveAllVisibleNotifications(bool by_user) override;
+  void RemoveAllNotifications(bool by_user, RemoveType type) override;
   void SetNotificationIcon(const std::string& notification_id,
                            const gfx::Image& image) override;
 

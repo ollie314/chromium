@@ -45,7 +45,7 @@ class ClientCertificateDelegateImpl : public ClientCertificateDelegate {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&SSLClientAuthHandler::ContinueWithCertificate, handler_,
-                   make_scoped_refptr(cert)));
+                   base::RetainedRef(cert)));
   }
 
  private:
@@ -62,7 +62,7 @@ void SelectCertificateOnUIThread(
     const base::WeakPtr<SSLClientAuthHandler>& handler) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  scoped_ptr<ClientCertificateDelegate> delegate(
+  std::unique_ptr<ClientCertificateDelegate> delegate(
       new ClientCertificateDelegateImpl(handler));
 
   RenderFrameHost* rfh =
@@ -82,13 +82,13 @@ void SelectCertificateOnUIThread(
 class SSLClientAuthHandler::Core : public base::RefCountedThreadSafe<Core> {
  public:
   Core(const base::WeakPtr<SSLClientAuthHandler>& handler,
-       scoped_ptr<net::ClientCertStore> client_cert_store,
+       std::unique_ptr<net::ClientCertStore> client_cert_store,
        net::SSLCertRequestInfo* cert_request_info)
       : handler_(handler),
         client_cert_store_(std::move(client_cert_store)),
         cert_request_info_(cert_request_info) {}
 
-  bool has_client_cert_store() const { return client_cert_store_; }
+  bool has_client_cert_store() const { return !!client_cert_store_; }
 
   void GetClientCerts() {
     if (client_cert_store_) {
@@ -116,12 +116,12 @@ class SSLClientAuthHandler::Core : public base::RefCountedThreadSafe<Core> {
   }
 
   base::WeakPtr<SSLClientAuthHandler> handler_;
-  scoped_ptr<net::ClientCertStore> client_cert_store_;
+  std::unique_ptr<net::ClientCertStore> client_cert_store_;
   scoped_refptr<net::SSLCertRequestInfo> cert_request_info_;
 };
 
 SSLClientAuthHandler::SSLClientAuthHandler(
-    scoped_ptr<net::ClientCertStore> client_cert_store,
+    std::unique_ptr<net::ClientCertStore> client_cert_store,
     net::URLRequest* request,
     net::SSLCertRequestInfo* cert_request_info,
     SSLClientAuthHandler::Delegate* delegate)
@@ -178,8 +178,7 @@ void SSLClientAuthHandler::DidGetClientCerts() {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&SSLClientAuthHandler::ContinueWithCertificate,
-                   weak_factory_.GetWeakPtr(),
-                   scoped_refptr<net::X509Certificate>()));
+                   weak_factory_.GetWeakPtr(), nullptr));
     return;
   }
 
@@ -198,7 +197,7 @@ void SSLClientAuthHandler::DidGetClientCerts() {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&SelectCertificateOnUIThread, render_process_host_id,
-                 render_frame_host_id, cert_request_info_,
+                 render_frame_host_id, base::RetainedRef(cert_request_info_),
                  weak_factory_.GetWeakPtr()));
 }
 

@@ -41,13 +41,13 @@
 #include "platform/weborigin/KURL.h"
 #include "public/platform/PointerProperties.h"
 #include "public/platform/WebDisplayMode.h"
-#include "wtf/HashSet.h"
-#include "wtf/RefCounted.h"
+#include "public/platform/WebViewportStyle.h"
 
 namespace blink {
 
 class CORE_EXPORT Settings {
-    WTF_MAKE_NONCOPYABLE(Settings); USING_FAST_MALLOC(Settings);
+    WTF_MAKE_NONCOPYABLE(Settings);
+    USING_FAST_MALLOC(Settings);
 public:
     static PassOwnPtr<Settings> create();
 
@@ -67,11 +67,6 @@ public:
     static void setMockScrollbarsEnabled(bool flag);
     static bool mockScrollbarsEnabled();
 
-    // FIXME: naming_utilities.py isn't smart enough to handle OpenGL yet.
-    // It could handle "GL", but that seems a bit overly broad.
-    void setOpenGLMultisamplingEnabled(bool flag);
-    bool openGLMultisamplingEnabled() { return m_openGLMultisamplingEnabled; }
-
     void setDelegate(SettingsDelegate*);
 
 private:
@@ -82,7 +77,6 @@ private:
     SettingsDelegate* m_delegate;
 
     GenericFontFamilySettings m_genericFontFamilySettings;
-    bool m_openGLMultisamplingEnabled : 1;
     IntSize m_textAutosizingWindowSizeOverride;
     bool m_textAutosizingEnabled : 1;
 

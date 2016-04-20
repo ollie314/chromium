@@ -46,15 +46,6 @@ template("common_tmpl") {
   }
 }
 
-if (is_android) {
-  common_tmpl("common_small") {
-    deps = [
-      "//net:net_small",
-      "//url:url_lib_use_icu_alternatives_on_android",
-    ]
-  }
-}
-
 common_tmpl("common") {
   deps = [
     "//net",
@@ -113,4 +104,8 @@ source_set("unit_tests") {
 process_version("version_header") {
   template_file = "version.h.in"
   output = "$target_gen_dir/version.h"
+  extra_args = [
+    "-e",
+    "VERSION_FULL=\"%s.%s.%s.%s\" % (MAJOR,MINOR,BUILD,PATCH)",
+  ]
 }

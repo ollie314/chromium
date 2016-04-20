@@ -10,8 +10,6 @@
 #include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -25,6 +23,8 @@
 #include "components/flags_ui/flags_ui_constants.h"
 #include "components/flags_ui/flags_ui_pref_names.h"
 #include "components/flags_ui/pref_service_flags_storage.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -44,6 +44,7 @@
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/owner_flags_storage.h"
+#include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -141,7 +142,7 @@ class FlagsDOMHandler : public WebUIMessageHandler {
   void HandleResetAllFlags(const base::ListValue* args);
 
  private:
-  scoped_ptr<flags_ui::FlagsStorage> flags_storage_;
+  std::unique_ptr<flags_ui::FlagsStorage> flags_storage_;
   flags_ui::FlagAccess access_;
   bool experimental_features_requested_;
 
@@ -186,8 +187,8 @@ void FlagsDOMHandler::HandleRequestExperimentalFeatures(
 
   base::DictionaryValue results;
 
-  scoped_ptr<base::ListValue> supported_features(new base::ListValue);
-  scoped_ptr<base::ListValue> unsupported_features(new base::ListValue);
+  std::unique_ptr<base::ListValue> supported_features(new base::ListValue);
+  std::unique_ptr<base::ListValue> unsupported_features(new base::ListValue);
   about_flags::GetFlagFeatureEntries(flags_storage_.get(),
                                      access_,
                                      supported_features.get(),
@@ -246,7 +247,10 @@ void FlagsDOMHandler::HandleRestartBrowser(const base::ListValue* args) {
   chromeos::DBusThreadManager::Get()
       ->GetSessionManagerClient()
       ->SetFlagsForUser(
-          user_manager::UserManager::Get()->GetActiveUser()->email(), flags);
+          cryptohome::Identification(user_manager::UserManager::Get()
+                                         ->GetActiveUser()
+                                         ->GetAccountId()),
+          flags);
 #endif
   chrome::AttemptRestart();
 }

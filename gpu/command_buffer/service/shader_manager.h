@@ -6,11 +6,11 @@
 #define GPU_COMMAND_BUFFER_SERVICE_SHADER_MANAGER_H_
 
 #include <string>
+
 #include "base/containers/hash_tables.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/shader_translator.h"
 #include "gpu/gpu_export.h"
@@ -181,10 +181,6 @@ class GPU_EXPORT Shader : public base::RefCounted<Shader> {
   void set_interface_block_map(const InterfaceBlockMap& interface_block_map) {
     // copied because cache might be cleared
     interface_block_map_ = InterfaceBlockMap(interface_block_map);
-  }
-
-  void AddUniformToUniformMap(sh::Uniform uniform) {
-    uniform_map_[uniform.mappedName] = uniform;
   }
 
   void set_output_variable_list(

@@ -10,19 +10,20 @@
 
 #include "ash/sticky_keys/sticky_keys_controller.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/sys_info.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/extensions/extension_commands_global_registry.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/prefs/pref_service.h"
 #include "components/user_manager/user_manager.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
@@ -94,7 +95,7 @@ const struct ModifierRemapping {
     {ui::EF_COMMAND_DOWN,
      input_method::kSearchKey,
      prefs::kLanguageRemapSearchKeyTo,
-     {ui::EF_COMMAND_DOWN, ui::DomCode::OS_LEFT, ui::DomKey::OS,
+     {ui::EF_COMMAND_DOWN, ui::DomCode::OS_LEFT, ui::DomKey::META,
       ui::VKEY_LWIN}},
     {ui::EF_ALT_DOWN,
      input_method::kAltKey,
@@ -315,13 +316,13 @@ EventRewriter::DeviceType EventRewriter::KeyboardDeviceAddedForTesting(
 
 void EventRewriter::RewriteMouseButtonEventForTesting(
     const ui::MouseEvent& event,
-    scoped_ptr<ui::Event>* rewritten_event) {
+    std::unique_ptr<ui::Event>* rewritten_event) {
   RewriteMouseButtonEvent(event, rewritten_event);
 }
 
 ui::EventRewriteStatus EventRewriter::RewriteEvent(
     const ui::Event& event,
-    scoped_ptr<ui::Event>* rewritten_event) {
+    std::unique_ptr<ui::Event>* rewritten_event) {
   if ((event.type() == ui::ET_KEY_PRESSED) ||
       (event.type() == ui::ET_KEY_RELEASED)) {
     return RewriteKeyEvent(static_cast<const ui::KeyEvent&>(event),
@@ -350,7 +351,7 @@ ui::EventRewriteStatus EventRewriter::RewriteEvent(
 
 ui::EventRewriteStatus EventRewriter::NextDispatchEvent(
     const ui::Event& last_event,
-    scoped_ptr<ui::Event>* new_event) {
+    std::unique_ptr<ui::Event>* new_event) {
   if (sticky_keys_controller_) {
     // In the case of sticky keys, we know what the events obtained here are:
     // modifier key releases that match the ones previously discarded. So, we
@@ -366,7 +367,7 @@ ui::EventRewriteStatus EventRewriter::NextDispatchEvent(
 void EventRewriter::BuildRewrittenKeyEvent(
     const ui::KeyEvent& key_event,
     const MutableKeyState& state,
-    scoped_ptr<ui::Event>* rewritten_event) {
+    std::unique_ptr<ui::Event>* rewritten_event) {
   ui::KeyEvent* rewritten_key_event =
       new ui::KeyEvent(key_event.type(), state.key_code, state.code,
                        state.flags, state.key, key_event.time_stamp());
@@ -484,7 +485,7 @@ int EventRewriter::GetRemappedModifierMasks(const PrefService& pref_service,
 
 ui::EventRewriteStatus EventRewriter::RewriteKeyEvent(
     const ui::KeyEvent& key_event,
-    scoped_ptr<ui::Event>* rewritten_event) {
+    std::unique_ptr<ui::Event>* rewritten_event) {
   if (IsExtensionCommandRegistered(key_event.key_code(), key_event.flags()))
     return ui::EVENT_REWRITE_CONTINUE;
   if (key_event.source_device_id() != ui::ED_UNKNOWN_DEVICE)
@@ -560,7 +561,7 @@ ui::EventRewriteStatus EventRewriter::RewriteKeyEvent(
 
 ui::EventRewriteStatus EventRewriter::RewriteMouseButtonEvent(
     const ui::MouseEvent& mouse_event,
-    scoped_ptr<ui::Event>* rewritten_event) {
+    std::unique_ptr<ui::Event>* rewritten_event) {
   int flags = mouse_event.flags();
   RewriteLocatedEvent(mouse_event, &flags);
   ui::EventRewriteStatus status = ui::EVENT_REWRITE_CONTINUE;
@@ -594,10 +595,11 @@ ui::EventRewriteStatus EventRewriter::RewriteMouseButtonEvent(
 
 ui::EventRewriteStatus EventRewriter::RewriteMouseWheelEvent(
     const ui::MouseWheelEvent& wheel_event,
-    scoped_ptr<ui::Event>* rewritten_event) {
+    std::unique_ptr<ui::Event>* rewritten_event) {
   if (!sticky_keys_controller_)
     return ui::EVENT_REWRITE_CONTINUE;
   int flags = wheel_event.flags();
+  RewriteLocatedEvent(wheel_event, &flags);
   ui::EventRewriteStatus status =
       sticky_keys_controller_->RewriteMouseEvent(wheel_event, &flags);
   if ((wheel_event.flags() == flags) &&
@@ -618,7 +620,7 @@ ui::EventRewriteStatus EventRewriter::RewriteMouseWheelEvent(
 
 ui::EventRewriteStatus EventRewriter::RewriteTouchEvent(
     const ui::TouchEvent& touch_event,
-    scoped_ptr<ui::Event>* rewritten_event) {
+    std::unique_ptr<ui::Event>* rewritten_event) {
   int flags = touch_event.flags();
   RewriteLocatedEvent(touch_event, &flags);
   if (touch_event.flags() == flags)
@@ -634,7 +636,7 @@ ui::EventRewriteStatus EventRewriter::RewriteTouchEvent(
 
 ui::EventRewriteStatus EventRewriter::RewriteScrollEvent(
     const ui::ScrollEvent& scroll_event,
-    scoped_ptr<ui::Event>* rewritten_event) {
+    std::unique_ptr<ui::Event>* rewritten_event) {
   int flags = scroll_event.flags();
   ui::EventRewriteStatus status = ui::EVENT_REWRITE_CONTINUE;
   if (sticky_keys_controller_)
@@ -664,7 +666,7 @@ bool EventRewriter::RewriteModifierKeys(const ui::KeyEvent& key_event,
   // when user logs in as guest.
   // TODO(kpschoedel): check whether this is still necessary.
   if (user_manager::UserManager::Get()->IsLoggedInAsGuest() &&
-      LoginDisplayHostImpl::default_host())
+      LoginDisplayHost::default_host())
     return false;
 
   const PrefService* pref_service = GetPrefService();
@@ -1022,13 +1024,13 @@ void EventRewriter::RewriteFunctionKeys(const ui::KeyEvent& key_event,
            {ui::EF_NONE, ui::DomCode::BRIGHTNESS_UP, ui::DomKey::BRIGHTNESS_UP,
             ui::VKEY_BRIGHTNESS_UP}},
           {{ui::EF_NONE, ui::VKEY_F8},
-           {ui::EF_NONE, ui::DomCode::VOLUME_MUTE, ui::DomKey::VOLUME_MUTE,
-            ui::VKEY_VOLUME_MUTE}},
+           {ui::EF_NONE, ui::DomCode::VOLUME_MUTE,
+            ui::DomKey::AUDIO_VOLUME_MUTE, ui::VKEY_VOLUME_MUTE}},
           {{ui::EF_NONE, ui::VKEY_F9},
-           {ui::EF_NONE, ui::DomCode::VOLUME_DOWN, ui::DomKey::VOLUME_DOWN,
-            ui::VKEY_VOLUME_DOWN}},
+           {ui::EF_NONE, ui::DomCode::VOLUME_DOWN,
+            ui::DomKey::AUDIO_VOLUME_DOWN, ui::VKEY_VOLUME_DOWN}},
           {{ui::EF_NONE, ui::VKEY_F10},
-           {ui::EF_NONE, ui::DomCode::VOLUME_UP, ui::DomKey::VOLUME_UP,
+           {ui::EF_NONE, ui::DomCode::VOLUME_UP, ui::DomKey::AUDIO_VOLUME_UP,
             ui::VKEY_VOLUME_UP}},
       };
       MutableKeyState incoming_without_command = *state;

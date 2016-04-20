@@ -46,8 +46,8 @@ UChar TextIteratorTextState::characterAt(unsigned index) const
         return 0;
 
     if (m_singleCharacterBuffer) {
-        ASSERT(!index);
-        ASSERT(length() == 1);
+        DCHECK_EQ(index, 0u);
+        DCHECK_EQ(length(), 1);
         return m_singleCharacterBuffer;
     }
 
@@ -61,8 +61,8 @@ String TextIteratorTextState::substring(unsigned position, unsigned length) cons
     if (!length)
         return emptyString();
     if (m_singleCharacterBuffer) {
-        ASSERT(!position);
-        ASSERT(length == 1);
+        DCHECK_EQ(position, 0u);
+        DCHECK_EQ(length, 1u);
         return String(&m_singleCharacterBuffer, 1);
     }
     return string().substring(positionStartOffset() + position, length);
@@ -74,7 +74,7 @@ void TextIteratorTextState::appendTextToStringBuilder(StringBuilder& builder, un
     if (!lengthToAppend)
         return;
     if (m_singleCharacterBuffer) {
-        ASSERT(!position);
+        DCHECK_EQ(position, 0u);
         builder.append(m_singleCharacterBuffer);
     } else {
         builder.append(string(), positionStartOffset() + position, lengthToAppend);
@@ -111,9 +111,9 @@ void TextIteratorTextState::flushPositionOffsets() const
     m_positionOffsetBaseNode = nullptr;
 }
 
-void TextIteratorTextState::emitCharacter(UChar c, Node* textNode, Node* offsetBaseNode, int textStartOffset, int textEndOffset)
+void TextIteratorTextState::spliceBuffer(UChar c, Node* textNode, Node* offsetBaseNode, int textStartOffset, int textEndOffset)
 {
-    ASSERT(textNode);
+    DCHECK(textNode);
     m_hasEmitted = true;
 
     // Remember information with which to construct the TextIterator::range().
@@ -125,7 +125,7 @@ void TextIteratorTextState::emitCharacter(UChar c, Node* textNode, Node* offsetB
 
     // remember information with which to construct the TextIterator::characters() and length()
     m_singleCharacterBuffer = c;
-    ASSERT(m_singleCharacterBuffer);
+    DCHECK(m_singleCharacterBuffer);
     m_textLength = 1;
 
     // remember some iteration state
@@ -134,12 +134,14 @@ void TextIteratorTextState::emitCharacter(UChar c, Node* textNode, Node* offsetB
 
 void TextIteratorTextState::emitText(Node* textNode, LayoutText* layoutObject, int textStartOffset, int textEndOffset)
 {
-    ASSERT(textNode);
+    DCHECK(textNode);
     m_text = m_emitsOriginalText ? layoutObject->originalText() : layoutObject->text();
-    ASSERT(!m_text.isEmpty());
-    ASSERT(0 <= textStartOffset && textStartOffset < static_cast<int>(m_text.length()));
-    ASSERT(0 <= textEndOffset && textEndOffset <= static_cast<int>(m_text.length()));
-    ASSERT(textStartOffset <= textEndOffset);
+    DCHECK(!m_text.isEmpty());
+    DCHECK_LE(0, textStartOffset);
+    DCHECK_LT(textStartOffset, static_cast<int>(m_text.length()));
+    DCHECK_LE(0, textEndOffset);
+    DCHECK_LE(textEndOffset, static_cast<int>(m_text.length()));
+    DCHECK_LE(textStartOffset, textEndOffset);
 
     m_positionNode = textNode;
     m_positionOffsetBaseNode = nullptr;
@@ -150,6 +152,32 @@ void TextIteratorTextState::emitText(Node* textNode, LayoutText* layoutObject, i
     m_lastCharacter = m_text[textEndOffset - 1];
 
     m_hasEmitted = true;
+}
+
+void TextIteratorTextState::appendTextTo(ForwardsTextBuffer* output, unsigned position, unsigned lengthToAppend) const
+{
+    ASSERT_WITH_SECURITY_IMPLICATION(position + lengthToAppend <= static_cast<unsigned>(length()));
+    // Make sure there's no integer overflow.
+    ASSERT_WITH_SECURITY_IMPLICATION(position + lengthToAppend >= position);
+    if (!lengthToAppend)
+        return;
+    DCHECK(output);
+    if (m_singleCharacterBuffer) {
+        DCHECK_EQ(position, 0u);
+        DCHECK_EQ(length(), 1);
+        output->pushCharacters(m_singleCharacterBuffer, 1);
+        return;
+    }
+    if (positionNode()) {
+        flushPositionOffsets();
+        unsigned offset = positionStartOffset() + position;
+        if (string().is8Bit())
+            output->pushRange(string().characters8() + offset, lengthToAppend);
+        else
+            output->pushRange(string().characters16() + offset, lengthToAppend);
+        return;
+    }
+    ASSERT_NOT_REACHED(); // "We shouldn't be attempting to append text that doesn't exist.";
 }
 
 } // namespace blink

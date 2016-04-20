@@ -5,10 +5,12 @@
 #include "content/browser/service_worker/service_worker_storage.h"
 
 #include <stddef.h>
+
 #include <utility>
 
 #include "base/bind_helpers.h"
 #include "base/files/file_util.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
@@ -96,6 +98,9 @@ DidDeleteRegistrationParams::DidDeleteRegistrationParams()
     : registration_id(kInvalidServiceWorkerRegistrationId) {
 }
 
+ServiceWorkerStorage::DidDeleteRegistrationParams::DidDeleteRegistrationParams(
+    const DidDeleteRegistrationParams& other) = default;
+
 ServiceWorkerStorage::
 DidDeleteRegistrationParams::~DidDeleteRegistrationParams() {
 }
@@ -108,29 +113,26 @@ ServiceWorkerStorage::~ServiceWorkerStorage() {
 }
 
 // static
-scoped_ptr<ServiceWorkerStorage> ServiceWorkerStorage::Create(
+std::unique_ptr<ServiceWorkerStorage> ServiceWorkerStorage::Create(
     const base::FilePath& path,
     const base::WeakPtr<ServiceWorkerContextCore>& context,
-    scoped_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager,
+    std::unique_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager,
     const scoped_refptr<base::SingleThreadTaskRunner>& disk_cache_thread,
     storage::QuotaManagerProxy* quota_manager_proxy,
     storage::SpecialStoragePolicy* special_storage_policy) {
-  return make_scoped_ptr(new ServiceWorkerStorage(
+  return base::WrapUnique(new ServiceWorkerStorage(
       path, context, std::move(database_task_manager), disk_cache_thread,
       quota_manager_proxy, special_storage_policy));
 }
 
 // static
-scoped_ptr<ServiceWorkerStorage> ServiceWorkerStorage::Create(
+std::unique_ptr<ServiceWorkerStorage> ServiceWorkerStorage::Create(
     const base::WeakPtr<ServiceWorkerContextCore>& context,
     ServiceWorkerStorage* old_storage) {
-  return make_scoped_ptr(
-      new ServiceWorkerStorage(old_storage->path_,
-                               context,
-                               old_storage->database_task_manager_->Clone(),
-                               old_storage->disk_cache_thread_,
-                               old_storage->quota_manager_proxy_.get(),
-                               old_storage->special_storage_policy_.get()));
+  return base::WrapUnique(new ServiceWorkerStorage(
+      old_storage->path_, context, old_storage->database_task_manager_->Clone(),
+      old_storage->disk_cache_thread_, old_storage->quota_manager_proxy_.get(),
+      old_storage->special_storage_policy_.get()));
 }
 
 void ServiceWorkerStorage::FindRegistrationForDocument(
@@ -338,7 +340,7 @@ void ServiceWorkerStorage::GetRegistrationsForOrigin(
     if (state_ != INITIALIZING) {
       RunSoon(
           FROM_HERE,
-          base::Bind(callback,
+          base::Bind(callback, SERVICE_WORKER_ERROR_ABORT,
                      std::vector<scoped_refptr<ServiceWorkerRegistration>>()));
     }
     return;
@@ -364,8 +366,9 @@ void ServiceWorkerStorage::GetAllRegistrationsInfos(
           base::Bind(&ServiceWorkerStorage::GetAllRegistrationsInfos,
                      weak_factory_.GetWeakPtr(), callback))) {
     if (state_ != INITIALIZING) {
-      RunSoon(FROM_HERE, base::Bind(
-          callback, std::vector<ServiceWorkerRegistrationInfo>()));
+      RunSoon(FROM_HERE,
+              base::Bind(callback, SERVICE_WORKER_ERROR_ABORT,
+                         std::vector<ServiceWorkerRegistrationInfo>()));
     }
     return;
   }
@@ -403,6 +406,7 @@ void ServiceWorkerStorage::StoreRegistration(
   data.last_update_check = registration->last_update_check();
   data.is_active = (version == registration->active_version());
   data.foreign_fetch_scopes = version->foreign_fetch_scopes();
+  data.foreign_fetch_origins = version->foreign_fetch_origins();
 
   ResourceList resources;
   version->script_cache_map()->GetResources(&resources);
@@ -462,7 +466,6 @@ void ServiceWorkerStorage::UpdateToActiveState(
 void ServiceWorkerStorage::UpdateLastUpdateCheckTime(
     ServiceWorkerRegistration* registration) {
   DCHECK(registration);
-
   DCHECK(state_ == INITIALIZED || state_ == DISABLED) << state_;
   if (IsDisabled())
     return;
@@ -513,27 +516,29 @@ void ServiceWorkerStorage::DeleteRegistration(int64_t registration_id,
     registration->set_is_deleted(true);
 }
 
-scoped_ptr<ServiceWorkerResponseReader>
+std::unique_ptr<ServiceWorkerResponseReader>
 ServiceWorkerStorage::CreateResponseReader(int64_t resource_id) {
-  return make_scoped_ptr(
-      new ServiceWorkerResponseReader(resource_id, disk_cache()));
+  return base::WrapUnique(
+      new ServiceWorkerResponseReader(resource_id, disk_cache()->GetWeakPtr()));
 }
 
-scoped_ptr<ServiceWorkerResponseWriter>
+std::unique_ptr<ServiceWorkerResponseWriter>
 ServiceWorkerStorage::CreateResponseWriter(int64_t resource_id) {
-  return make_scoped_ptr(
-      new ServiceWorkerResponseWriter(resource_id, disk_cache()));
+  return base::WrapUnique(
+      new ServiceWorkerResponseWriter(resource_id, disk_cache()->GetWeakPtr()));
 }
 
-scoped_ptr<ServiceWorkerResponseMetadataWriter>
+std::unique_ptr<ServiceWorkerResponseMetadataWriter>
 ServiceWorkerStorage::CreateResponseMetadataWriter(int64_t resource_id) {
-  return make_scoped_ptr(
-      new ServiceWorkerResponseMetadataWriter(resource_id, disk_cache()));
+  return base::WrapUnique(new ServiceWorkerResponseMetadataWriter(
+      resource_id, disk_cache()->GetWeakPtr()));
 }
 
 void ServiceWorkerStorage::StoreUncommittedResourceId(int64_t resource_id) {
   DCHECK_NE(kInvalidServiceWorkerResourceId, resource_id);
-  DCHECK_EQ(INITIALIZED, state_);
+  DCHECK(INITIALIZED == state_ || DISABLED == state_) << state_;
+  if (IsDisabled())
+    return;
 
   if (!has_checked_for_stale_resources_)
     DeleteStaleResources();
@@ -549,11 +554,18 @@ void ServiceWorkerStorage::StoreUncommittedResourceId(int64_t resource_id) {
 
 void ServiceWorkerStorage::DoomUncommittedResource(int64_t resource_id) {
   DCHECK_NE(kInvalidServiceWorkerResourceId, resource_id);
+  DCHECK(INITIALIZED == state_ || DISABLED == state_) << state_;
+  if (IsDisabled())
+    return;
   DoomUncommittedResources(std::set<int64_t>(&resource_id, &resource_id + 1));
 }
 
 void ServiceWorkerStorage::DoomUncommittedResources(
     const std::set<int64_t>& resource_ids) {
+  DCHECK(INITIALIZED == state_ || DISABLED == state_) << state_;
+  if (IsDisabled())
+    return;
+
   PostTaskAndReplyWithResult(
       database_task_manager_->GetTaskRunner(), FROM_HERE,
       base::Bind(&ServiceWorkerDatabase::PurgeUncommittedResourceIds,
@@ -758,10 +770,6 @@ void ServiceWorkerStorage::Disable() {
     disk_cache_->Disable();
 }
 
-bool ServiceWorkerStorage::IsDisabled() const {
-  return state_ == DISABLED;
-}
-
 void ServiceWorkerStorage::PurgeResources(const ResourceList& resources) {
   if (!has_checked_for_stale_resources_)
     DeleteStaleResources();
@@ -771,7 +779,7 @@ void ServiceWorkerStorage::PurgeResources(const ResourceList& resources) {
 ServiceWorkerStorage::ServiceWorkerStorage(
     const base::FilePath& path,
     base::WeakPtr<ServiceWorkerContextCore> context,
-    scoped_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager,
+    std::unique_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager,
     const scoped_refptr<base::SingleThreadTaskRunner>& disk_cache_thread,
     storage::QuotaManagerProxy* quota_manager_proxy,
     storage::SpecialStoragePolicy* special_storage_policy)
@@ -832,7 +840,7 @@ bool ServiceWorkerStorage::LazyInitialize(const base::Closure& callback) {
 }
 
 void ServiceWorkerStorage::DidReadInitialData(
-    scoped_ptr<InitialData> data,
+    std::unique_ptr<InitialData> data,
     ServiceWorkerDatabase::Status status) {
   DCHECK(data);
   DCHECK_EQ(INITIALIZING, state_);
@@ -971,7 +979,8 @@ void ServiceWorkerStorage::DidGetRegistrations(
   if (status != ServiceWorkerDatabase::STATUS_OK &&
       status != ServiceWorkerDatabase::STATUS_ERROR_NOT_FOUND) {
     ScheduleDeleteAndStartOver();
-    callback.Run(std::vector<scoped_refptr<ServiceWorkerRegistration>>());
+    callback.Run(DatabaseStatusToStatusCode(status),
+                 std::vector<scoped_refptr<ServiceWorkerRegistration>>());
     return;
   }
 
@@ -994,7 +1003,7 @@ void ServiceWorkerStorage::DidGetRegistrations(
     }
   }
 
-  callback.Run(registrations);
+  callback.Run(SERVICE_WORKER_OK, registrations);
 }
 
 void ServiceWorkerStorage::DidGetRegistrationsInfos(
@@ -1006,7 +1015,8 @@ void ServiceWorkerStorage::DidGetRegistrationsInfos(
   if (status != ServiceWorkerDatabase::STATUS_OK &&
       status != ServiceWorkerDatabase::STATUS_ERROR_NOT_FOUND) {
     ScheduleDeleteAndStartOver();
-    callback.Run(std::vector<ServiceWorkerRegistrationInfo>());
+    callback.Run(DatabaseStatusToStatusCode(status),
+                 std::vector<ServiceWorkerRegistrationInfo>());
     return;
   }
 
@@ -1063,7 +1073,7 @@ void ServiceWorkerStorage::DidGetRegistrationsInfos(
     }
   }
 
-  callback.Run(infos);
+  callback.Run(SERVICE_WORKER_OK, infos);
 }
 
 void ServiceWorkerStorage::DidStoreRegistration(
@@ -1228,6 +1238,7 @@ ServiceWorkerStorage::GetOrCreateRegistration(
         ServiceWorkerVersion::ACTIVATED : ServiceWorkerVersion::INSTALLED);
     version->script_cache_map()->SetResources(resources);
     version->set_foreign_fetch_scopes(data.foreign_fetch_scopes);
+    version->set_foreign_fetch_origins(data.foreign_fetch_origins);
   }
 
   if (version->status() == ServiceWorkerVersion::ACTIVATED)
@@ -1274,11 +1285,15 @@ ServiceWorkerStorage::FindInstallingRegistrationForId(int64_t registration_id) {
 }
 
 ServiceWorkerDiskCache* ServiceWorkerStorage::disk_cache() {
-  DCHECK_EQ(INITIALIZED, state_);
+  DCHECK(INITIALIZED == state_ || DISABLED == state_) << state_;
   if (disk_cache_)
     return disk_cache_.get();
-
   disk_cache_.reset(new ServiceWorkerDiskCache);
+
+  if (IsDisabled()) {
+    disk_cache_->Disable();
+    return disk_cache_.get();
+  }
 
   base::FilePath path = GetDiskCachePath();
   if (path.empty()) {
@@ -1455,7 +1470,7 @@ void ServiceWorkerStorage::ReadInitialDataFromDB(
     scoped_refptr<base::SequencedTaskRunner> original_task_runner,
     const InitializeCallback& callback) {
   DCHECK(database);
-  scoped_ptr<ServiceWorkerStorage::InitialData> data(
+  std::unique_ptr<ServiceWorkerStorage::InitialData> data(
       new ServiceWorkerStorage::InitialData());
 
   ServiceWorkerDatabase::Status status =
@@ -1685,6 +1700,10 @@ void ServiceWorkerStorage::DeleteAllDataForOriginsFromDB(
 
   std::vector<int64_t> newly_purgeable_resources;
   database->DeleteAllDataForOrigins(origins, &newly_purgeable_resources);
+}
+
+bool ServiceWorkerStorage::IsDisabled() const {
+  return state_ == DISABLED;
 }
 
 // TODO(nhiroki): The corruption recovery should not be scheduled if the error

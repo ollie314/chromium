@@ -12,7 +12,6 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile_io_data.h"
@@ -20,6 +19,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "net/base/network_delegate.h"
@@ -53,8 +53,8 @@ bool ShouldRemoveHandlersNotInOS() {
   // difference (http://crbug.com/88255).
   return false;
 #else
-  return ShellIntegration::CanSetAsDefaultProtocolClient() !=
-      ShellIntegration::SET_DEFAULT_NOT_ALLOWED;
+  return shell_integration::GetDefaultWebClientSetPermission() !=
+         shell_integration::SET_DEFAULT_NOT_ALLOWED;
 #endif
 }
 
@@ -69,7 +69,6 @@ class ProtocolHandlerRegistry::IOThreadDelegate
     : public base::RefCountedThreadSafe<
           ProtocolHandlerRegistry::IOThreadDelegate> {
  public:
-
   // Creates a new instance. If |enabled| is true the registry is considered
   // enabled on the IO thread.
   explicit IOThreadDelegate(bool enabled);
@@ -174,7 +173,7 @@ ProtocolHandlerRegistry::JobInterceptorFactory::~JobInterceptorFactory() {
 }
 
 void ProtocolHandlerRegistry::JobInterceptorFactory::Chain(
-    scoped_ptr<net::URLRequestJobFactory> job_factory) {
+    std::unique_ptr<net::URLRequestJobFactory> job_factory) {
   job_factory_ = std::move(job_factory);
 }
 
@@ -230,51 +229,6 @@ bool ProtocolHandlerRegistry::JobInterceptorFactory::IsSafeRedirectTarget(
   return job_factory_->IsSafeRedirectTarget(location);
 }
 
-// DefaultClientObserver ------------------------------------------------------
-
-ProtocolHandlerRegistry::DefaultClientObserver::DefaultClientObserver(
-    ProtocolHandlerRegistry* registry)
-    : worker_(NULL),
-      registry_(registry) {
-  DCHECK(registry_);
-}
-
-ProtocolHandlerRegistry::DefaultClientObserver::~DefaultClientObserver() {
-  if (worker_)
-    worker_->ObserverDestroyed();
-
-  DefaultClientObserverList::iterator iter = std::find(
-      registry_->default_client_observers_.begin(),
-      registry_->default_client_observers_.end(), this);
-  registry_->default_client_observers_.erase(iter);
-}
-
-void ProtocolHandlerRegistry::DefaultClientObserver::SetDefaultWebClientUIState(
-    ShellIntegration::DefaultWebClientUIState state) {
-  if (worker_) {
-    if (ShouldRemoveHandlersNotInOS() &&
-        (state == ShellIntegration::STATE_NOT_DEFAULT)) {
-      registry_->ClearDefault(worker_->protocol());
-    }
-  } else {
-    NOTREACHED();
-  }
-}
-
-bool ProtocolHandlerRegistry::DefaultClientObserver::
-    IsInteractiveSetDefaultPermitted() {
-  return true;
-}
-
-void ProtocolHandlerRegistry::DefaultClientObserver::SetWorker(
-    ShellIntegration::DefaultProtocolClientWorker* worker) {
-  worker_ = worker;
-}
-
-bool ProtocolHandlerRegistry::DefaultClientObserver::IsOwnedByWorker() {
-  return true;
-}
-
 // Delegate --------------------------------------------------------------------
 
 ProtocolHandlerRegistry::Delegate::~Delegate() {}
@@ -299,43 +253,34 @@ bool ProtocolHandlerRegistry::Delegate::IsExternalHandlerRegistered(
   return ProfileIOData::IsHandledProtocol(protocol);
 }
 
-ShellIntegration::DefaultProtocolClientWorker*
+scoped_refptr<shell_integration::DefaultProtocolClientWorker>
 ProtocolHandlerRegistry::Delegate::CreateShellWorker(
-    ShellIntegration::DefaultWebClientObserver* observer,
+    const shell_integration::DefaultWebClientWorkerCallback& callback,
     const std::string& protocol) {
-  return new ShellIntegration::DefaultProtocolClientWorker(observer, protocol);
-}
-
-ProtocolHandlerRegistry::DefaultClientObserver*
-ProtocolHandlerRegistry::Delegate::CreateShellObserver(
-    ProtocolHandlerRegistry* registry) {
-  return new DefaultClientObserver(registry);
+  return new shell_integration::DefaultProtocolClientWorker(callback, protocol);
 }
 
 void ProtocolHandlerRegistry::Delegate::RegisterWithOSAsDefaultClient(
     const std::string& protocol, ProtocolHandlerRegistry* registry) {
-  DefaultClientObserver* observer = CreateShellObserver(registry);
-  // The worker pointer is reference counted. While it is running the
+  // The worker pointer is reference counted. While it is running, the
   // message loops of the FILE and UI thread will hold references to it
   // and it will be automatically freed once all its tasks have finished.
-  scoped_refptr<ShellIntegration::DefaultProtocolClientWorker> worker;
-  worker = CreateShellWorker(observer, protocol);
-  observer->SetWorker(worker.get());
-  registry->default_client_observers_.push_back(observer);
-  worker->StartSetAsDefault();
+  CreateShellWorker(registry->GetDefaultWebClientCallback(protocol), protocol)
+      ->StartSetAsDefault();
 }
 
 // ProtocolHandlerRegistry -----------------------------------------------------
 
 ProtocolHandlerRegistry::ProtocolHandlerRegistry(
-    content::BrowserContext* context, Delegate* delegate)
+    content::BrowserContext* context,
+    Delegate* delegate)
     : context_(context),
       delegate_(delegate),
       enabled_(true),
       is_loading_(false),
       is_loaded_(false),
-      io_thread_delegate_(new IOThreadDelegate(enabled_)){
-}
+      io_thread_delegate_(new IOThreadDelegate(enabled_)),
+      weak_ptr_factory_(this) {}
 
 bool ProtocolHandlerRegistry::SilentlyHandleRegisterHandlerRequest(
     const ProtocolHandler& handler) {
@@ -476,12 +421,13 @@ void ProtocolHandlerRegistry::InitProtocolSettings() {
     for (ProtocolHandlerMap::const_iterator p = default_handlers_.begin();
          p != default_handlers_.end(); ++p) {
       ProtocolHandler handler = p->second;
-      DefaultClientObserver* observer = delegate_->CreateShellObserver(this);
-      scoped_refptr<ShellIntegration::DefaultProtocolClientWorker> worker;
-      worker = delegate_->CreateShellWorker(observer, handler.protocol());
-      observer->SetWorker(worker.get());
-      default_client_observers_.push_back(observer);
-      worker->StartCheckIsDefault();
+      // The worker pointer is reference counted. While it is running the
+      // message loops of the FILE and UI thread will hold references to it
+      // and it will be automatically freed once all its tasks have finished.
+      delegate_
+          ->CreateShellWorker(GetDefaultWebClientCallback(handler.protocol()),
+                              handler.protocol())
+          ->StartSetAsDefault();
     }
   }
 }
@@ -717,14 +663,8 @@ void ProtocolHandlerRegistry::Disable() {
 void ProtocolHandlerRegistry::Shutdown() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   delegate_.reset(NULL);
-  // We free these now in case there are any outstanding workers running. If
-  // we didn't free them they could respond to workers and try to update the
-  // protocol handler registry after it was deleted.
-  // Observers remove themselves from this list when they are deleted; so
-  // we delete the last item until none are left in the list.
-  while (!default_client_observers_.empty()) {
-    delete default_client_observers_.back();
-  }
+
+  weak_ptr_factory_.InvalidateWeakPtrs();
 }
 
 // static
@@ -739,7 +679,6 @@ void ProtocolHandlerRegistry::RegisterProfilePrefs(
 
 ProtocolHandlerRegistry::~ProtocolHandlerRegistry() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK(default_client_observers_.empty());
 }
 
 void ProtocolHandlerRegistry::PromoteHandler(const ProtocolHandler& handler) {
@@ -757,9 +696,10 @@ void ProtocolHandlerRegistry::Save() {
   if (is_loading_) {
     return;
   }
-  scoped_ptr<base::Value> registered_protocol_handlers(
+  std::unique_ptr<base::Value> registered_protocol_handlers(
       EncodeRegisteredHandlers());
-  scoped_ptr<base::Value> ignored_protocol_handlers(EncodeIgnoredHandlers());
+  std::unique_ptr<base::Value> ignored_protocol_handlers(
+      EncodeIgnoredHandlers());
   PrefService* prefs = user_prefs::UserPrefs::Get(context_);
 
   prefs->Set(prefs::kRegisteredProtocolHandlers,
@@ -957,6 +897,15 @@ void ProtocolHandlerRegistry::EraseHandler(const ProtocolHandler& handler,
   list->erase(std::find(list->begin(), list->end(), handler));
 }
 
+void ProtocolHandlerRegistry::OnSetAsDefaultProtocolClientFinished(
+    const std::string& protocol,
+    shell_integration::DefaultWebClientState state) {
+  if (ShouldRemoveHandlersNotInOS() &&
+      state == shell_integration::NOT_DEFAULT) {
+    ClearDefault(protocol);
+  }
+}
+
 void ProtocolHandlerRegistry::AddPredefinedHandler(
     const ProtocolHandler& handler) {
   DCHECK(!is_loaded_);  // Must be called prior InitProtocolSettings.
@@ -964,12 +913,20 @@ void ProtocolHandlerRegistry::AddPredefinedHandler(
   SetDefault(handler);
 }
 
-scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
+shell_integration::DefaultWebClientWorkerCallback
+ProtocolHandlerRegistry::GetDefaultWebClientCallback(
+    const std::string& protocol) {
+  return base::Bind(
+      &ProtocolHandlerRegistry::OnSetAsDefaultProtocolClientFinished,
+      weak_ptr_factory_.GetWeakPtr(), protocol);
+}
+
+std::unique_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
 ProtocolHandlerRegistry::CreateJobInterceptorFactory() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // this is always created on the UI thread (in profile_io's
   // InitializeOnUIThread. Any method calls must be done
   // on the IO thread (this is checked).
-  return scoped_ptr<JobInterceptorFactory>(
+  return std::unique_ptr<JobInterceptorFactory>(
       new JobInterceptorFactory(io_thread_delegate_.get()));
 }

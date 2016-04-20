@@ -16,25 +16,35 @@
 #include "base/time/time.h"
 #include "gpu/command_buffer/common/capabilities.h"
 #include "gpu/command_buffer/common/command_buffer.h"
+#include "gpu/command_buffer/common/command_buffer_id.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "mojo/public/cpp/bindings/array.h"
 #include "mojo/public/cpp/system/buffer.h"
+#include "ui/gfx/buffer_types.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/swap_result.h"
 #include "ui/mojo/geometry/geometry.mojom.h"
-
-namespace gpu {
-class CommandBufferService;
-class GpuScheduler;
-class SyncPointClient;
-class SyncPointOrderData;
-namespace gles2 {
-class GLES2Decoder;
-}
-}
 
 namespace gfx {
 class GLContext;
 class GLSurface;
+}
+
+namespace gpu {
+class CommandBufferService;
+class CommandExecutor;
+class SyncPointClient;
+class SyncPointOrderData;
+
+namespace gles2 {
+class GLES2Decoder;
+}  // namespace gles2
+
+}  // namespace gpu
+
+namespace ui {
+class NativePixmap;
 }
 
 namespace mus {
@@ -50,14 +60,18 @@ class CommandBufferDriver : base::NonThreadSafe {
     virtual ~Client();
     virtual void DidLoseContext(uint32_t reason) = 0;
     virtual void UpdateVSyncParameters(int64_t timebase, int64_t interval) = 0;
+    virtual void OnGpuCompletedSwapBuffers(gfx::SwapResult result) = 0;
   };
   CommandBufferDriver(gpu::CommandBufferNamespace command_buffer_namespace,
-                      uint64_t command_buffer_id,
+                      gpu::CommandBufferId command_buffer_id,
                       gfx::AcceleratedWidget widget,
                       scoped_refptr<GpuState> gpu_state);
   ~CommandBufferDriver();
 
-  void set_client(scoped_ptr<Client> client) { client_ = std::move(client); }
+  // The class owning the CommandBufferDriver instance (e.g. CommandBufferLocal)
+  // is itself the Client implementation so CommandBufferDriver does not own the
+  // client.
+  void set_client(Client* client) { client_ = client; }
 
   bool Initialize(mojo::ScopedSharedBufferHandle shared_state,
                   mojo::Array<int32_t> attribs);
@@ -73,6 +87,12 @@ class CommandBufferDriver : base::NonThreadSafe {
                    mojo::SizePtr size,
                    int32_t format,
                    int32_t internal_format);
+  void CreateImageNativeOzone(int32_t id,
+                              int32_t type,
+                              gfx::Size size,
+                              gfx::BufferFormat format,
+                              uint32_t internal_format,
+                              ui::NativePixmap* pixmap);
   void DestroyImage(int32_t id);
   bool IsScheduled() const;
   bool HasUnprocessedCommands() const;
@@ -81,12 +101,13 @@ class CommandBufferDriver : base::NonThreadSafe {
   gpu::CommandBufferNamespace GetNamespaceID() const {
     return command_buffer_namespace_;
   }
-  uint64_t GetCommandBufferID() const { return command_buffer_id_; }
+  gpu::CommandBufferId GetCommandBufferID() const { return command_buffer_id_; }
   gpu::SyncPointOrderData* sync_point_order_data() {
     return sync_point_order_data_.get();
   }
   uint32_t GetUnprocessedOrderNum() const;
   uint32_t GetProcessedOrderNum() const;
+  void SignalQuery(uint32_t query_id, const base::Closure& callback);
 
  private:
   bool MakeCurrent();
@@ -110,21 +131,21 @@ class CommandBufferDriver : base::NonThreadSafe {
   // Callbacks:
   void OnUpdateVSyncParameters(const base::TimeTicks timebase,
                                const base::TimeDelta interval);
-  bool OnWaitSyncPoint(uint32_t sync_point);
   void OnFenceSyncRelease(uint64_t release);
   bool OnWaitFenceSync(gpu::CommandBufferNamespace namespace_id,
-                       uint64_t command_buffer_id,
+                       gpu::CommandBufferId command_buffer_id,
                        uint64_t release);
   void OnParseError();
   void OnContextLost(uint32_t reason);
+  void OnGpuCompletedSwapBuffers(gfx::SwapResult result);
 
   const gpu::CommandBufferNamespace command_buffer_namespace_;
-  const uint64_t command_buffer_id_;
+  const gpu::CommandBufferId command_buffer_id_;
   gfx::AcceleratedWidget widget_;
-  scoped_ptr<Client> client_;
+  Client* client_;  // NOT OWNED.
   scoped_ptr<gpu::CommandBufferService> command_buffer_;
   scoped_ptr<gpu::gles2::GLES2Decoder> decoder_;
-  scoped_ptr<gpu::GpuScheduler> scheduler_;
+  scoped_ptr<gpu::CommandExecutor> executor_;
   scoped_refptr<gpu::SyncPointOrderData> sync_point_order_data_;
   scoped_ptr<gpu::SyncPointClient> sync_point_client_;
   scoped_refptr<gfx::GLContext> context_;

@@ -12,7 +12,6 @@
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_result_codes.h"
@@ -26,6 +25,7 @@
 
 #include "base/file_version_info.h"
 #include "base/win/registry.h"
+#include "chrome/common/metrics_constants_util_win.h"
 #include "chrome/installer/util/google_chrome_sxs_distribution.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/util_constants.h"
@@ -33,7 +33,7 @@
 #include "policy/policy_constants.h"
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "components/upload_list/crash_upload_list.h"
 #include "components/version_info/version_info_values.h"
 #endif
@@ -66,7 +66,7 @@ ChromeCrashReporterClient::ChromeCrashReporterClient() {}
 
 ChromeCrashReporterClient::~ChromeCrashReporterClient() {}
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_WIN)
 void ChromeCrashReporterClient::SetCrashReporterClientIdFromGUID(
     const std::string& client_guid) {
   crash_keys::SetMetricsClientIdFromGUID(client_guid);
@@ -78,7 +78,7 @@ bool ChromeCrashReporterClient::GetAlternativeCrashDumpLocation(
     base::FilePath* crash_dir) {
   // By setting the BREAKPAD_DUMP_LOCATION environment variable, an alternate
   // location to write breakpad crash dumps can be set.
-  scoped_ptr<base::Environment> env(base::Environment::Create());
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
   std::string alternate_crash_dump_location;
   if (env->GetVar("BREAKPAD_DUMP_LOCATION", &alternate_crash_dump_location)) {
     *crash_dir = base::FilePath::FromUTF8Unsafe(alternate_crash_dump_location);
@@ -99,7 +99,7 @@ void ChromeCrashReporterClient::GetProductNameAndVersion(
   DCHECK(special_build);
   DCHECK(channel_name);
 
-  scoped_ptr<FileVersionInfo> version_info(
+  std::unique_ptr<FileVersionInfo> version_info(
       FileVersionInfo::CreateFileVersionInfo(exe_path));
 
   if (version_info.get()) {
@@ -123,7 +123,7 @@ void ChromeCrashReporterClient::GetProductNameAndVersion(
 bool ChromeCrashReporterClient::ShouldShowRestartDialog(base::string16* title,
                                                         base::string16* message,
                                                         bool* is_rtl_locale) {
-  scoped_ptr<base::Environment> env(base::Environment::Create());
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
   if (!env->HasVar(env_vars::kShowRestart) ||
       !env->HasVar(env_vars::kRestartInfo) ||
       env->HasVar(env_vars::kMetroConnected)) {
@@ -149,7 +149,7 @@ bool ChromeCrashReporterClient::ShouldShowRestartDialog(base::string16* title,
 }
 
 bool ChromeCrashReporterClient::AboutToRestart() {
-  scoped_ptr<base::Environment> env(base::Environment::Create());
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
   if (!env->HasVar(env_vars::kRestartInfo))
     return false;
 
@@ -162,7 +162,7 @@ bool ChromeCrashReporterClient::GetDeferredUploadsSupported(
   Version update_version = GoogleUpdateSettings::GetGoogleUpdateVersion(
       !is_per_user_install);
   if (!update_version.IsValid() ||
-      update_version.IsOlderThan(std::string(kMinUpdateVersion)))
+      update_version < base::Version(kMinUpdateVersion))
     return false;
 
   return true;
@@ -178,10 +178,12 @@ bool ChromeCrashReporterClient::GetShouldDumpLargerDumps(
   base::string16 channel_name =
       GoogleUpdateSettings::GetChromeChannel(!is_per_user_install);
 
-  // Capture more detail in crash dumps for beta and dev channel builds.
-  return (channel_name == installer::kChromeChannelDev ||
-          channel_name == installer::kChromeChannelBeta ||
-          channel_name == GoogleChromeSxSDistribution::ChannelName());
+  // Capture more detail in crash dumps for Beta, Dev, Canary channels and
+  // if channel is unknown (e.g. Chromium or developer builds).
+  return (channel_name == installer::kChromeChannelBeta ||
+          channel_name == installer::kChromeChannelDev ||
+          channel_name == GoogleChromeSxSDistribution::ChannelName() ||
+          channel_name == installer::kChromeChannelUnknown);
 }
 
 int ChromeCrashReporterClient::GetResultCodeRespawnFailed() {
@@ -192,9 +194,7 @@ void ChromeCrashReporterClient::InitBrowserCrashDumpsRegKey() {
 #if !defined(NACL_WIN64)
   if (GetCollectStatsConsent()){
     crash_reporting_metrics_.reset(new browser_watcher::CrashReportingMetrics(
-        InstallUtil::IsChromeSxSProcess()
-            ? chrome::kBrowserCrashDumpAttemptsRegistryPathSxS
-            : chrome::kBrowserCrashDumpAttemptsRegistryPath));
+        chrome::GetBrowserCrashDumpAttemptsRegistryPath()));
   }
 #endif
 }
@@ -252,7 +252,7 @@ bool ChromeCrashReporterClient::ReportingIsEnforcedByPolicy(
 }
 #endif  // defined(OS_WIN)
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
 void ChromeCrashReporterClient::GetProductNameAndVersion(
     const char** product_name,
     const char** version) {
@@ -280,21 +280,31 @@ base::FilePath ChromeCrashReporterClient::GetReporterLogFilename() {
 
 bool ChromeCrashReporterClient::GetCrashDumpLocation(
     base::FilePath* crash_dir) {
+  // By setting the BREAKPAD_DUMP_LOCATION environment variable, an alternate
+  // location to write breakpad crash dumps can be set.
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
+  std::string alternate_crash_dump_location;
+  if (env->GetVar("BREAKPAD_DUMP_LOCATION", &alternate_crash_dump_location)) {
+    base::FilePath crash_dumps_dir_path =
+        base::FilePath::FromUTF8Unsafe(alternate_crash_dump_location);
+
+#if defined(OS_WIN)
+    // If this environment variable exists, then for the time being,
+    // short-circuit how it's handled on Windows. Honoring this
+    // variable is required in order to symbolize stack traces in
+    // Telemetry based tests: http://crbug.com/561763.
+    *crash_dir = crash_dumps_dir_path;
+    return true;
+#else
+    PathService::Override(chrome::DIR_CRASH_DUMPS, crash_dumps_dir_path);
+#endif
+  }
+
 #if defined(OS_WIN)
   // TODO(scottmg): Consider supporting --user-data-dir. See
   // https://crbug.com/565446.
   return chrome::GetDefaultCrashDumpLocation(crash_dir);
 #else
-  // By setting the BREAKPAD_DUMP_LOCATION environment variable, an alternate
-  // location to write breakpad crash dumps can be set.
-  scoped_ptr<base::Environment> env(base::Environment::Create());
-  std::string alternate_crash_dump_location;
-  if (env->GetVar("BREAKPAD_DUMP_LOCATION", &alternate_crash_dump_location)) {
-    base::FilePath crash_dumps_dir_path =
-        base::FilePath::FromUTF8Unsafe(alternate_crash_dump_location);
-    PathService::Override(chrome::DIR_CRASH_DUMPS, crash_dumps_dir_path);
-  }
-
   return PathService::Get(chrome::DIR_CRASH_DUMPS, crash_dir);
 #endif
 }
@@ -304,7 +314,7 @@ size_t ChromeCrashReporterClient::RegisterCrashKeys() {
 }
 
 bool ChromeCrashReporterClient::IsRunningUnattended() {
-  scoped_ptr<base::Environment> env(base::Environment::Create());
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
   return env->HasVar(env_vars::kHeadless);
 }
 
@@ -345,7 +355,6 @@ int ChromeCrashReporterClient::GetAndroidMinidumpDescriptor() {
 bool ChromeCrashReporterClient::EnableBreakpadForProcess(
     const std::string& process_type) {
   return process_type == switches::kRendererProcess ||
-         process_type == switches::kPluginProcess ||
          process_type == switches::kPpapiPluginProcess ||
          process_type == switches::kZygoteProcess ||
          process_type == switches::kGpuProcess;

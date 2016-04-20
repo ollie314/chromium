@@ -4,10 +4,10 @@
 
 #include "core/css/LocalFontFaceSource.h"
 
+#include "platform/Histogram.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/fonts/FontDescription.h"
 #include "platform/fonts/SimpleFontData.h"
-#include "public/platform/Platform.h"
 
 namespace blink {
 
@@ -20,7 +20,7 @@ PassRefPtr<SimpleFontData> LocalFontFaceSource::createFontData(const FontDescrip
 {
     // We don't want to check alternate font family names here, so pass true as the checkingAlternateName parameter.
     RefPtr<SimpleFontData> fontData = FontCache::fontCache()->getFontData(fontDescription, m_fontName, true);
-    m_histograms.record(fontData);
+    m_histograms.record(fontData.get());
     return fontData.release();
 }
 
@@ -29,7 +29,8 @@ void LocalFontFaceSource::LocalFontHistograms::record(bool loadSuccess)
     if (m_reported)
         return;
     m_reported = true;
-    Platform::current()->histogramEnumeration("WebFont.LocalFontUsed", loadSuccess ? 1 : 0, 2);
+    DEFINE_STATIC_LOCAL(EnumerationHistogram, localFontUsedHistogram, ("WebFont.LocalFontUsed", 2));
+    localFontUsedHistogram.count(loadSuccess ? 1 : 0);
 }
 
 } // namespace blink

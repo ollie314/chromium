@@ -8,8 +8,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -17,13 +15,13 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/host_desktop.h"
-#include "chrome/browser/ui/views/browser_dialogs.h"
 #include "chrome/browser/ui/views/new_task_manager_view.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
@@ -34,8 +32,6 @@
 #include "ui/gfx/canvas.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/label_button.h"
-#include "ui/views/controls/link.h"
-#include "ui/views/controls/link_listener.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/table/table_grouper.h"
 #include "ui/views/controls/table/table_view.h"
@@ -51,7 +47,7 @@
 #endif
 
 #if defined(OS_WIN)
-#include "chrome/browser/shell_integration.h"
+#include "chrome/browser/shell_integration_win.h"
 #include "ui/base/win/shell.h"
 #include "ui/views/win/hwnd_util.h"
 #endif
@@ -150,11 +146,10 @@ void TaskManagerTableModel::OnItemsRemoved(int start, int length) {
 class TaskManagerView : public views::ButtonListener,
                         public views::DialogDelegateView,
                         public views::TableViewObserver,
-                        public views::LinkListener,
                         public views::ContextMenuController,
                         public ui::SimpleMenuModel::Delegate {
  public:
-  explicit TaskManagerView(chrome::HostDesktopType desktop_type);
+  TaskManagerView();
   ~TaskManagerView() override;
 
   // Shows the Task Manager window, or re-activates an existing one.
@@ -189,9 +184,6 @@ class TaskManagerView : public views::ButtonListener,
   void OnDoubleClick() override;
   void OnKeyDown(ui::KeyboardCode keycode) override;
 
-  // views::LinkListener:
-  void LinkClicked(views::Link* source, int event_flags) override;
-
   // views::ContextMenuController:
   void ShowContextMenuForView(views::View* source,
                               const gfx::Point& point,
@@ -218,7 +210,6 @@ class TaskManagerView : public views::ButtonListener,
   bool GetSavedAlwaysOnTopState(bool* always_on_top) const;
 
   views::LabelButton* kill_button_;
-  views::Link* about_memory_link_;
   views::TableView* tab_table_;
   views::View* tab_table_parent_;
 
@@ -229,13 +220,10 @@ class TaskManagerView : public views::ButtonListener,
   // all possible columns, not necessarily visible
   std::vector<ui::TableColumn> columns_;
 
-  scoped_ptr<TaskManagerTableModel> table_model_;
+  std::unique_ptr<TaskManagerTableModel> table_model_;
 
   // True when the Task Manager window should be shown on top of other windows.
   bool is_always_on_top_;
-
-  // The host desktop type this task manager belongs to.
-  const chrome::HostDesktopType desktop_type_;
 
   // We need to own the text of the menu, the Windows API does not copy it.
   base::string16 always_on_top_menu_text_;
@@ -244,7 +232,7 @@ class TaskManagerView : public views::ButtonListener,
   // is reset to NULL when the window is closed.
   static TaskManagerView* instance_;
 
-  scoped_ptr<views::MenuRunner> menu_runner_;
+  std::unique_ptr<views::MenuRunner> menu_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerView);
 };
@@ -252,16 +240,13 @@ class TaskManagerView : public views::ButtonListener,
 // static
 TaskManagerView* TaskManagerView::instance_ = NULL;
 
-
-TaskManagerView::TaskManagerView(chrome::HostDesktopType desktop_type)
+TaskManagerView::TaskManagerView()
     : kill_button_(NULL),
-      about_memory_link_(NULL),
       tab_table_(NULL),
       tab_table_parent_(NULL),
       task_manager_(TaskManager::GetInstance()),
       model_(TaskManager::GetInstance()->model()),
-      is_always_on_top_(false),
-      desktop_type_(desktop_type) {
+      is_always_on_top_(false) {
   Init();
 }
 
@@ -384,9 +369,6 @@ void TaskManagerView::Init() {
   kill_button_ = new views::LabelButton(this,
       l10n_util::GetStringUTF16(IDS_TASK_MANAGER_KILL));
   kill_button_->SetStyle(views::Button::STYLE_BUTTON);
-  about_memory_link_ = new views::Link(
-      l10n_util::GetStringUTF16(IDS_TASK_MANAGER_ABOUT_MEMORY_LINK));
-  about_memory_link_->set_listener(this);
 
   // Makes sure our state is consistent.
   OnSelectionChanged();
@@ -398,20 +380,17 @@ void TaskManagerView::Init() {
 void TaskManagerView::ViewHierarchyChanged(
     const ViewHierarchyChangedDetails& details) {
   views::DialogDelegateView::ViewHierarchyChanged(details);
-  // Since we want the Kill button and the Memory Details link to show up in
-  // the same visual row as the close button, which is provided by the
-  // framework, we must add the buttons to the non-client view, which is the
-  // parent of this view. Similarly, when we're removed from the view
-  // hierarchy, we must take care to clean up those items as well.
+  // Since we want the Kill button to show up in the same visual row as the
+  // close button, which is provided by the framework, we must add it to the
+  // non-client view, which is the parent of this view. Similarly, when we're
+  // removed from the view hierarchy, we must take care to clean up that item.
   if (details.child == this) {
     if (details.is_add) {
-      details.parent->AddChildView(about_memory_link_);
       details.parent->AddChildView(kill_button_);
       tab_table_parent_ = tab_table_->CreateParentIfNecessary();
       AddChildView(tab_table_parent_);
     } else {
       details.parent->RemoveChildView(kill_button_);
-      details.parent->RemoveChildView(about_memory_link_);
     }
   }
 }
@@ -424,12 +403,6 @@ void TaskManagerView::Layout() {
   int x = width() - size.width() - horizontal_margin;
   int y_buttons = parent_bounds.bottom() - size.height() - vertical_margin;
   kill_button_->SetBounds(x, y_buttons, size.width(), size.height());
-
-  size = about_memory_link_->GetPreferredSize();
-  about_memory_link_->SetBounds(
-      horizontal_margin,
-      y_buttons + (kill_button_->height() - size.height()) / 2,
-      size.width(), size.height());
 
   gfx::Rect rect = GetLocalBounds();
   rect.Inset(horizontal_margin, views::kPanelVertMargin);
@@ -451,17 +424,12 @@ bool TaskManagerView::AcceleratorPressed(const ui::Accelerator& accelerator) {
 
 // static
 void TaskManagerView::Show(Browser* browser) {
-  // In ash we can come here through the ChromeShellDelegate. If there is no
-  // browser window at that time of the call, browser could be passed as NULL.
-  const chrome::HostDesktopType desktop_type =
-      browser ? browser->host_desktop_type() : chrome::HOST_DESKTOP_TYPE_ASH;
-
   if (instance_) {
     // If there's a Task manager window open already, just activate it.
     instance_->GetWidget()->Activate();
     return;
   }
-  instance_ = new TaskManagerView(desktop_type);
+  instance_ = new TaskManagerView();
   gfx::NativeWindow window =
       browser ? browser->window()->GetNativeWindow() : NULL;
 #if defined(USE_ASH)
@@ -477,7 +445,7 @@ void TaskManagerView::Show(Browser* browser) {
   // process.
   if (browser) {
     ui::win::SetAppIdForWindow(
-        ShellIntegration::GetChromiumModelIdForProfile(
+        shell_integration::win::GetChromiumModelIdForProfile(
             browser->profile()->GetPath()),
         views::HWNDForWidget(instance_->GetWidget()));
   }
@@ -569,7 +537,8 @@ void TaskManagerView::OnSelectionChanged() {
     }
   }
   kill_button_->SetEnabled(!selection_contains_browser_process &&
-                           !selection.empty());
+                           !selection.empty() &&
+                           TaskManager::IsEndProcessEnabled());
 }
 
 void TaskManagerView::OnDoubleClick() {
@@ -579,11 +548,6 @@ void TaskManagerView::OnDoubleClick() {
 void TaskManagerView::OnKeyDown(ui::KeyboardCode keycode) {
   if (keycode == ui::VKEY_RETURN)
     ActivateFocusedTab();
-}
-
-void TaskManagerView::LinkClicked(views::Link* source, int event_flags) {
-  DCHECK_EQ(about_memory_link_, source);
-  task_manager_->OpenAboutMemory(desktop_type_);
 }
 
 void TaskManagerView::ShowContextMenuForView(views::View* source,

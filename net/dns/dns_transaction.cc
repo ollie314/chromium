@@ -5,6 +5,7 @@
 #include "net/dns/dns_transaction.h"
 
 #include <deque>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -13,8 +14,8 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/profiler/scoped_tracker.h"
@@ -28,6 +29,7 @@
 #include "base/values.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
+#include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/dns/dns_protocol.h"
@@ -57,15 +59,15 @@ int CountLabels(const std::string& name) {
 }
 
 bool IsIPLiteral(const std::string& hostname) {
-  IPAddressNumber ip;
-  return ParseIPLiteralToNumber(hostname, &ip);
+  IPAddress ip;
+  return ip.AssignFromIPLiteral(hostname);
 }
 
-scoped_ptr<base::Value> NetLogStartCallback(
+std::unique_ptr<base::Value> NetLogStartCallback(
     const std::string* hostname,
     uint16_t qtype,
     NetLogCaptureMode /* capture_mode */) {
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("hostname", *hostname);
   dict->SetInteger("query_type", qtype);
   return std::move(dict);
@@ -102,11 +104,11 @@ class DnsAttempt {
   // Returns a Value representing the received response, along with a reference
   // to the NetLog source source of the UDP socket used.  The request must have
   // completed before this is called.
-  scoped_ptr<base::Value> NetLogResponseCallback(
+  std::unique_ptr<base::Value> NetLogResponseCallback(
       NetLogCaptureMode capture_mode) const {
     DCHECK(GetResponse()->IsValid());
 
-    scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+    std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
     dict->SetInteger("rcode", GetResponse()->rcode());
     dict->SetInteger("answer_count", GetResponse()->answer_count());
     GetSocketNetLog().source().AddToEventParameters(dict.get());
@@ -138,8 +140,8 @@ class DnsAttempt {
 class DnsUDPAttempt : public DnsAttempt {
  public:
   DnsUDPAttempt(unsigned server_index,
-                scoped_ptr<DnsSession::SocketLease> socket_lease,
-                scoped_ptr<DnsQuery> query)
+                std::unique_ptr<DnsSession::SocketLease> socket_lease,
+                std::unique_ptr<DnsQuery> query)
       : DnsAttempt(server_index),
         next_state_(STATE_NONE),
         received_malformed_response_(false),
@@ -287,10 +289,10 @@ class DnsUDPAttempt : public DnsAttempt {
   bool received_malformed_response_;
   base::TimeTicks start_time_;
 
-  scoped_ptr<DnsSession::SocketLease> socket_lease_;
-  scoped_ptr<DnsQuery> query_;
+  std::unique_ptr<DnsSession::SocketLease> socket_lease_;
+  std::unique_ptr<DnsQuery> query_;
 
-  scoped_ptr<DnsResponse> response_;
+  std::unique_ptr<DnsResponse> response_;
 
   CompletionCallback callback_;
 
@@ -300,8 +302,8 @@ class DnsUDPAttempt : public DnsAttempt {
 class DnsTCPAttempt : public DnsAttempt {
  public:
   DnsTCPAttempt(unsigned server_index,
-                scoped_ptr<StreamSocket> socket,
-                scoped_ptr<DnsQuery> query)
+                std::unique_ptr<StreamSocket> socket,
+                std::unique_ptr<DnsQuery> query)
       : DnsAttempt(server_index),
         next_state_(STATE_NONE),
         socket_(std::move(socket)),
@@ -531,13 +533,13 @@ class DnsTCPAttempt : public DnsAttempt {
   State next_state_;
   base::TimeTicks start_time_;
 
-  scoped_ptr<StreamSocket> socket_;
-  scoped_ptr<DnsQuery> query_;
+  std::unique_ptr<StreamSocket> socket_;
+  std::unique_ptr<DnsQuery> query_;
   scoped_refptr<IOBufferWithSize> length_buffer_;
   scoped_refptr<DrainableIOBuffer> buffer_;
 
   uint16_t response_length_;
-  scoped_ptr<DnsResponse> response_;
+  std::unique_ptr<DnsResponse> response_;
 
   CompletionCallback callback_;
 
@@ -705,7 +707,7 @@ class DnsTransactionImpl : public DnsTransaction,
     unsigned attempt_number = attempts_.size();
 
     uint16_t id = session_->NextQueryId();
-    scoped_ptr<DnsQuery> query;
+    std::unique_ptr<DnsQuery> query;
     if (attempts_.empty()) {
       query.reset(new DnsQuery(id, qnames_.front(), qtype_));
     } else {
@@ -719,7 +721,7 @@ class DnsTransactionImpl : public DnsTransaction,
     // Skip over known failed servers.
     server_index = session_->NextGoodServerIndex(server_index);
 
-    scoped_ptr<DnsSession::SocketLease> lease =
+    std::unique_ptr<DnsSession::SocketLease> lease =
         session_->AllocateSocket(server_index, net_log_.source());
 
     bool got_socket = !!lease.get();
@@ -727,7 +729,7 @@ class DnsTransactionImpl : public DnsTransaction,
     DnsUDPAttempt* attempt =
         new DnsUDPAttempt(server_index, std::move(lease), std::move(query));
 
-    attempts_.push_back(make_scoped_ptr(attempt));
+    attempts_.push_back(base::WrapUnique(attempt));
     ++attempts_count_;
 
     if (!got_socket)
@@ -755,12 +757,12 @@ class DnsTransactionImpl : public DnsTransaction,
 
     unsigned server_index = previous_attempt->server_index();
 
-    scoped_ptr<StreamSocket> socket(
+    std::unique_ptr<StreamSocket> socket(
         session_->CreateTCPSocket(server_index, net_log_.source()));
 
     // TODO(szym): Reuse the same id to help the server?
     uint16_t id = session_->NextQueryId();
-    scoped_ptr<DnsQuery> query =
+    std::unique_ptr<DnsQuery> query =
         previous_attempt->GetQuery()->CloneWithNewId(id);
 
     RecordLostPacketsIfAny();
@@ -772,7 +774,7 @@ class DnsTransactionImpl : public DnsTransaction,
     DnsTCPAttempt* attempt =
         new DnsTCPAttempt(server_index, std::move(socket), std::move(query));
 
-    attempts_.push_back(make_scoped_ptr(attempt));
+    attempts_.push_back(base::WrapUnique(attempt));
     ++attempts_count_;
     had_tcp_attempt_ = true;
 
@@ -954,7 +956,7 @@ class DnsTransactionImpl : public DnsTransaction,
   size_t qnames_initial_size_;
 
   // List of attempts for the current name.
-  std::vector<scoped_ptr<DnsAttempt>> attempts_;
+  std::vector<std::unique_ptr<DnsAttempt>> attempts_;
   // Count of attempts, not reset when |attempts_| vector is cleared.
   int  attempts_count_;
   bool had_tcp_attempt_;
@@ -977,12 +979,12 @@ class DnsTransactionFactoryImpl : public DnsTransactionFactory {
     session_ = session;
   }
 
-  scoped_ptr<DnsTransaction> CreateTransaction(
+  std::unique_ptr<DnsTransaction> CreateTransaction(
       const std::string& hostname,
       uint16_t qtype,
       const CallbackType& callback,
       const BoundNetLog& net_log) override {
-    return scoped_ptr<DnsTransaction>(new DnsTransactionImpl(
+    return std::unique_ptr<DnsTransaction>(new DnsTransactionImpl(
         session_.get(), hostname, qtype, callback, net_log));
   }
 
@@ -993,9 +995,9 @@ class DnsTransactionFactoryImpl : public DnsTransactionFactory {
 }  // namespace
 
 // static
-scoped_ptr<DnsTransactionFactory> DnsTransactionFactory::CreateFactory(
+std::unique_ptr<DnsTransactionFactory> DnsTransactionFactory::CreateFactory(
     DnsSession* session) {
-  return scoped_ptr<DnsTransactionFactory>(
+  return std::unique_ptr<DnsTransactionFactory>(
       new DnsTransactionFactoryImpl(session));
 }
 

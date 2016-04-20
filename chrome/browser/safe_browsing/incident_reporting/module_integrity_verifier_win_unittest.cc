@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "base/files/file_path.h"
@@ -156,8 +157,8 @@ class SafeBrowsingModuleVerifierWinTest : public testing::Test {
 
   base::ScopedNativeLibrary mem_dll_handle_;
   base::MemoryMappedFile disk_dll_handle_;
-  scoped_ptr<base::win::PEImageAsData> disk_peimage_ptr_;
-  scoped_ptr<base::win::PEImage> mem_peimage_ptr_;
+  std::unique_ptr<base::win::PEImageAsData> disk_peimage_ptr_;
+  std::unique_ptr<base::win::PEImage> mem_peimage_ptr_;
 };
 
 // Don't run these tests under AddressSanitizer as it patches the modules on

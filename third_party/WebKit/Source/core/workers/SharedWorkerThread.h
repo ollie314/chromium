@@ -40,18 +40,19 @@ class WorkerThreadStartupData;
 
 class CORE_EXPORT SharedWorkerThread : public WorkerThread {
 public:
-    static PassRefPtr<SharedWorkerThread> create(const String& name, PassRefPtr<WorkerLoaderProxy>, WorkerReportingProxy&);
+    static PassOwnPtr<SharedWorkerThread> create(const String& name, PassRefPtr<WorkerLoaderProxy>, WorkerReportingProxy&);
     ~SharedWorkerThread() override;
 
+    WorkerBackingThread& workerBackingThread() override { return *m_workerBackingThread; }
+
 protected:
-    PassRefPtrWillBeRawPtr<WorkerGlobalScope> createWorkerGlobalScope(PassOwnPtr<WorkerThreadStartupData>) override;
-    WebThreadSupportingGC& backingThread() override;
+    WorkerGlobalScope* createWorkerGlobalScope(PassOwnPtr<WorkerThreadStartupData>) override;
 
 private:
     SharedWorkerThread(const String& name, PassRefPtr<WorkerLoaderProxy>, WorkerReportingProxy&);
 
+    OwnPtr<WorkerBackingThread> m_workerBackingThread;
     String m_name;
-    OwnPtr<WebThreadSupportingGC> m_thread;
 };
 
 } // namespace blink

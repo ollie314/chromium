@@ -239,12 +239,6 @@ content::RenderView* GetRenderViewWithCheckedOrigin(const GURL& origin) {
   return render_view;
 }
 
-// Returns the current URL.
-GURL GetCurrentURL(content::RenderView* render_view) {
-  blink::WebView* webview = render_view->GetWebView();
-  return webview ? GURL(webview->mainFrame()->document().url()) : GURL();
-}
-
 }  // namespace
 
 namespace internal {  // for testing.
@@ -486,8 +480,7 @@ class SearchBoxExtensionWrapper : public v8::Extension {
   static void LogMostVisitedNavigation(
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
-  // Navigates the window to a URL represented by either a URL string or a
-  // restricted ID.
+  // Navigates the window to a URL represented by a restricted ID.
   static void NavigateContentWindow(
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
@@ -1140,39 +1133,30 @@ void SearchBoxExtensionWrapper::NavigateContentWindow(
   content::RenderView* render_view = GetRenderView();
   if (!render_view) return;
 
-  if (!args.Length()) {
+  if (!args.Length() || !args[0]->IsNumber()) {
     ThrowInvalidParameters(args);
     return;
   }
 
-  GURL destination_url;
-  bool is_most_visited_item_url = false;
-  // Check if the url is a rid
-  if (args[0]->IsNumber()) {
-    InstantMostVisitedItem item;
-    if (SearchBox::Get(render_view)->GetMostVisitedItemWithID(
-            args[0]->IntegerValue(), &item)) {
-      destination_url = item.url;
-      is_most_visited_item_url = true;
-    }
-  } else {
-    // Resolve the URL
-    const base::string16& possibly_relative_url = V8ValueToUTF16(args[0]);
-  GURL current_url = GetCurrentURL(render_view);
-    destination_url = internal::ResolveURL(current_url, possibly_relative_url);
-  }
+  InstantRestrictedID rid = args[0]->Int32Value();
+  InstantMostVisitedItem item;
+  if (!SearchBox::Get(render_view)->GetMostVisitedItemWithID(rid, &item))
+    return;
+
+  GURL destination_url = item.url;
 
   DVLOG(1) << render_view << " NavigateContentWindow: " << destination_url;
 
-  // Navigate the main frame.
+  // Navigate the main frame. Note that the security checks are enforced by the
+  // browser process in InstantService::IsValidURLForNavigation(), but some
+  // simple checks here are useful for avoiding unnecessary IPCs.
   if (destination_url.is_valid() &&
       !destination_url.SchemeIs(url::kJavaScriptScheme)) {
     WindowOpenDisposition disposition = CURRENT_TAB;
     if (args[1]->IsNumber()) {
       disposition = (WindowOpenDisposition) args[1]->Uint32Value();
     }
-    SearchBox::Get(render_view)->NavigateToURL(destination_url, disposition,
-                                               is_most_visited_item_url);
+    SearchBox::Get(render_view)->NavigateToURL(destination_url, disposition);
   }
 }
 

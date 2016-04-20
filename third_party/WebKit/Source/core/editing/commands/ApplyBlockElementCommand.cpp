@@ -55,7 +55,7 @@ ApplyBlockElementCommand::ApplyBlockElementCommand(Document& document, const Qua
 {
 }
 
-void ApplyBlockElementCommand::doApply()
+void ApplyBlockElementCommand::doApply(EditingState* editingState)
 {
     if (!endingSelection().rootEditableElement())
         return;
@@ -83,43 +83,49 @@ void ApplyBlockElementCommand::doApply()
     VisibleSelection selection = selectionForParagraphIteration(endingSelection());
     VisiblePosition startOfSelection = selection.visibleStart();
     VisiblePosition endOfSelection = selection.visibleEnd();
-    ASSERT(!startOfSelection.isNull());
-    ASSERT(!endOfSelection.isNull());
-    RefPtrWillBeRawPtr<ContainerNode> startScope = nullptr;
+    DCHECK(!startOfSelection.isNull());
+    DCHECK(!endOfSelection.isNull());
+    ContainerNode* startScope = nullptr;
     int startIndex = indexForVisiblePosition(startOfSelection, startScope);
-    RefPtrWillBeRawPtr<ContainerNode> endScope = nullptr;
+    ContainerNode* endScope = nullptr;
     int endIndex = indexForVisiblePosition(endOfSelection, endScope);
 
-    formatSelection(startOfSelection, endOfSelection);
+    formatSelection(startOfSelection, endOfSelection, editingState);
+    if (editingState->isAborted())
+        return;
 
     document().updateLayoutIgnorePendingStylesheets();
 
-    ASSERT(startScope == endScope);
-    ASSERT(startIndex >= 0);
-    ASSERT(startIndex <= endIndex);
+    DCHECK_EQ(startScope, endScope);
+    DCHECK_GE(startIndex, 0);
+    DCHECK_LE(startIndex, endIndex);
     if (startScope == endScope && startIndex >= 0 && startIndex <= endIndex) {
-        VisiblePosition start(visiblePositionForIndex(startIndex, startScope.get()));
-        VisiblePosition end(visiblePositionForIndex(endIndex, endScope.get()));
+        VisiblePosition start(visiblePositionForIndex(startIndex, startScope));
+        VisiblePosition end(visiblePositionForIndex(endIndex, endScope));
         if (start.isNotNull() && end.isNotNull())
             setEndingSelection(VisibleSelection(start, end, endingSelection().isDirectional()));
     }
 }
 
-void ApplyBlockElementCommand::formatSelection(const VisiblePosition& startOfSelection, const VisiblePosition& endOfSelection)
+void ApplyBlockElementCommand::formatSelection(const VisiblePosition& startOfSelection, const VisiblePosition& endOfSelection, EditingState* editingState)
 {
     // Special case empty unsplittable elements because there's nothing to split
     // and there's nothing to move.
     Position start = mostForwardCaretPosition(startOfSelection.deepEquivalent());
     if (isAtUnsplittableElement(start)) {
-        RefPtrWillBeRawPtr<HTMLElement> blockquote = createBlockElement();
-        insertNodeAt(blockquote, start);
-        RefPtrWillBeRawPtr<HTMLBRElement> placeholder = HTMLBRElement::create(document());
-        appendNode(placeholder, blockquote);
-        setEndingSelection(VisibleSelection(positionBeforeNode(placeholder.get()), TextAffinity::Downstream, endingSelection().isDirectional()));
+        HTMLElement* blockquote = createBlockElement();
+        insertNodeAt(blockquote, start, editingState);
+        if (editingState->isAborted())
+            return;
+        HTMLBRElement* placeholder = HTMLBRElement::create(document());
+        appendNode(placeholder, blockquote, editingState);
+        if (editingState->isAborted())
+            return;
+        setEndingSelection(VisibleSelection(positionBeforeNode(placeholder), TextAffinity::Downstream, endingSelection().isDirectional()));
         return;
     }
 
-    RefPtrWillBeRawPtr<HTMLElement> blockquoteForNextIndent = nullptr;
+    HTMLElement* blockquoteForNextIndent = nullptr;
     VisiblePosition endOfCurrentParagraph = endOfParagraph(startOfSelection);
     VisiblePosition endOfLastParagraph = endOfParagraph(endOfSelection);
     VisiblePosition endAfterSelection = endOfParagraph(nextPositionOf(endOfLastParagraph));
@@ -137,7 +143,9 @@ void ApplyBlockElementCommand::formatSelection(const VisiblePosition& startOfSel
         Node* enclosingCell = enclosingNodeOfType(start, &isTableCell);
         VisiblePosition endOfNextParagraph = endOfNextParagrahSplittingTextNodesIfNeeded(endOfCurrentParagraph, start, end);
 
-        formatRange(start, end, m_endOfLastParagraph, blockquoteForNextIndent);
+        formatRange(start, end, m_endOfLastParagraph, blockquoteForNextIndent, editingState);
+        if (editingState->isAborted())
+            return;
 
         // Don't put the next paragraph in the blockquote we just created for this paragraph unless
         // the next paragraph is in the same cell.
@@ -147,11 +155,11 @@ void ApplyBlockElementCommand::formatSelection(const VisiblePosition& startOfSel
         // indentIntoBlockquote could move more than one paragraph if the paragraph
         // is in a list item or a table. As a result, endAfterSelection could refer to a position
         // no longer in the document.
-        if (endAfterSelection.isNotNull() && !endAfterSelection.deepEquivalent().inDocument())
+        if (endAfterSelection.isNotNull() && !endAfterSelection.deepEquivalent().inShadowIncludingDocument())
             break;
         // Sanity check: Make sure our moveParagraph calls didn't remove endOfNextParagraph.deepEquivalent().anchorNode()
         // If somehow, e.g. mutation event handler, we did, return to prevent crashes.
-        if (endOfNextParagraph.isNotNull() && !endOfNextParagraph.deepEquivalent().inDocument())
+        if (endOfNextParagraph.isNotNull() && !endOfNextParagraph.deepEquivalent().inShadowIncludingDocument())
             return;
         endOfCurrentParagraph = endOfNextParagraph;
     }
@@ -184,7 +192,7 @@ void ApplyBlockElementCommand::rangeForParagraphSplittingTextNodesIfNeeded(const
     start = startOfParagraph(endOfCurrentParagraph).deepEquivalent();
     end = endOfCurrentParagraph.deepEquivalent();
 
-    document().updateLayoutTreeIfNeeded();
+    document().updateLayoutTree();
 
     bool isStartAndEndOnSameNode = false;
     if (const ComputedStyle* startStyle = computedStyleOfEnclosingTextNode(start)) {
@@ -192,10 +200,10 @@ void ApplyBlockElementCommand::rangeForParagraphSplittingTextNodesIfNeeded(const
         bool isStartAndEndOfLastParagraphOnSameNode = computedStyleOfEnclosingTextNode(m_endOfLastParagraph) && start.computeContainerNode() == m_endOfLastParagraph.computeContainerNode();
 
         // Avoid obtanining the start of next paragraph for start
-        // TODO(yosin) We should use |PositionMoveType::Character| for
+        // TODO(yosin) We should use |PositionMoveType::CodePoint| for
         // |previousPositionOf()|.
-        if (startStyle->preserveNewline() && isNewLineAtPosition(start) && !isNewLineAtPosition(previousPositionOf(start, PositionMoveType::CodePoint)) && start.offsetInContainerNode() > 0)
-            start = startOfParagraph(createVisiblePosition(previousPositionOf(end, PositionMoveType::CodePoint))).deepEquivalent();
+        if (startStyle->preserveNewline() && isNewLineAtPosition(start) && !isNewLineAtPosition(previousPositionOf(start, PositionMoveType::CodeUnit)) && start.offsetInContainerNode() > 0)
+            start = startOfParagraph(createVisiblePosition(previousPositionOf(end, PositionMoveType::CodeUnit))).deepEquivalent();
 
         // If start is in the middle of a text node, split.
         if (!startStyle->collapseWhiteSpace() && start.offsetInContainerNode() > 0) {
@@ -204,26 +212,26 @@ void ApplyBlockElementCommand::rangeForParagraphSplittingTextNodesIfNeeded(const
             splitTextNode(startText, startOffset);
             start = firstPositionInNode(startText);
             if (isStartAndEndOnSameNode) {
-                ASSERT(end.offsetInContainerNode() >= startOffset);
+                DCHECK_GE(end.offsetInContainerNode(), startOffset);
                 end = Position(startText, end.offsetInContainerNode() - startOffset);
             }
             if (isStartAndEndOfLastParagraphOnSameNode) {
-                ASSERT(m_endOfLastParagraph.offsetInContainerNode() >= startOffset);
+                DCHECK_GE(m_endOfLastParagraph.offsetInContainerNode(), startOffset);
                 m_endOfLastParagraph = Position(startText, m_endOfLastParagraph.offsetInContainerNode() - startOffset);
             }
         }
     }
 
-    document().updateLayoutTreeIfNeeded();
+    document().updateLayoutTree();
 
     if (const ComputedStyle* endStyle = computedStyleOfEnclosingTextNode(end)) {
         bool isEndAndEndOfLastParagraphOnSameNode = computedStyleOfEnclosingTextNode(m_endOfLastParagraph) && end.anchorNode() == m_endOfLastParagraph.anchorNode();
         // Include \n at the end of line if we're at an empty paragraph
         if (endStyle->preserveNewline() && start == end && end.offsetInContainerNode() < end.computeContainerNode()->maxCharacterOffset()) {
             int endOffset = end.offsetInContainerNode();
-            // TODO(yosin) We should use |PositionMoveType::Character| for
+            // TODO(yosin) We should use |PositionMoveType::CodePoint| for
             // |previousPositionOf()|.
-            if (!isNewLineAtPosition(previousPositionOf(end, PositionMoveType::CodePoint)) && isNewLineAtPosition(end))
+            if (!isNewLineAtPosition(previousPositionOf(end, PositionMoveType::CodeUnit)) && isNewLineAtPosition(end))
                 end = Position(end.computeContainerNode(), endOffset + 1);
             if (isEndAndEndOfLastParagraphOnSameNode && end.offsetInContainerNode() >= m_endOfLastParagraph.offsetInContainerNode())
                 m_endOfLastParagraph = end;
@@ -231,7 +239,7 @@ void ApplyBlockElementCommand::rangeForParagraphSplittingTextNodesIfNeeded(const
 
         // If end is in the middle of a text node, split.
         if (endStyle->userModify() != READ_ONLY && !endStyle->collapseWhiteSpace() && end.offsetInContainerNode() && end.offsetInContainerNode() < end.computeContainerNode()->maxCharacterOffset()) {
-            RefPtrWillBeRawPtr<Text> endContainer = toText(end.computeContainerNode());
+            Text* endContainer = toText(end.computeContainerNode());
             splitTextNode(endContainer, end.offsetInContainerNode());
             if (isStartAndEndOnSameNode)
                 start = firstPositionInOrBeforeNode(endContainer->previousSibling());
@@ -254,8 +262,8 @@ VisiblePosition ApplyBlockElementCommand::endOfNextParagrahSplittingTextNodesIfN
     if (!style)
         return endOfNextParagraph;
 
-    RefPtrWillBeRawPtr<Text> text = toText(position.computeContainerNode());
-    if (!style->preserveNewline() || !position.offsetInContainerNode() || !isNewLineAtPosition(firstPositionInNode(text.get())))
+    Text* text = toText(position.computeContainerNode());
+    if (!style->preserveNewline() || !position.offsetInContainerNode() || !isNewLineAtPosition(firstPositionInNode(text)))
         return endOfNextParagraph;
 
     // \n at the beginning of the text node immediately following the current paragraph is trimmed by moveParagraphWithClones.
@@ -264,11 +272,11 @@ VisiblePosition ApplyBlockElementCommand::endOfNextParagrahSplittingTextNodesIfN
     splitTextNode(text, 1);
 
     if (text == start.computeContainerNode() && text->previousSibling() && text->previousSibling()->isTextNode()) {
-        ASSERT(start.offsetInContainerNode() < position.offsetInContainerNode());
+        DCHECK_LT(start.offsetInContainerNode(), position.offsetInContainerNode());
         start = Position(toText(text->previousSibling()), start.offsetInContainerNode());
     }
     if (text == end.computeContainerNode() && text->previousSibling() && text->previousSibling()->isTextNode()) {
-        ASSERT(end.offsetInContainerNode() < position.offsetInContainerNode());
+        DCHECK_LT(end.offsetInContainerNode(), position.offsetInContainerNode());
         end = Position(toText(text->previousSibling()), end.offsetInContainerNode());
     }
     if (text == m_endOfLastParagraph.computeContainerNode()) {
@@ -278,19 +286,19 @@ VisiblePosition ApplyBlockElementCommand::endOfNextParagrahSplittingTextNodesIfN
                 && static_cast<unsigned>(m_endOfLastParagraph.offsetInContainerNode()) <= toText(text->previousSibling())->length())
                 m_endOfLastParagraph = Position(toText(text->previousSibling()), m_endOfLastParagraph.offsetInContainerNode());
         } else {
-            m_endOfLastParagraph = Position(text.get(), m_endOfLastParagraph.offsetInContainerNode() - 1);
+            m_endOfLastParagraph = Position(text, m_endOfLastParagraph.offsetInContainerNode() - 1);
         }
     }
 
-    return createVisiblePosition(Position(text.get(), position.offsetInContainerNode() - 1));
+    return createVisiblePosition(Position(text, position.offsetInContainerNode() - 1));
 }
 
-PassRefPtrWillBeRawPtr<HTMLElement> ApplyBlockElementCommand::createBlockElement() const
+HTMLElement* ApplyBlockElementCommand::createBlockElement() const
 {
-    RefPtrWillBeRawPtr<HTMLElement> element = createHTMLElement(document(), m_tagName);
+    HTMLElement* element = createHTMLElement(document(), m_tagName);
     if (m_inlineStyle.length())
         element->setAttribute(styleAttr, m_inlineStyle);
-    return element.release();
+    return element;
 }
 
 DEFINE_TRACE(ApplyBlockElementCommand)
@@ -299,4 +307,4 @@ DEFINE_TRACE(ApplyBlockElementCommand)
     CompositeEditCommand::trace(visitor);
 }
 
-}
+} // namespace blink

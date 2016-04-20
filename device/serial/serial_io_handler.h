@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/files/file.h"
 #include "base/macros.h"
@@ -50,21 +52,31 @@ class SerialIoHandler : public base::NonThreadSafe,
       scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner,
       dbus::FileDescriptor fd);
 
+  // Signals that the permission broker failed to open the port.
+  void OnPathOpenError(
+      scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner,
+      const std::string& error_name,
+      const std::string& error_message);
+
   // Validates the file descriptor provided by the permission broker.
   void ValidateOpenPort(
       scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner,
       dbus::FileDescriptor fd);
+
+  // Reports the open error from the permission broker.
+  void ReportPathOpenError(const std::string& error_name,
+                           const std::string& error_message);
 #endif  // defined(OS_CHROMEOS)
 
   // Performs an async Read operation. Behavior is undefined if this is called
   // while a Read is already pending. Otherwise, the Done or DoneWithError
   // method on |buffer| will eventually be called with a result.
-  void Read(scoped_ptr<WritableBuffer> buffer);
+  void Read(std::unique_ptr<WritableBuffer> buffer);
 
   // Performs an async Write operation. Behavior is undefined if this is called
   // while a Write is already pending. Otherwise, the Done or DoneWithError
   // method on |buffer| will eventually be called with a result.
-  void Write(scoped_ptr<ReadOnlyBuffer> buffer);
+  void Write(std::unique_ptr<ReadOnlyBuffer> buffer);
 
   // Indicates whether or not a read is currently pending.
   bool IsReadPending() const;
@@ -228,11 +240,11 @@ class SerialIoHandler : public base::NonThreadSafe,
   // Currently applied connection options.
   serial::ConnectionOptions options_;
 
-  scoped_ptr<WritableBuffer> pending_read_buffer_;
+  std::unique_ptr<WritableBuffer> pending_read_buffer_;
   serial::ReceiveError read_cancel_reason_;
   bool read_canceled_;
 
-  scoped_ptr<ReadOnlyBuffer> pending_write_buffer_;
+  std::unique_ptr<ReadOnlyBuffer> pending_write_buffer_;
   serial::SendError write_cancel_reason_;
   bool write_canceled_;
 

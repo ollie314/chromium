@@ -7,6 +7,8 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/macros.h"
 #include "sql/connection.h"
 
@@ -25,31 +27,31 @@ namespace sql {
 // not accidentally disrupt the restored data.
 //
 // {
-//   scoped_ptr<sql::Recovery> r =
+//   std::unique_ptr<sql::Recovery> r =
 //       sql::Recovery::Begin(orig_db, orig_db_path);
 //   if (r) {
 //     // Create the schema to recover to.  On failure, clear the
 //     // database.
 //     if (!r.db()->Execute(kCreateSchemaSql)) {
-//       sql::Recovery::Unrecoverable(r.Pass());
+//       sql::Recovery::Unrecoverable(std::move(r));
 //       return;
 //     }
 //
 //     // Recover data in "mytable".
 //     size_t rows_recovered = 0;
 //     if (!r.AutoRecoverTable("mytable", 0, &rows_recovered)) {
-//       sql::Recovery::Unrecoverable(r.Pass());
+//       sql::Recovery::Unrecoverable(std::move(r));
 //       return;
 //     }
 //
 //     // Manually cleanup additional constraints.
 //     if (!r.db()->Execute(kCleanupSql)) {
-//       sql::Recovery::Unrecoverable(r.Pass());
+//       sql::Recovery::Unrecoverable(std::move(r));
 //       return;
 //     }
 //
 //     // Commit the recovered data to the original database file.
-//     sql::Recovery::Recovered(r.Pass());
+//     sql::Recovery::Recovered(std::move(r));
 //   }
 // }
 //
@@ -80,9 +82,9 @@ class SQL_EXPORT Recovery {
   // TODO(shess): Later versions of SQLite allow extracting the path
   // from the connection.
   // TODO(shess): Allow specifying the connection point?
-  static scoped_ptr<Recovery> Begin(
-      Connection* connection,
-      const base::FilePath& db_path) WARN_UNUSED_RESULT;
+  static std::unique_ptr<Recovery> Begin(Connection* connection,
+                                         const base::FilePath& db_path)
+      WARN_UNUSED_RESULT;
 
   // Mark recovery completed by replicating the recovery database over
   // the original database, then closing the recovery database.  The
@@ -95,11 +97,11 @@ class SQL_EXPORT Recovery {
   // TODO(shess): At this time, this function can fail while leaving
   // the original database intact.  Figure out which failure cases
   // should go to RazeAndClose() instead.
-  static bool Recovered(scoped_ptr<Recovery> r) WARN_UNUSED_RESULT;
+  static bool Recovered(std::unique_ptr<Recovery> r) WARN_UNUSED_RESULT;
 
   // Indicate that the database is unrecoverable.  The original
   // database is razed, and the handle poisoned.
-  static void Unrecoverable(scoped_ptr<Recovery> r);
+  static void Unrecoverable(std::unique_ptr<Recovery> r);
 
   // When initially developing recovery code, sometimes the possible
   // database states are not well-understood without further
@@ -107,7 +109,7 @@ class SQL_EXPORT Recovery {
   // database.
   // NOTE(shess): Only call this when adding recovery support.  In the
   // steady state, all databases should progress to recovered or razed.
-  static void Rollback(scoped_ptr<Recovery> r);
+  static void Rollback(std::unique_ptr<Recovery> r);
 
   // Handle to the temporary recovery database.
   sql::Connection* db() { return &recover_db_; }
@@ -115,12 +117,11 @@ class SQL_EXPORT Recovery {
   // Attempt to recover the named table from the corrupt database into
   // the recovery database using a temporary recover virtual table.
   // The virtual table schema is derived from the named table's schema
-  // in database [main].  Data is copied using INSERT OR REPLACE, so
-  // duplicates overwrite each other.
+  // in database [main].  Data is copied using INSERT OR IGNORE, so
+  // duplicates are dropped.
   //
-  // |extend_columns| allows recovering tables which have excess
-  // columns relative to the target schema.  The recover virtual table
-  // treats more data than specified as a sign of corruption.
+  // If the source table has fewer columns than the target, the target
+  // DEFAULT value will be used for those columns.
   //
   // Returns true if all operations succeeded, with the number of rows
   // recovered in |*rows_recovered|.
@@ -134,9 +135,7 @@ class SQL_EXPORT Recovery {
   //
   // TODO(shess): Flag for INSERT OR REPLACE vs IGNORE.
   // TODO(shess): Handle extended table names.
-  bool AutoRecoverTable(const char* table_name,
-                        size_t extend_columns,
-                        size_t* rows_recovered);
+  bool AutoRecoverTable(const char* table_name, size_t* rows_recovered);
 
   // Setup a recover virtual table at temp.recover_meta, reading from
   // corrupt.meta.  Returns true if created.

@@ -5,6 +5,8 @@
 #ifndef CONTENT_BROWSER_DEVTOOLS_PROTOCOL_DEVTOOLS_PROTOCOL_CLIENT_H_
 #define CONTENT_BROWSER_DEVTOOLS_PROTOCOL_DEVTOOLS_PROTOCOL_CLIENT_H_
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/values.h"
@@ -64,9 +66,9 @@ class DevToolsProtocolClient {
 
  protected:
   void SendSuccess(DevToolsCommandId command_id,
-                   scoped_ptr<base::DictionaryValue> params);
+                   std::unique_ptr<base::DictionaryValue> params);
   void SendNotification(const std::string& method,
-                        scoped_ptr<base::DictionaryValue> params);
+                        std::unique_ptr<base::DictionaryValue> params);
 
  private:
   friend class DevToolsProtocolDispatcher;

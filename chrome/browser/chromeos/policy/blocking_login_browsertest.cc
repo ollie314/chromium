@@ -81,6 +81,11 @@ struct BlockingLoginTestParam {
   const bool enroll_device;
 };
 
+// TODO(atwilson): This test is completely broken - it originally was built
+// when we made an entirely different set of network calls on startup. As a
+// result it generates random failures in startup network requests, then waits
+// to see if the profile finishes loading which is not at all what it is
+// intended to test. We need to fix this test or remove it (crbug.com/580537).
 class BlockingLoginTest
     : public OobeBaseTest,
       public content::NotificationObserver,
@@ -95,6 +100,9 @@ class BlockingLoginTest
     command_line->AppendSwitchASCII(
         policy::switches::kDeviceManagementUrl,
         embedded_test_server()->GetURL("/device_management").spec());
+
+    command_line->AppendSwitch(
+        chromeos::switches::kAllowFailedPolicyFetchForTest);
   }
 
   void SetUpOnMainThread() override {
@@ -162,9 +170,9 @@ class BlockingLoginTest
   // Handles an HTTP request sent to the test server. This handler either
   // uses a canned response in |responses_| if the request path matches one
   // of the URLs that we mock, otherwise this handler delegates to |fake_gaia_|.
-  scoped_ptr<net::test_server::HttpResponse> HandleRequest(
+  std::unique_ptr<net::test_server::HttpResponse> HandleRequest(
       const net::test_server::HttpRequest& request) {
-    scoped_ptr<net::test_server::HttpResponse> response;
+    std::unique_ptr<net::test_server::HttpResponse> response;
 
     GaiaUrls* gaia = GaiaUrls::GetInstance();
     if (request.relative_url == gaia->client_login_to_oauth2_url().path() ||

@@ -16,7 +16,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
@@ -28,7 +27,7 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/shell_integration.h"
+#include "chrome/browser/shell_integration_win.h"
 #include "chrome/browser/ui/app_list/app_list_util.h"
 #include "chrome/browser/ui/ash/app_list/app_list_service_ash.h"
 #include "chrome/browser/ui/views/app_list/win/activation_tracker_win.h"
@@ -40,6 +39,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/installer/util/browser_distribution.h"
+#include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
@@ -55,23 +55,13 @@
 #endif  // GOOGLE_CHROME_BUILD
 
 // static
-AppListService* AppListService::Get(chrome::HostDesktopType desktop_type) {
-  if (desktop_type == chrome::HOST_DESKTOP_TYPE_ASH) {
-    DCHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kViewerConnect));
-    return AppListServiceAsh::GetInstance();
-  }
-
+AppListService* AppListService::Get() {
   return AppListServiceWin::GetInstance();
 }
 
 // static
 void AppListService::InitAll(Profile* initial_profile,
                              const base::FilePath& profile_path) {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kViewerConnect))
-    AppListServiceAsh::GetInstance()->Init(initial_profile);
-
   AppListServiceWin::GetInstance()->Init(initial_profile);
 }
 
@@ -84,18 +74,14 @@ int GetAppListIconIndex() {
   return dist->GetIconIndex(BrowserDistribution::SHORTCUT_APP_LAUNCHER);
 }
 
-base::string16 GetAppListIconPath() {
+base::FilePath GetAppListIconPath() {
   base::FilePath icon_path;
   if (!PathService::Get(base::FILE_EXE, &icon_path)) {
     NOTREACHED();
-    return base::string16();
+    return base::FilePath();
   }
 
-  std::stringstream ss;
-  ss << "," << GetAppListIconIndex();
-  base::string16 result = icon_path.value();
-  result.append(base::UTF8ToUTF16(ss.str()));
-  return result;
+  return icon_path;
 }
 
 base::string16 GetAppListShortcutName() {
@@ -129,7 +115,8 @@ base::string16 GetAppModelId() {
         command_line->GetSwitchValuePath(switches::kUserDataDir).AppendASCII(
             chrome::kInitialProfile);
   }
-  return ShellIntegration::GetAppListAppModelIdForProfile(initial_profile_path);
+  return shell_integration::win::GetAppListAppModelIdForProfile(
+      initial_profile_path);
 }
 
 #if defined(GOOGLE_CHROME_BUILD)
@@ -165,7 +152,7 @@ void SetDidRunForNDayActiveStats() {
 // |app_model_id|. This runs on the FILE thread and not in the blocking IO
 // thread pool as there are other tasks running (also on the FILE thread)
 // which fiddle with shortcut icons
-// (ShellIntegration::MigrateWin7ShortcutsOnPath). Having different threads
+// (shell_integration::MigrateWin7ShortcutsOnPath). Having different threads
 // fiddle with the same shortcuts could cause race issues.
 void CreateAppListShortcuts(
     const base::FilePath& user_data_dir,
@@ -245,8 +232,8 @@ void SetWindowAttributes(HWND hwnd) {
   ui::win::SetRelaunchDetailsForWindow(
       relaunch.GetCommandLineString(), app_name, hwnd);
   ::SetWindowText(hwnd, app_name.c_str());
-  base::string16 icon_path = GetAppListIconPath();
-  ui::win::SetAppIconForWindow(icon_path, hwnd);
+  ui::win::SetAppIconForWindow(GetAppListIconPath(), GetAppListIconIndex(),
+                               hwnd);
 }
 
 }  // namespace
@@ -258,9 +245,8 @@ AppListServiceWin* AppListServiceWin::GetInstance() {
 }
 
 AppListServiceWin::AppListServiceWin()
-    : AppListServiceViews(scoped_ptr<AppListControllerDelegate>(
-          new AppListControllerDelegateWin(this))) {
-}
+    : AppListServiceViews(std::unique_ptr<AppListControllerDelegate>(
+          new AppListControllerDelegateWin(this))) {}
 
 AppListServiceWin::~AppListServiceWin() {
 }

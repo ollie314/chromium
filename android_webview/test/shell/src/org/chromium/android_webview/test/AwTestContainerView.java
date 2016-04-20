@@ -417,8 +417,14 @@ public class AwTestContainerView extends FrameLayout {
 
     private class NativeGLDelegate implements AwContents.NativeGLDelegate {
         @Override
-        public boolean requestDrawGL(Canvas canvas, boolean waitForCompletion,
-                View containerview) {
+        public boolean supportsDrawGLFunctorReleasedCallback() {
+            return false;
+        }
+
+        @Override
+        public boolean requestDrawGL(Canvas canvas, boolean waitForCompletion, View containerview,
+                Runnable releasedRunnable) {
+            assert releasedRunnable == null;
             if (!isBackedByHardwareView()) return false;
             mHardwareView.requestRender(canvas, waitForCompletion);
             return true;
@@ -433,11 +439,6 @@ public class AwTestContainerView extends FrameLayout {
     // TODO: AwContents could define a generic class that holds an implementation similar to
     // the one below.
     private class InternalAccessAdapter implements AwContents.InternalAccessDelegate {
-
-        @Override
-        public boolean drawChild(Canvas canvas, View child, long drawingTime) {
-            return AwTestContainerView.super.drawChild(canvas, child, drawingTime);
-        }
 
         @Override
         public boolean super_onKeyUp(int keyCode, KeyEvent event) {

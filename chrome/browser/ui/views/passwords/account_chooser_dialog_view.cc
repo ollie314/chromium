@@ -6,6 +6,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/passwords/manage_passwords_view_utils.h"
 #include "chrome/browser/ui/passwords/password_dialog_controller.h"
 #include "chrome/browser/ui/views/passwords/credentials_item_view.h"
 #include "chrome/grit/generated_resources.h"
@@ -16,33 +17,40 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/border.h"
+#include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/styled_label.h"
+#include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 
 namespace {
 
-const int kDesiredWidth = 370;
-const int kTitleHorizontalInset = 16;
-const int kTitleTopInset = 12;
+// Maximum number of accounts displayed before vertical scrolling appears.
+const size_t kMaxAccounts = 3;
+
+const int kVerticalAvatarMargin = 8;
 
 // An identifier for views::ColumnSet.
 enum ColumnSetType {
   SINGLE_VIEW_COLUMN_SET,
+  SINGLE_VIEW_COLUMN_SET_NO_PADDING,
 };
 
-// Construct a SINGLE_VIEW_COLUMN_SET ColumnSet and add it to |layout|.
-void BuildOneColumnSet(views::GridLayout* layout) {
-  views::ColumnSet* column_set = layout->AddColumnSet(SINGLE_VIEW_COLUMN_SET);
-  column_set->AddPaddingColumn(0, kTitleHorizontalInset);
+// Construct a |type| ColumnSet and add it to |layout|.
+void BuildColumnSet(ColumnSetType type, views::GridLayout* layout) {
+  views::ColumnSet* column_set = layout->AddColumnSet(type);
+  bool padding = (type == SINGLE_VIEW_COLUMN_SET);
+  if (padding)
+    column_set->AddPaddingColumn(0, views::kButtonHEdgeMarginNew);
   column_set->AddColumn(views::GridLayout::FILL,
                         views::GridLayout::FILL,
                         1,
                         views::GridLayout::USE_PREF,
                         0,
                         0);
-  column_set->AddPaddingColumn(0, kTitleHorizontalInset);
+  if (padding)
+    column_set->AddPaddingColumn(0, views::kButtonHEdgeMarginNew);
 }
 
 views::StyledLabel::RangeStyleInfo GetLinkStyle() {
@@ -55,6 +63,34 @@ Profile* GetProfileFromWebContents(content::WebContents* web_contents) {
   if (!web_contents)
     return nullptr;
   return Profile::FromBrowserContext(web_contents->GetBrowserContext());
+}
+
+// Creates a list view of credentials in |forms|.
+views::ScrollView* CreateCredentialsView(
+    const PasswordDialogController::FormsVector& forms,
+    views::ButtonListener* button_listener,
+    net::URLRequestContextGetter* request_context) {
+  views::View* list_view = new views::View;
+  list_view->SetLayoutManager(
+      new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0));
+  int item_height = 0;
+  for (const auto& form : forms) {
+    std::pair<base::string16, base::string16> titles =
+        GetCredentialLabelsForAccountChooser(*form);
+    CredentialsItemView* credential_view = new CredentialsItemView(
+        button_listener, titles.first, titles.second, kButtonHoverColor,
+        form.get(), request_context);
+    credential_view->SetLowerLabelColor(kAutoSigninTextColor);
+    credential_view->SetBorder(views::Border::CreateEmptyBorder(
+        kVerticalAvatarMargin, views::kButtonHEdgeMarginNew,
+        kVerticalAvatarMargin, views::kButtonHEdgeMarginNew));
+    item_height = std::max(item_height, credential_view->GetPreferredHeight());
+    list_view->AddChildView(credential_view);
+  }
+  views::ScrollView* scroll_view = new views::ScrollView;
+  scroll_view->ClipHeightTo(0, kMaxAccounts * item_height);
+  scroll_view->SetContents(list_view);
+  return scroll_view;
 }
 
 }  // namespace
@@ -70,7 +106,7 @@ AccountChooserDialogView::AccountChooserDialogView(
 
 AccountChooserDialogView::~AccountChooserDialogView() = default;
 
-void AccountChooserDialogView::Show() {
+void AccountChooserDialogView::ShowAccountChooser() {
   InitWindow();
   constrained_window::ShowWebModalDialogViews(this, web_contents_);
 }
@@ -97,6 +133,11 @@ bool AccountChooserDialogView::ShouldShowCloseButton() const {
   return false;
 }
 
+void AccountChooserDialogView::WindowClosing() {
+  if (controller_)
+    controller_->OnCloseDialog();
+}
+
 int AccountChooserDialogView::GetDialogButtons() const {
   return ui::DIALOG_BUTTON_CANCEL;
 }
@@ -104,11 +145,6 @@ int AccountChooserDialogView::GetDialogButtons() const {
 base::string16 AccountChooserDialogView::GetDialogButtonLabel(
     ui::DialogButton button) const {
   return l10n_util::GetStringUTF16(IDS_APP_CANCEL);
-}
-
-void AccountChooserDialogView::OnClosed() {
-  if (controller_)
-    controller_->OnCloseAccountChooser();
 }
 
 gfx::Size AccountChooserDialogView::GetPreferredSize() const {
@@ -124,14 +160,15 @@ void AccountChooserDialogView::StyledLabelLinkClicked(views::StyledLabel* label,
 void AccountChooserDialogView::ButtonPressed(views::Button* sender,
                                              const ui::Event& event) {
   CredentialsItemView* view = static_cast<CredentialsItemView*>(sender);
-  controller_->OnChooseCredentials(*view->form(),
-                                   view->credential_type());
+  controller_->OnChooseCredentials(
+      *view->form(),
+      password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD);
 }
 
 void AccountChooserDialogView::InitWindow() {
   views::GridLayout* layout = new views::GridLayout(this);
   SetLayoutManager(layout);
-  BuildOneColumnSet(layout);
+  BuildColumnSet(SINGLE_VIEW_COLUMN_SET, layout);
 
   // Create the title.
   std::pair<base::string16, gfx::Range> title_content =
@@ -149,26 +186,12 @@ void AccountChooserDialogView::InitWindow() {
   layout->AddPaddingRow(0, 2*views::kRelatedControlVerticalSpacing);
 
   // Show credentials.
-  net::URLRequestContextGetter* request_context =
-      GetProfileFromWebContents(web_contents_)->GetRequestContext();
-  for (const auto& form : controller_->GetLocalForms()) {
-    const base::string16& upper_string =
-        form->display_name.empty() ? form->username_value : form->display_name;
-    base::string16 lower_string;
-    if (form->federation_url.is_empty()) {
-      if (!form->display_name.empty())
-        lower_string = form->username_value;
-    } else {
-      lower_string = l10n_util::GetStringFUTF16(
-          IDS_PASSWORDS_VIA_FEDERATION,
-          base::UTF8ToUTF16(form->federation_url.host()));
-    }
-    layout->StartRow(0, SINGLE_VIEW_COLUMN_SET);
-    layout->AddView(new CredentialsItemView(
-        this, form.get(),
-        password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD,
-        upper_string, lower_string, request_context));
-  }
+  BuildColumnSet(SINGLE_VIEW_COLUMN_SET_NO_PADDING, layout);
+  layout->StartRow(0, SINGLE_VIEW_COLUMN_SET_NO_PADDING);
+  layout->AddView(CreateCredentialsView(
+      controller_->GetLocalForms(),
+      this,
+      GetProfileFromWebContents(web_contents_)->GetRequestContext()));
   // DialogClientView adds kRelatedControlVerticalSpacing padding once more for
   // the buttons.
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);

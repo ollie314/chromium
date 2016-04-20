@@ -22,6 +22,7 @@ class BluetoothTestAndroid : public BluetoothTestBase {
 
   // Test overrides:
   void SetUp() override;
+  void TearDown() override;
 
   // BluetoothTestBase overrides:
   bool PlatformSupportsLowEnergy() override;
@@ -43,13 +44,19 @@ class BluetoothTestAndroid : public BluetoothTestBase {
                                   int properties) override;
   void RememberCharacteristicForSubsequentAction(
       BluetoothGattCharacteristic* characteristic) override;
+  void RememberCCCDescriptorForSubsequentAction(
+      BluetoothGattCharacteristic* characteristic) override;
   void SimulateGattNotifySessionStarted(
       BluetoothGattCharacteristic* characteristic) override;
+  void SimulateGattNotifySessionStartError(
+      BluetoothGattCharacteristic* characteristic,
+      BluetoothGattService::GattErrorCode error_code) override;
   void SimulateGattCharacteristicSetNotifyWillFailSynchronouslyOnce(
       BluetoothGattCharacteristic* characteristic) override;
   void SimulateGattCharacteristicChanged(
       BluetoothGattCharacteristic* characteristic,
       const std::vector<uint8_t>& value) override;
+
   void SimulateGattCharacteristicRead(
       BluetoothGattCharacteristic* characteristic,
       const std::vector<uint8_t>& value) override;
@@ -58,6 +65,7 @@ class BluetoothTestAndroid : public BluetoothTestBase {
       BluetoothGattService::GattErrorCode) override;
   void SimulateGattCharacteristicReadWillFailSynchronouslyOnce(
       BluetoothGattCharacteristic* characteristic) override;
+
   void SimulateGattCharacteristicWrite(
       BluetoothGattCharacteristic* characteristic) override;
   void SimulateGattCharacteristicWriteError(
@@ -65,10 +73,31 @@ class BluetoothTestAndroid : public BluetoothTestBase {
       BluetoothGattService::GattErrorCode) override;
   void SimulateGattCharacteristicWriteWillFailSynchronouslyOnce(
       BluetoothGattCharacteristic* characteristic) override;
+
   void SimulateGattDescriptor(BluetoothGattCharacteristic* characteristic,
                               const std::string& uuid) override;
+  void RememberDescriptorForSubsequentAction(
+      BluetoothGattDescriptor* descriptor) override;
+
+  void SimulateGattDescriptorRead(BluetoothGattDescriptor* descriptor,
+                                  const std::vector<uint8_t>& value) override;
+  void SimulateGattDescriptorReadError(
+      BluetoothGattDescriptor* descriptor,
+      BluetoothGattService::GattErrorCode) override;
+  void SimulateGattDescriptorReadWillFailSynchronouslyOnce(
+      BluetoothGattDescriptor* descriptor) override;
+
+  void SimulateGattDescriptorWrite(
+      BluetoothGattDescriptor* descriptor) override;
+  void SimulateGattDescriptorWriteError(
+      BluetoothGattDescriptor* descriptor,
+      BluetoothGattService::GattErrorCode) override;
   void SimulateGattDescriptorWriteWillFailSynchronouslyOnce(
       BluetoothGattDescriptor* descriptor) override;
+
+  // Instruct the fake adapter to throw an IllegalStateException for
+  // startScan and stopScan.
+  void ForceIllegalStateException();
 
   // Records that Java FakeBluetoothDevice connectGatt was called.
   void OnFakeBluetoothDeviceConnectGattCalled(
@@ -77,6 +106,11 @@ class BluetoothTestAndroid : public BluetoothTestBase {
 
   // Records that Java FakeBluetoothGatt disconnect was called.
   void OnFakeBluetoothGattDisconnect(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& caller);
+
+  // Records that Java FakeBluetoothGatt close was called.
+  void OnFakeBluetoothGattClose(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& caller);
 
@@ -102,13 +136,27 @@ class BluetoothTestAndroid : public BluetoothTestBase {
       const base::android::JavaParamRef<jobject>& caller,
       const base::android::JavaParamRef<jbyteArray>& value);
 
+  // Records that Java FakeBluetoothGatt readDescriptor was called.
+  void OnFakeBluetoothGattReadDescriptor(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& caller);
+
   // Records that Java FakeBluetoothGatt writeDescriptor was called.
   void OnFakeBluetoothGattWriteDescriptor(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& caller,
       const base::android::JavaParamRef<jbyteArray>& value);
 
+  // Records that Java FakeBluetoothAdapter onAdapterStateChanged was called.
+  void OnFakeAdapterStateChanged(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& caller,
+      const bool powered);
+
   base::android::ScopedJavaGlobalRef<jobject> j_fake_bluetooth_adapter_;
+
+  int gatt_open_connections_ = 0;
+  BluetoothGattDescriptor* remembered_ccc_descriptor_ = nullptr;
 };
 
 // Defines common test fixture name. Use TEST_F(BluetoothTest, YourTestName).

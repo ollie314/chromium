@@ -273,9 +273,9 @@ class TouchSelectionControllerImplTest : public ViewsTestBase {
   Widget* widget_;
 
   Textfield* textfield_;
-  scoped_ptr<TextfieldTestApi> textfield_test_api_;
-  scoped_ptr<ViewsTouchEditingControllerFactory> views_tsc_factory_;
-  scoped_ptr<aura::test::TestCursorClient> test_cursor_client_;
+  std::unique_ptr<TextfieldTestApi> textfield_test_api_;
+  std::unique_ptr<ViewsTouchEditingControllerFactory> views_tsc_factory_;
+  std::unique_ptr<aura::test::TestCursorClient> test_cursor_client_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TouchSelectionControllerImplTest);
@@ -553,13 +553,15 @@ TEST_F(TouchSelectionControllerImplTest,
   textfield_->OnGestureEvent(&tap);
 
   // Select some text such that one handle is hidden.
-  textfield_->SelectRange(gfx::Range(10, textfield_text.length()));
+  textfield_->SelectRange(
+      gfx::Range(10u, static_cast<uint32_t>(textfield_text.length())));
 
   // Check that one selection handle is hidden.
   EXPECT_FALSE(IsSelectionHandle1Visible());
   EXPECT_TRUE(IsSelectionHandle2Visible());
-  EXPECT_EQ(gfx::Range(10, textfield_text.length()),
-            textfield_->GetSelectedRange());
+  EXPECT_EQ(
+      gfx::Range(10u, static_cast<uint32_t>(textfield_text.length())),
+      textfield_->GetSelectedRange());
 
   // Drag the visible handle around and make sure the selection end point of the
   // invisible handle does not change.
@@ -683,8 +685,9 @@ TEST_F(TouchSelectionControllerImplTest,
   CreateWidget();
 
   TestTouchEditable touch_editable(widget_->GetNativeView());
-  scoped_ptr<ui::TouchEditingControllerDeprecated> touch_selection_controller(
-      ui::TouchEditingControllerDeprecated::Create(&touch_editable));
+  std::unique_ptr<ui::TouchEditingControllerDeprecated>
+      touch_selection_controller(
+          ui::TouchEditingControllerDeprecated::Create(&touch_editable));
 
   touch_editable.set_bounds(gfx::Rect(0, 0, 100, 20));
 

@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
 #include "net/base/io_buffer.h"
 #include "net/base/test_completion_callback.h"
@@ -213,7 +213,7 @@ class SequencedSocketDataTest : public testing::Test {
 
  private:
   MockConnect connect_data_;
-  scoped_ptr<SequencedSocketData> data_;
+  std::unique_ptr<SequencedSocketData> data_;
 
   const HostPortPair endpoint_;
   scoped_refptr<TransportSocketParams> tcp_params_;
@@ -234,7 +234,6 @@ SequencedSocketDataTest::SequencedSocketDataTest()
       endpoint_("www.google.com", 443),
       tcp_params_(new TransportSocketParams(
           endpoint_,
-          false,
           false,
           OnHostResolutionCallback(),
           TransportSocketParams::COMBINE_CONNECT_AND_WRITE_DEFAULT)),
@@ -262,7 +261,8 @@ void SequencedSocketDataTest::Initialize(MockRead* reads,
 
   EXPECT_EQ(OK,
             connection_.Init(
-                endpoint_.ToString(), tcp_params_, LOWEST, CompletionCallback(),
+                endpoint_.ToString(), tcp_params_, LOWEST,
+                ClientSocketPool::RespectLimits::ENABLED, CompletionCallback(),
                 reinterpret_cast<TransportClientSocketPool*>(&socket_pool_),
                 BoundNetLog()));
   sock_ = connection_.socket();

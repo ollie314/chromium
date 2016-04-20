@@ -5,10 +5,11 @@
 #include "device/bluetooth/bluetooth_device_bluez.h"
 
 #include <stdio.h>
+
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -207,9 +208,7 @@ void BluetoothDeviceBlueZ::CreateGattConnectionImpl() {
 }
 
 void BluetoothDeviceBlueZ::DisconnectGatt() {
-  // BlueZ implementation does not use the default CreateGattConnection
-  // implementation.
-  NOTIMPLEMENTED();
+  Disconnect(base::Bind(&base::DoNothing), base::Bind(&base::DoNothing));
 }
 
 std::string BluetoothDeviceBlueZ::GetAddress() const {
@@ -244,6 +243,18 @@ uint16_t BluetoothDeviceBlueZ::GetDeviceID() const {
   uint16_t device_id = 0;
   ParseModalias(object_path_, NULL, NULL, NULL, &device_id);
   return device_id;
+}
+
+uint16_t BluetoothDeviceBlueZ::GetAppearance() const {
+  bluez::BluetoothDeviceClient::Properties* properties =
+      bluez::BluezDBusManager::Get()->GetBluetoothDeviceClient()->GetProperties(
+          object_path_);
+  DCHECK(properties);
+
+  if (!properties->appearance.is_valid())
+    return kAppearanceNotPresent;
+
+  return properties->appearance.value();
 }
 
 bool BluetoothDeviceBlueZ::IsPaired() const {
@@ -551,7 +562,7 @@ void BluetoothDeviceBlueZ::GattServiceAdded(
       new BluetoothRemoteGattServiceBlueZ(adapter(), this, object_path);
 
   gatt_services_.set(service->GetIdentifier(),
-                     scoped_ptr<BluetoothGattService>(service));
+                     std::unique_ptr<BluetoothGattService>(service));
   DCHECK(service->object_path() == object_path);
   DCHECK(service->GetUUID().IsValid());
 
@@ -576,7 +587,7 @@ void BluetoothDeviceBlueZ::GattServiceRemoved(
           << "' from device: " << GetAddress();
 
   DCHECK(service->object_path() == object_path);
-  scoped_ptr<BluetoothGattService> scoped_service =
+  std::unique_ptr<BluetoothGattService> scoped_service =
       gatt_services_.take_and_erase(iter->first);
 
   DCHECK(adapter_);
@@ -635,7 +646,7 @@ void BluetoothDeviceBlueZ::OnConnect(bool after_pairing,
 
 void BluetoothDeviceBlueZ::OnCreateGattConnection(
     const GattConnectionCallback& callback) {
-  scoped_ptr<device::BluetoothGattConnection> conn(
+  std::unique_ptr<device::BluetoothGattConnection> conn(
       new BluetoothGattConnectionBlueZ(adapter_, GetAddress(), object_path_));
   callback.Run(std::move(conn));
 }

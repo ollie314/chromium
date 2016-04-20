@@ -40,8 +40,9 @@ class ManifestIconSelector {
   static GURL FindBestMatchingIcon(
       const std::vector<content::Manifest::Icon>& icons,
       int ideal_icon_size_in_dp,
-      int minimum_icon_size_in_dp,
-      const gfx::Screen* screen);
+      int minimum_icon_size_in_dp);
+
+  static int ConvertIconSizeFromDpToPx(int icon_size_in_dp);
 
  private:
   ManifestIconSelector(int ideal_icon_size_in_px,
@@ -51,9 +52,7 @@ class ManifestIconSelector {
   // Runs the algorithm to find the best matching icon in the icons listed in
   // the Manifest.
   // Returns the icon url if a suitable icon is found. An empty URL otherwise.
-  int FindBestMatchingIcon(
-      const std::vector<content::Manifest::Icon>& icons,
-      float density);
+  int FindBestMatchingIcon(const std::vector<content::Manifest::Icon>& icons);
 
   // Runs an algorithm only based on icon declared sizes. It will try to find
   // size that is the closest to preferred_icon_size_in_pixels_ but bigger than
@@ -81,6 +80,7 @@ class ManifestIconSelector {
 
   const int ideal_icon_size_in_px_;
   const int minimum_icon_size_in_px_;
+  const float density_;
 
   friend class ManifestIconSelectorTest;
 

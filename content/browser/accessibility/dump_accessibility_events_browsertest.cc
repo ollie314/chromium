@@ -75,7 +75,7 @@ class DumpAccessibilityEventsTest : public DumpAccessibilityTestBase {
 std::vector<std::string> DumpAccessibilityEventsTest::Dump() {
   WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
       shell()->web_contents());
-  scoped_ptr<AccessibilityEventRecorder> event_recorder(
+  std::unique_ptr<AccessibilityEventRecorder> event_recorder(
       AccessibilityEventRecorder::Create(
           web_contents->GetRootBrowserAccessibilityManager()));
 
@@ -87,7 +87,7 @@ std::vector<std::string> DumpAccessibilityEventsTest::Dump() {
   // This will ensure that after calling the go() function, we
   // block until we've received an accessibility event generated as
   // a result of this function.
-  scoped_ptr<AccessibilityNotificationWaiter> waiter;
+  std::unique_ptr<AccessibilityNotificationWaiter> waiter;
   waiter.reset(new AccessibilityNotificationWaiter(
       shell(), AccessibilityModeComplete, ui::AX_EVENT_NONE));
 
@@ -202,8 +202,16 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
   RunEventTest(FILE_PATH_LITERAL("inner-html-change.html"));
 }
 
+#if defined(OS_MACOSX)
+// Mac failures: http://crbug.com/598527.
+#define MAYBE_AccessibilityEventsInputTypeTextValueChanged \
+    DISABLED_AccessibilityEventsInputTypeTextValueChanged
+#else
+#define MAYBE_AccessibilityEventsInputTypeTextValueChanged \
+    AccessibilityEventsInputTypeTextValueChanged
+#endif
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
-                       AccessibilityEventsInputTypeTextValueChanged) {
+                       MAYBE_AccessibilityEventsInputTypeTextValueChanged) {
   RunEventTest(FILE_PATH_LITERAL("input-type-text-value-changed.html"));
 }
 
@@ -213,18 +221,9 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
 }
 
 // Flaky on Windows: http://crbug.com/486861
-#if defined(OS_WIN)
-#define MAYBE_AccessibilityEventsListboxNext \
-  DISABLED_AccessibilityEventsListboxNext
-#define MAYBE_AccessibilityEventsMenuListPopup \
-  DISABLED_AccessibilityEventsMenuListPopup
-#else
-#define MAYBE_AccessibilityEventsListboxNext AccessibilityEventsListboxNext
-#define MAYBE_AccessibilityEventsMenuListPopup AccessibilityEventsMenuListPopup
-#endif
-
+// Flaky on Mac: http://crbug.com/588271
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
-                       MAYBE_AccessibilityEventsListboxNext) {
+                       DISABLED_AccessibilityEventsListboxNext) {
   RunEventTest(FILE_PATH_LITERAL("listbox-next.html"));
 }
 
@@ -238,8 +237,9 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
   RunEventTest(FILE_PATH_LITERAL("menulist-next.html"));
 }
 
+// Flaky on Windows: http://crbug.com/486861
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
-                       MAYBE_AccessibilityEventsMenuListPopup) {
+                       DISABLED_AccessibilityEventsMenuListPopup) {
   RunEventTest(FILE_PATH_LITERAL("menulist-popup.html"));
 }
 

@@ -9,21 +9,25 @@
 
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_content_browser_client.h"
+#include "android_webview/browser/net/aw_cookie_store_wrapper.h"
 #include "android_webview/browser/net/aw_http_user_agent_settings.h"
 #include "android_webview/browser/net/aw_network_delegate.h"
 #include "android_webview/browser/net/aw_request_interceptor.h"
 #include "android_webview/browser/net/aw_url_request_job_factory.h"
 #include "android_webview/browser/net/init_native_callback.h"
+#include "android_webview/browser/net/token_binding_manager.h"
 #include "android_webview/common/aw_content_client.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/prefs/pref_service.h"
+#include "base/files/file_path.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/worker_pool.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_request_options.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/cookie_store_factory.h"
@@ -33,6 +37,7 @@
 #include "net/base/cache_type.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/mapped_host_resolver.h"
+#include "net/extras/sqlite/sqlite_channel_id_store.h"
 #include "net/http/http_auth_filter.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_auth_preferences.h"
@@ -55,6 +60,8 @@ namespace android_webview {
 
 
 namespace {
+
+const base::FilePath::CharType kChannelIDFilename[] = "Origin Bound Certs";
 
 void ApplyCmdlineOverridesToHostResolver(
     net::MappedHostResolver* host_resolver) {
@@ -89,38 +96,39 @@ void ApplyCmdlineOverridesToNetworkSessionParams(
   }
 }
 
-scoped_ptr<net::URLRequestJobFactory> CreateJobFactory(
+std::unique_ptr<net::URLRequestJobFactory> CreateJobFactory(
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) {
-  scoped_ptr<AwURLRequestJobFactory> aw_job_factory(new AwURLRequestJobFactory);
+  std::unique_ptr<AwURLRequestJobFactory> aw_job_factory(
+      new AwURLRequestJobFactory);
   // Note that the registered schemes must also be specified in
   // AwContentBrowserClient::IsHandledURL.
   bool set_protocol = aw_job_factory->SetProtocolHandler(
       url::kFileScheme,
-      make_scoped_ptr(new net::FileProtocolHandler(
+      base::WrapUnique(new net::FileProtocolHandler(
           content::BrowserThread::GetBlockingPool()
               ->GetTaskRunnerWithShutdownBehavior(
                   base::SequencedWorkerPool::SKIP_ON_SHUTDOWN))));
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
-      url::kDataScheme, make_scoped_ptr(new net::DataProtocolHandler()));
+      url::kDataScheme, base::WrapUnique(new net::DataProtocolHandler()));
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
       url::kBlobScheme,
-      make_scoped_ptr((*protocol_handlers)[url::kBlobScheme].release()));
+      base::WrapUnique((*protocol_handlers)[url::kBlobScheme].release()));
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
       url::kFileSystemScheme,
-      make_scoped_ptr((*protocol_handlers)[url::kFileSystemScheme].release()));
+      base::WrapUnique((*protocol_handlers)[url::kFileSystemScheme].release()));
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
       content::kChromeUIScheme,
-      make_scoped_ptr(
+      base::WrapUnique(
           (*protocol_handlers)[content::kChromeUIScheme].release()));
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
       content::kChromeDevToolsScheme,
-      make_scoped_ptr(
+      base::WrapUnique(
           (*protocol_handlers)[content::kChromeDevToolsScheme].release()));
   DCHECK(set_protocol);
   protocol_handlers->clear();
@@ -144,13 +152,14 @@ scoped_ptr<net::URLRequestJobFactory> CreateJobFactory(
 
   // The chain of responsibility will execute the handlers in reverse to the
   // order in which the elements of the chain are created.
-  scoped_ptr<net::URLRequestJobFactory> job_factory(std::move(aw_job_factory));
+  std::unique_ptr<net::URLRequestJobFactory> job_factory(
+      std::move(aw_job_factory));
   for (content::URLRequestInterceptorScopedVector::reverse_iterator i =
            request_interceptors.rbegin();
        i != request_interceptors.rend();
        ++i) {
     job_factory.reset(new net::URLRequestInterceptingJobFactory(
-        std::move(job_factory), make_scoped_ptr(*i)));
+        std::move(job_factory), base::WrapUnique(*i)));
   }
   request_interceptors.weak_clear();
 
@@ -161,13 +170,11 @@ scoped_ptr<net::URLRequestJobFactory> CreateJobFactory(
 
 AwURLRequestContextGetter::AwURLRequestContextGetter(
     const base::FilePath& cache_path,
-    net::CookieStore* cookie_store,
-    scoped_ptr<net::ProxyConfigService> config_service,
+    std::unique_ptr<net::ProxyConfigService> config_service,
     PrefService* user_pref_service)
     : cache_path_(cache_path),
       net_log_(new net::NetLog()),
       proxy_config_service_(std::move(config_service)),
-      cookie_store_(cookie_store),
       http_user_agent_settings_(new AwHttpUserAgentSettings()) {
   // CreateSystemProxyConfigService for Android must be called on main thread.
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -197,7 +204,8 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
   DCHECK(!url_request_context_);
 
   net::URLRequestContextBuilder builder;
-  scoped_ptr<AwNetworkDelegate> aw_network_delegate(new AwNetworkDelegate());
+  std::unique_ptr<AwNetworkDelegate> aw_network_delegate(
+      new AwNetworkDelegate());
 
   AwBrowserContext* browser_context = AwBrowserContext::GetDefault();
   DCHECK(browser_context);
@@ -210,13 +218,30 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
   builder.set_ftp_enabled(false);  // Android WebView does not support ftp yet.
 #endif
   DCHECK(proxy_config_service_.get());
+  std::unique_ptr<net::ChannelIDService> channel_id_service;
+  if (TokenBindingManager::GetInstance()->is_enabled()) {
+    base::FilePath channel_id_path =
+        browser_context->GetPath().Append(kChannelIDFilename);
+    scoped_refptr<net::SQLiteChannelIDStore> channel_id_db;
+    channel_id_db = new net::SQLiteChannelIDStore(
+        channel_id_path,
+        BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
+            BrowserThread::GetBlockingPool()->GetSequenceToken()));
+
+    channel_id_service.reset(new net::ChannelIDService(
+        new net::DefaultChannelIDStore(channel_id_db.get()),
+        base::WorkerPool::GetTaskRunner(true)));
+  }
+
   // Android provides a local HTTP proxy that handles all the proxying.
   // Create the proxy without a resolver since we rely on this local HTTP proxy.
   // TODO(sgurun) is this behavior guaranteed through SDK?
   builder.set_proxy_service(net::ProxyService::CreateWithoutProxyResolver(
       std::move(proxy_config_service_), net_log_.get()));
   builder.set_net_log(net_log_.get());
-  builder.SetCookieAndChannelIdStores(cookie_store_, NULL);
+  builder.SetCookieAndChannelIdStores(
+      base::WrapUnique(new AwCookieStoreWrapper()),
+      std::move(channel_id_service));
 
   net::URLRequestContextBuilder::HttpCacheParams cache_params;
   cache_params.type =
@@ -233,8 +258,9 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
   builder.set_http_network_session_params(network_session_params);
   builder.SetSpdyAndQuicEnabled(true, false);
 
-  scoped_ptr<net::MappedHostResolver> host_resolver(new net::MappedHostResolver(
-      net::HostResolver::CreateDefaultResolver(nullptr)));
+  std::unique_ptr<net::MappedHostResolver> host_resolver(
+      new net::MappedHostResolver(
+          net::HostResolver::CreateDefaultResolver(nullptr)));
   ApplyCmdlineOverridesToHostResolver(host_resolver.get());
   builder.SetHttpAuthHandlerFactory(
       CreateAuthHandlerFactory(host_resolver.get()));
@@ -282,14 +308,15 @@ void AwURLRequestContextGetter::SetKeyOnIO(const std::string& key) {
       request_options()->SetKeyOnIO(key);
 }
 
-scoped_ptr<net::HttpAuthHandlerFactory>
+std::unique_ptr<net::HttpAuthHandlerFactory>
 AwURLRequestContextGetter::CreateAuthHandlerFactory(
     net::HostResolver* resolver) {
   DCHECK(resolver);
 
   // In Chrome this is configurable via the AuthSchemes policy. For WebView
   // there is no interest to have it available so far.
-  std::vector<std::string> supported_schemes = {"basic", "digest", "negotiate"};
+  std::vector<std::string> supported_schemes = {"basic", "digest", "ntlm",
+                                                "negotiate"};
   http_auth_preferences_.reset(new net::HttpAuthPreferences(supported_schemes));
 
   UpdateServerWhitelist();

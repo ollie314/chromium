@@ -48,7 +48,7 @@ class AdbClientSocket {
                    bool has_length,
                    const CommandCallback& callback);
 
-  scoped_ptr<net::StreamSocket> socket_;
+  std::unique_ptr<net::StreamSocket> socket_;
 
  private:
   void ReadResponse(const CommandCallback& callback,
@@ -73,7 +73,6 @@ class AdbClientSocket {
                       int bytes_left,
                       int result);
 
-  std::string host_;
   int port_;
 
   DISALLOW_COPY_AND_ASSIGN(AdbClientSocket);

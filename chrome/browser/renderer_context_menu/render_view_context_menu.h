@@ -6,9 +6,11 @@
 #define CHROME_BROWSER_RENDERER_CONTEXT_MENU_RENDER_VIEW_CONTEXT_MENU_H_
 
 #include <map>
+#include <memory>
 #include <string>
+#include <vector>
 
-#include "base/memory/scoped_ptr.h"
+#include "base/files/file_path.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -29,7 +31,7 @@
 class PrintPreviewContextMenuObserver;
 class Profile;
 class SpellingMenuObserver;
-class SpellCheckerSubMenuObserver;
+class SpellingOptionsSubMenuObserver;
 
 namespace content {
 class RenderFrameHost;
@@ -64,10 +66,15 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   // WebContents and the frame's WebContents.
   static gfx::Vector2d GetOffset(content::RenderFrameHost* render_frame_host);
 
-  // SimpleMenuModel::Delegate:
+  // Adds the spell check service item to the context menu.
+  static void AddSpellCheckServiceItem(ui::SimpleMenuModel* menu,
+                                       bool is_checked);
+
+  // RenderViewContextMenuBase:
   bool IsCommandIdChecked(int command_id) const override;
   bool IsCommandIdEnabled(int command_id) const override;
   void ExecuteCommand(int command_id, int event_flags) override;
+  void AddSpellCheckServiceItem(bool is_checked) override;
 
  protected:
   Profile* GetProfile();
@@ -128,6 +135,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendRotationItems();
   void AppendEditableItems();
   void AppendLanguageSettings();
+  void AppendSpellingSuggestionItems();
   void AppendSearchProvider();
 #if defined(ENABLE_EXTENSIONS)
   void AppendAllExtensionItems();
@@ -135,7 +143,6 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
 #endif
   void AppendPrintPreviewItems();
   void AppendSearchWebForImageItems();
-  void AppendSpellingSuggestionsSubMenu();
   void AppendProtocolHandlerSubMenu();
   void AppendPasswordItems();
 
@@ -170,16 +177,25 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   GURL selection_navigation_url_;
 
   ui::SimpleMenuModel profile_link_submenu_model_;
+  std::vector<base::FilePath> profile_link_paths_;
   bool multiple_profiles_open_;
   ui::SimpleMenuModel protocol_handler_submenu_model_;
   ProtocolHandlerRegistry* protocol_handler_registry_;
 
-  // An observer that handles spelling-menu items.
-  scoped_ptr<SpellingMenuObserver> spelling_menu_observer_;
+  // An observer that handles spelling suggestions, "Add to dictionary", and
+  // "Ask Google for suggestions" items.
+  std::unique_ptr<SpellingMenuObserver> spelling_suggestions_menu_observer_;
+
+#if !defined(OS_MACOSX)
+  // An observer that handles the submenu for showing spelling options. This
+  // submenu lets users select the spelling language, for example.
+  std::unique_ptr<SpellingOptionsSubMenuObserver>
+      spelling_options_submenu_observer_;
+#endif
 
 #if defined(ENABLE_PRINT_PREVIEW)
   // An observer that disables menu items when print preview is active.
-  scoped_ptr<PrintPreviewContextMenuObserver> print_preview_menu_observer_;
+  std::unique_ptr<PrintPreviewContextMenuObserver> print_preview_menu_observer_;
 #endif
 
   // In the case of a MimeHandlerView this will point to the WebContents that

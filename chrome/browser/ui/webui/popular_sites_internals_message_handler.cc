@@ -4,19 +4,33 @@
 
 #include "chrome/browser/ui/webui/popular_sites_internals_message_handler.h"
 
-#include <string>
 #include <utility>
 
 #include "base/bind.h"
+#include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/task_runner_util.h"
 #include "base/values.h"
-#include "chrome/browser/android/popular_sites.h"
+#include "chrome/browser/android/ntp/popular_sites.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/url_formatter/url_fixer.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_ui.h"
 
-PopularSitesInternalsMessageHandler::PopularSitesInternalsMessageHandler() {
+namespace {
+
+std::string ReadFileToString(const base::FilePath& path) {
+  std::string result;
+  if (!base::ReadFileToString(path, &result))
+    result.clear();
+  return result;
 }
+
+}  // namespace
+
+PopularSitesInternalsMessageHandler::PopularSitesInternalsMessageHandler()
+    : weak_ptr_factory_(this) {}
 
 PopularSitesInternalsMessageHandler::~PopularSitesInternalsMessageHandler() {}
 
@@ -27,6 +41,11 @@ void PopularSitesInternalsMessageHandler::RegisterMessages() {
 
   web_ui()->RegisterMessageCallback("download",
       base::Bind(&PopularSitesInternalsMessageHandler::HandleDownload,
+                 base::Unretained(this)));
+
+  web_ui()->RegisterMessageCallback(
+      "viewJson",
+      base::Bind(&PopularSitesInternalsMessageHandler::HandleViewJson,
                  base::Unretained(this)));
 }
 
@@ -65,6 +84,21 @@ void PopularSitesInternalsMessageHandler::HandleDownload(
                                         version, true, callback));
 }
 
+void PopularSitesInternalsMessageHandler::HandleViewJson(
+    const base::ListValue* args) {
+  DCHECK_EQ(0u, args->GetSize());
+
+  const base::FilePath& path = popular_sites_->local_path();
+  base::PostTaskAndReplyWithResult(
+      content::BrowserThread::GetBlockingPool()
+          ->GetTaskRunnerWithShutdownBehavior(
+              base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN)
+          .get(),
+      FROM_HERE, base::Bind(&ReadFileToString, path),
+      base::Bind(&PopularSitesInternalsMessageHandler::SendJson,
+                 weak_ptr_factory_.GetWeakPtr()));
+}
+
 void PopularSitesInternalsMessageHandler::SendDownloadResult(bool success) {
   base::StringValue result(success ? "Success" : "Fail");
   web_ui()->CallJavascriptFunction(
@@ -72,9 +106,9 @@ void PopularSitesInternalsMessageHandler::SendDownloadResult(bool success) {
 }
 
 void PopularSitesInternalsMessageHandler::SendSites() {
-  scoped_ptr<base::ListValue> sites_list(new base::ListValue);
+  std::unique_ptr<base::ListValue> sites_list(new base::ListValue);
   for (const PopularSites::Site& site : popular_sites_->sites()) {
-    scoped_ptr<base::DictionaryValue> entry(new base::DictionaryValue);
+    std::unique_ptr<base::DictionaryValue> entry(new base::DictionaryValue);
     entry->SetString("title", site.title);
     entry->SetString("url", site.url.spec());
     sites_list->Append(std::move(entry));
@@ -82,8 +116,15 @@ void PopularSitesInternalsMessageHandler::SendSites() {
 
   base::DictionaryValue result;
   result.Set("sites", std::move(sites_list));
+  result.SetString("country", popular_sites_->GetCountry());
+  result.SetString("version", popular_sites_->GetVersion());
   web_ui()->CallJavascriptFunction(
       "chrome.popular_sites_internals.receiveSites", result);
+}
+
+void PopularSitesInternalsMessageHandler::SendJson(const std::string& json) {
+  web_ui()->CallJavascriptFunction("chrome.popular_sites_internals.receiveJson",
+                                   base::StringValue(json));
 }
 
 void PopularSitesInternalsMessageHandler::OnPopularSitesAvailable(

@@ -7,11 +7,11 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/power_monitor/power_observer.h"
@@ -337,9 +337,6 @@ class NET_EXPORT URLRequestJob : public base::PowerObserver {
   // The status of the job.
   const URLRequestStatus GetStatus();
 
-  // Set the status of the job.
-  void SetStatus(const URLRequestStatus& status);
-
   // Set the proxy server that was used, if any.
   void SetProxyServer(const HostPortPair& proxy_server);
 
@@ -366,6 +363,10 @@ class NET_EXPORT URLRequestJob : public base::PowerObserver {
   URLRequest* request_;
 
  private:
+  // Set the status of the associated URLRequest.
+  // TODO(mmenke): Make the URLRequest manage its own status.
+  void SetStatus(const URLRequestStatus& status);
+
   // When data filtering is enabled, this function is used to read data
   // for the filter. Returns a net error code to indicate if raw data was
   // successfully read,  an error happened, or the IO is pending.
@@ -430,7 +431,7 @@ class NET_EXPORT URLRequestJob : public base::PowerObserver {
   int64_t postfilter_bytes_read_;
 
   // The data stream filter which is enabled on demand.
-  scoped_ptr<Filter> filter_;
+  std::unique_ptr<Filter> filter_;
 
   // If the filter filled its output buffer, then there is a change that it
   // still has internal data to emit, and this flag is set.

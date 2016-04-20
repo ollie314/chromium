@@ -5,9 +5,10 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_OPTIONS_SYNC_SETUP_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_SYNC_SETUP_HANDLER_H_
 
+#include <memory>
+
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/sync/sync_startup_tracker.h"
@@ -50,7 +51,7 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
       content::WebUI* web_ui);
 
   // Initializes the sync setup flow and shows the setup UI.
-  void OpenSyncSetup(const base::ListValue* args);
+  void OpenSyncSetup(bool creating_supervised_user);
 
   // Shows advanced configuration dialog without going through sign in dialog.
   // Kicks the sync backend if necessary with showing spinner dialog until it
@@ -150,7 +151,7 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
   void DisplayConfigureSync(bool passphrase_failed);
 
   // Helper object used to wait for the sync backend to startup.
-  scoped_ptr<SyncStartupTracker> sync_startup_tracker_;
+  std::unique_ptr<SyncStartupTracker> sync_startup_tracker_;
 
   // Set to true whenever the sync configure UI is visible. This is used to tell
   // what stage of the setup wizard the user was in and to update the UMA
@@ -159,7 +160,7 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
 
   // The OneShotTimer object used to timeout of starting the sync backend
   // service.
-  scoped_ptr<base::OneShotTimer> backend_start_timer_;
+  std::unique_ptr<base::OneShotTimer> backend_start_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSetupHandler);
 };

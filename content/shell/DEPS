@@ -33,6 +33,9 @@ include_rules = [
 
   # For media::RemoveProprietaryMediaTypesAndCodecsForTests.
   "+media/base/mime_util.h",
+
+  # For enabling mojo media services.
+  "+media/mojo/services",
 ]
 
 specific_include_rules = {
@@ -41,10 +44,5 @@ specific_include_rules = {
   ],
   "content_browser_tests_android\.cc": [
     "+media/base"
-  ],
-  # Test hook.
-  "shell_mojo_test_utils_android\.cc": [
-    "+content/browser/mojo",
-    "+content/common/mojo",
   ],
 }

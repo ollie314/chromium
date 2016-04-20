@@ -7,12 +7,12 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
@@ -81,8 +81,9 @@ class COMPOSITOR_EXPORT ContextFactory {
 
   // Creates a reflector that copies the content of the |mirrored_compositor|
   // onto |mirroring_layer|.
-  virtual scoped_ptr<Reflector> CreateReflector(Compositor* mirrored_compositor,
-                                                Layer* mirroring_layer) = 0;
+  virtual std::unique_ptr<Reflector> CreateReflector(
+      Compositor* mirrored_compositor,
+      Layer* mirroring_layer) = 0;
   // Removes the reflector, which stops the mirroring.
   virtual void RemoveReflector(Reflector* reflector) = 0;
 
@@ -112,7 +113,8 @@ class COMPOSITOR_EXPORT ContextFactory {
   virtual cc::TaskGraphRunner* GetTaskGraphRunner() = 0;
 
   // Creates a Surface ID allocator with a new namespace.
-  virtual scoped_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator() = 0;
+  virtual std::unique_ptr<cc::SurfaceIdAllocator>
+  CreateSurfaceIdAllocator() = 0;
 
   // Resize the display corresponding to this compositor to a particular size.
   virtual void ResizeDisplay(ui::Compositor* compositor,
@@ -145,13 +147,6 @@ class COMPOSITOR_EXPORT CompositorLock
   DISALLOW_COPY_AND_ASSIGN(CompositorLock);
 };
 
-// This class observes BeginFrame notification from LayerTreeHost.
-class COMPOSITOR_EXPORT CompositorBeginFrameObserver {
- public:
-  virtual ~CompositorBeginFrameObserver() {}
-  virtual void OnSendBeginFrame(const cc::BeginFrameArgs& args) = 0;
-};
-
 // Compositor object to take care of GPU painting.
 // A Browser compositor object is responsible for generating the final
 // displayable form of pixels comprising a single widget's contents. It draws an
@@ -167,7 +162,7 @@ class COMPOSITOR_EXPORT Compositor
 
   ui::ContextFactory* context_factory() { return context_factory_; }
 
-  void SetOutputSurface(scoped_ptr<cc::OutputSurface> surface);
+  void SetOutputSurface(std::unique_ptr<cc::OutputSurface> surface);
 
   // Schedules a redraw of the layer tree associated with this compositor.
   void ScheduleDraw();
@@ -261,9 +256,6 @@ class COMPOSITOR_EXPORT Compositor
   void RemoveAnimationObserver(CompositorAnimationObserver* observer);
   bool HasAnimationObserver(const CompositorAnimationObserver* observer) const;
 
-  void AddBeginFrameObserver(CompositorBeginFrameObserver* observer);
-  void RemoveBeginFrameObserver(CompositorBeginFrameObserver* observer);
-
   // Change the timeout behavior for all future locks that are created. Locks
   // should time out if there is an expectation that the compositor will be
   // responsive.
@@ -306,17 +298,14 @@ class COMPOSITOR_EXPORT Compositor
   void DidCommitAndDrawFrame() override;
   void DidCompleteSwapBuffers() override;
   void DidCompletePageScaleAnimation() override {}
-  void SendBeginFramesToChildren(const cc::BeginFrameArgs& args) override;
-  void RecordFrameTimingEvents(
-      scoped_ptr<cc::FrameTimingTracker::CompositeTimingSet> composite_events,
-      scoped_ptr<cc::FrameTimingTracker::MainFrameTimingSet> main_frame_events)
-      override {}
 
   // cc::LayerTreeHostSingleThreadClient implementation.
   void DidPostSwapBuffers() override;
   void DidAbortSwapBuffers() override;
 
   bool IsLocked() { return compositor_lock_ != NULL; }
+
+  void SetOutputIsSecure(bool output_is_secure);
 
   const cc::LayerTreeDebugState& GetLayerTreeDebugState() const;
   void SetLayerTreeDebugState(const cc::LayerTreeDebugState& debug_state);
@@ -349,15 +338,13 @@ class COMPOSITOR_EXPORT Compositor
 
   base::ObserverList<CompositorObserver, true> observer_list_;
   base::ObserverList<CompositorAnimationObserver> animation_observer_list_;
-  base::ObserverList<CompositorBeginFrameObserver, true>
-      begin_frame_observer_list_;
 
   gfx::AcceleratedWidget widget_;
   bool widget_valid_;
   bool output_surface_requested_;
-  scoped_ptr<cc::SurfaceIdAllocator> surface_id_allocator_;
+  std::unique_ptr<cc::SurfaceIdAllocator> surface_id_allocator_;
   scoped_refptr<cc::Layer> root_web_layer_;
-  scoped_ptr<cc::LayerTreeHost> host_;
+  std::unique_ptr<cc::LayerTreeHost> host_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   // The manager of vsync parameters for this compositor.
@@ -375,9 +362,6 @@ class COMPOSITOR_EXPORT Compositor
 
   LayerAnimatorCollection layer_animator_collection_;
   scoped_refptr<cc::AnimationTimeline> animation_timeline_;
-
-  // Used to send to any new CompositorBeginFrameObserver immediately.
-  cc::BeginFrameArgs missed_begin_frame_args_;
 
   base::WeakPtrFactory<Compositor> weak_ptr_factory_;
 

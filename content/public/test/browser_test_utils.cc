@@ -21,10 +21,16 @@
 #include "base/test/test_timeouts.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "content/browser/accessibility/accessibility_mode_helper.h"
+#include "content/browser/accessibility/browser_accessibility.h"
+#include "content/browser/accessibility/browser_accessibility_manager.h"
+#include "content/browser/frame_host/frame_tree_node.h"
+#include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/web_contents/web_contents_view.h"
 #include "content/common/input/synthetic_web_input_event_builders.h"
+#include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/histogram_fetcher.h"
@@ -34,6 +40,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
@@ -132,17 +139,17 @@ class InterstitialObserver : public content::WebContentsObserver {
 };
 
 // Specifying a prototype so that we can add the WARN_UNUSED_RESULT attribute.
-bool ExecuteScriptHelper(
-    RenderFrameHost* render_frame_host,
-    const std::string& original_script,
-    scoped_ptr<base::Value>* result) WARN_UNUSED_RESULT;
+bool ExecuteScriptHelper(RenderFrameHost* render_frame_host,
+                         const std::string& original_script,
+                         std::unique_ptr<base::Value>* result)
+    WARN_UNUSED_RESULT;
 
 // Executes the passed |original_script| in the frame specified by
 // |render_frame_host|.  If |result| is not NULL, stores the value that the
 // evaluation of the script in |result|.  Returns true on success.
 bool ExecuteScriptHelper(RenderFrameHost* render_frame_host,
                          const std::string& original_script,
-                         scoped_ptr<base::Value>* result) {
+                         std::unique_ptr<base::Value>* result) {
   // TODO(jcampan): we should make the domAutomationController not require an
   //                automation id.
   std::string script =
@@ -174,13 +181,13 @@ bool ExecuteScriptHelper(RenderFrameHost* render_frame_host,
 bool ExecuteScriptInIsolatedWorldHelper(RenderFrameHost* render_frame_host,
                                         const int world_id,
                                         const std::string& original_script,
-                                        scoped_ptr<base::Value>* result)
+                                        std::unique_ptr<base::Value>* result)
     WARN_UNUSED_RESULT;
 
 bool ExecuteScriptInIsolatedWorldHelper(RenderFrameHost* render_frame_host,
                                         const int world_id,
                                         const std::string& original_script,
-                                        scoped_ptr<base::Value>* result) {
+                                        std::unique_ptr<base::Value>* result) {
   std::string script =
       "window.domAutomationController.setAutomationId(0);" + original_script;
   DOMOperationObserver dom_op_observer(render_frame_host);
@@ -280,13 +287,13 @@ void SetCookieOnIOThread(const GURL& url,
       base::Bind(&SetCookieCallback, result, event));
 }
 
-scoped_ptr<net::test_server::HttpResponse> CrossSiteRedirectResponseHandler(
-    const GURL& server_base_url,
-    const net::test_server::HttpRequest& request) {
+std::unique_ptr<net::test_server::HttpResponse>
+CrossSiteRedirectResponseHandler(const GURL& server_base_url,
+                                 const net::test_server::HttpRequest& request) {
   std::string prefix("/cross-site/");
   if (!base::StartsWith(request.relative_url, prefix,
                         base::CompareCase::SENSITIVE))
-    return scoped_ptr<net::test_server::HttpResponse>();
+    return std::unique_ptr<net::test_server::HttpResponse>();
 
   std::string params = request.relative_url.substr(prefix.length());
 
@@ -294,7 +301,7 @@ scoped_ptr<net::test_server::HttpResponse> CrossSiteRedirectResponseHandler(
   // one '/' character is expected.
   size_t slash = params.find('/');
   if (slash == std::string::npos)
-    return scoped_ptr<net::test_server::HttpResponse>();
+    return std::unique_ptr<net::test_server::HttpResponse>();
 
   // Replace the host of the URL with the one passed in the URL.
   GURL::Replacements replace_host;
@@ -306,7 +313,7 @@ scoped_ptr<net::test_server::HttpResponse> CrossSiteRedirectResponseHandler(
   GURL redirect_target(redirect_server.Resolve(path));
   DCHECK(redirect_target.is_valid());
 
-  scoped_ptr<net::test_server::BasicHttpResponse> http_response(
+  std::unique_ptr<net::test_server::BasicHttpResponse> http_response(
       new net::test_server::BasicHttpResponse);
   http_response->set_code(net::HTTP_MOVED_PERMANENTLY);
   http_response->AddCustomHeader("Location", redirect_target.spec());
@@ -658,7 +665,7 @@ bool ExecuteScript(const ToRenderFrameHost& adapter,
 bool ExecuteScriptAndExtractInt(const ToRenderFrameHost& adapter,
                                 const std::string& script, int* result) {
   DCHECK(result);
-  scoped_ptr<base::Value> value;
+  std::unique_ptr<base::Value> value;
   if (!ExecuteScriptHelper(adapter.render_frame_host(), script, &value) ||
       !value.get()) {
     return false;
@@ -670,7 +677,7 @@ bool ExecuteScriptAndExtractInt(const ToRenderFrameHost& adapter,
 bool ExecuteScriptAndExtractBool(const ToRenderFrameHost& adapter,
                                  const std::string& script, bool* result) {
   DCHECK(result);
-  scoped_ptr<base::Value> value;
+  std::unique_ptr<base::Value> value;
   if (!ExecuteScriptHelper(adapter.render_frame_host(), script, &value) ||
       !value.get()) {
     return false;
@@ -685,7 +692,7 @@ bool ExecuteScriptInIsolatedWorldAndExtractBool(
     const std::string& script,
     bool* result) {
   DCHECK(result);
-  scoped_ptr<base::Value> value;
+  std::unique_ptr<base::Value> value;
   if (!ExecuteScriptInIsolatedWorldHelper(adapter.render_frame_host(), world_id,
                                           script, &value) ||
       !value.get()) {
@@ -699,7 +706,7 @@ bool ExecuteScriptAndExtractString(const ToRenderFrameHost& adapter,
                                    const std::string& script,
                                    std::string* result) {
   DCHECK(result);
-  scoped_ptr<base::Value> value;
+  std::unique_ptr<base::Value> value;
   if (!ExecuteScriptHelper(adapter.render_frame_host(), script, &value) ||
       !value.get()) {
     return false;
@@ -740,6 +747,13 @@ bool FrameHasSourceUrl(const GURL& url, RenderFrameHost* frame) {
   return frame->GetLastCommittedURL() == url;
 }
 
+RenderFrameHost* ChildFrameAt(RenderFrameHost* frame, size_t index) {
+  RenderFrameHostImpl* rfh = static_cast<RenderFrameHostImpl*>(frame);
+  if (index >= rfh->frame_tree_node()->child_count())
+    return nullptr;
+  return rfh->frame_tree_node()->child_at(index)->current_frame_host();
+}
+
 bool ExecuteWebUIResourceTest(WebContents* web_contents,
                               const std::vector<int>& js_resource_ids) {
   // Inject WebUI test runner script first prior to other scripts required to
@@ -776,12 +790,13 @@ std::string GetCookies(BrowserContext* browser_context, const GURL& url) {
   std::string cookies;
   base::WaitableEvent event(true, false);
   net::URLRequestContextGetter* context_getter =
-      browser_context->GetRequestContext();
+      BrowserContext::GetDefaultStoragePartition(browser_context)->
+          GetURLRequestContext();
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&GetCookiesOnIOThread, url,
-                 make_scoped_refptr(context_getter), &event, &cookies));
+      base::Bind(&GetCookiesOnIOThread, url, base::RetainedRef(context_getter),
+                 &event, &cookies));
   event.Wait();
   return cookies;
 }
@@ -792,12 +807,13 @@ bool SetCookie(BrowserContext* browser_context,
   bool result = false;
   base::WaitableEvent event(true, false);
   net::URLRequestContextGetter* context_getter =
-      browser_context->GetRequestContext();
+      BrowserContext::GetDefaultStoragePartition(browser_context)->
+          GetURLRequestContext();
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&SetCookieOnIOThread, url, value,
-                 make_scoped_refptr(context_getter), &event, &result));
+                 base::RetainedRef(context_getter), &event, &result));
   event.Wait();
   return result;
 }
@@ -872,6 +888,31 @@ bool WaitForRenderFrameReady(RenderFrameHost* rfh) {
           "})();",
           &result));
   return result == "pageLoadComplete";
+}
+
+void EnableAccessibilityForWebContents(WebContents* web_contents) {
+  WebContentsImpl* web_contents_impl =
+      static_cast<WebContentsImpl*>(web_contents);
+  web_contents_impl->SetAccessibilityMode(AccessibilityModeComplete);
+}
+
+void WaitForAccessibilityFocusChange() {
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  BrowserAccessibilityManager::SetFocusChangeCallbackForTesting(
+      loop_runner->QuitClosure());
+  loop_runner->Run();
+}
+
+ui::AXNodeData GetFocusedAccessibilityNodeInfo(WebContents* web_contents) {
+  WebContentsImpl* web_contents_impl =
+      static_cast<WebContentsImpl*>(web_contents);
+  BrowserAccessibilityManager* manager =
+      web_contents_impl->GetRootBrowserAccessibilityManager();
+  if (!manager)
+    return ui::AXNodeData();
+  BrowserAccessibility* focused_node = manager->GetFocus();
+  return focused_node->GetData();
 }
 
 TitleWatcher::TitleWatcher(WebContents* web_contents,
@@ -1066,23 +1107,29 @@ bool RequestFrame(WebContents* web_contents) {
       ->ScheduleComposite();
 }
 
-FrameWatcher::FrameWatcher()
-    : BrowserMessageFilter(ViewMsgStart), frames_to_wait_(0) {
-}
+FrameWatcher::FrameWatcher() : MessageFilter(), frames_to_wait_(0) {}
 
 FrameWatcher::~FrameWatcher() {
 }
 
-void FrameWatcher::ReceivedFrameSwap() {
+void FrameWatcher::ReceivedFrameSwap(cc::CompositorFrameMetadata metadata) {
   --frames_to_wait_;
+  last_metadata_ = metadata;
   if (frames_to_wait_ == 0)
     quit_.Run();
 }
 
 bool FrameWatcher::OnMessageReceived(const IPC::Message& message) {
   if (message.type() == ViewHostMsg_SwapCompositorFrame::ID) {
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::Bind(&FrameWatcher::ReceivedFrameSwap, this));
+    ViewHostMsg_SwapCompositorFrame::Param param;
+    if (!ViewHostMsg_SwapCompositorFrame::Read(&message, &param))
+      return false;
+    std::unique_ptr<cc::CompositorFrame> frame(new cc::CompositorFrame);
+    base::get<1>(param).AssignTo(frame.get());
+
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&FrameWatcher::ReceivedFrameSwap, this, frame->metadata));
   }
   return false;
 }
@@ -1091,7 +1138,7 @@ void FrameWatcher::AttachTo(WebContents* web_contents) {
   DCHECK(web_contents);
   RenderWidgetHostImpl* widget_host = RenderWidgetHostImpl::From(
       web_contents->GetRenderViewHost()->GetWidget());
-  widget_host->GetProcess()->AddFilter(this);
+  widget_host->GetProcess()->GetChannel()->AddFilter(this);
 }
 
 void FrameWatcher::WaitFrames(int frames_to_wait) {
@@ -1101,6 +1148,91 @@ void FrameWatcher::WaitFrames(int frames_to_wait) {
   base::AutoReset<base::Closure> reset_quit(&quit_, run_loop.QuitClosure());
   base::AutoReset<int> reset_frames_to_wait(&frames_to_wait_, frames_to_wait);
   run_loop.Run();
+}
+
+const cc::CompositorFrameMetadata& FrameWatcher::LastMetadata() {
+  return last_metadata_;
+}
+
+MainThreadFrameObserver::MainThreadFrameObserver(
+    RenderWidgetHost* render_widget_host)
+    : render_widget_host_(render_widget_host),
+      routing_id_(render_widget_host_->GetProcess()->GetNextRoutingID()) {
+  // TODO(lfg): We should look into adding a way to observe RenderWidgetHost
+  // messages similarly to what WebContentsObserver can do with RFH and RVW.
+  render_widget_host_->GetProcess()->AddRoute(routing_id_, this);
+}
+
+MainThreadFrameObserver::~MainThreadFrameObserver() {
+  render_widget_host_->GetProcess()->RemoveRoute(routing_id_);
+}
+
+void MainThreadFrameObserver::Wait() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  render_widget_host_->Send(new ViewMsg_WaitForNextFrameForTests(
+      render_widget_host_->GetRoutingID(), routing_id_));
+  run_loop_.reset(new base::RunLoop());
+  run_loop_->Run();
+  run_loop_.reset(nullptr);
+}
+
+void MainThreadFrameObserver::Quit() {
+  if (run_loop_)
+    run_loop_->Quit();
+}
+
+bool MainThreadFrameObserver::OnMessageReceived(const IPC::Message& msg) {
+  if (msg.type() == ViewHostMsg_WaitForNextFrameForTests_ACK::ID &&
+      msg.routing_id() == routing_id_) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&MainThreadFrameObserver::Quit, base::Unretained(this)));
+  }
+  return true;
+}
+
+InputMsgWatcher::InputMsgWatcher(RenderWidgetHost* render_widget_host,
+                                 blink::WebInputEvent::Type type)
+    : BrowserMessageFilter(InputMsgStart),
+      wait_for_type_(type),
+      ack_result_(INPUT_EVENT_ACK_STATE_UNKNOWN) {
+  render_widget_host->GetProcess()->AddFilter(this);
+}
+
+InputMsgWatcher::~InputMsgWatcher() {}
+
+void InputMsgWatcher::ReceivedAck(blink::WebInputEvent::Type ack_type,
+                                  uint32_t ack_state) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (wait_for_type_ == ack_type) {
+    ack_result_ = ack_state;
+    if (!quit_.is_null())
+      quit_.Run();
+  }
+}
+
+bool InputMsgWatcher::OnMessageReceived(const IPC::Message& message) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (message.type() == InputHostMsg_HandleInputEvent_ACK::ID) {
+    InputHostMsg_HandleInputEvent_ACK::Param params;
+    InputHostMsg_HandleInputEvent_ACK::Read(&message, &params);
+    blink::WebInputEvent::Type ack_type = base::get<0>(params).type;
+    InputEventAckState ack_state = base::get<0>(params).state;
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&InputMsgWatcher::ReceivedAck, this, ack_type, ack_state));
+  }
+  return false;
+}
+
+uint32_t InputMsgWatcher::WaitForAck() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (ack_result_ != INPUT_EVENT_ACK_STATE_UNKNOWN)
+    return ack_result_;
+  base::RunLoop run_loop;
+  base::AutoReset<base::Closure> reset_quit(&quit_, run_loop.QuitClosure());
+  run_loop.Run();
+  return ack_result_;
 }
 
 }  // namespace content

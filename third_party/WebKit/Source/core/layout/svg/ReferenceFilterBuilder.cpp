@@ -41,7 +41,7 @@ namespace blink {
 
 namespace {
 
-using ResourceReferenceMap = WillBePersistentHeapHashMap<RawPtrWillBeWeakMember<const FilterOperation>, OwnPtr<DocumentResourceReference>>;
+using ResourceReferenceMap = PersistentHeapHashMap<WeakMember<const FilterOperation>, OwnPtr<DocumentResourceReference>>;
 
 ResourceReferenceMap& documentResourceReferences()
 {
@@ -62,14 +62,7 @@ void ReferenceFilterBuilder::setDocumentResourceReference(const FilterOperation*
     documentResourceReferences().add(filterOperation, documentResourceReference);
 }
 
-#if !ENABLE(OILPAN)
-void ReferenceFilterBuilder::clearDocumentResourceReference(const FilterOperation* filterOperation)
-{
-    documentResourceReferences().remove(filterOperation);
-}
-#endif
-
-PassRefPtrWillBeRawPtr<Filter> ReferenceFilterBuilder::build(float zoom, Element* element, FilterEffect* previousEffect, const ReferenceFilterOperation& filterOperation, const FloatSize* referenceBoxSize, const SkPaint* fillPaint, const SkPaint* strokePaint)
+Filter* ReferenceFilterBuilder::build(float zoom, Element* element, FilterEffect* previousEffect, const ReferenceFilterOperation& filterOperation, const FloatSize* referenceBoxSize, const SkPaint* fillPaint, const SkPaint* strokePaint)
 {
     TreeScope* treeScope = &element->treeScope();
 
@@ -100,27 +93,25 @@ PassRefPtrWillBeRawPtr<Filter> ReferenceFilterBuilder::build(float zoom, Element
     SVGFilterElement& filterElement = toSVGFilterElement(*filter);
 
     FloatRect referenceBox;
-    if (element->inDocument() && element->layoutObject() && element->layoutObject()->enclosingLayer()) {
-        if (referenceBoxSize) {
-            referenceBox = FloatRect(FloatPoint(), *referenceBoxSize);
-        } else {
-            FloatSize size(element->layoutObject()->enclosingLayer()->physicalBoundingBoxIncludingReflectionAndStackingChildren(LayoutPoint()).size());
-            referenceBox = FloatRect(FloatPoint(), size);
-        }
+    if (referenceBoxSize) {
+        referenceBox = FloatRect(FloatPoint(), *referenceBoxSize);
+    } else if (element->inShadowIncludingDocument() && element->layoutObject() && element->layoutObject()->enclosingLayer()) {
+        FloatSize size(element->layoutObject()->enclosingLayer()->physicalBoundingBoxIncludingReflectionAndStackingChildren(LayoutPoint()).size());
+        referenceBox = FloatRect(FloatPoint(), size);
     }
     referenceBox.scale(1.0f / zoom);
     FloatRect filterRegion = SVGLengthContext::resolveRectangle<SVGFilterElement>(&filterElement, filterElement.filterUnits()->currentValue()->enumValue(), referenceBox);
     bool primitiveBoundingBoxMode = filterElement.primitiveUnits()->currentValue()->enumValue() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX;
     Filter::UnitScaling unitScaling = primitiveBoundingBoxMode ? Filter::BoundingBox : Filter::UserSpace;
-    RefPtrWillBeRawPtr<Filter> result(Filter::create(referenceBox, filterRegion, zoom, unitScaling));
+    Filter* result = Filter::create(referenceBox, filterRegion, zoom, unitScaling);
     if (!previousEffect)
-        previousEffect = result->sourceGraphic();
+        previousEffect = result->getSourceGraphic();
 
     SVGFilterBuilder builder(previousEffect, nullptr, fillPaint, strokePaint);
-    builder.buildGraph(result.get(), filterElement, referenceBox);
+    builder.buildGraph(result, filterElement, referenceBox);
 
     result->setLastEffect(builder.lastEffect());
-    return result.release();
+    return result;
 }
 
 } // namespace blink

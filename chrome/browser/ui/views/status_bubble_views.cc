@@ -39,6 +39,7 @@
 
 #if defined(USE_ASH)
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #endif
 
 // The alpha and color of the bubble's shadow.
@@ -178,7 +179,7 @@ class StatusBubbleViews::StatusView : public views::View {
   BubbleState state_;
   BubbleStyle style_;
 
-  scoped_ptr<StatusViewAnimation> animation_;
+  std::unique_ptr<StatusViewAnimation> animation_;
 
   // Handle to the widget that contains us.
   views::Widget* popup_;
@@ -420,22 +421,25 @@ void StatusBubbleViews::StatusView::OnPaint(gfx::Canvas* canvas) {
   rrect.setRectRadii(RectToSkRect(rect), (const SkVector*)rad);
   canvas->sk_canvas()->drawRRect(rrect, paint);
 
-  // Draw highlight text and then the text body. In order to make sure the text
-  // is aligned to the right on RTL UIs, we mirror the text bounds if the
-  // locale is RTL.
+  // Compute text bounds.
   const gfx::FontList font_list;
   int text_width =
       std::min(gfx::GetStringWidth(text_, font_list),
                width - shadow_size - kTextPositionX - kTextHorizPadding);
   int text_height = height - shadow_size;
-  gfx::Rect body_bounds(kShadowThickness + kTextPositionX,
+  gfx::Rect text_bounds(kShadowThickness + kTextPositionX,
                         kShadowThickness,
                         std::max(0, text_width),
                         std::max(0, text_height));
-  body_bounds.set_x(GetMirroredXForRect(body_bounds));
+  // Make sure the text is aligned to the right on RTL UIs.
+  text_bounds.set_x(GetMirroredXForRect(text_bounds));
+
+  // Text color is the foreground tab text color at 50% alpha.
   SkColor text_color =
-      theme_provider_->GetColor(ThemeProperties::COLOR_STATUS_BAR_TEXT);
-  canvas->DrawStringRect(text_, font_list, text_color, body_bounds);
+      theme_provider_->GetColor(ThemeProperties::COLOR_TAB_TEXT);
+  canvas->DrawStringRect(text_, font_list,
+                         SkColorSetA(text_color, SkColorGetA(text_color) / 2),
+                         text_bounds);
 }
 
 
@@ -667,9 +671,8 @@ void StatusBubbleViews::SetStatus(const base::string16& status_text) {
   }
 }
 
-void StatusBubbleViews::SetURL(const GURL& url, const std::string& languages) {
+void StatusBubbleViews::SetURL(const GURL& url) {
   url_ = url;
-  languages_ = languages;
   if (size_.IsEmpty())
     return;  // We have no bounds, don't attempt to show the popup.
 
@@ -695,7 +698,7 @@ void StatusBubbleViews::SetURL(const GURL& url, const std::string& languages) {
   int text_width = static_cast<int>(popup_bounds.width() -
       (kShadowThickness * 2) - kTextPositionX - kTextHorizPadding - 1);
   url_text_ =
-      url_formatter::ElideUrl(url, gfx::FontList(), text_width, languages);
+      url_formatter::ElideUrl(url, gfx::FontList(), text_width);
 
   // An URL is always treated as a left-to-right string. On right-to-left UIs
   // we need to explicitly mark the URL as LTR to make sure it is displayed
@@ -711,7 +714,7 @@ void StatusBubbleViews::SetURL(const GURL& url, const std::string& languages) {
     // size (shrinking or expanding). Otherwise delay.
     if (is_expanded_ && !url.is_empty()) {
       ExpandBubble();
-    } else if (url_formatter::FormatUrl(url, languages).length() >
+    } else if (url_formatter::FormatUrl(url).length() >
                url_text_.length()) {
       base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
           FROM_HERE, base::Bind(&StatusBubbleViews::ExpandBubble,
@@ -804,8 +807,8 @@ void StatusBubbleViews::AvoidMouse(const gfx::Point& location) {
     // Check if the bubble sticks out from the monitor or will obscure
     // download shelf.
     gfx::NativeView window = base_view_->GetWidget()->GetNativeView();
-    gfx::Rect monitor_rect = gfx::Screen::GetScreenFor(window)->
-        GetDisplayNearestWindow(window).work_area();
+    gfx::Rect monitor_rect =
+        gfx::Screen::GetScreen()->GetDisplayNearestWindow(window).work_area();
     const int bubble_bottom_y = top_left.y() + position_.y() + size_.height();
 
     if (bubble_bottom_y + offset > monitor_rect.height() ||
@@ -859,8 +862,7 @@ void StatusBubbleViews::ExpandBubble() {
   gfx::Rect popup_bounds = popup_->GetWindowBoundsInScreen();
   int max_status_bubble_width = GetMaxStatusBubbleWidth();
   const gfx::FontList font_list;
-  url_text_ = url_formatter::ElideUrl(url_, font_list, max_status_bubble_width,
-                                       languages_);
+  url_text_ = url_formatter::ElideUrl(url_, font_list, max_status_bubble_width);
   int expanded_bubble_width =
       std::max(GetStandardStatusBubbleWidth(),
                std::min(gfx::GetStringWidth(url_text_, font_list) +

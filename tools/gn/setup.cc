@@ -31,6 +31,7 @@
 #include "tools/gn/tokenizer.h"
 #include "tools/gn/trace.h"
 #include "tools/gn/value.h"
+#include "tools/gn/value_extractors.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -139,7 +140,7 @@ base::FilePath FindDotFile(const base::FilePath& current_dir) {
 // Called on any thread. Post the item to the builder on the main thread.
 void ItemDefinedCallback(base::MessageLoop* main_loop,
                          scoped_refptr<Builder> builder,
-                         scoped_ptr<Item> item) {
+                         std::unique_ptr<Item> item) {
   DCHECK(item);
   main_loop->PostTask(FROM_HERE, base::Bind(&Builder::ItemDefined, builder,
                                             base::Passed(&item)));
@@ -198,7 +199,7 @@ base::FilePath FindWindowsPython() {
   DWORD path_length = ::GetEnvironmentVariable(kPathEnvVarName, nullptr, 0);
   if (path_length == 0)
     return base::FilePath();
-  scoped_ptr<base::char16[]> full_path(new base::char16[path_length]);
+  std::unique_ptr<base::char16[]> full_path(new base::char16[path_length]);
   DWORD actual_path_length =
       ::GetEnvironmentVariable(kPathEnvVarName, full_path.get(), path_length);
   CHECK_EQ(path_length, actual_path_length + 1);
@@ -224,6 +225,21 @@ base::FilePath FindWindowsPython() {
   return base::FilePath();
 }
 #endif
+
+// Expands all ./, ../, and symbolic links in the given path.
+bool GetRealPath(const base::FilePath& path, base::FilePath* out) {
+#if defined(OS_POSIX)
+  char buf[PATH_MAX];
+  if (!realpath(path.value().c_str(), buf)) {
+    return false;
+  }
+  *out = base::FilePath(buf);
+#else
+  // Do nothing on a non-POSIX system.
+  *out = path;
+#endif
+  return true;
+}
 
 }  // namespace
 
@@ -512,9 +528,16 @@ bool Setup::FillSourceDir(const base::CommandLine& cmdline) {
     root_path = dotfile_name_.DirName();
   }
 
+  base::FilePath root_realpath;
+  if (!GetRealPath(root_path, &root_realpath)) {
+    Err(Location(), "Can't get the real root path.",
+        "I could not get the real path of \"" + FilePathToUTF8(root_path) +
+        "\".").PrintToStdout();
+    return false;
+  }
   if (scheduler_.verbose_logging())
-    scheduler_.Log("Using source root", FilePathToUTF8(root_path));
-  build_settings_.SetRootPath(root_path);
+    scheduler_.Log("Using source root", FilePathToUTF8(root_realpath));
+  build_settings_.SetRootPath(root_realpath);
 
   return true;
 }
@@ -530,11 +553,27 @@ bool Setup::FillBuildDir(const std::string& build_dir, bool require_exists) {
     return false;
   }
 
+  base::FilePath build_dir_path = build_settings_.GetFullPath(resolved);
+  if (!base::CreateDirectory(build_dir_path)) {
+    Err(Location(), "Can't create the build dir.",
+        "I could not create the build dir \"" + FilePathToUTF8(build_dir_path) +
+        "\".").PrintToStdout();
+    return false;
+  }
+  base::FilePath build_dir_realpath;
+  if (!GetRealPath(build_dir_path, &build_dir_realpath)) {
+    Err(Location(), "Can't get the real build dir path.",
+        "I could not get the real path of \"" + FilePathToUTF8(build_dir_path) +
+        "\".").PrintToStdout();
+    return false;
+  }
+  resolved = SourceDirForPath(build_settings_.root_path(),
+                              build_dir_realpath);
+
   if (scheduler_.verbose_logging())
     scheduler_.Log("Using build dir", resolved.value());
 
   if (require_exists) {
-    base::FilePath build_dir_path = build_settings_.GetFullPath(resolved);
     if (!base::PathExists(build_dir_path.Append(
             FILE_PATH_LITERAL("build.ninja")))) {
       Err(Location(), "Not a build directory.",
@@ -655,20 +694,12 @@ bool Setup::FillOtherConfig(const base::CommandLine& cmdline) {
   const Value* check_targets_value =
       dotfile_scope_.GetValue("check_targets", true);
   if (check_targets_value) {
-    // Fill the list of targets to check.
-    if (!check_targets_value->VerifyTypeIs(Value::LIST, &err)) {
+    check_patterns_.reset(new std::vector<LabelPattern>);
+    ExtractListOfLabelPatterns(*check_targets_value, current_dir,
+                               check_patterns_.get(), &err);
+    if (err.has_error()) {
       err.PrintToStdout();
       return false;
-    }
-
-    check_patterns_.reset(new std::vector<LabelPattern>);
-    for (const auto& item : check_targets_value->list_value()) {
-      check_patterns_->push_back(
-          LabelPattern::GetPattern(current_dir, item, &err));
-      if (err.has_error()) {
-        err.PrintToStdout();
-        return false;
-      }
     }
   }
 
@@ -681,7 +712,7 @@ bool Setup::FillOtherConfig(const base::CommandLine& cmdline) {
       err.PrintToStdout();
       return false;
     }
-    scoped_ptr<std::set<SourceFile>> whitelist(new std::set<SourceFile>);
+    std::unique_ptr<std::set<SourceFile>> whitelist(new std::set<SourceFile>);
     for (const auto& item : exec_script_whitelist_value->list_value()) {
       if (!item.VerifyTypeIs(Value::STRING, &err)) {
         err.PrintToStdout();

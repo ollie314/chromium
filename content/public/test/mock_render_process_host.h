@@ -11,6 +11,7 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
+#include "base/metrics/persistent_memory_allocator.h"
 #include "base/observer_list.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_process_host_factory.h"
@@ -76,7 +77,6 @@ class MockRenderProcessHost : public RenderProcessHost {
   void AddFilter(BrowserMessageFilter* filter) override;
   bool FastShutdownForPageCount(size_t count) override;
   base::TimeDelta GetChildProcessIdleTime() const override;
-  void ResumeRequestsForView(int route_id) override;
   void FilterURL(bool empty_allowed, GURL* url) override;
 #if defined(ENABLE_WEBRTC)
   void EnableAudioDebugRecordings(const base::FilePath& file) override;
@@ -85,6 +85,7 @@ class MockRenderProcessHost : public RenderProcessHost {
   void DisableEventLogRecordings() override;
   void SetWebRtcLogMessageCallback(
       base::Callback<void(const std::string&)> callback) override;
+  void ClearWebRtcLogMessageCallback() override;
   WebRtcStopRtpDumpCallback StartRtpDump(
       bool incoming,
       bool outgoing,
@@ -93,6 +94,9 @@ class MockRenderProcessHost : public RenderProcessHost {
   void ResumeDeferredNavigation(const GlobalRequestID& request_id) override;
   void NotifyTimezoneChange(const std::string& zone_id) override;
   ServiceRegistry* GetServiceRegistry() override;
+  shell::Connection* GetChildConnection() override;
+  std::unique_ptr<base::SharedPersistentMemoryAllocator> TakeMetricsAllocator()
+      override;
   const base::TimeTicks& GetInitTimeForNavigationMetrics() const override;
   bool SubscribeUniformEnabled() const override;
   void OnAddSubscription(unsigned int target) override;
@@ -128,7 +132,7 @@ class MockRenderProcessHost : public RenderProcessHost {
     is_process_backgrounded_ = is_process_backgrounded;
   }
 
-  void SetProcessHandle(scoped_ptr<base::ProcessHandle> new_handle) {
+  void SetProcessHandle(std::unique_ptr<base::ProcessHandle> new_handle) {
     process_handle = std::move(new_handle);
   }
 
@@ -137,7 +141,7 @@ class MockRenderProcessHost : public RenderProcessHost {
 
   int worker_ref_count() const { return worker_ref_count_; }
 
-  void SetServiceRegistry(scoped_ptr<ServiceRegistry> service_registry) {
+  void SetServiceRegistry(std::unique_ptr<ServiceRegistry> service_registry) {
     service_registry_ = std::move(service_registry);
   }
 
@@ -158,9 +162,9 @@ class MockRenderProcessHost : public RenderProcessHost {
   bool deletion_callback_called_;
   bool is_for_guests_only_;
   bool is_process_backgrounded_;
-  scoped_ptr<base::ProcessHandle> process_handle;
+  std::unique_ptr<base::ProcessHandle> process_handle;
   int worker_ref_count_;
-  scoped_ptr<ServiceRegistry> service_registry_;
+  std::unique_ptr<ServiceRegistry> service_registry_;
 
   DISALLOW_COPY_AND_ASSIGN(MockRenderProcessHost);
 };

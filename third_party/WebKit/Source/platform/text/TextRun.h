@@ -32,7 +32,6 @@
 #include "platform/text/TextDirection.h"
 #include "platform/text/TextPath.h"
 #include "wtf/Allocator.h"
-#include "wtf/RefCounted.h"
 #include "wtf/text/WTFString.h"
 
 class SkTextBlob;
@@ -194,7 +193,7 @@ public:
     void setHorizontalGlyphStretch(float scale) { m_horizontalGlyphStretch = scale; }
 
     bool allowTabs() const { return m_allowTabs; }
-    TabSize tabSize() const { return m_tabSize; }
+    TabSize getTabSize() const { return m_tabSize; }
     void setTabSize(bool, TabSize);
 
     float xPos() const { return m_xpos; }
@@ -213,7 +212,7 @@ public:
     void setDirectionalOverride(bool override) { m_directionalOverride = override; }
 
     void setTextJustify(TextJustify textJustify) { m_textJustify = static_cast<unsigned>(textJustify); }
-    TextJustify textJustify() const { return static_cast<TextJustify>(m_textJustify); }
+    TextJustify getTextJustify() const { return static_cast<TextJustify>(m_textJustify); }
 
 private:
     union {
@@ -266,5 +265,5 @@ public:
     RefPtr<const SkTextBlob>* cachedTextBlob;
 };
 
-}
+} // namespace blink
 #endif

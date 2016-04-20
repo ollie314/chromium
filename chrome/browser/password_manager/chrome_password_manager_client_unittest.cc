@@ -7,13 +7,10 @@
 #include <stdint.h>
 
 #include <string>
+#include <tuple>
 
-#include "base/command_line.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/testing_pref_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -23,16 +20,18 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/autofill/content/common/autofill_messages.h"
 #include "components/password_manager/content/browser/password_manager_internals_service_factory.h"
-#include "components/password_manager/content/common/credential_manager_messages.h"
 #include "components/password_manager/core/browser/credentials_filter.h"
 #include "components/password_manager/core/browser/log_manager.h"
 #include "components/password_manager/core/browser/log_receiver.h"
 #include "components/password_manager/core/browser/log_router.h"
 #include "components/password_manager/core/browser/password_manager_internals_service.h"
+#include "components/password_manager/core/browser/password_manager_test_utils.h"
 #include "components/password_manager/core/common/credential_manager_types.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
-#include "components/password_manager/core/common/password_manager_switches.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/testing_pref_service.h"
 #include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_context.h"
@@ -130,9 +129,9 @@ bool ChromePasswordManagerClientTest::WasLoggingActivationMessageSent(
       process()->sink().GetFirstMessageMatching(kMsgID);
   if (!message)
     return false;
-  base::Tuple<bool> param;
+  std::tuple<bool> param;
   AutofillMsg_SetLoggingState::Read(message, &param);
-  *activation_flag = base::get<0>(param);
+  *activation_flag = std::get<0>(param);
   process()->sink().ClearMessages();
   return true;
 }
@@ -168,11 +167,13 @@ TEST_F(ChromePasswordManagerClientTest,
 TEST_F(ChromePasswordManagerClientTest,
        IsAutomaticPasswordSavingEnabledWhenFlagIsSetTest) {
   // Add the enable-automatic-password-saving feature.
-  base::FeatureList::ClearInstanceForTesting();
-  scoped_ptr<base::FeatureList> feature_list(new base::FeatureList);
-  feature_list->InitializeFromCommandLine(
-      password_manager::features::kEnableAutomaticPasswordSaving.name, "");
-  base::FeatureList::SetInstance(std::move(feature_list));
+  std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
+  std::vector<const base::Feature*> enabled_features;
+  std::vector<const base::Feature*> disabled_features;
+  enabled_features.push_back(
+      &password_manager::features::kEnableAutomaticPasswordSaving);
+  password_manager::SetFeatures(enabled_features, disabled_features,
+                                std::move(feature_list));
 
   if (chrome::GetChannel() == version_info::Channel::UNKNOWN)
     EXPECT_TRUE(GetClient()->IsAutomaticPasswordSavingEnabled());
@@ -190,7 +191,7 @@ TEST_F(ChromePasswordManagerClientTest, GetPasswordSyncState) {
 
   syncer::ModelTypeSet active_types;
   active_types.Put(syncer::PASSWORDS);
-  EXPECT_CALL(*mock_sync_service, HasSyncSetupCompleted())
+  EXPECT_CALL(*mock_sync_service, IsFirstSetupComplete())
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*mock_sync_service, IsSyncActive()).WillRepeatedly(Return(true));
   EXPECT_CALL(*mock_sync_service, GetActiveDataTypes())
@@ -282,7 +283,7 @@ TEST_F(ChromePasswordManagerClientTest,
 }
 
 TEST_F(ChromePasswordManagerClientTest, SavingAndFillingEnabledConditionsTest) {
-  scoped_ptr<MockChromePasswordManagerClient> client(
+  std::unique_ptr<MockChromePasswordManagerClient> client(
       new MockChromePasswordManagerClient(web_contents()));
   // Functionality disabled if there is SSL errors.
   EXPECT_CALL(*client, DidLastPageLoadEncounterSSLErrors())

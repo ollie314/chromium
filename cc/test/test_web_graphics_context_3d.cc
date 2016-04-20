@@ -13,6 +13,7 @@
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/numerics/safe_conversions.h"
 #include "cc/test/test_context_support.h"
@@ -46,8 +47,8 @@ TestWebGraphicsContext3D::Namespace::~Namespace() {
 }
 
 // static
-scoped_ptr<TestWebGraphicsContext3D> TestWebGraphicsContext3D::Create() {
-  return make_scoped_ptr(new TestWebGraphicsContext3D());
+std::unique_ptr<TestWebGraphicsContext3D> TestWebGraphicsContext3D::Create() {
+  return base::WrapUnique(new TestWebGraphicsContext3D());
 }
 
 TestWebGraphicsContext3D::TestWebGraphicsContext3D()
@@ -526,12 +527,12 @@ void TestWebGraphicsContext3D::bindBuffer(GLenum target,
   DCHECK_LT(buffer_id, namespace_->next_buffer_id);
   DCHECK_EQ(context_id, context_id_);
 
-  base::ScopedPtrHashMap<unsigned, scoped_ptr<Buffer>>& buffers =
+  std::unordered_map<unsigned, std::unique_ptr<Buffer>>& buffers =
       namespace_->buffers;
   if (buffers.count(bound_buffer_) == 0)
-    buffers.set(bound_buffer_, make_scoped_ptr(new Buffer));
+    buffers[bound_buffer_] = base::WrapUnique(new Buffer);
 
-  buffers.get(bound_buffer_)->target = target;
+  buffers[bound_buffer_]->target = target;
 }
 
 void TestWebGraphicsContext3D::bufferData(GLenum target,
@@ -539,11 +540,11 @@ void TestWebGraphicsContext3D::bufferData(GLenum target,
                                           const void* data,
                                           GLenum usage) {
   base::AutoLock lock(namespace_->lock);
-  base::ScopedPtrHashMap<unsigned, scoped_ptr<Buffer>>& buffers =
+  std::unordered_map<unsigned, std::unique_ptr<Buffer>>& buffers =
       namespace_->buffers;
   DCHECK_GT(buffers.count(bound_buffer_), 0u);
-  DCHECK_EQ(target, buffers.get(bound_buffer_)->target);
-  Buffer* buffer = buffers.get(bound_buffer_);
+  DCHECK_EQ(target, buffers[bound_buffer_]->target);
+  Buffer* buffer = buffers[bound_buffer_].get();
   if (context_lost_) {
     buffer->pixels = nullptr;
     return;
@@ -589,10 +590,10 @@ void TestWebGraphicsContext3D::pixelStorei(GLenum pname, GLint param) {
 void* TestWebGraphicsContext3D::mapBufferCHROMIUM(GLenum target,
                                                   GLenum access) {
   base::AutoLock lock(namespace_->lock);
-  base::ScopedPtrHashMap<unsigned, scoped_ptr<Buffer>>& buffers =
+  std::unordered_map<unsigned, std::unique_ptr<Buffer>>& buffers =
       namespace_->buffers;
   DCHECK_GT(buffers.count(bound_buffer_), 0u);
-  DCHECK_EQ(target, buffers.get(bound_buffer_)->target);
+  DCHECK_EQ(target, buffers[bound_buffer_]->target);
   if (times_map_buffer_chromium_succeeds_ >= 0) {
     if (!times_map_buffer_chromium_succeeds_) {
       return NULL;
@@ -600,17 +601,17 @@ void* TestWebGraphicsContext3D::mapBufferCHROMIUM(GLenum target,
     --times_map_buffer_chromium_succeeds_;
   }
 
-  return buffers.get(bound_buffer_)->pixels.get();
+  return buffers[bound_buffer_]->pixels.get();
 }
 
 GLboolean TestWebGraphicsContext3D::unmapBufferCHROMIUM(
     GLenum target) {
   base::AutoLock lock(namespace_->lock);
-  base::ScopedPtrHashMap<unsigned, scoped_ptr<Buffer>>& buffers =
+  std::unordered_map<unsigned, std::unique_ptr<Buffer>>& buffers =
       namespace_->buffers;
   DCHECK_GT(buffers.count(bound_buffer_), 0u);
-  DCHECK_EQ(target, buffers.get(bound_buffer_)->target);
-  buffers.get(bound_buffer_)->pixels = nullptr;
+  DCHECK_EQ(target, buffers[bound_buffer_]->target);
+  buffers[bound_buffer_]->pixels = nullptr;
   return true;
 }
 
@@ -621,7 +622,7 @@ GLuint TestWebGraphicsContext3D::createImageCHROMIUM(ClientBuffer buffer,
   DCHECK_EQ(GL_RGBA, static_cast<int>(internalformat));
   GLuint image_id = NextImageId();
   base::AutoLock lock(namespace_->lock);
-  base::hash_set<unsigned>& images = namespace_->images;
+  std::unordered_set<unsigned>& images = namespace_->images;
   images.insert(image_id);
   return image_id;
 }
@@ -630,7 +631,7 @@ void TestWebGraphicsContext3D::destroyImageCHROMIUM(
     GLuint id) {
   RetireImageId(id);
   base::AutoLock lock(namespace_->lock);
-  base::hash_set<unsigned>& images = namespace_->images;
+  std::unordered_set<unsigned>& images = namespace_->images;
   if (!images.count(id))
     ADD_FAILURE() << "destroyImageCHROMIUM called on unknown image " << id;
   images.erase(id);
@@ -644,13 +645,9 @@ GLuint TestWebGraphicsContext3D::createGpuMemoryBufferImageCHROMIUM(
   DCHECK_EQ(GL_RGBA, static_cast<int>(internalformat));
   GLuint image_id = NextImageId();
   base::AutoLock lock(namespace_->lock);
-  base::hash_set<unsigned>& images = namespace_->images;
+  std::unordered_set<unsigned>& images = namespace_->images;
   images.insert(image_id);
   return image_id;
-}
-
-GLuint TestWebGraphicsContext3D::insertSyncPoint() {
-  return static_cast<GLuint>(next_insert_fence_sync_++);
 }
 
 GLuint64 TestWebGraphicsContext3D::insertFenceSync() {
@@ -659,8 +656,8 @@ GLuint64 TestWebGraphicsContext3D::insertFenceSync() {
 
 void TestWebGraphicsContext3D::genSyncToken(GLuint64 fence_sync,
                                             GLbyte* sync_token) {
-  gpu::SyncToken sync_token_data(gpu::CommandBufferNamespace::GPU_IO, 0, 0,
-                                 fence_sync);
+  gpu::SyncToken sync_token_data(gpu::CommandBufferNamespace::GPU_IO, 0,
+                                 gpu::CommandBufferId(), fence_sync);
   sync_token_data.SetVerifyFlush();
   memcpy(sync_token, &sync_token_data, sizeof(sync_token_data));
 }

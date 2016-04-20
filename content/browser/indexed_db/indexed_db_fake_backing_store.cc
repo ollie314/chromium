@@ -4,31 +4,30 @@
 
 #include "content/browser/indexed_db/indexed_db_fake_backing_store.h"
 
+#include <memory>
+
 #include "base/files/file_path.h"
-#include "base/memory/scoped_ptr.h"
 
 namespace content {
 
 IndexedDBFakeBackingStore::IndexedDBFakeBackingStore()
     : IndexedDBBackingStore(NULL /* indexed_db_factory */,
-                            GURL("http://localhost:81"),
+                            url::Origin(GURL("http://localhost:81")),
                             base::FilePath(),
                             NULL /* request_context */,
-                            scoped_ptr<LevelDBDatabase>(),
-                            scoped_ptr<LevelDBComparator>(),
-                            NULL /* task_runner */) {
-}
+                            std::unique_ptr<LevelDBDatabase>(),
+                            std::unique_ptr<LevelDBComparator>(),
+                            NULL /* task_runner */) {}
 IndexedDBFakeBackingStore::IndexedDBFakeBackingStore(
     IndexedDBFactory* factory,
     base::SequencedTaskRunner* task_runner)
     : IndexedDBBackingStore(factory,
-                            GURL("http://localhost:81"),
+                            url::Origin(GURL("http://localhost:81")),
                             base::FilePath(),
                             NULL /* request_context */,
-                            scoped_ptr<LevelDBDatabase>(),
-                            scoped_ptr<LevelDBComparator>(),
-                            task_runner) {
-}
+                            std::unique_ptr<LevelDBDatabase>(),
+                            std::unique_ptr<LevelDBComparator>(),
+                            task_runner) {}
 IndexedDBFakeBackingStore::~IndexedDBFakeBackingStore() {}
 
 std::vector<base::string16> IndexedDBFakeBackingStore::GetDatabaseNames(
@@ -45,8 +44,7 @@ leveldb::Status IndexedDBFakeBackingStore::GetIDBDatabaseMetaData(
 
 leveldb::Status IndexedDBFakeBackingStore::CreateIDBDatabaseMetaData(
     const base::string16& name,
-    const base::string16& version,
-    int64_t int_version,
+    int64_t version,
     int64_t* row_id) {
   return leveldb::Status::OK();
 }
@@ -157,7 +155,7 @@ leveldb::Status IndexedDBFakeBackingStore::PutIndexDataForRecord(
 void IndexedDBFakeBackingStore::ReportBlobUnused(int64_t database_id,
                                                  int64_t blob_key) {}
 
-scoped_ptr<IndexedDBBackingStore::Cursor>
+std::unique_ptr<IndexedDBBackingStore::Cursor>
 IndexedDBFakeBackingStore::OpenObjectStoreKeyCursor(
     IndexedDBBackingStore::Transaction* transaction,
     int64_t database_id,
@@ -165,9 +163,9 @@ IndexedDBFakeBackingStore::OpenObjectStoreKeyCursor(
     const IndexedDBKeyRange& key_range,
     blink::WebIDBCursorDirection,
     leveldb::Status* s) {
-  return scoped_ptr<IndexedDBBackingStore::Cursor>();
+  return std::unique_ptr<IndexedDBBackingStore::Cursor>();
 }
-scoped_ptr<IndexedDBBackingStore::Cursor>
+std::unique_ptr<IndexedDBBackingStore::Cursor>
 IndexedDBFakeBackingStore::OpenObjectStoreCursor(
     IndexedDBBackingStore::Transaction* transaction,
     int64_t database_id,
@@ -175,9 +173,9 @@ IndexedDBFakeBackingStore::OpenObjectStoreCursor(
     const IndexedDBKeyRange& key_range,
     blink::WebIDBCursorDirection,
     leveldb::Status* s) {
-  return scoped_ptr<IndexedDBBackingStore::Cursor>();
+  return std::unique_ptr<IndexedDBBackingStore::Cursor>();
 }
-scoped_ptr<IndexedDBBackingStore::Cursor>
+std::unique_ptr<IndexedDBBackingStore::Cursor>
 IndexedDBFakeBackingStore::OpenIndexKeyCursor(
     IndexedDBBackingStore::Transaction* transaction,
     int64_t database_id,
@@ -186,9 +184,9 @@ IndexedDBFakeBackingStore::OpenIndexKeyCursor(
     const IndexedDBKeyRange& key_range,
     blink::WebIDBCursorDirection,
     leveldb::Status* s) {
-  return scoped_ptr<IndexedDBBackingStore::Cursor>();
+  return std::unique_ptr<IndexedDBBackingStore::Cursor>();
 }
-scoped_ptr<IndexedDBBackingStore::Cursor>
+std::unique_ptr<IndexedDBBackingStore::Cursor>
 IndexedDBFakeBackingStore::OpenIndexCursor(
     IndexedDBBackingStore::Transaction* transaction,
     int64_t database_id,
@@ -197,7 +195,7 @@ IndexedDBFakeBackingStore::OpenIndexCursor(
     const IndexedDBKeyRange& key_range,
     blink::WebIDBCursorDirection,
     leveldb::Status* s) {
-  return scoped_ptr<IndexedDBBackingStore::Cursor>();
+  return std::unique_ptr<IndexedDBBackingStore::Cursor>();
 }
 
 IndexedDBFakeBackingStore::FakeTransaction::FakeTransaction(

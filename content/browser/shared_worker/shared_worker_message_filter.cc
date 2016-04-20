@@ -19,6 +19,15 @@ namespace {
 const uint32_t kFilteredMessageClasses[] = {
     ViewMsgStart, WorkerMsgStart,
 };
+
+// TODO(estark): For now, only URLMismatch errors actually stop the
+// worker from being created. Other errors are recorded in UMA in
+// Blink but do not stop the worker from being created
+// yet. https://crbug.com/573206
+bool CreateWorkerErrorIsFatal(blink::WebWorkerCreationError error) {
+  return (error == blink::WebWorkerCreationErrorURLMismatch);
+}
+
 }  // namespace
 
 SharedWorkerMessageFilter::SharedWorkerMessageFilter(
@@ -64,7 +73,6 @@ bool SharedWorkerMessageFilter::OnMessageReceived(const IPC::Message& message) {
                         OnWorkerScriptLoadFailed)
     IPC_MESSAGE_HANDLER(WorkerHostMsg_WorkerConnected,
                         OnWorkerConnected)
-    IPC_MESSAGE_HANDLER(WorkerProcessHostMsg_AllowDatabase, OnAllowDatabase)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(
         WorkerProcessHostMsg_RequestFileSystemAccessSync,
         OnRequestFileSystemAccess)
@@ -85,7 +93,7 @@ void SharedWorkerMessageFilter::OnCreateWorker(
   SharedWorkerServiceImpl::GetInstance()->CreateWorker(
       params, reply->route_id, this, resource_context_,
       WorkerStoragePartitionId(partition_), &reply->error);
-  if (reply->error != blink::WebWorkerCreationErrorNone)
+  if (CreateWorkerErrorIsFatal(reply->error))
     reply->route_id = MSG_ROUTING_NONE;
 }
 
@@ -132,22 +140,6 @@ void SharedWorkerMessageFilter::OnWorkerConnected(int message_port_id,
       message_port_id,
       worker_route_id,
       this);
-}
-
-void SharedWorkerMessageFilter::OnAllowDatabase(
-    int worker_route_id,
-    const GURL& url,
-    const base::string16& name,
-    const base::string16& display_name,
-    unsigned long estimated_size,
-    bool* result) {
-  SharedWorkerServiceImpl::GetInstance()->AllowDatabase(worker_route_id,
-                                                        url,
-                                                        name,
-                                                        display_name,
-                                                        estimated_size,
-                                                        result,
-                                                        this);
 }
 
 void SharedWorkerMessageFilter::OnRequestFileSystemAccess(

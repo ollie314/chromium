@@ -96,6 +96,10 @@ bool GLSurface::InitializeOneOffImplementation(GLImplementation impl,
 GLSurface::GLSurface() {}
 
 bool GLSurface::Initialize() {
+  return Initialize(SURFACE_DEFAULT);
+}
+
+bool GLSurface::Initialize(GLSurface::Format format) {
   return true;
 }
 
@@ -186,9 +190,9 @@ void* GLSurface::GetConfig() {
   return NULL;
 }
 
-unsigned GLSurface::GetFormat() {
+GLSurface::Format GLSurface::GetFormat() {
   NOTIMPLEMENTED();
-  return 0;
+  return SURFACE_DEFAULT;
 }
 
 VSyncProvider* GLSurface::GetVSyncProvider() {
@@ -209,10 +213,12 @@ bool GLSurface::ScheduleCALayer(gl::GLImage* contents_image,
                                 float opacity,
                                 unsigned background_color,
                                 unsigned edge_aa_mask,
-                                const RectF& bounds_rect,
+                                const RectF& rect,
                                 bool is_clipped,
                                 const RectF& clip_rect,
-                                const Transform& transform) {
+                                const Transform& transform,
+                                int sorting_content_id,
+                                unsigned filter) {
   NOTIMPLEMENTED();
   return false;
 }
@@ -260,8 +266,8 @@ void GLSurface::OnSetSwapInterval(int interval) {
 
 GLSurfaceAdapter::GLSurfaceAdapter(GLSurface* surface) : surface_(surface) {}
 
-bool GLSurfaceAdapter::Initialize() {
-  return surface_->Initialize();
+bool GLSurfaceAdapter::Initialize(GLSurface::Format format) {
+  return surface_->Initialize(format);
 }
 
 void GLSurfaceAdapter::Destroy() {
@@ -368,7 +374,7 @@ void* GLSurfaceAdapter::GetConfig() {
   return surface_->GetConfig();
 }
 
-unsigned GLSurfaceAdapter::GetFormat() {
+GLSurface::Format GLSurfaceAdapter::GetFormat() {
   return surface_->GetFormat();
 }
 

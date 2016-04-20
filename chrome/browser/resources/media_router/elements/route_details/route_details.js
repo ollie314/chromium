@@ -18,6 +18,15 @@ Polymer({
     },
 
     /**
+     * Whether the browser is currently incognito.
+     * @type {boolean}
+     */
+    isOffTheRecord: {
+      type: Boolean,
+      value: false,
+    },
+
+    /**
      * The route to show.
      * @type {?media_router.Route}
      */
@@ -25,28 +34,6 @@ Polymer({
       type: Object,
       value: null,
       observer: 'maybeLoadCustomController_',
-    },
-
-    /**
-     * The text for the join button.
-     * @private {string}
-     */
-    joinButtonText_: {
-      type: String,
-      readOnly: true,
-      value: loadTimeData.getString('joinButton'),
-    },
-
-    /**
-     * The text for the stop casting button.
-     * @private {string}
-     */
-    stopCastingButtonText_: {
-      type: String,
-      readOnly: true,
-      value: function() {
-        return loadTimeData.getString('stopCastingButton');
-      },
     },
 
     /**
@@ -61,6 +48,10 @@ Polymer({
     },
   },
 
+  behaviors: [
+    I18nBehavior,
+  ],
+
   /**
    * Fires a close-route-click event. This is called when the button to close
    * the current route is clicked.
@@ -72,13 +63,13 @@ Polymer({
   },
 
   /**
-   * Fires a join-route-click event. This is called when the button to join
-   * the current route is clicked.
+   * Fires a start-casting-to-route-click event. This is called when the button
+   * to start casting to the current route is clicked.
    *
    * @private
    */
-  joinRoute_: function() {
-    this.fire('join-route-click', {route: this.route});
+  startCastingToRoute_: function() {
+    this.fire('start-casting-to-route-click', {route: this.route});
   },
 
   /**
@@ -94,7 +85,8 @@ Polymer({
                                 this.route.description) :
         '';
 
-    if (!this.route || !this.route.customControllerPath) {
+    if (!this.route || !this.route.customControllerPath ||
+        this.isOffTheRecord) {
       this.isCustomControllerHidden_ = true;
       return;
     }

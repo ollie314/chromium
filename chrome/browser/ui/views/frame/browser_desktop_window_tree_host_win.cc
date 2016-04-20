@@ -18,52 +18,14 @@
 #include "chrome/browser/ui/views/frame/browser_window_property_manager_win.h"
 #include "chrome/browser/ui/views/frame/system_menu_insertion_delegate_win.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
-#include "chrome/browser/ui/views/theme_image_mapper.h"
 #include "chrome/common/chrome_constants.h"
 #include "ui/base/theme_provider.h"
-#include "ui/gfx/win/dpi.h"
+#include "ui/display/win/screen_win.h"
 #include "ui/views/controls/menu/native_menu_win.h"
-
-#pragma comment(lib, "dwmapi.lib")
 
 namespace {
 
 const int kClientEdgeThickness = 3;
-
-// DesktopThemeProvider maps resource ids using MapThemeImage(). This is
-// necessary for BrowserDesktopWindowTreeHostWin so that it uses the windows
-// theme images rather than the ash theme images.
-class DesktopThemeProvider : public ui::ThemeProvider {
- public:
-  explicit DesktopThemeProvider(const ui::ThemeProvider& delegate)
-      : delegate_(delegate) {}
-
-  gfx::ImageSkia* GetImageSkiaNamed(int id) const override {
-    return delegate_.GetImageSkiaNamed(
-        chrome::MapThemeImage(chrome::HOST_DESKTOP_TYPE_NATIVE, id));
-  }
-  SkColor GetColor(int id) const override { return delegate_.GetColor(id); }
-  int GetDisplayProperty(int id) const override {
-    return delegate_.GetDisplayProperty(id);
-  }
-  bool ShouldUseNativeFrame() const override {
-    return delegate_.ShouldUseNativeFrame();
-  }
-  bool HasCustomImage(int id) const override {
-    return delegate_.HasCustomImage(
-        chrome::MapThemeImage(chrome::HOST_DESKTOP_TYPE_NATIVE, id));
-  }
-  base::RefCountedMemory* GetRawData(
-      int id,
-      ui::ScaleFactor scale_factor) const override {
-    return delegate_.GetRawData(id, scale_factor);
-  }
-
- private:
-  const ui::ThemeProvider& delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(DesktopThemeProvider);
-};
 
 }  // namespace
 
@@ -80,10 +42,6 @@ BrowserDesktopWindowTreeHostWin::BrowserDesktopWindowTreeHostWin(
       browser_view_(browser_view),
       browser_frame_(browser_frame),
       did_gdi_clear_(false) {
-  scoped_ptr<ui::ThemeProvider> theme_provider(
-      new DesktopThemeProvider(ThemeService::GetThemeProviderForProfile(
-          browser_view->browser()->profile())));
-  browser_frame->SetThemeProvider(theme_provider.Pass());
 }
 
 BrowserDesktopWindowTreeHostWin::~BrowserDesktopWindowTreeHostWin() {
@@ -194,62 +152,71 @@ void BrowserDesktopWindowTreeHostWin::PostHandleMSG(UINT message,
                                                     WPARAM w_param,
                                                     LPARAM l_param) {
   switch (message) {
-  case WM_CREATE:
-    minimize_button_metrics_.Init(GetHWND());
-    break;
-  case WM_WINDOWPOSCHANGED: {
-    UpdateDWMFrame();
+    case WM_CREATE:
+      minimize_button_metrics_.Init(GetHWND());
+      break;
+    case WM_WINDOWPOSCHANGED: {
+      UpdateDWMFrame();
 
-    // Windows lies to us about the position of the minimize button before a
-    // window is visible.  We use this position to place the OTR avatar in RTL
-    // mode, so when the window is shown, we need to re-layout and schedule a
-    // paint for the non-client frame view so that the icon top has the correct
-    // position when the window becomes visible.  This fixes bugs where the icon
-    // appears to overlay the minimize button.
-    // Note that we will call Layout every time SetWindowPos is called with
-    // SWP_SHOWWINDOW, however callers typically are careful about not
-    // specifying this flag unless necessary to avoid flicker.
-    // This may be invoked during creation on XP and before the non_client_view
-    // has been created.
-    WINDOWPOS* window_pos = reinterpret_cast<WINDOWPOS*>(l_param);
-    if (window_pos->flags & SWP_SHOWWINDOW && GetWidget()->non_client_view()) {
-      GetWidget()->non_client_view()->Layout();
-      GetWidget()->non_client_view()->SchedulePaint();
+      // Windows lies to us about the position of the minimize button before a
+      // window is visible.  We use this position to place the OTR avatar in RTL
+      // mode, so when the window is shown, we need to re-layout and schedule a
+      // paint for the non-client frame view so that the icon top has the
+      // correct
+      // position when the window becomes visible.  This fixes bugs where the
+      // icon
+      // appears to overlay the minimize button.
+      // Note that we will call Layout every time SetWindowPos is called with
+      // SWP_SHOWWINDOW, however callers typically are careful about not
+      // specifying this flag unless necessary to avoid flicker.
+      // This may be invoked during creation on XP and before the
+      // non_client_view
+      // has been created.
+      WINDOWPOS* window_pos = reinterpret_cast<WINDOWPOS*>(l_param);
+      if (window_pos->flags & SWP_SHOWWINDOW &&
+          GetWidget()->non_client_view()) {
+        GetWidget()->non_client_view()->Layout();
+        GetWidget()->non_client_view()->SchedulePaint();
+      }
+      break;
     }
-    break;
-  }
-  case WM_ERASEBKGND:
-    if (!did_gdi_clear_ && DesktopWindowTreeHostWin::ShouldUseNativeFrame()) {
-      // This is necessary to avoid white flashing in the titlebar area around
-      // the minimize/maximize/close buttons.
-      HDC dc = GetDC(GetHWND());
-      MARGINS margins = GetDWMFrameMargins();
-      RECT client_rect;
-      GetClientRect(GetHWND(), &client_rect);
-      HBRUSH brush = CreateSolidBrush(0);
-      RECT rect = { 0, 0, client_rect.right, margins.cyTopHeight };
-      FillRect(dc, &rect, brush);
-      DeleteObject(brush);
-      ReleaseDC(GetHWND(), dc);
-      did_gdi_clear_ = true;
+    case WM_ERASEBKGND: {
+      gfx::Insets insets;
+      if (!did_gdi_clear_ && GetClientAreaInsets(&insets)) {
+        // This is necessary to avoid white flashing in the titlebar area around
+        // the minimize/maximize/close buttons.
+        DCHECK_EQ(0, insets.top());
+        HDC dc = GetDC(GetHWND());
+        MARGINS margins = GetDWMFrameMargins();
+        RECT client_rect;
+        GetClientRect(GetHWND(), &client_rect);
+        HBRUSH brush = CreateSolidBrush(0);
+        RECT rect = {0, 0, client_rect.right, margins.cyTopHeight};
+        FillRect(dc, &rect, brush);
+        DeleteObject(brush);
+        ReleaseDC(GetHWND(), dc);
+        did_gdi_clear_ = true;
+      }
+      break;
     }
-    break;
   }
 }
 
-
-bool BrowserDesktopWindowTreeHostWin::IsUsingCustomFrame() const {
+views::FrameMode BrowserDesktopWindowTreeHostWin::GetFrameMode() const {
   // We don't theme popup or app windows, so regardless of whether or not a
   // theme is active for normal browser windows, we don't want to use the custom
   // frame for popups/apps.
   if (!browser_view_->IsBrowserTypeNormal() &&
-      !DesktopWindowTreeHostWin::IsUsingCustomFrame()) {
-    return false;
+      DesktopWindowTreeHostWin::GetFrameMode() ==
+          views::FrameMode::SYSTEM_DRAWN) {
+    return views::FrameMode::SYSTEM_DRAWN;
   }
 
   // Otherwise, we use the native frame when we're told we should by the theme
   // provider (e.g. no custom theme is active).
-  return !GetWidget()->GetThemeProvider()->ShouldUseNativeFrame();
+  return GetWidget()->GetThemeProvider()->ShouldUseNativeFrame()
+             ? views::FrameMode::SYSTEM_DRAWN
+             : views::FrameMode::CUSTOM_DRAWN;
 }
 
 bool BrowserDesktopWindowTreeHostWin::ShouldUseNativeFrame() const {
@@ -318,7 +285,8 @@ MARGINS BrowserDesktopWindowTreeHostWin::GetDWMFrameMargins() const {
     if (!browser_view_->IsFullscreen()) {
       gfx::Rect tabstrip_bounds(
           browser_frame_->GetBoundsForTabStrip(browser_view_->tabstrip()));
-      tabstrip_bounds = gfx::win::DIPToScreenRect(tabstrip_bounds);
+      tabstrip_bounds =
+          display::win::ScreenWin::DIPToClientRect(GetHWND(), tabstrip_bounds);
       margins.cyTopHeight = tabstrip_bounds.bottom();
 
       // On pre-Win 10, we need to offset the DWM frame into the toolbar so that

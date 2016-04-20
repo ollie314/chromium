@@ -18,6 +18,28 @@ namespace mus {
 
 namespace ws {
 
+namespace {
+
+const ServerWindow* GetModalChildForWindowAncestor(const ServerWindow* window) {
+  for (const ServerWindow* ancestor = window; ancestor;
+       ancestor = ancestor->parent()) {
+    for (const auto& transient_child : ancestor->transient_children()) {
+      if (transient_child->is_modal() && transient_child->IsDrawn())
+        return transient_child;
+    }
+  }
+  return nullptr;
+}
+
+const ServerWindow* GetModalTargetForWindow(const ServerWindow* window) {
+  const ServerWindow* modal_window = GetModalChildForWindowAncestor(window);
+  if (!modal_window)
+    return window;
+  return GetModalTargetForWindow(modal_window);
+}
+
+}  // namespace
+
 ServerWindow::ServerWindow(ServerWindowDelegate* delegate, const WindowId& id)
     : ServerWindow(delegate, id, Properties()) {}
 
@@ -29,8 +51,9 @@ ServerWindow::ServerWindow(ServerWindowDelegate* delegate,
       parent_(nullptr),
       stacking_target_(nullptr),
       transient_parent_(nullptr),
+      is_modal_(false),
       visible_(false),
-      cursor_id_(mojom::CURSOR_NULL),
+      cursor_id_(mojom::Cursor::CURSOR_NULL),
       opacity_(1),
       can_focus_(true),
       properties_(properties),
@@ -87,7 +110,7 @@ void ServerWindow::Add(ServerWindow* child) {
   if (child->parent() == this) {
     if (children_.size() == 1)
       return;  // Already in the right position.
-    child->Reorder(children_.back(), mojom::ORDER_DIRECTION_ABOVE);
+    child->Reorder(children_.back(), mojom::OrderDirection::ABOVE);
     return;
   }
 
@@ -138,14 +161,14 @@ void ServerWindow::StackChildAtBottom(ServerWindow* child) {
   // There's nothing to do if the child is already at the bottom.
   if (children_.size() <= 1 || child == children_.front())
     return;
-  child->Reorder(children_.front(), mojom::ORDER_DIRECTION_BELOW);
+  child->Reorder(children_.front(), mojom::OrderDirection::BELOW);
 }
 
 void ServerWindow::StackChildAtTop(ServerWindow* child) {
   // There's nothing to do if the child is already at the top.
   if (children_.size() <= 1 || child == children_.back())
     return;
-  child->Reorder(children_.back(), mojom::ORDER_DIRECTION_ABOVE);
+  child->Reorder(children_.back(), mojom::OrderDirection::ABOVE);
 }
 
 void ServerWindow::SetBounds(const gfx::Rect& bounds) {
@@ -241,6 +264,18 @@ void ServerWindow::RemoveTransientWindow(ServerWindow* child) {
                     OnTransientWindowRemoved(this, child));
 }
 
+void ServerWindow::SetModal() {
+  is_modal_ = true;
+}
+
+bool ServerWindow::IsBlockedByModalWindow() const {
+  return !!GetModalChildForWindowAncestor(this);
+}
+
+const ServerWindow* ServerWindow::GetModalTarget() const {
+  return GetModalTargetForWindow(this);
+}
+
 bool ServerWindow::Contains(const ServerWindow* window) const {
   for (const ServerWindow* parent = window; parent; parent = parent->parent_) {
     if (parent == this)
@@ -263,8 +298,11 @@ void ServerWindow::SetVisible(bool value) {
 void ServerWindow::SetOpacity(float value) {
   if (value == opacity_)
     return;
+  float old_opacity = opacity_;
   opacity_ = value;
   delegate_->OnScheduleWindowPaint(this);
+  FOR_EACH_OBSERVER(ServerWindowObserver, observers_,
+                    OnWindowOpacityChanged(this, old_opacity, opacity_));
 }
 
 void ServerWindow::SetPredefinedCursor(mus::mojom::Cursor value) {
@@ -408,10 +446,10 @@ void ServerWindow::ReorderImpl(ServerWindow* window,
                                              window));
   Windows::iterator i = std::find(window->parent_->children_.begin(),
                                   window->parent_->children_.end(), relative);
-  if (direction == mojom::ORDER_DIRECTION_ABOVE) {
+  if (direction == mojom::OrderDirection::ABOVE) {
     DCHECK(i != window->parent_->children_.end());
     window->parent_->children_.insert(++i, window);
-  } else if (direction == mojom::ORDER_DIRECTION_BELOW) {
+  } else if (direction == mojom::OrderDirection::BELOW) {
     DCHECK(i != window->parent_->children_.end());
     window->parent_->children_.insert(i, window);
   }

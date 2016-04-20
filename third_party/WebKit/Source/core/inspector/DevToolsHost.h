@@ -31,7 +31,6 @@
 
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
-#include "wtf/RefCounted.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
 
@@ -43,12 +42,12 @@ class FrontendMenuProvider;
 class InspectorFrontendClient;
 class LocalFrame;
 
-class CORE_EXPORT DevToolsHost final : public RefCountedWillBeGarbageCollectedFinalized<DevToolsHost>, public ScriptWrappable {
+class CORE_EXPORT DevToolsHost final : public GarbageCollectedFinalized<DevToolsHost>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<DevToolsHost> create(InspectorFrontendClient* client, LocalFrame* frontendFrame)
+    static DevToolsHost* create(InspectorFrontendClient* client, LocalFrame* frontendFrame)
     {
-        return adoptRefWillBeNoop(new DevToolsHost(client, frontendFrame));
+        return new DevToolsHost(client, frontendFrame);
     }
 
     ~DevToolsHost();
@@ -77,11 +76,14 @@ public:
     void clearMenuProvider() { m_menuProvider = nullptr; }
 
 private:
+    friend class FrontendMenuProvider;
+
     DevToolsHost(InspectorFrontendClient*, LocalFrame* frontendFrame);
+    void evaluateScript(const String&);
 
     InspectorFrontendClient* m_client;
-    RawPtrWillBeMember<LocalFrame> m_frontendFrame;
-    RawPtrWillBeMember<FrontendMenuProvider> m_menuProvider;
+    Member<LocalFrame> m_frontendFrame;
+    Member<FrontendMenuProvider> m_menuProvider;
 };
 
 } // namespace blink

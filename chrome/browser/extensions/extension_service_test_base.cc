@@ -18,6 +18,7 @@
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_garbage_collector_factory.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/shared_module_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -44,7 +45,7 @@ namespace {
 const int kThreadOptions = content::TestBrowserThreadBundle::IO_MAINLOOP;
 
 // Create a testing profile according to |params|.
-scoped_ptr<TestingProfile> BuildTestingProfile(
+std::unique_ptr<TestingProfile> BuildTestingProfile(
     const ExtensionServiceTestBase::ExtensionServiceInitParams& params) {
   TestingProfile::Builder profile_builder;
   // Create a PrefService that only contains user defined preference values.
@@ -56,7 +57,7 @@ scoped_ptr<TestingProfile> BuildTestingProfile(
                              base::ThreadTaskRunnerHandle::Get().get());
     scoped_refptr<user_prefs::PrefRegistrySyncable> registry(
         new user_prefs::PrefRegistrySyncable);
-    scoped_ptr<syncable_prefs::PrefServiceSyncable> prefs(
+    std::unique_ptr<syncable_prefs::PrefServiceSyncable> prefs(
         factory.CreateSyncable(registry.get()));
     chrome::RegisterUserProfilePrefs(registry.get());
     profile_builder.SetPrefService(std::move(prefs));
@@ -77,6 +78,10 @@ ExtensionServiceTestBase::ExtensionServiceInitParams::
       is_first_run(true),
       profile_is_supervised(false) {
 }
+
+ExtensionServiceTestBase::ExtensionServiceInitParams::
+    ExtensionServiceInitParams(const ExtensionServiceInitParams& other) =
+        default;
 
 ExtensionServiceTestBase::ExtensionServiceTestBase()
     : thread_bundle_(new content::TestBrowserThreadBundle(kThreadOptions)),
@@ -314,7 +319,6 @@ void ExtensionServiceTestBase::CreateExtensionService(
       base::ThreadTaskRunnerHandle::Get().get());
   service_->set_extensions_enabled(true);
   service_->set_show_extensions_prompts(false);
-  service_->set_install_updates_when_idle_for_test(false);
   service_->component_loader()->set_ignore_whitelist_for_testing(true);
 
   // When we start up, we want to make sure there is no external provider,
@@ -323,6 +327,9 @@ void ExtensionServiceTestBase::CreateExtensionService(
   // interfere with the tests. Those tests that need an external provider
   // will register one specifically.
   service_->ClearProvidersForTesting();
+
+  service_->RegisterInstallGate(ExtensionPrefs::DELAY_REASON_WAIT_FOR_IMPORTS,
+                                service_->shared_module_service());
 
 #if defined(OS_CHROMEOS)
   InstallLimiter::Get(profile_.get())->DisableForTest();

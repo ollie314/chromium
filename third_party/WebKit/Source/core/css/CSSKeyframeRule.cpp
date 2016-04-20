@@ -42,14 +42,12 @@ CSSKeyframeRule::CSSKeyframeRule(StyleRuleKeyframe* keyframe, CSSKeyframesRule* 
 
 CSSKeyframeRule::~CSSKeyframeRule()
 {
-#if !ENABLE(OILPAN)
-    if (m_propertiesCSSOMWrapper)
-        m_propertiesCSSOMWrapper->clearParentRule();
-#endif
 }
 
 void CSSKeyframeRule::setKeyText(const String& keyText, ExceptionState& exceptionState)
 {
+    CSSStyleSheet::RuleMutationScope(this);
+
     if (!m_keyframe->setKeyText(keyText))
         exceptionState.throwDOMException(SyntaxError, "The key '" + keyText + "' is invalid and cannot be parsed");
 

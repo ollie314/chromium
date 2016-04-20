@@ -22,6 +22,7 @@
 #ifndef XMLHttpRequest_h
 #define XMLHttpRequest_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptString.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/ActiveDOMObject.h"
@@ -66,9 +67,9 @@ class XMLHttpRequestUpload;
 
 typedef int ExceptionCode;
 
-class XMLHttpRequest final : public XMLHttpRequestEventTarget, private ThreadableLoaderClient, public DocumentParserClient, public ActiveDOMObject {
+class XMLHttpRequest final : public XMLHttpRequestEventTarget, private ThreadableLoaderClient, public DocumentParserClient, public ActiveScriptWrappable, public ActiveDOMObject {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(XMLHttpRequest);
+    USING_GARBAGE_COLLECTED_MIXIN(XMLHttpRequest);
 public:
     static XMLHttpRequest* create(ScriptState*);
     static XMLHttpRequest* create(ExecutionContext*);
@@ -95,11 +96,13 @@ public:
 
     // ActiveDOMObject
     void contextDestroyed() override;
-    ExecutionContext* executionContext() const override;
-    bool hasPendingActivity() const override;
+    ExecutionContext* getExecutionContext() const override;
     void suspend() override;
     void resume() override;
     void stop() override;
+
+    // ActiveScriptWrappable
+    bool hasPendingActivity() const final;
 
     // XMLHttpRequestEventTarget
     const AtomicString& interfaceName() const override;
@@ -128,7 +131,7 @@ public:
     Stream* responseLegacyStream();
     unsigned timeout() const { return m_timeoutMilliseconds; }
     void setTimeout(unsigned timeout, ExceptionState&);
-    ResponseTypeCode responseTypeCode() const { return m_responseTypeCode; }
+    ResponseTypeCode getResponseTypeCode() const { return m_responseTypeCode; }
     String responseType();
     void setResponseType(const String&, ExceptionState&);
     String responseURL();
@@ -137,15 +140,13 @@ public:
     void sendForInspectorXHRReplay(PassRefPtr<EncodedFormData>, ExceptionState&);
 
     XMLHttpRequestUpload* upload();
+    bool isAsync() { return m_async; }
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(readystatechange);
 
     // (Also) eagerly finalized so as to prevent access to the eagerly finalized
     // progress event throttle.
     EAGERLY_FINALIZE();
-#if !ENABLE(OILPAN)
-    DECLARE_EAGER_FINALIZATION_OPERATOR_NEW();
-#endif
     DECLARE_VIRTUAL_TRACE();
 
 private:
@@ -153,7 +154,7 @@ private:
     XMLHttpRequest(ExecutionContext*, PassRefPtr<SecurityOrigin>);
 
     Document* document() const;
-    SecurityOrigin* securityOrigin() const;
+    SecurityOrigin* getSecurityOrigin() const;
 
     void didSendData(unsigned long long bytesSent, unsigned long long totalBytesToBeSent) override;
     void didReceiveResponse(unsigned long identifier, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
@@ -264,7 +265,7 @@ private:
     Member<Blob> m_responseBlob;
     Member<Stream> m_responseLegacyStream;
 
-    RefPtr<ThreadableLoader> m_loader;
+    OwnPtr<ThreadableLoader> m_loader;
     State m_state;
 
     ResourceResponse m_response;
@@ -273,13 +274,13 @@ private:
     OwnPtr<TextResourceDecoder> m_decoder;
 
     ScriptString m_responseText;
-    RefPtrWillBeMember<Document> m_responseDocument;
-    RefPtrWillBeMember<DocumentParser> m_responseDocumentParser;
+    Member<Document> m_responseDocument;
+    Member<DocumentParser> m_responseDocumentParser;
 
     RefPtr<SharedBuffer> m_binaryResponseBuilder;
     long long m_lengthDownloadedToFile;
 
-    RefPtr<DOMArrayBuffer> m_responseArrayBuffer;
+    Member<DOMArrayBuffer> m_responseArrayBuffer;
 
     // Used for onprogress tracking
     long long m_receivedLength;

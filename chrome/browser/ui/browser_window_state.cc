@@ -8,8 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/profiles/profile.h"
@@ -19,6 +18,8 @@
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 
 namespace chrome {
 namespace {
@@ -79,16 +80,16 @@ std::string GetWindowName(const Browser* browser) {
   return browser->app_name();
 }
 
-scoped_ptr<DictionaryPrefUpdate> GetWindowPlacementDictionaryReadWrite(
+std::unique_ptr<DictionaryPrefUpdate> GetWindowPlacementDictionaryReadWrite(
     const std::string& window_name,
     PrefService* prefs) {
   DCHECK(!window_name.empty());
   // A normal DictionaryPrefUpdate will suffice for non-app windows.
   if (prefs->FindPreference(window_name.c_str())) {
-    return make_scoped_ptr(
+    return base::WrapUnique(
         new DictionaryPrefUpdate(prefs, window_name.c_str()));
   }
-  return scoped_ptr<DictionaryPrefUpdate>(
+  return std::unique_ptr<DictionaryPrefUpdate>(
       new WindowPlacementPrefUpdate(prefs, window_name));
 }
 

@@ -7,7 +7,6 @@
 #include "cc/animation/animation_delegate.h"
 #include "cc/animation/animation_host.h"
 #include "cc/animation/animation_timeline.h"
-#include "cc/animation/element_animations.h"
 #include "cc/animation/layer_animation_controller.h"
 
 namespace cc {
@@ -105,8 +104,7 @@ void AnimationPlayer::BindElementAnimations() {
 
   // Pass all accumulated animations to LAC.
   for (auto& animation : animations_) {
-    element_animations_->layer_animation_controller()->AddAnimation(
-        std::move(animation));
+    element_animations_->AddAnimation(std::move(animation));
   }
   if (!animations_.empty())
     SetNeedsCommit();
@@ -118,13 +116,12 @@ void AnimationPlayer::UnbindElementAnimations() {
   DCHECK(animations_.empty());
 }
 
-void AnimationPlayer::AddAnimation(scoped_ptr<Animation> animation) {
-  DCHECK(animation->target_property() != Animation::SCROLL_OFFSET ||
+void AnimationPlayer::AddAnimation(std::unique_ptr<Animation> animation) {
+  DCHECK(animation->target_property() != TargetProperty::SCROLL_OFFSET ||
          (animation_host_ && animation_host_->SupportsScrollAnimations()));
 
   if (element_animations_) {
-    element_animations_->layer_animation_controller()->AddAnimation(
-        std::move(animation));
+    element_animations_->AddAnimation(std::move(animation));
     SetNeedsCommit();
   } else {
     animations_.push_back(std::move(animation));
@@ -133,43 +130,40 @@ void AnimationPlayer::AddAnimation(scoped_ptr<Animation> animation) {
 
 void AnimationPlayer::PauseAnimation(int animation_id, double time_offset) {
   DCHECK(element_animations_);
-  element_animations_->layer_animation_controller()->PauseAnimation(
+  element_animations_->PauseAnimation(
       animation_id, base::TimeDelta::FromSecondsD(time_offset));
   SetNeedsCommit();
 }
 
 void AnimationPlayer::RemoveAnimation(int animation_id) {
   if (element_animations_) {
-    element_animations_->layer_animation_controller()->RemoveAnimation(
-        animation_id);
+    element_animations_->RemoveAnimation(animation_id);
     SetNeedsCommit();
   } else {
-    auto animations_to_remove =
-        std::remove_if(animations_.begin(), animations_.end(),
-                       [animation_id](const scoped_ptr<Animation>& animation) {
-                         return animation->id() == animation_id;
-                       });
+    auto animations_to_remove = std::remove_if(
+        animations_.begin(), animations_.end(),
+        [animation_id](const std::unique_ptr<Animation>& animation) {
+          return animation->id() == animation_id;
+        });
     animations_.erase(animations_to_remove, animations_.end());
   }
 }
 
 void AnimationPlayer::AbortAnimation(int animation_id) {
   DCHECK(element_animations_);
-  element_animations_->layer_animation_controller()->AbortAnimation(
-      animation_id);
+  element_animations_->AbortAnimation(animation_id);
   SetNeedsCommit();
 }
 
-void AnimationPlayer::AbortAnimations(
-    Animation::TargetProperty target_property) {
+void AnimationPlayer::AbortAnimations(TargetProperty::Type target_property,
+                                      bool needs_completion) {
   if (element_animations_) {
-    element_animations_->layer_animation_controller()->AbortAnimations(
-        target_property);
+    element_animations_->AbortAnimations(target_property, needs_completion);
     SetNeedsCommit();
   } else {
     auto animations_to_remove = std::remove_if(
         animations_.begin(), animations_.end(),
-        [target_property](const scoped_ptr<Animation>& animation) {
+        [target_property](const std::unique_ptr<Animation>& animation) {
           return animation->target_property() == target_property;
         });
     animations_.erase(animations_to_remove, animations_.end());
@@ -187,7 +181,7 @@ void AnimationPlayer::PushPropertiesTo(AnimationPlayer* player_impl) {
 
 void AnimationPlayer::NotifyAnimationStarted(
     base::TimeTicks monotonic_time,
-    Animation::TargetProperty target_property,
+    TargetProperty::Type target_property,
     int group) {
   if (layer_animation_delegate_)
     layer_animation_delegate_->NotifyAnimationStarted(monotonic_time,
@@ -196,7 +190,7 @@ void AnimationPlayer::NotifyAnimationStarted(
 
 void AnimationPlayer::NotifyAnimationFinished(
     base::TimeTicks monotonic_time,
-    Animation::TargetProperty target_property,
+    TargetProperty::Type target_property,
     int group) {
   if (layer_animation_delegate_)
     layer_animation_delegate_->NotifyAnimationFinished(monotonic_time,
@@ -205,11 +199,24 @@ void AnimationPlayer::NotifyAnimationFinished(
 
 void AnimationPlayer::NotifyAnimationAborted(
     base::TimeTicks monotonic_time,
-    Animation::TargetProperty target_property,
+    TargetProperty::Type target_property,
     int group) {
   if (layer_animation_delegate_)
     layer_animation_delegate_->NotifyAnimationAborted(monotonic_time,
                                                       target_property, group);
+}
+
+void AnimationPlayer::NotifyAnimationTakeover(
+    base::TimeTicks monotonic_time,
+    TargetProperty::Type target_property,
+    double animation_start_time,
+    std::unique_ptr<AnimationCurve> curve) {
+  if (layer_animation_delegate_) {
+    DCHECK(curve);
+    layer_animation_delegate_->NotifyAnimationTakeover(
+        monotonic_time, target_property, animation_start_time,
+        std::move(curve));
+  }
 }
 
 void AnimationPlayer::SetNeedsCommit() {

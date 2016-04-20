@@ -24,10 +24,8 @@ class SpeechRecognitionEventListener;
 // Configuration params for creating a new speech recognition session.
 struct CONTENT_EXPORT SpeechRecognitionSessionConfig {
   SpeechRecognitionSessionConfig();
+  SpeechRecognitionSessionConfig(const SpeechRecognitionSessionConfig& other);
   ~SpeechRecognitionSessionConfig();
-
-  // TODO(hans): The legacy API is dead; remove this flag (crbug.com/223198).
-  bool is_legacy_api;
 
   std::string language;
   SpeechRecognitionGrammarArray grammars;

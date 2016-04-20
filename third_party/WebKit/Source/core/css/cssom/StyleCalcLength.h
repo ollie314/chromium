@@ -23,30 +23,34 @@ public:
         return create(length);
     }
 
-#define GETTER_SETTER_MACRO(name, capsName, index) \
-    double name(bool& isNull) { isNull = !has(index); return get(index); } \
-    void set##capsName(double value) { set(value, index); }
+#define GETTER_MACRO(name, type) \
+    double name(bool& isNull) \
+    { \
+        isNull = !hasAtIndex(indexForUnit(type)); \
+        return get(type); \
+    }
 
-    GETTER_SETTER_MACRO(px, Px, LengthUnit::Px)
-    GETTER_SETTER_MACRO(percent, Percent, LengthUnit::Percent)
-    GETTER_SETTER_MACRO(em, Em, LengthUnit::Em)
-    GETTER_SETTER_MACRO(ex, Ex, LengthUnit::Ex)
-    GETTER_SETTER_MACRO(ch, Ch, LengthUnit::Ch)
-    GETTER_SETTER_MACRO(rem, Rem, LengthUnit::Rem)
-    GETTER_SETTER_MACRO(vw, Vw, LengthUnit::Vw)
-    GETTER_SETTER_MACRO(vh, Vh, LengthUnit::Vh)
-    GETTER_SETTER_MACRO(vmin, Vmin, LengthUnit::Vmin)
-    GETTER_SETTER_MACRO(vmax, Vmax, LengthUnit::Vmax)
-    GETTER_SETTER_MACRO(cm, Cm, LengthUnit::Cm)
-    GETTER_SETTER_MACRO(mm, Mm, LengthUnit::Mm)
-    GETTER_SETTER_MACRO(in, In, LengthUnit::In)
-    GETTER_SETTER_MACRO(pc, Pc, LengthUnit::Pc)
-    GETTER_SETTER_MACRO(pt, Pt, LengthUnit::Pt)
+    GETTER_MACRO(px, CSSPrimitiveValue::UnitType::Pixels)
+    GETTER_MACRO(percent, CSSPrimitiveValue::UnitType::Percentage)
+    GETTER_MACRO(em, CSSPrimitiveValue::UnitType::Ems)
+    GETTER_MACRO(ex, CSSPrimitiveValue::UnitType::Exs)
+    GETTER_MACRO(ch, CSSPrimitiveValue::UnitType::Chs)
+    GETTER_MACRO(rem, CSSPrimitiveValue::UnitType::Rems)
+    GETTER_MACRO(vw, CSSPrimitiveValue::UnitType::ViewportWidth)
+    GETTER_MACRO(vh, CSSPrimitiveValue::UnitType::ViewportHeight)
+    GETTER_MACRO(vmin, CSSPrimitiveValue::UnitType::ViewportMin)
+    GETTER_MACRO(vmax, CSSPrimitiveValue::UnitType::ViewportMax)
+    GETTER_MACRO(cm, CSSPrimitiveValue::UnitType::Centimeters)
+    GETTER_MACRO(mm, CSSPrimitiveValue::UnitType::Millimeters)
+    GETTER_MACRO(in, CSSPrimitiveValue::UnitType::Inches)
+    GETTER_MACRO(pc, CSSPrimitiveValue::UnitType::Picas)
+    GETTER_MACRO(pt, CSSPrimitiveValue::UnitType::Points)
 
-#undef GETTER_SETTER_MACRO
+#undef GETTER_MACRO
 
-    String cssString() const override;
-    PassRefPtrWillBeRawPtr<CSSValue> toCSSValue() const override;
+    bool containsPercent() const override;
+
+    CSSValue* toCSSValue() const override;
 
     StyleValueType type() const override { return CalcLengthType; }
 protected:
@@ -60,24 +64,35 @@ private:
     StyleCalcLength(const StyleCalcLength& other);
     StyleCalcLength(const SimpleLength& other);
 
-    bool has(LengthUnit lengthUnit) const
+    static int indexForUnit(CSSPrimitiveValue::UnitType);
+    static CSSPrimitiveValue::UnitType unitFromIndex(int index)
     {
-        ASSERT(lengthUnit < LengthUnit::Count);
-        return m_hasValues.quickGet(lengthUnit);
-    }
-    void set(double value, LengthUnit lengthUnit)
-    {
-        ASSERT(lengthUnit < LengthUnit::Count);
-        m_hasValues.quickSet(lengthUnit);
-        m_values[lengthUnit] = value;
-    }
-    double get(LengthUnit lengthUnit) const
-    {
-        ASSERT(lengthUnit < LengthUnit::Count);
-        return m_values[lengthUnit];
+        ASSERT(index < LengthValue::kNumSupportedUnits);
+        int lowestValue = static_cast<int>(CSSPrimitiveValue::UnitType::Percentage);
+        return static_cast<CSSPrimitiveValue::UnitType>(index + lowestValue);
     }
 
-    Vector<double, LengthUnit::Count> m_values;
+    bool hasAtIndex(int index) const
+    {
+        ASSERT(index < LengthValue::kNumSupportedUnits);
+        return m_hasValues.quickGet(index);
+    }
+    bool has(CSSPrimitiveValue::UnitType unit) const { return hasAtIndex(indexForUnit(unit)); }
+    void setAtIndex(double value, int index)
+    {
+        ASSERT(index < LengthValue::kNumSupportedUnits);
+        m_hasValues.quickSet(index);
+        m_values[index] = value;
+    }
+    void set(double value, CSSPrimitiveValue::UnitType unit) { setAtIndex(value, indexForUnit(unit)); }
+    double getAtIndex(int index) const
+    {
+        ASSERT(index < LengthValue::kNumSupportedUnits);
+        return m_values[index];
+    }
+    double get(CSSPrimitiveValue::UnitType unit) const { return getAtIndex(indexForUnit(unit)); }
+
+    Vector<double, LengthValue::kNumSupportedUnits> m_values;
     BitVector m_hasValues;
 };
 

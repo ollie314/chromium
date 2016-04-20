@@ -8,7 +8,6 @@
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -34,6 +33,7 @@
 #include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
@@ -93,15 +93,11 @@ TabSpecificContentSettings::TabSpecificContentSettings(WebContents* tab)
       geolocation_usages_state_(
           HostContentSettingsMapFactory::GetForProfile(
               Profile::FromBrowserContext(tab->GetBrowserContext())),
-          CONTENT_SETTINGS_TYPE_GEOLOCATION,
-          prefs::kAcceptLanguages,
-          Profile::FromBrowserContext(tab->GetBrowserContext())->GetPrefs()),
+          CONTENT_SETTINGS_TYPE_GEOLOCATION),
       midi_usages_state_(
           HostContentSettingsMapFactory::GetForProfile(
               Profile::FromBrowserContext(tab->GetBrowserContext())),
-          CONTENT_SETTINGS_TYPE_MIDI_SYSEX,
-          prefs::kAcceptLanguages,
-          Profile::FromBrowserContext(tab->GetBrowserContext())->GetPrefs()),
+          CONTENT_SETTINGS_TYPE_MIDI_SYSEX),
       pending_protocol_handler_(ProtocolHandler::EmptyProtocolHandler()),
       previous_protocol_handler_(ProtocolHandler::EmptyProtocolHandler()),
       pending_protocol_handler_setting_(CONTENT_SETTING_DEFAULT),

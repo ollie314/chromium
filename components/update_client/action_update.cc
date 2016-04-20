@@ -78,7 +78,7 @@ void ActionUpdate::Run(UpdateContext* update_context, Callback callback) {
   OnDownloadStart(item);
 
   crx_downloader_->StartDownload(
-      GetUrls(item),
+      GetUrls(item), GetHash(item),
       base::Bind(&ActionUpdate::DownloadComplete, base::Unretained(this), id));
 }
 
@@ -210,6 +210,11 @@ std::vector<GURL> ActionUpdateDiff::GetUrls(const CrxUpdateItem* item) {
   return item->crx_diffurls;
 }
 
+std::string ActionUpdateDiff::GetHash(const CrxUpdateItem* item) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return item->hashdiff_sha256;
+}
+
 void ActionUpdateDiff::OnDownloadStart(CrxUpdateItem* item) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(item->state == CrxUpdateItem::State::kCanUpdate);
@@ -289,13 +294,18 @@ bool ActionUpdateFull::IsBackgroundDownload(const CrxUpdateItem* item) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   // On demand component updates are always downloaded in foreground.
-  return !item->on_demand && item->component.allow_background_download &&
+  return !item->on_demand && item->component.allows_background_download &&
          update_context_->config->UseBackgroundDownloader();
 }
 
 std::vector<GURL> ActionUpdateFull::GetUrls(const CrxUpdateItem* item) {
   DCHECK(thread_checker_.CalledOnValidThread());
   return item->crx_urls;
+}
+
+std::string ActionUpdateFull::GetHash(const CrxUpdateItem* item) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return item->hash_sha256;
 }
 
 void ActionUpdateFull::OnDownloadStart(CrxUpdateItem* item) {

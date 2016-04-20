@@ -31,6 +31,8 @@
 /** @const */ var SCREEN_TERMS_OF_SERVICE = 'terms-of-service';
 /** @const */ var SCREEN_WRONG_HWID = 'wrong-hwid';
 /** @const */ var SCREEN_DEVICE_DISABLED = 'device-disabled';
+/** @const */ var SCREEN_UNRECOVERABLE_CRYPTOHOME_ERROR =
+    'unrecoverable-cryptohome-error';
 
 /* Accelerator identifiers. Must be kept in sync with webui_login_view.cc. */
 /** @const */ var ACCELERATOR_CANCEL = 'cancel';
@@ -570,6 +572,9 @@ cr.define('cr.ui.login', function() {
 
       $('step-logo').hidden = newStep.classList.contains('no-logo');
 
+      $('oobe').dispatchEvent(
+          new CustomEvent('screenchanged',
+                          {detail: this.currentScreen.id}));
       chrome.send('updateCurrentScreen', [this.currentScreen.id]);
     },
 
@@ -917,8 +922,9 @@ cr.define('cr.ui.login', function() {
   DisplayManager.resetSigninUI = function(forceOnline) {
     var currentScreenId = Oobe.getInstance().currentScreen.id;
 
-    $(SCREEN_GAIA_SIGNIN).reset(
-        currentScreenId == SCREEN_GAIA_SIGNIN, forceOnline);
+    if ($(SCREEN_GAIA_SIGNIN))
+      $(SCREEN_GAIA_SIGNIN).reset(
+          currentScreenId == SCREEN_GAIA_SIGNIN, forceOnline);
     $('login-header-bar').disabled = false;
     $('pod-row').reset(currentScreenId == SCREEN_ACCOUNT_PICKER);
   };

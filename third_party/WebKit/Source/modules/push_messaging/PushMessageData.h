@@ -24,16 +24,12 @@ class MODULES_EXPORT PushMessageData final : public GarbageCollectedFinalized<Pu
     DEFINE_WRAPPERTYPEINFO();
 
 public:
-    static PushMessageData* create()
-    {
-        return new PushMessageData();
-    }
     static PushMessageData* create(const String& data);
     static PushMessageData* create(const ArrayBufferOrArrayBufferViewOrUSVString& data);
 
     virtual ~PushMessageData();
 
-    PassRefPtr<DOMArrayBuffer> arrayBuffer() const;
+    DOMArrayBuffer* arrayBuffer() const;
     Blob* blob() const;
     ScriptValue json(ScriptState*, ExceptionState&) const;
     String text() const;
@@ -41,7 +37,6 @@ public:
     DECLARE_TRACE();
 
 private:
-    PushMessageData();
     PushMessageData(const char* data, unsigned bytesSize);
 
     Vector<char> m_data;

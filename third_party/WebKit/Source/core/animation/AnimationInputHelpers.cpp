@@ -4,11 +4,12 @@
 
 #include "core/animation/AnimationInputHelpers.h"
 
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/SVGNames.h"
-#include "core/XLinkNames.h"
 #include "core/css/CSSValueList.h"
 #include "core/css/parser/CSSParser.h"
 #include "core/css/resolver/CSSToStyleMap.h"
+#include "core/frame/Deprecation.h"
 #include "core/svg/SVGElement.h"
 #include "core/svg/animation/SVGSMILElement.h"
 #include "wtf/text/StringBuilder.h"
@@ -29,15 +30,22 @@ static String removeSVGPrefix(const String& property)
     return property.substring(kSVGPrefixLength);
 }
 
-CSSPropertyID AnimationInputHelpers::keyframeAttributeToCSSProperty(const String& property)
+CSSPropertyID AnimationInputHelpers::keyframeAttributeToCSSProperty(const String& property, const Document& document)
 {
     // Disallow prefixed properties.
     if (property[0] == '-' || isASCIIUpper(property[0]))
         return CSSPropertyInvalid;
     if (property == "cssFloat")
         return CSSPropertyFloat;
+
     StringBuilder builder;
     for (size_t i = 0; i < property.length(); ++i) {
+        // Disallow hyphenated properties.
+        if (property[i] == '-') {
+            if (cssPropertyID(property) != CSSPropertyInvalid)
+                Deprecation::countDeprecation(document, UseCounter::WebAnimationHyphenatedProperty);
+            return CSSPropertyInvalid;
+        }
         if (isASCIIUpper(property[i]))
             builder.append('-');
         builder.append(property[i]);
@@ -88,6 +96,7 @@ const AttributeNameMap& getSupportedAttributes()
             &SVGNames::gradientTransformAttr,
             &SVGNames::gradientUnitsAttr,
             &SVGNames::heightAttr,
+            &SVGNames::hrefAttr,
             &SVGNames::in2Attr,
             &SVGNames::inAttr,
             &SVGNames::interceptAttr,
@@ -108,7 +117,6 @@ const AttributeNameMap& getSupportedAttributes()
             &SVGNames::modeAttr,
             &SVGNames::numOctavesAttr,
             &SVGNames::offsetAttr,
-            &SVGNames::opacityAttr,
             &SVGNames::operatorAttr,
             &SVGNames::orderAttr,
             &SVGNames::orientAttr,
@@ -161,10 +169,11 @@ const AttributeNameMap& getSupportedAttributes()
             &SVGNames::yAttr,
             &SVGNames::yChannelSelectorAttr,
             &SVGNames::zAttr,
-            &XLinkNames::hrefAttr,
         };
-        for (size_t i = 0; i < WTF_ARRAY_LENGTH(attributes); i++)
+        for (size_t i = 0; i < WTF_ARRAY_LENGTH(attributes); i++) {
+            ASSERT(!SVGElement::isAnimatableCSSProperty(*attributes[i]));
             supportedAttributes.set(*attributes[i], attributes[i]);
+        }
     }
     return supportedAttributes;
 }
@@ -172,10 +181,6 @@ const AttributeNameMap& getSupportedAttributes()
 QualifiedName svgAttributeName(const String& property)
 {
     ASSERT(!isSVGPrefixed(property));
-
-    if (property == "href")
-        return XLinkNames::hrefAttr;
-
     return QualifiedName(nullAtom, AtomicString(property), nullAtom);
 }
 
@@ -198,19 +203,55 @@ const QualifiedName* AnimationInputHelpers::keyframeAttributeToSVGAttribute(cons
     return iter->value;
 }
 
-PassRefPtr<TimingFunction> AnimationInputHelpers::parseTimingFunction(const String& string)
+PassRefPtr<TimingFunction> AnimationInputHelpers::parseTimingFunction(const String& string, Document* document, ExceptionState& exceptionState)
 {
-    if (string.isEmpty())
-        return nullptr;
-
-    RefPtrWillBeRawPtr<CSSValue> value = CSSParser::parseSingleValue(CSSPropertyTransitionTimingFunction, string);
-    if (!value || !value->isValueList()) {
-        ASSERT(!value || value->isCSSWideKeyword());
+    if (string.isEmpty()) {
+        exceptionState.throwTypeError("Easing may not be the empty string");
         return nullptr;
     }
-    CSSValueList* valueList = toCSSValueList(value.get());
-    if (valueList->length() > 1)
+
+    CSSValue* value = CSSParser::parseSingleValue(CSSPropertyTransitionTimingFunction, string);
+    if (!value || !value->isValueList()) {
+        ASSERT(!value || value->isCSSWideKeyword());
+        bool throwTypeError = true;
+        if (document) {
+            if (string.startsWith("function")) {
+                // Due to a bug in old versions of the web-animations-next
+                // polyfill, in some circumstances the string passed in here
+                // may be a Javascript function instead of the allowed values
+                // from the spec
+                // (http://w3c.github.io/web-animations/#dom-animationeffecttimingreadonly-easing)
+                // This bug was fixed in
+                // https://github.com/web-animations/web-animations-next/pull/423
+                // and we want to track how often it is still being hit. The
+                // linear case is special because 'linear' is the default value
+                // for easing. See http://crbug.com/601672
+                if (string == "function (a){return a}") {
+                    Deprecation::countDeprecation(*document, UseCounter::WebAnimationsEasingAsFunctionLinear);
+                    throwTypeError = false;
+                } else {
+                    UseCounter::count(*document, UseCounter::WebAnimationsEasingAsFunctionOther);
+                }
+            }
+        }
+
+        // TODO(suzyh): This return clause exists so that the special linear
+        // function case above is exempted from causing TypeErrors. The
+        // throwTypeError bool and this if-statement should be removed after the
+        // M53 branch point in July 2016, so that this case will also throw
+        // TypeErrors from M54 onward.
+        if (!throwTypeError) {
+            return Timing::defaults().timingFunction;
+        }
+
+        exceptionState.throwTypeError("'" + string + "' is not a valid value for easing");
         return nullptr;
+    }
+    CSSValueList* valueList = toCSSValueList(value);
+    if (valueList->length() > 1) {
+        exceptionState.throwTypeError("Easing may not be set to a list of values");
+        return nullptr;
+    }
     return CSSToStyleMap::mapAnimationTimingFunction(*valueList->item(0), true);
 }
 

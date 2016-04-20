@@ -49,15 +49,15 @@ void SpeechSynthesis::setPlatformSynthesizer(PlatformSpeechSynthesizer* synthesi
     m_platformSpeechSynthesizer = synthesizer;
 }
 
-ExecutionContext* SpeechSynthesis::executionContext() const
+ExecutionContext* SpeechSynthesis::getExecutionContext() const
 {
-    return ContextLifecycleObserver::executionContext();
+    return ContextLifecycleObserver::getExecutionContext();
 }
 
 void SpeechSynthesis::voicesDidChange()
 {
     m_voiceList.clear();
-    if (executionContext() && !executionContext()->activeDOMObjectsAreStopped())
+    if (getExecutionContext() && !getExecutionContext()->activeDOMObjectsAreStopped())
         dispatchEvent(Event::create(EventTypeNames::voiceschanged));
 }
 
@@ -67,7 +67,7 @@ const HeapVector<Member<SpeechSynthesisVoice>>& SpeechSynthesis::getVoices()
         return m_voiceList;
 
     // If the voiceList is empty, that's the cue to get the voices from the platform again.
-    const HeapVector<Member<PlatformSpeechSynthesisVoice>>& platformVoices = m_platformSpeechSynthesizer->voiceList();
+    const Vector<RefPtr<PlatformSpeechSynthesisVoice>>& platformVoices = m_platformSpeechSynthesizer->voiceList();
     size_t voiceCount = platformVoices.size();
     for (size_t k = 0; k < voiceCount; k++)
         m_voiceList.append(SpeechSynthesisVoice::create(platformVoices[k]));
@@ -139,7 +139,7 @@ void SpeechSynthesis::resume()
 
 void SpeechSynthesis::fireEvent(const AtomicString& type, SpeechSynthesisUtterance* utterance, unsigned long charIndex, const String& name)
 {
-    if (executionContext() && !executionContext()->activeDOMObjectsAreStopped())
+    if (getExecutionContext() && !getExecutionContext()->activeDOMObjectsAreStopped())
         utterance->dispatchEvent(SpeechSynthesisEvent::create(type, utterance, charIndex, (currentTime() - utterance->startTime()), name));
 }
 
@@ -234,7 +234,7 @@ DEFINE_TRACE(SpeechSynthesis)
     visitor->trace(m_voiceList);
     visitor->trace(m_utteranceQueue);
     PlatformSpeechSynthesizerClient::trace(visitor);
-    RefCountedGarbageCollectedEventTargetWithInlineData<SpeechSynthesis>::trace(visitor);
+    EventTargetWithInlineData::trace(visitor);
     ContextLifecycleObserver::trace(visitor);
 }
 

@@ -9,23 +9,26 @@
 
 #include <set>
 
+#include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/prefs/pref_member.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/synchronization/waitable_event_watcher.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/common/features.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
+#include "components/content_settings/core/common/content_settings_types.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/offline_pages/offline_page_model.h"
+#include "components/prefs/pref_member.h"
 #include "components/search_engines/template_url_service.h"
 #include "storage/common/quota/quota_types.h"
 #include "url/gurl.h"
-#include "url/origin.h"
 
 #if defined(ENABLE_PLUGINS)
 #include "chrome/browser/pepper_flash_settings_manager.h"
@@ -36,7 +39,9 @@
 #endif
 
 class BrowsingDataRemoverFactory;
+class HostContentSettingsMap;
 class IOThread;
+class BrowsingDataFilterBuilder;
 class Profile;
 
 namespace chrome_browser_net {
@@ -53,6 +58,10 @@ namespace net {
 class URLRequestContextGetter;
 }
 
+#if BUILDFLAG(ANDROID_JAVA_UI)
+class WebappRegistry;
+#endif
+
 // BrowsingDataRemover is responsible for removing data related to browsing:
 // visits in url database, downloads, cookies ...
 class BrowsingDataRemover : public KeyedService
@@ -62,12 +71,20 @@ class BrowsingDataRemover : public KeyedService
 {
  public:
   // Time period ranges available when doing browsing data removals.
+  // TODO(msramek): As this is now reused on Android, we should move it
+  // to browsing_data_counter_utils.h (and rename appropriately), so that
+  // all fundamental types related to browsing data on all platforms are in
+  // one place.
+  //
+  // A Java counterpart will be generated for this enum.
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser
   enum TimePeriod {
     LAST_HOUR = 0,
     LAST_DAY,
     LAST_WEEK,
     FOUR_WEEKS,
-    EVERYTHING
+    EVERYTHING,
+    TIME_PERIOD_LAST = EVERYTHING
   };
 
   // Mask used for Remove.
@@ -187,7 +204,7 @@ class BrowsingDataRemover : public KeyedService
   };
 
   using Callback = base::Callback<void(const NotificationDetails&)>;
-  using CallbackSubscription = scoped_ptr<
+  using CallbackSubscription = std::unique_ptr<
       base::CallbackList<void(const NotificationDetails&)>::Subscription>;
 
   // The completion inhibitor can artificially delay completion of the browsing
@@ -239,6 +256,17 @@ class BrowsingDataRemover : public KeyedService
               int remove_mask,
               int origin_type_mask);
 
+  // Removes the specified items related to browsing for all origins that match
+  // the provided |origin_type_mask| (see BrowsingDataHelper::OriginTypeMask).
+  // The |origin_filter| is used as a final filter for clearing operations.
+  // TODO(dmurph): Support all backends with filter (crbug.com/113621).
+  // DO NOT USE THIS METHOD UNLESS CALLER KNOWS WHAT THEY'RE DOING. NOT ALL
+  // BACKENDS ARE SUPPORTED YET, AND MORE DATA THAN EXPECTED COULD BE DELETED.
+  void RemoveWithFilter(const TimeRange& time_range,
+                        int remove_mask,
+                        int origin_type_mask,
+                        const BrowsingDataFilterBuilder& origin_filter);
+
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
@@ -246,10 +274,17 @@ class BrowsingDataRemover : public KeyedService
   void OverrideStoragePartitionForTesting(
       content::StoragePartition* storage_partition);
 
+#if BUILDFLAG(ANDROID_JAVA_UI)
+  void OverrideWebappRegistryForTesting(
+      std::unique_ptr<WebappRegistry> webapp_registry);
+#endif
+
  private:
   // The clear API needs to be able to toggle removing_ in order to test that
   // only one BrowsingDataRemover instance can be called at a time.
   FRIEND_TEST_ALL_PREFIXES(ExtensionBrowsingDataTest, OneAtATime);
+  // Testing our static method, ClearSettingsForOneTypeWithPredicate.
+  FRIEND_TEST_ALL_PREFIXES(BrowsingDataRemoverTest, ClearWithPredicate);
 
   // The BrowsingDataRemover tests need to be able to access the implementation
   // of Remove(), as it exposes details that aren't yet available in the public
@@ -260,6 +295,17 @@ class BrowsingDataRemover : public KeyedService
   friend class BrowsingDataRemoverTest;
 
   friend class BrowsingDataRemoverFactory;
+
+  // Clears all host-specific settings for one content type that satisfy the
+  // given predicate.
+  //
+  // This should only be called on the UI thread.
+  static void ClearSettingsForOneTypeWithPredicate(
+      HostContentSettingsMap* content_settings_map,
+      ContentSettingsType content_type,
+      const base::Callback<
+          bool(const ContentSettingsPattern& primary_pattern,
+               const ContentSettingsPattern& secondary_pattern)>& predicate);
 
   // Use BrowsingDataRemoverFactory::GetForBrowserContext to get an instance of
   // this class.
@@ -291,15 +337,16 @@ class BrowsingDataRemover : public KeyedService
 #endif
 
   // Removes the specified items related to browsing for a specific host. If the
-  // provided |remove_url| is empty, data is removed for all origins. The
+  // provided |remove_url| is empty, data is removed for all origins; otherwise,
+  // it is restricted by the origin filter origin (where implemented yet). The
   // |origin_type_mask| parameter defines the set of origins from which data
   // should be removed (protected, unprotected, or both).
-  // TODO(mkwst): The current implementation relies on unique (empty) origins to
-  // signal removal of all origins. Reconsider this behavior if/when we build
-  // a "forget this site" feature.
+  // TODO(ttr314): Remove "(where implemented yet)" constraint above once
+  // crbug.com/113621 is done.
+  // TODO(crbug.com/589586): Support all backends w/ origin filter.
   void RemoveImpl(const TimeRange& time_range,
                   int remove_mask,
-                  const GURL& remove_url,
+                  const BrowsingDataFilterBuilder& origin_filter,
                   int origin_type_mask);
 
   // Notifies observers and transitions to the idle state.
@@ -345,6 +392,9 @@ class BrowsingDataRemover : public KeyedService
   // cleared.
   void OnClearedPasswordsStats();
 
+  // Callback for when the autosignin state of passwords has been revoked.
+  void OnClearedAutoSignIn();
+
   // Callback for when cookies have been deleted. Invokes NotifyIfDone.
   void OnClearedCookies();
 
@@ -374,8 +424,12 @@ class BrowsingDataRemover : public KeyedService
   // Callback on UI thread when the webapp data has been cleared.
   void OnClearedWebappData();
 
+  // Callback on UI thread when the webapp history has been cleared.
+  void OnClearedWebappHistory();
+
   // Callback on UI thread when the offline page data has been cleared.
-  void OnClearedOfflinePageData();
+  void OnClearedOfflinePageData(
+      offline_pages::OfflinePageModel::DeletePageResult result);
 #endif
 
   void OnClearedDomainReliabilityMonitor();
@@ -400,17 +454,13 @@ class BrowsingDataRemover : public KeyedService
   // to artificially delay completion. Used for testing.
   static CompletionInhibitor* completion_inhibitor_;
 
-  // Used to delete data from HTTP cache.
-  scoped_refptr<net::URLRequestContextGetter> main_context_getter_;
-  scoped_refptr<net::URLRequestContextGetter> media_context_getter_;
-
 #if defined(ENABLE_PLUGINS)
   // Used to delete plugin data.
-  scoped_ptr<content::PluginDataRemover> plugin_data_remover_;
+  std::unique_ptr<content::PluginDataRemover> plugin_data_remover_;
   base::WaitableEventWatcher watcher_;
 
   // Used to deauthorize content licenses for Pepper Flash.
-  scoped_ptr<PepperFlashSettingsManager> pepper_flash_settings_manager_;
+  std::unique_ptr<PepperFlashSettingsManager> pepper_flash_settings_manager_;
 #endif
 
   uint32_t deauthorize_content_licenses_request_id_ = 0;
@@ -438,12 +488,14 @@ class BrowsingDataRemover : public KeyedService
 #if BUILDFLAG(ANDROID_JAVA_UI)
   bool waiting_for_clear_precache_history_ = false;
   bool waiting_for_clear_webapp_data_ = false;
+  bool waiting_for_clear_webapp_history_ = false;
   bool waiting_for_clear_offline_page_data_ = false;
 #endif
   bool waiting_for_clear_storage_partition_data_ = false;
 #if defined(ENABLE_WEBRTC)
   bool waiting_for_clear_webrtc_logs_ = false;
 #endif
+  bool waiting_for_clear_auto_sign_in_ = false;
 
   // The removal mask for the current removal operation.
   int remove_mask_ = 0;
@@ -456,10 +508,16 @@ class BrowsingDataRemover : public KeyedService
   // Used if we need to clear history.
   base::CancelableTaskTracker history_task_tracker_;
 
-  scoped_ptr<TemplateURLService::Subscription> template_url_sub_;
+  std::unique_ptr<TemplateURLService::Subscription> template_url_sub_;
 
   // We do not own this.
   content::StoragePartition* storage_partition_for_testing_ = nullptr;
+
+#if BUILDFLAG(ANDROID_JAVA_UI)
+  // WebappRegistry makes calls across the JNI. In unit tests, the Java side is
+  // not initialised, so the registry must be mocked out.
+  std::unique_ptr<WebappRegistry> webapp_registry_;
+#endif
 
   base::WeakPtrFactory<BrowsingDataRemover> weak_ptr_factory_;
 

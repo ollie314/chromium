@@ -122,13 +122,18 @@ public:
 
     bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) override;
 
-    void addOverflowFromCell(const LayoutTableCell*);
+    void computeOverflow();
 
     const char* name() const override { return "LayoutTableRow"; }
 
-    bool backgroundIsKnownToBeOpaqueInRect(const LayoutRect&) const override;
+    // Whether a row has opaque background depends on many factors, e.g. border spacing,
+    // border collapsing, missing cells, etc.
+    // For simplicity, just conservatively assume all table rows are not opaque.
+    bool foregroundIsKnownToBeOpaqueInRect(const LayoutRect&, unsigned) const override { return false; }
+    bool backgroundIsKnownToBeOpaqueInRect(const LayoutRect&) const override { return false; }
 
 private:
+    void addOverflowFromCell(const LayoutTableCell*);
     LayoutObjectChildList* virtualChildren() override { return children(); }
     const LayoutObjectChildList* virtualChildren() const override { return children(); }
 
@@ -141,7 +146,7 @@ private:
 
     PaintLayerType layerTypeRequired() const override
     {
-        if (hasTransformRelatedProperty() || hasHiddenBackface() || hasClipPath() || createsGroup() || style()->shouldCompositeForCurrentAnimations() || style()->hasCompositorProxy())
+        if (hasTransformRelatedProperty() || hasHiddenBackface() || hasClipPath() || createsGroup() || style()->shouldCompositeForCurrentAnimations() || isStickyPositioned() || style()->hasCompositorProxy())
             return NormalPaintLayer;
 
         if (hasOverflowClip())

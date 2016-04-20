@@ -40,8 +40,6 @@ public:
     void capsLockStateMayHaveChanged();
 
 protected:
-    virtual void centerContainerIfNeeded(LayoutBox*) const { }
-    virtual LayoutUnit computeLogicalHeightLimit() const;
     Element* containerElement() const;
     Element* editingViewPortElement() const;
     HTMLInputElement* inputElement() const;
@@ -70,11 +68,12 @@ private:
     float getAvgCharWidth(const AtomicString& family) const final;
     LayoutUnit preferredContentLogicalWidth(float charWidth) const final;
     LayoutUnit computeControlLogicalHeight(LayoutUnit lineHeight, LayoutUnit nonContentHeight) const override;
-
     void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) final;
+    void addOverflowFromChildren() final;
+
+    bool allowsOverflowClip() const override { return false; }
 
     bool textShouldBeTruncated() const;
-
     HTMLElement* innerSpinButtonElement() const;
 
     bool m_shouldDrawCapsLockIndicator;
@@ -99,6 +98,6 @@ private:
     bool hasLineIfEmpty() const override { return true; }
 };
 
-}
+} // namespace blink
 
 #endif

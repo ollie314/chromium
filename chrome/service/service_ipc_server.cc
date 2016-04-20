@@ -86,7 +86,8 @@ bool ServiceIPCServer::Send(IPC::Message* msg) {
   return channel_->Send(msg);
 }
 
-void ServiceIPCServer::AddMessageHandler(scoped_ptr<MessageHandler> handler) {
+void ServiceIPCServer::AddMessageHandler(
+    std::unique_ptr<MessageHandler> handler) {
   message_handlers_.push_back(handler.release());
 }
 
@@ -123,7 +124,10 @@ void ServiceIPCServer::OnGetHistograms() {
         new base::HistogramDeltaSerialization("ServiceProcess"));
   }
   std::vector<std::string> deltas;
-  histogram_delta_serializer_->PrepareAndSerializeDeltas(&deltas);
+  // "false" to PerpareAndSerializeDeltas() indicates to *not* include
+  // histograms held in persistent storage on the assumption that they will be
+  // visible to the recipient through other means.
+  histogram_delta_serializer_->PrepareAndSerializeDeltas(&deltas, false);
   channel_->Send(new ServiceHostMsg_Histograms(deltas));
 }
 

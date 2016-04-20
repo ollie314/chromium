@@ -13,12 +13,9 @@
 #include "bindings/core/v8/V8ObjectConstructor.h"
 #include "bindings/core/v8/V8TestDictionary.h"
 #include "bindings/core/v8/V8TestInterfaceEmpty.h"
-#include "core/dom/ContextFeatures.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/UseCounter.h"
-#include "platform/RuntimeEnabledFeatures.h"
-#include "platform/TraceEvent.h"
 #include "wtf/GetPtr.h"
 #include "wtf/RefPtr.h"
 
@@ -30,7 +27,7 @@ namespace blink {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo V8TestInterfaceConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceConstructor::domTemplate, V8TestInterfaceConstructor::refObject, V8TestInterfaceConstructor::derefObject, V8TestInterfaceConstructor::trace, 0, 0, V8TestInterfaceConstructor::preparePrototypeAndInterfaceObject, V8TestInterfaceConstructor::installConditionallyEnabledProperties, "TestInterfaceConstructor", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestInterfaceConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceConstructor::domTemplate, V8TestInterfaceConstructor::trace, 0, 0, V8TestInterfaceConstructor::preparePrototypeAndInterfaceObject, V8TestInterfaceConstructor::installConditionallyEnabledProperties, "TestInterfaceConstructor", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
 #endif
@@ -48,7 +45,7 @@ static void constructor1(const v8::FunctionCallbackInfo<v8::Value>& info)
     ScriptState* scriptState = ScriptState::current(info.GetIsolate());
     ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
     Document& document = *toDocument(currentExecutionContext(info.GetIsolate()));
-    RefPtr<TestInterfaceConstructor> impl = TestInterfaceConstructor::create(scriptState, executionContext, document, exceptionState);
+    TestInterfaceConstructor* impl = TestInterfaceConstructor::create(scriptState, executionContext, document, exceptionState);
     if (exceptionState.hadException()) {
         exceptionState.throwIfNeeded();
         return;
@@ -118,7 +115,7 @@ static void constructor2(const v8::FunctionCallbackInfo<v8::Value>& info)
     ScriptState* scriptState = ScriptState::current(info.GetIsolate());
     ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
     Document& document = *toDocument(currentExecutionContext(info.GetIsolate()));
-    RefPtr<TestInterfaceConstructor> impl = TestInterfaceConstructor::create(scriptState, executionContext, document, doubleArg, stringArg, testInterfaceEmptyArg, dictionaryArg, sequenceStringArg, sequenceDictionaryArg, sequenceLongOrTestDictionaryArg, optionalDictionaryArg, optionalTestInterfaceEmptyArg, exceptionState);
+    TestInterfaceConstructor* impl = TestInterfaceConstructor::create(scriptState, executionContext, document, doubleArg, stringArg, testInterfaceEmptyArg, dictionaryArg, sequenceStringArg, sequenceDictionaryArg, sequenceLongOrTestDictionaryArg, optionalDictionaryArg, optionalTestInterfaceEmptyArg, exceptionState);
     if (exceptionState.hadException()) {
         exceptionState.throwIfNeeded();
         return;
@@ -147,7 +144,7 @@ static void constructor3(const v8::FunctionCallbackInfo<v8::Value>& info)
             ScriptState* scriptState = ScriptState::current(info.GetIsolate());
             ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
             Document& document = *toDocument(currentExecutionContext(info.GetIsolate()));
-            RefPtr<TestInterfaceConstructor> impl = TestInterfaceConstructor::create(scriptState, executionContext, document, arg, exceptionState);
+            TestInterfaceConstructor* impl = TestInterfaceConstructor::create(scriptState, executionContext, document, arg, exceptionState);
             if (exceptionState.hadException()) {
                 exceptionState.throwIfNeeded();
                 return;
@@ -164,7 +161,7 @@ static void constructor3(const v8::FunctionCallbackInfo<v8::Value>& info)
     ScriptState* scriptState = ScriptState::current(info.GetIsolate());
     ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
     Document& document = *toDocument(currentExecutionContext(info.GetIsolate()));
-    RefPtr<TestInterfaceConstructor> impl = TestInterfaceConstructor::create(scriptState, executionContext, document, arg, optArg, exceptionState);
+    TestInterfaceConstructor* impl = TestInterfaceConstructor::create(scriptState, executionContext, document, arg, optArg, exceptionState);
     if (exceptionState.hadException()) {
         exceptionState.throwIfNeeded();
         return;
@@ -194,7 +191,7 @@ static void constructor4(const v8::FunctionCallbackInfo<v8::Value>& info)
     ScriptState* scriptState = ScriptState::current(info.GetIsolate());
     ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
     Document& document = *toDocument(currentExecutionContext(info.GetIsolate()));
-    RefPtr<TestInterfaceConstructor> impl = TestInterfaceConstructor::create(scriptState, executionContext, document, arg, arg2, arg3, exceptionState);
+    TestInterfaceConstructor* impl = TestInterfaceConstructor::create(scriptState, executionContext, document, arg, arg2, arg3, exceptionState);
     if (exceptionState.hadException()) {
         exceptionState.throwIfNeeded();
         return;
@@ -272,7 +269,7 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo V8TestInterfaceConstructorConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceConstructorConstructor::domTemplate, V8TestInterfaceConstructor::refObject, V8TestInterfaceConstructor::derefObject, V8TestInterfaceConstructor::trace, 0, 0, V8TestInterfaceConstructor::preparePrototypeAndInterfaceObject, V8TestInterfaceConstructor::installConditionallyEnabledProperties, "TestInterfaceConstructor", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestInterfaceConstructorConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceConstructorConstructor::domTemplate, V8TestInterfaceConstructor::trace, 0, 0, V8TestInterfaceConstructor::preparePrototypeAndInterfaceObject, V8TestInterfaceConstructor::installConditionallyEnabledProperties, "TestInterfaceConstructor", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
 #endif
@@ -310,7 +307,7 @@ static void V8TestInterfaceConstructorConstructorCallback(const v8::FunctionCall
             ScriptState* scriptState = ScriptState::current(info.GetIsolate());
             ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
             Document& document = *toDocument(currentExecutionContext(info.GetIsolate()));
-            RefPtr<TestInterfaceConstructor> impl = TestInterfaceConstructor::createForJSConstructor(scriptState, executionContext, document, arg, exceptionState);
+            TestInterfaceConstructor* impl = TestInterfaceConstructor::createForJSConstructor(scriptState, executionContext, document, arg, exceptionState);
             if (exceptionState.hadException()) {
                 exceptionState.throwIfNeeded();
                 return;
@@ -327,7 +324,7 @@ static void V8TestInterfaceConstructorConstructorCallback(const v8::FunctionCall
     ScriptState* scriptState = ScriptState::current(info.GetIsolate());
     ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
     Document& document = *toDocument(currentExecutionContext(info.GetIsolate()));
-    RefPtr<TestInterfaceConstructor> impl = TestInterfaceConstructor::createForJSConstructor(scriptState, executionContext, document, arg, optArg, exceptionState);
+    TestInterfaceConstructor* impl = TestInterfaceConstructor::createForJSConstructor(scriptState, executionContext, document, arg, optArg, exceptionState);
     if (exceptionState.hadException()) {
         exceptionState.throwIfNeeded();
         return;
@@ -337,27 +334,25 @@ static void V8TestInterfaceConstructorConstructorCallback(const v8::FunctionCall
     v8SetReturnValue(info, wrapper);
 }
 
-v8::Local<v8::FunctionTemplate> V8TestInterfaceConstructorConstructor::domTemplate(v8::Isolate* isolate)
+v8::Local<v8::FunctionTemplate> V8TestInterfaceConstructorConstructor::domTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world)
 {
     static int domTemplateKey; // This address is used for a key to look up the dom template.
     V8PerIsolateData* data = V8PerIsolateData::from(isolate);
-    v8::Local<v8::FunctionTemplate> result = data->existingDOMTemplate(&domTemplateKey);
+    v8::Local<v8::FunctionTemplate> result = data->findInterfaceTemplate(world, &domTemplateKey);
     if (!result.IsEmpty())
         return result;
 
-    TRACE_EVENT_SCOPED_SAMPLING_STATE("blink", "BuildDOMTemplate");
     result = v8::FunctionTemplate::New(isolate, V8TestInterfaceConstructorConstructorCallback);
     v8::Local<v8::ObjectTemplate> instanceTemplate = result->InstanceTemplate();
     instanceTemplate->SetInternalFieldCount(V8TestInterfaceConstructor::internalFieldCount);
     result->SetClassName(v8AtomicString(isolate, "TestInterfaceConstructor"));
-    result->Inherit(V8TestInterfaceConstructor::domTemplate(isolate));
-    data->setDOMTemplate(&domTemplateKey, result);
+    result->Inherit(V8TestInterfaceConstructor::domTemplate(isolate, world));
+    data->setInterfaceTemplate(world, &domTemplateKey, result);
     return result;
 }
 
 void V8TestInterfaceConstructor::constructorCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SCOPED_SAMPLING_STATE("blink", "DOMConstructor");
     UseCounter::countIfNotPrivateScript(info.GetIsolate(), currentExecutionContext(info.GetIsolate()), UseCounter::TestFeature);
     if (!info.IsConstructCall()) {
         V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::constructorNotCallableAsFunction("TestInterfaceConstructor"));
@@ -372,26 +367,25 @@ void V8TestInterfaceConstructor::constructorCallback(const v8::FunctionCallbackI
     TestInterfaceConstructorV8Internal::constructor(info);
 }
 
-static void installV8TestInterfaceConstructorTemplate(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+static void installV8TestInterfaceConstructorTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world, v8::Local<v8::FunctionTemplate> interfaceTemplate)
 {
-    functionTemplate->ReadOnlyPrototype();
-
-    v8::Local<v8::Signature> defaultSignature;
-    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "TestInterfaceConstructor", v8::Local<v8::FunctionTemplate>(), V8TestInterfaceConstructor::internalFieldCount,
-        0, 0,
-        0, 0,
-        0, 0);
-    functionTemplate->SetCallHandler(V8TestInterfaceConstructor::constructorCallback);
-    functionTemplate->SetLength(0);
-    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    // Initialize the interface object's template.
+    V8DOMConfiguration::initializeDOMInterfaceTemplate(isolate, interfaceTemplate, V8TestInterfaceConstructor::wrapperTypeInfo.interfaceName, v8::Local<v8::FunctionTemplate>(), V8TestInterfaceConstructor::internalFieldCount);
+    interfaceTemplate->SetCallHandler(V8TestInterfaceConstructor::constructorCallback);
+    interfaceTemplate->SetLength(0);
+    v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
+    ALLOW_UNUSED_LOCAL(signature);
+    v8::Local<v8::ObjectTemplate> instanceTemplate = interfaceTemplate->InstanceTemplate();
     ALLOW_UNUSED_LOCAL(instanceTemplate);
-    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = interfaceTemplate->PrototypeTemplate();
     ALLOW_UNUSED_LOCAL(prototypeTemplate);
+    // Register DOM constants, attributes and operations.
+
 }
 
-v8::Local<v8::FunctionTemplate> V8TestInterfaceConstructor::domTemplate(v8::Isolate* isolate)
+v8::Local<v8::FunctionTemplate> V8TestInterfaceConstructor::domTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world)
 {
-    return V8DOMConfiguration::domClassTemplate(isolate, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestInterfaceConstructorTemplate);
+    return V8DOMConfiguration::domClassTemplate(isolate, world, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestInterfaceConstructorTemplate);
 }
 
 bool V8TestInterfaceConstructor::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
@@ -407,16 +401,6 @@ v8::Local<v8::Object> V8TestInterfaceConstructor::findInstanceInPrototypeChain(v
 TestInterfaceConstructor* V8TestInterfaceConstructor::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
     return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
-}
-
-void V8TestInterfaceConstructor::refObject(ScriptWrappable* scriptWrappable)
-{
-    scriptWrappable->toImpl<TestInterfaceConstructor>()->ref();
-}
-
-void V8TestInterfaceConstructor::derefObject(ScriptWrappable* scriptWrappable)
-{
-    scriptWrappable->toImpl<TestInterfaceConstructor>()->deref();
 }
 
 } // namespace blink

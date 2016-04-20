@@ -16,7 +16,6 @@
 #include "ppapi/host/dispatch_host_message.h"
 #include "ppapi/host/ppapi_host.h"
 #include "ppapi/proxy/ppapi_messages.h"
-#include "third_party/WebKit/public/platform/WebCString.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/web/WebFileChooserCompletion.h"
@@ -180,7 +179,7 @@ void PepperFileChooserHost::DidCreateResourceHosts(
         renderer_ppapi_host_, pp_instance(), 0, file_paths[i]);
     int renderer_id =
         renderer_ppapi_host_->GetPpapiHost()->AddPendingResourceHost(
-            scoped_ptr<ppapi::host::ResourceHost>(renderer_host));
+            std::unique_ptr<ppapi::host::ResourceHost>(renderer_host));
     ppapi::FileRefCreateInfo info = ppapi::MakeExternalFileRefCreateInfo(
         file_paths[i], display_names[i], browser_ids[i], renderer_id);
     chosen_files.push_back(info);

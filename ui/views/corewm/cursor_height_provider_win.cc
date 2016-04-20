@@ -7,14 +7,15 @@
 #include <windows.h>
 #include <stddef.h>
 #include <stdint.h>
+
 #include <algorithm>
 #include <map>
+#include <memory>
 
-#include "base/memory/scoped_ptr.h"
 #include "base/win/scoped_hdc.h"
 
 namespace {
-using PixelData = scoped_ptr<uint32_t[]>;
+using PixelData = std::unique_ptr<uint32_t[]>;
 using HeightStorage = std::map<HCURSOR, int>;
 
 const uint32_t kBitsPeruint32 = sizeof(uint32_t) * 8;
@@ -35,11 +36,11 @@ PixelData GetBitmapData(HBITMAP handle, const BITMAPINFO& info, HDC hdc) {
   // Masks are monochromatic.
   DCHECK_EQ(info.bmiHeader.biBitCount, 1);
   if (info.bmiHeader.biBitCount != 1)
-    return data.Pass();
+    return data;
 
   // When getting pixel data palette is appended to memory pointed by
   // BITMAPINFO passed so allocate additional memory to store additional data.
-  scoped_ptr<char[]> header(new char[KHeaderAndPalette]);
+  std::unique_ptr<char[]> header(new char[KHeaderAndPalette]);
   memcpy(header.get(), &(info.bmiHeader), sizeof(info.bmiHeader));
 
   data.reset(new uint32_t[info.bmiHeader.biSizeImage / sizeof(uint32_t)]);
@@ -55,7 +56,7 @@ PixelData GetBitmapData(HBITMAP handle, const BITMAPINFO& info, HDC hdc) {
   if (result == 0)
     data.reset();
 
-  return data.Pass();
+  return data;
 }
 
 // Checks if the specifed row is transparent in provided bitmap.

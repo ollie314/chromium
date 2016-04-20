@@ -11,14 +11,14 @@
 #include "base/bind_helpers.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/settings/token_encryptor.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/cryptohome/system_salt_getter.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -114,7 +114,7 @@ void DeviceOAuth2TokenServiceDelegate::OnRefreshTokenResponse(
 }
 
 void DeviceOAuth2TokenServiceDelegate::OnGetTokenInfoResponse(
-    scoped_ptr<base::DictionaryValue> token_info) {
+    std::unique_ptr<base::DictionaryValue> token_info) {
   std::string gaia_robot_id;
   token_info->GetString("email", &gaia_robot_id);
   gaia_oauth_client_.reset();

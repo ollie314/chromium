@@ -8,11 +8,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "content/common/content_export.h"
+#include "gpu/command_buffer/client/gpu_control_client.h"
 #include "media/video/video_encode_accelerator.h"
 #include "ppapi/c/pp_codecs.h"
 #include "ppapi/c/ppb_video_frame.h"
@@ -21,21 +23,25 @@
 #include "ppapi/proxy/resource_message_params.h"
 #include "ppapi/shared_impl/media_stream_buffer_manager.h"
 
+namespace gpu {
+class CommandBufferProxyImpl;
+class GpuChannelHost;
+}
+
 namespace media {
 class GpuVideoAcceleratorFactories;
 }
 
 namespace content {
 
-class CommandBufferProxyImpl;
-class GpuChannelHost;
 class RendererPpapiHost;
 class VideoEncoderShim;
 
 class CONTENT_EXPORT PepperVideoEncoderHost
     : public ppapi::host::ResourceHost,
       public media::VideoEncodeAccelerator::Client,
-      public ppapi::MediaStreamBufferManager::Delegate {
+      public ppapi::MediaStreamBufferManager::Delegate,
+      public gpu::GpuControlClient {
  public:
   PepperVideoEncoderHost(RendererPpapiHost* host,
                          PP_Instance instance,
@@ -47,7 +53,7 @@ class CONTENT_EXPORT PepperVideoEncoderHost
 
   // Shared memory buffers.
   struct ShmBuffer {
-    ShmBuffer(uint32_t id, scoped_ptr<base::SharedMemory> shm);
+    ShmBuffer(uint32_t id, std::unique_ptr<base::SharedMemory> shm);
     ~ShmBuffer();
 
     media::BitstreamBuffer ToBitstreamBuffer();
@@ -55,7 +61,7 @@ class CONTENT_EXPORT PepperVideoEncoderHost
     // Index of the buffer in the ScopedVector. Buffers have the same id in
     // the plugin and the host.
     uint32_t id;
-    scoped_ptr<base::SharedMemory> shm;
+    std::unique_ptr<base::SharedMemory> shm;
     bool in_use;
   };
 
@@ -72,6 +78,10 @@ class CONTENT_EXPORT PepperVideoEncoderHost
   int32_t OnResourceMessageReceived(
       const IPC::Message& msg,
       ppapi::host::HostMessageContext* context) override;
+
+  // GpuControlClient implementation.
+  void OnGpuControlLostContext() final;
+  void OnGpuControlErrorMessage(const char* msg, int id) final {}
 
   int32_t OnHostMsgGetSupportedProfiles(
       ppapi::host::HostMessageContext* context);
@@ -126,10 +136,10 @@ class CONTENT_EXPORT PepperVideoEncoderHost
   // Buffer manager for shared memory that holds video frames.
   ppapi::MediaStreamBufferManager buffer_manager_;
 
-  scoped_refptr<GpuChannelHost> channel_;
-  scoped_ptr<CommandBufferProxyImpl> command_buffer_;
+  scoped_refptr<gpu::GpuChannelHost> channel_;
+  std::unique_ptr<gpu::CommandBufferProxyImpl> command_buffer_;
 
-  scoped_ptr<media::VideoEncodeAccelerator> encoder_;
+  std::unique_ptr<media::VideoEncodeAccelerator> encoder_;
 
   // Whether the encoder has been successfully initialized.
   bool initialized_;
@@ -157,6 +167,10 @@ class CONTENT_EXPORT PepperVideoEncoderHost
 
   // Format of the frames to give to the encoder.
   media::VideoPixelFormat media_input_format_;
+
+#if DCHECK_IS_ON()
+  bool lost_context_ = false;
+#endif
 
   base::WeakPtrFactory<PepperVideoEncoderHost> weak_ptr_factory_;
 

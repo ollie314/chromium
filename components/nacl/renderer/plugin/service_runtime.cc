@@ -13,7 +13,6 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "components/nacl/renderer/plugin/plugin.h"
-#include "components/nacl/renderer/plugin/utility.h"
 #include "native_client/src/trusted/service_runtime/nacl_error_code.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/cpp/completion_callback.h"
@@ -28,13 +27,11 @@ ServiceRuntime::ServiceRuntime(Plugin* plugin,
     : plugin_(plugin),
       pp_instance_(pp_instance),
       main_service_runtime_(main_service_runtime),
-      uses_nonsfi_mode_(uses_nonsfi_mode),
-      process_id_(base::kNullProcessId) {
-}
+      uses_nonsfi_mode_(uses_nonsfi_mode) {}
 
 void ServiceRuntime::StartSelLdr(const SelLdrStartParams& params,
                                  pp::CompletionCallback callback) {
-  GetNaClInterface()->LaunchSelLdr(
+  nacl::PPBNaClPrivate::LaunchSelLdr(
       pp_instance_,
       PP_FromBool(main_service_runtime_),
       params.url.c_str(),
@@ -42,7 +39,6 @@ void ServiceRuntime::StartSelLdr(const SelLdrStartParams& params,
       PP_FromBool(uses_nonsfi_mode_),
       params.process_type,
       &translator_channel_,
-      &process_id_,
       callback.pp_completion_callback());
 }
 

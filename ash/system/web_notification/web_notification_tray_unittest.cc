@@ -20,6 +20,7 @@
 #include "ash/test/status_area_widget_test_helper.h"
 #include "ash/test/test_system_tray_delegate.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/aura/client/aura_constants.h"
@@ -94,13 +95,14 @@ class WebNotificationTrayTest : public test::AshTestBase {
   ~WebNotificationTrayTest() override {}
 
   void TearDown() override {
-    GetMessageCenter()->RemoveAllNotifications(false);
+    GetMessageCenter()->RemoveAllNotifications(
+        false /* by_user */, message_center::MessageCenter::RemoveType::ALL);
     test::AshTestBase::TearDown();
   }
 
  protected:
   void AddNotification(const std::string& id) {
-    scoped_ptr<message_center::Notification> notification;
+    std::unique_ptr<message_center::Notification> notification;
     notification.reset(new message_center::Notification(
         message_center::NOTIFICATION_TYPE_SIMPLE, id,
         base::ASCIIToUTF16("Test Web Notification"),
@@ -113,7 +115,7 @@ class WebNotificationTrayTest : public test::AshTestBase {
 
   void UpdateNotification(const std::string& old_id,
                           const std::string& new_id) {
-    scoped_ptr<message_center::Notification> notification;
+    std::unique_ptr<message_center::Notification> notification;
     notification.reset(new message_center::Notification(
         message_center::NOTIFICATION_TYPE_SIMPLE, new_id,
         base::ASCIIToUTF16("Updated Web Notification"),
@@ -353,7 +355,7 @@ TEST_F(WebNotificationTrayTest, MAYBE_PopupAndAutoHideShelf) {
   int bottom = GetPopupWorkAreaBottom();
 
   // Shelf's auto-hide state won't be HIDDEN unless window exists.
-  scoped_ptr<aura::Window> window(
+  std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(1, 2, 3, 4)));
   ShelfLayoutManager* shelf =
       Shell::GetPrimaryRootWindowController()->GetShelfLayoutManager();
@@ -411,7 +413,7 @@ TEST_F(WebNotificationTrayTest, MAYBE_PopupAndFullscreen) {
   int bottom = GetPopupWorkAreaBottom();
 
   // Checks the work area for normal auto-hidden state.
-  scoped_ptr<aura::Window> window(
+  std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(1, 2, 3, 4)));
   ShelfLayoutManager* shelf =
       Shell::GetPrimaryRootWindowController()->GetShelfLayoutManager();
@@ -436,7 +438,7 @@ TEST_F(WebNotificationTrayTest, MAYBE_PopupAndFullscreen) {
   // Move the mouse cursor at the bottom, which shows the shelf.
   ui::test::EventGenerator generator(Shell::GetPrimaryRootWindow());
   gfx::Point bottom_right =
-      Shell::GetScreen()->GetPrimaryDisplay().bounds().bottom_right();
+      gfx::Screen::GetScreen()->GetPrimaryDisplay().bounds().bottom_right();
   bottom_right.Offset(-1, -1);
   generator.MoveMouseTo(bottom_right);
   shelf->UpdateAutoHideStateNow();
@@ -444,7 +446,7 @@ TEST_F(WebNotificationTrayTest, MAYBE_PopupAndFullscreen) {
   EXPECT_EQ(bottom, GetPopupWorkAreaBottom());
 
   generator.MoveMouseTo(
-      Shell::GetScreen()->GetPrimaryDisplay().bounds().CenterPoint());
+      gfx::Screen::GetScreen()->GetPrimaryDisplay().bounds().CenterPoint());
   shelf->UpdateAutoHideStateNow();
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
   EXPECT_EQ(bottom_auto_hidden, GetPopupWorkAreaBottom());

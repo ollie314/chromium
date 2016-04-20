@@ -7,16 +7,13 @@
 #include <memory.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <algorithm>
-#include <map>
-#include <set>
-#include <sstream>
+
+#include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
-
 #include "courgette/courgette.h"
 #include "courgette/encoded_program.h"
 
@@ -365,37 +362,13 @@ void AssemblyProgram::AssignRemainingIndexes(RVAToLabel* labels) {
           << "  infill " << fill_infill_count;
 }
 
-typedef CheckBool (EncodedProgram::*DefineLabelMethod)(int index, RVA value);
-
-#if defined(OS_WIN)
-__declspec(noinline)
-#endif
-static CheckBool DefineLabels(const RVAToLabel& labels,
-                              EncodedProgram* encoded_format,
-                              DefineLabelMethod define_label) {
-  bool ok = true;
-  for (RVAToLabel::const_iterator p = labels.begin();
-       ok && p != labels.end();
-       ++p) {
-    Label* label = p->second;
-    ok = (encoded_format->*define_label)(label->index_, label->rva_);
-  }
-  return ok;
-}
-
-EncodedProgram* AssemblyProgram::Encode() const {
-  scoped_ptr<EncodedProgram> encoded(new EncodedProgram());
+std::unique_ptr<EncodedProgram> AssemblyProgram::Encode() const {
+  std::unique_ptr<EncodedProgram> encoded(new EncodedProgram());
 
   encoded->set_image_base(image_base_);
 
-  if (!DefineLabels(abs32_labels_, encoded.get(),
-                    &EncodedProgram::DefineAbs32Label) ||
-      !DefineLabels(rel32_labels_, encoded.get(),
-                    &EncodedProgram::DefineRel32Label)) {
-    return NULL;
-  }
-
-  encoded->EndLabels();
+  if (!encoded->DefineLabels(abs32_labels_, rel32_labels_))
+    return nullptr;
 
   for (size_t i = 0;  i < instructions_.size();  ++i) {
     Instruction* instruction = instructions_[i];
@@ -404,13 +377,13 @@ EncodedProgram* AssemblyProgram::Encode() const {
       case ORIGIN: {
         OriginInstruction* org = static_cast<OriginInstruction*>(instruction);
         if (!encoded->AddOrigin(org->origin_rva()))
-          return NULL;
+          return nullptr;
         break;
       }
       case DEFBYTE: {
         uint8_t b = static_cast<ByteInstruction*>(instruction)->byte_value();
         if (!encoded->AddCopy(1, &b))
-          return NULL;
+          return nullptr;
         break;
       }
       case DEFBYTES: {
@@ -419,13 +392,13 @@ EncodedProgram* AssemblyProgram::Encode() const {
         size_t len = static_cast<BytesInstruction*>(instruction)->len();
 
         if (!encoded->AddCopy(len, byte_values))
-          return NULL;
+          return nullptr;
         break;
       }
       case REL32: {
         Label* label = static_cast<InstructionWithLabel*>(instruction)->label();
         if (!encoded->AddRel32(label->index_))
-          return NULL;
+          return nullptr;
         break;
       }
       case REL32ARM: {
@@ -434,34 +407,34 @@ EncodedProgram* AssemblyProgram::Encode() const {
         uint16_t compressed_op =
             static_cast<InstructionWithLabelARM*>(instruction)->compressed_op();
         if (!encoded->AddRel32ARM(compressed_op, label->index_))
-          return NULL;
+          return nullptr;
         break;
       }
       case ABS32: {
         Label* label = static_cast<InstructionWithLabel*>(instruction)->label();
         if (!encoded->AddAbs32(label->index_))
-          return NULL;
+          return nullptr;
         break;
       }
       case ABS64: {
         Label* label = static_cast<InstructionWithLabel*>(instruction)->label();
         if (!encoded->AddAbs64(label->index_))
-          return NULL;
+          return nullptr;
         break;
       }
       case MAKEPERELOCS: {
         if (!encoded->AddPeMakeRelocs(kind_))
-          return NULL;
+          return nullptr;
         break;
       }
       case MAKEELFRELOCS: {
         if (!encoded->AddElfMakeRelocs())
-          return NULL;
+          return nullptr;
         break;
       }
       case MAKEELFARMRELOCS: {
         if (!encoded->AddElfARMMakeRelocs())
-          return NULL;
+          return nullptr;
         break;
       }
       default: {
@@ -470,7 +443,7 @@ EncodedProgram* AssemblyProgram::Encode() const {
     }
   }
 
-  return encoded.release();
+  return encoded;
 }
 
 Instruction* AssemblyProgram::GetByteInstruction(uint8_t byte) {
@@ -554,22 +527,13 @@ CheckBool AssemblyProgram::TrimLabels() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-Status TrimLabels(AssemblyProgram* program) {
-  if (program->TrimLabels())
-    return C_OK;
-  else
-    return C_TRIM_FAILED;
-}
+Status Encode(const AssemblyProgram& program,
+              std::unique_ptr<EncodedProgram>* output) {
+  // Explicitly release any memory associated with the output before encoding.
+  output->reset();
 
-Status Encode(AssemblyProgram* program, EncodedProgram** output) {
-  *output = NULL;
-  EncodedProgram *encoded = program->Encode();
-  if (encoded) {
-    *output = encoded;
-    return C_OK;
-  } else {
-    return C_GENERAL_ERROR;
-  }
+  *output = program.Encode();
+  return (*output) ? C_OK : C_GENERAL_ERROR;
 }
 
 }  // namespace courgette

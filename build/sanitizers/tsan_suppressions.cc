@@ -43,14 +43,11 @@ char kTSanDefaultSuppressions[] =
 // Test-only race, won't fix.
 "race:tracked_objects::ThreadData::ShutdownSingleThreadedCleanup\n"
 
-// http://crbug.com/115540
-"race:*GetCurrentThreadIdentifier\n"
-
 // http://crbug.com/120808
 "race:base/threading/watchdog.cc\n"
 
 // http://crbug.com/157586
-"race:third_party/libvpx_new/source/libvpx/vp8/decoder/threading.c\n"
+"race:third_party/libvpx/source/libvpx/vp8/decoder/threading.c\n"
 
 // http://crbug.com/158718
 "race:third_party/ffmpeg/libavcodec/pthread.c\n"
@@ -62,8 +59,8 @@ char kTSanDefaultSuppressions[] =
 "race:media::ReleaseData\n"
 
 // http://crbug.com/158922
-"race:third_party/libvpx_new/source/libvpx/vp8/encoder/*\n"
-"race:third_party/libvpx_new/source/libvpx/vp9/encoder/*\n"
+"race:third_party/libvpx/source/libvpx/vp8/encoder/*\n"
+"race:third_party/libvpx/source/libvpx/vp9/encoder/*\n"
 
 // http://crbug.com/189177
 "race:thread_manager\n"
@@ -277,20 +274,11 @@ char kTSanDefaultSuppressions[] =
 // https://crbug.com/454655
 "race:content::BrowserTestBase::PostTaskToInProcessRendererAndWait\n"
 
-// https://crbug.com/539315
-"race:MojoCreateMessagePipe\n"
-
-// http://crbug.com/559117
-"race:base::trace_event::TraceConfig::AsConvertableToTraceFormat\n"
-
 // https://crbug.com/569682
 "race:blink::ThreadState::visitStackRoots\n"
 
-// http://crbug.com/571735
-"deadlock:mojo::edk::RawChannel::Init\n"
-
-// http://crbug.com/571735
-"deadlock:mojo::edk::MessagePipeDispatcher::TransportStarted\n"
+// http://crbug.com/582274
+"race:usrsctp_close\n"
 
 // End of suppressions.
 ;  // Please keep this semicolon.

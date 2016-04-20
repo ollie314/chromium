@@ -27,7 +27,6 @@
 
 [
     SetWrapperReferenceTo(SVGElement contextElement),
-    WillBeGarbageCollected,
 ] interface SVGAnimatedPreserveAspectRatio {
     readonly attribute SVGPreserveAspectRatio baseVal;
     readonly attribute SVGPreserveAspectRatio animVal;

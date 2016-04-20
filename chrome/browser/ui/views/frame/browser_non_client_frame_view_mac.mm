@@ -122,7 +122,7 @@ void BrowserNonClientFrameViewMac::OnPaint(gfx::Canvas* canvas) {
 }
 
 // BrowserNonClientFrameView:
-void BrowserNonClientFrameViewMac::UpdateNewAvatarButtonImpl() {
+void BrowserNonClientFrameViewMac::UpdateAvatar() {
   NOTIMPLEMENTED();
 }
 
@@ -130,13 +130,10 @@ void BrowserNonClientFrameViewMac::UpdateNewAvatarButtonImpl() {
 // BrowserNonClientFrameViewMac, private:
 
 void BrowserNonClientFrameViewMac::PaintThemedFrame(gfx::Canvas* canvas) {
-  gfx::ImageSkia* image = GetFrameImage();
-  if (image)
-    canvas->TileImageInt(*image, 0, 0, width(), image->height());
-
-  gfx::ImageSkia* overlay = GetFrameOverlayImage();
-  if (overlay)
-    canvas->TileImageInt(*overlay, 0, 0, width(), overlay->height());
+  gfx::ImageSkia image = GetFrameImage();
+  canvas->TileImageInt(image, 0, 0, width(), image.height());
+  gfx::ImageSkia overlay = GetFrameOverlayImage();
+  canvas->TileImageInt(overlay, 0, 0, width(), overlay.height());
 }
 
 void BrowserNonClientFrameViewMac::PaintToolbarBackground(gfx::Canvas* canvas) {
@@ -172,5 +169,6 @@ void BrowserNonClientFrameViewMac::PaintToolbarBackground(gfx::Canvas* canvas) {
   canvas->FillRect(
       gfx::Rect(x, y + h - kClientEdgeThickness, w, kClientEdgeThickness),
       ThemeProperties::GetDefaultColor(
-          ThemeProperties::COLOR_TOOLBAR_BOTTOM_SEPARATOR));
+          ThemeProperties::COLOR_TOOLBAR_BOTTOM_SEPARATOR,
+          browser_view()->IsOffTheRecord()));
 }

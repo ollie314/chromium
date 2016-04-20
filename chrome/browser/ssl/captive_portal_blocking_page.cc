@@ -8,17 +8,14 @@
 
 #include "base/i18n/rtl.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/captive_portal/captive_portal_tab_helper.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/cert_report_helper.h"
 #include "chrome/browser/ssl/ssl_cert_reporter.h"
-#include "chrome/common/pref_names.h"
 #include "components/captive_portal/captive_portal_detector.h"
 #include "components/certificate_reporting/error_reporter.h"
 #include "components/security_interstitials/core/controller_client.h"
@@ -26,7 +23,6 @@
 #include "components/wifi/wifi_service.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
-#include "net/base/net_util.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/network_interfaces.h"
 #include "net/ssl/ssl_info.h"
@@ -56,7 +52,7 @@ CaptivePortalBlockingPage::CaptivePortalBlockingPage(
     content::WebContents* web_contents,
     const GURL& request_url,
     const GURL& login_url,
-    scoped_ptr<SSLCertReporter> ssl_cert_reporter,
+    std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
     const net::SSLInfo& ssl_info,
     const base::Callback<void(bool)>& callback)
     : SecurityInterstitialPage(web_contents, request_url),
@@ -96,7 +92,7 @@ std::string CaptivePortalBlockingPage::GetWiFiSSID() const {
   // Linux so |net::GetWifiSSID| is used instead.
   std::string ssid;
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  scoped_ptr<wifi::WiFiService> wifi_service(wifi::WiFiService::Create());
+  std::unique_ptr<wifi::WiFiService> wifi_service(wifi::WiFiService::Create());
   wifi_service->Initialize(nullptr);
   std::string error;
   wifi_service->GetConnectedNetworkSSID(&ssid, &error);
@@ -156,13 +152,8 @@ void CaptivePortalBlockingPage::PopulateInterstitialStrings(
   } else {
     // Portal redirection was done with HTTP redirects, so show the login URL.
     // If |languages| is empty, punycode in |login_host| will always be decoded.
-    std::string languages;
-    Profile* profile =
-        Profile::FromBrowserContext(web_contents()->GetBrowserContext());
-    if (profile)
-      languages = profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
     base::string16 login_host =
-        url_formatter::IDNToUnicode(login_url_.host(), languages);
+        url_formatter::IDNToUnicode(login_url_.host());
     if (base::i18n::IsRTL())
       base::i18n::WrapStringWithLTRFormatting(&login_host);
 

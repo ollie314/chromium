@@ -6,7 +6,6 @@
 
 #include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/browsing_data/browsing_data_remover_factory.h"
@@ -18,6 +17,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
@@ -73,7 +73,7 @@ class BrowsingDataRemoverBrowserTest : public InProcessBrowserTest {
     // Start a download.
     content::DownloadManager* download_manager =
         content::BrowserContext::GetDownloadManager(browser()->profile());
-    scoped_ptr<content::DownloadTestObserver> observer(
+    std::unique_ptr<content::DownloadTestObserver> observer(
         new content::DownloadTestObserverTerminal(
             download_manager, 1,
             content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT));

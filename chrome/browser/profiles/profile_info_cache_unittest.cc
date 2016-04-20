@@ -9,10 +9,10 @@
 
 #include <vector>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
-#include "base/prefs/testing_pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -26,6 +26,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
+#include "components/prefs/testing_pref_service.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -491,7 +492,7 @@ TEST_F(ProfileInfoCacheTest, CreateSupervisedTestingProfile) {
   testing_profile_manager_.CreateTestingProfile("default");
   base::string16 supervised_user_name = ASCIIToUTF16("Supervised User");
   testing_profile_manager_.CreateTestingProfile(
-      "test1", scoped_ptr<syncable_prefs::PrefServiceSyncable>(),
+      "test1", std::unique_ptr<syncable_prefs::PrefServiceSyncable>(),
       supervised_user_name, 0, "TEST_ID", TestingProfile::TestingFactories());
   for (size_t i = 0; i < GetCache()->GetNumberOfProfiles(); i++) {
     bool is_supervised =
@@ -554,7 +555,7 @@ TEST_F(ProfileInfoCacheTest, AddStubProfile) {
 }
 
 // High res avatar downloading is only supported on desktop.
-#if !defined(OS_ANDROID) && !defined(OS_IOS) && !defined(OS_CHROMEOS)
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
 TEST_F(ProfileInfoCacheTest, DownloadHighResAvatarTest) {
   // The TestingProfileManager's ProfileInfoCache doesn't download avatars.
   ProfileInfoCache profile_info_cache(g_browser_process->local_state(),
@@ -585,8 +586,10 @@ TEST_F(ProfileInfoCacheTest, DownloadHighResAvatarTest) {
 
   // Simulate downloading a high-res avatar.
   ProfileAvatarDownloader avatar_downloader(
-      kIconIndex, profile_info_cache.GetPathOfProfileAtIndex(0),
-      &profile_info_cache);
+      kIconIndex,
+      base::Bind(&ProfileInfoCache::SaveAvatarImageAtPath,
+                 base::Unretained(&profile_info_cache),
+                 profile_info_cache.GetPathOfProfileAtIndex(0)));
 
   // Put a real bitmap into "bitmap".  2x2 bitmap of green 32 bit pixels.
   SkBitmap bitmap;
@@ -690,7 +693,7 @@ TEST_F(ProfileInfoCacheTest, MigrateLegacyProfileNamesWithNewAvatarMenu) {
 }
 #endif
 
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID) || defined(OS_IOS)
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
 TEST_F(ProfileInfoCacheTest,
        DontMigrateLegacyProfileNamesWithoutNewAvatarMenu) {
   EXPECT_EQ(0U, GetCache()->GetNumberOfProfiles());

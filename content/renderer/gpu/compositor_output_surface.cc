@@ -15,7 +15,6 @@
 #include "cc/output/compositor_frame_ack.h"
 #include "cc/output/managed_memory_policy.h"
 #include "cc/output/output_surface_client.h"
-#include "content/common/gpu/client/command_buffer_proxy_impl.h"
 #include "content/common/gpu/client/context_provider_command_buffer.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/common/view_messages.h"
@@ -24,6 +23,7 @@
 #include "content/renderer/render_thread_impl.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "gpu/ipc/client/command_buffer_proxy_impl.h"
 #include "ipc/ipc_sync_channel.h"
 
 namespace content {
@@ -33,22 +33,24 @@ CompositorOutputSurface::CompositorOutputSurface(
     uint32_t output_surface_id,
     const scoped_refptr<ContextProviderCommandBuffer>& context_provider,
     const scoped_refptr<ContextProviderCommandBuffer>& worker_context_provider,
-    scoped_ptr<cc::SoftwareOutputDevice> software_device,
+#if defined(ENABLE_VULKAN)
+    const scoped_refptr<cc::VulkanContextProvider>& vulkan_context_provider,
+#endif
+    std::unique_ptr<cc::SoftwareOutputDevice> software_device,
     scoped_refptr<FrameSwapMessageQueue> swap_frame_message_queue,
     bool use_swap_compositor_frame_message)
     : OutputSurface(context_provider,
                     worker_context_provider,
+#if defined(ENABLE_VULKAN)
+                    vulkan_context_provider,
+#endif
                     std::move(software_device)),
       output_surface_id_(output_surface_id),
       use_swap_compositor_frame_message_(use_swap_compositor_frame_message),
-      output_surface_filter_(RenderThreadImpl::current()
-                                 ->compositor_message_filter()),
+      output_surface_filter_(
+          RenderThreadImpl::current()->compositor_message_filter()),
       frame_swap_message_queue_(swap_frame_message_queue),
       routing_id_(routing_id),
-#if defined(OS_ANDROID)
-      prefers_smoothness_(false),
-      main_thread_runner_(base::MessageLoop::current()->task_runner()),
-#endif
       layout_test_mode_(RenderThreadImpl::current()->layout_test_mode()),
       weak_ptrs_(this) {
   DCHECK(output_surface_filter_.get());
@@ -86,7 +88,6 @@ bool CompositorOutputSurface::BindToClient(
 void CompositorOutputSurface::DetachFromClient() {
   if (!HasClient())
     return;
-  UpdateSmoothnessTakesPriority(false);
   if (output_surface_proxy_.get())
     output_surface_proxy_->ClearOutputSurface();
   output_surface_filter_->RemoveHandlerOnCompositorThread(
@@ -96,7 +97,7 @@ void CompositorOutputSurface::DetachFromClient() {
 
 void CompositorOutputSurface::ShortcutSwapAck(
     uint32_t output_surface_id,
-    scoped_ptr<cc::GLFrameData> gl_frame_data) {
+    std::unique_ptr<cc::GLFrameData> gl_frame_data) {
   if (!layout_test_previous_frame_ack_) {
     layout_test_previous_frame_ack_.reset(new cc::CompositorFrameAck);
     layout_test_previous_frame_ack_->gl_frame_data.reset(new cc::GLFrameData);
@@ -142,10 +143,11 @@ void CompositorOutputSurface::SwapBuffers(cc::CompositorFrame* frame) {
     return;
   } else {
     {
-      std::vector<scoped_ptr<IPC::Message>> messages;
+      std::vector<std::unique_ptr<IPC::Message>> messages;
       std::vector<IPC::Message> messages_to_deliver_with_frame;
-      scoped_ptr<FrameSwapMessageQueue::SendMessageScope> send_message_scope =
-          frame_swap_message_queue_->AcquireSendMessageScope();
+      std::unique_ptr<FrameSwapMessageQueue::SendMessageScope>
+          send_message_scope =
+              frame_swap_message_queue_->AcquireSendMessageScope();
       frame_swap_message_queue_->DrainMessages(&messages);
       FrameSwapMessageQueue::TransferMessages(&messages,
                                               &messages_to_deliver_with_frame);
@@ -175,7 +177,11 @@ void CompositorOutputSurface::OnUpdateVSyncParametersFromBrowser(
     base::TimeTicks timebase,
     base::TimeDelta interval) {
   DCHECK(client_thread_checker_.CalledOnValidThread());
-  CommitVSyncParameters(timebase, interval);
+  TRACE_EVENT2("cc",
+               "CompositorOutputSurface::OnUpdateVSyncParametersFromBrowser",
+               "timebase", (timebase - base::TimeTicks()).InSecondsF(),
+               "interval", interval.InSecondsF());
+  client_->CommitVSyncParameters(timebase, interval);
 }
 
 void CompositorOutputSurface::OnSwapAck(uint32_t output_surface_id,
@@ -200,34 +206,6 @@ void CompositorOutputSurface::OnReclaimResources(
 
 bool CompositorOutputSurface::Send(IPC::Message* message) {
   return message_sender_->Send(message);
-}
-
-#if defined(OS_ANDROID)
-namespace {
-void SetThreadPriorityToIdle() {
-  base::PlatformThread::SetCurrentThreadPriority(
-      base::ThreadPriority::BACKGROUND);
-}
-void SetThreadPriorityToDefault() {
-  base::PlatformThread::SetCurrentThreadPriority(base::ThreadPriority::NORMAL);
-}
-}  // namespace
-#endif
-
-void CompositorOutputSurface::UpdateSmoothnessTakesPriority(
-    bool prefers_smoothness) {
-#if defined(OS_ANDROID)
-  if (prefers_smoothness_ == prefers_smoothness)
-    return;
-  prefers_smoothness_ = prefers_smoothness;
-  if (prefers_smoothness) {
-    main_thread_runner_->PostTask(FROM_HERE,
-                                  base::Bind(&SetThreadPriorityToIdle));
-  } else {
-    main_thread_runner_->PostTask(FROM_HERE,
-                                  base::Bind(&SetThreadPriorityToDefault));
-  }
-#endif
 }
 
 }  // namespace content

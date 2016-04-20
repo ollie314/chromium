@@ -7,13 +7,13 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/debug/leak_tracker.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/supports_user_data.h"
 #include "base/threading/non_thread_safe.h"
@@ -46,7 +46,6 @@ class StackTrace;
 
 namespace net {
 
-class ChunkedUploadDataStream;
 class CookieOptions;
 class HostPortPair;
 class IOBuffer;
@@ -150,12 +149,13 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
     // redirect call.
     //
     // When this function is called, the request will still contain the
-    // original URL, the destination of the redirect is provided in 'new_url'.
-    // If the delegate does not cancel the request and |*defer_redirect| is
-    // false, then the redirect will be followed, and the request's URL will be
-    // changed to the new URL.  Otherwise if the delegate does not cancel the
-    // request and |*defer_redirect| is true, then the redirect will be
-    // followed once FollowDeferredRedirect is called on the URLRequest.
+    // original URL, the destination of the redirect is provided in
+    // |redirect_info.new_url|.  If the delegate does not cancel the request
+    // and |*defer_redirect| is false, then the redirect will be followed, and
+    // the request's URL will be changed to the new URL.  Otherwise if the
+    // delegate does not cancel the request and |*defer_redirect| is true, then
+    // the redirect will be followed once FollowDeferredRedirect is called
+    // on the URLRequest.
     //
     // The caller must set |*defer_redirect| to false, so that delegates do not
     // need to set it if they are happy with the default behavior of not
@@ -326,30 +326,20 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   ReferrerPolicy referrer_policy() const { return referrer_policy_; }
   void set_referrer_policy(ReferrerPolicy referrer_policy);
 
+  // If this request should include a referred Token Binding, this returns the
+  // hostname of the referrer that indicated this request should include a
+  // referred Token Binding. Otherwise, this returns the empty string.
+  const std::string& token_binding_referrer() const {
+    return token_binding_referrer_;
+  }
+
   // Sets the delegate of the request.  This is only to allow creating a request
   // before creating its delegate.  |delegate| must be non-NULL and the request
   // must not yet have a Delegate set.
   void set_delegate(Delegate* delegate);
 
-  // Indicates that the request body should be sent using chunked transfer
-  // encoding. This method may only be called before Start() is called.
-  void EnableChunkedUpload();
-
-  // Appends the given bytes to the request's upload data to be sent
-  // immediately via chunked transfer encoding. When all data has been added,
-  // set |is_last_chunk| to true to indicate the end of upload data.  All chunks
-  // but the last must have |bytes_len| > 0.
-  //
-  // This method may be called only after calling EnableChunkedUpload().
-  //
-  // Despite the name of this method, over-the-wire chunk boundaries will most
-  // likely not match the "chunks" appended with this function.
-  void AppendChunkToUpload(const char* bytes,
-                           int bytes_len,
-                           bool is_last_chunk);
-
   // Sets the upload data.
-  void set_upload(scoped_ptr<UploadDataStream> upload);
+  void set_upload(std::unique_ptr<UploadDataStream> upload);
 
   // Gets the upload data.
   const UploadDataStream* get_upload() const;
@@ -407,7 +397,7 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
 
   // Returns a partial representation of the request's state as a value, for
   // debugging.
-  scoped_ptr<base::Value> GetStateAsValue() const;
+  std::unique_ptr<base::Value> GetStateAsValue() const;
 
   // Logs information about the what external object currently blocking the
   // request.  LogUnblocked must be called before resuming the request.  This
@@ -435,7 +425,8 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   // that appear more than once in the response are coalesced, with values
   // separated by commas (per RFC 2616). This will not work with cookies since
   // comma can be used in cookie values.
-  void GetResponseHeaderByName(const std::string& name, std::string* value);
+  void GetResponseHeaderByName(const std::string& name,
+                               std::string* value) const;
 
   // The time when |this| was constructed.
   base::TimeTicks creation_time() const { return creation_time_; }
@@ -780,11 +771,8 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   // Tracks the time spent in various load states throughout this request.
   BoundNetLog net_log_;
 
-  scoped_ptr<URLRequestJob> job_;
-  scoped_ptr<UploadDataStream> upload_data_stream_;
-  // TODO(mmenke):  Make whether or not an upload is chunked transparent to the
-  // URLRequest.
-  ChunkedUploadDataStream* upload_chunked_data_stream_;
+  std::unique_ptr<URLRequestJob> job_;
+  std::unique_ptr<UploadDataStream> upload_data_stream_;
 
   std::vector<GURL> url_chain_;
   GURL first_party_for_cookies_;
@@ -793,6 +781,7 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   std::string method_;  // "GET", "POST", etc. Should be all uppercase.
   std::string referrer_;
   ReferrerPolicy referrer_policy_;
+  std::string token_binding_referrer_;
   FirstPartyURLPolicy first_party_url_policy_;
   HttpRequestHeaders extra_request_headers_;
   int load_flags_;  // Flags indicating the request type for the load;
@@ -883,7 +872,7 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   // The proxy server used for this request, if any.
   HostPortPair proxy_server_;
 
-  scoped_ptr<const base::debug::StackTrace> stack_trace_;
+  std::unique_ptr<const base::debug::StackTrace> stack_trace_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequest);
 };

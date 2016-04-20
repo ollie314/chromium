@@ -8,10 +8,10 @@
 #include <vector>
 
 #include "cc/resources/resource_provider.h"
-#include "cc/test/fake_display_list_raster_source.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/fake_picture_layer_tiling_client.h"
+#include "cc/test/fake_raster_source.h"
 #include "cc/test/fake_resource_provider.h"
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/trees/layer_tree_settings.h"
@@ -21,7 +21,7 @@
 namespace cc {
 namespace {
 
-scoped_ptr<PictureLayerTilingSet> CreateTilingSet(
+std::unique_ptr<PictureLayerTilingSet> CreateTilingSet(
     PictureLayerTilingClient* client) {
   LayerTreeSettings defaults;
   return PictureLayerTilingSet::Create(
@@ -33,11 +33,11 @@ scoped_ptr<PictureLayerTilingSet> CreateTilingSet(
 TEST(PictureLayerTilingSetTest, NoResources) {
   FakePictureLayerTilingClient client;
   gfx::Size layer_bounds(1000, 800);
-  scoped_ptr<PictureLayerTilingSet> set = CreateTilingSet(&client);
+  std::unique_ptr<PictureLayerTilingSet> set = CreateTilingSet(&client);
   client.SetTileSize(gfx::Size(256, 256));
 
-  scoped_refptr<FakeDisplayListRasterSource> raster_source =
-      FakeDisplayListRasterSource::CreateEmpty(layer_bounds);
+  scoped_refptr<FakeRasterSource> raster_source =
+      FakeRasterSource::CreateEmpty(layer_bounds);
 
   set->AddTiling(1.0, raster_source);
   set->AddTiling(1.5, raster_source);
@@ -74,10 +74,10 @@ TEST(PictureLayerTilingSetTest, TilingRange) {
   PictureLayerTiling* high_res_tiling;
   PictureLayerTiling* low_res_tiling;
 
-  scoped_refptr<FakeDisplayListRasterSource> raster_source =
-      FakeDisplayListRasterSource::CreateFilled(layer_bounds);
+  scoped_refptr<FakeRasterSource> raster_source =
+      FakeRasterSource::CreateFilled(layer_bounds);
 
-  scoped_ptr<PictureLayerTilingSet> set = CreateTilingSet(&client);
+  std::unique_ptr<PictureLayerTilingSet> set = CreateTilingSet(&client);
   set->AddTiling(2.0, raster_source);
   high_res_tiling = set->AddTiling(1.0, raster_source);
   high_res_tiling->set_resolution(HIGH_RESOLUTION);
@@ -109,7 +109,7 @@ TEST(PictureLayerTilingSetTest, TilingRange) {
   EXPECT_EQ(4u, lower_than_low_res_range.start);
   EXPECT_EQ(5u, lower_than_low_res_range.end);
 
-  scoped_ptr<PictureLayerTilingSet> set_without_low_res =
+  std::unique_ptr<PictureLayerTilingSet> set_without_low_res =
       CreateTilingSet(&client);
   set_without_low_res->AddTiling(2.0, raster_source);
   high_res_tiling = set_without_low_res->AddTiling(1.0, raster_source);
@@ -140,7 +140,7 @@ TEST(PictureLayerTilingSetTest, TilingRange) {
       PictureLayerTilingSet::LOWER_THAN_LOW_RES);
   EXPECT_EQ(0u, lower_than_low_res_range.end - lower_than_low_res_range.start);
 
-  scoped_ptr<PictureLayerTilingSet> set_with_only_high_and_low_res =
+  std::unique_ptr<PictureLayerTilingSet> set_with_only_high_and_low_res =
       CreateTilingSet(&client);
   high_res_tiling =
       set_with_only_high_and_low_res->AddTiling(1.0, raster_source);
@@ -174,7 +174,7 @@ TEST(PictureLayerTilingSetTest, TilingRange) {
       PictureLayerTilingSet::LOWER_THAN_LOW_RES);
   EXPECT_EQ(0u, lower_than_low_res_range.end - lower_than_low_res_range.start);
 
-  scoped_ptr<PictureLayerTilingSet> set_with_only_high_res =
+  std::unique_ptr<PictureLayerTilingSet> set_with_only_high_res =
       CreateTilingSet(&client);
   high_res_tiling = set_with_only_high_res->AddTiling(1.0, raster_source);
   high_res_tiling->set_resolution(HIGH_RESOLUTION);
@@ -211,22 +211,22 @@ class PictureLayerTilingSetTestWithResources : public testing::Test {
                float ideal_contents_scale,
                float expected_scale) {
     FakeOutputSurfaceClient output_surface_client;
-    scoped_ptr<FakeOutputSurface> output_surface =
+    std::unique_ptr<FakeOutputSurface> output_surface =
         FakeOutputSurface::Create3d();
     CHECK(output_surface->BindToClient(&output_surface_client));
 
-    scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+    std::unique_ptr<SharedBitmapManager> shared_bitmap_manager(
         new TestSharedBitmapManager());
-    scoped_ptr<ResourceProvider> resource_provider =
+    std::unique_ptr<ResourceProvider> resource_provider =
         FakeResourceProvider::Create(output_surface.get(),
                                      shared_bitmap_manager.get());
 
     FakePictureLayerTilingClient client(resource_provider.get());
     client.SetTileSize(gfx::Size(256, 256));
     gfx::Size layer_bounds(1000, 800);
-    scoped_ptr<PictureLayerTilingSet> set = CreateTilingSet(&client);
-    scoped_refptr<FakeDisplayListRasterSource> raster_source =
-        FakeDisplayListRasterSource::CreateFilled(layer_bounds);
+    std::unique_ptr<PictureLayerTilingSet> set = CreateTilingSet(&client);
+    scoped_refptr<FakeRasterSource> raster_source =
+        FakeRasterSource::CreateFilled(layer_bounds);
 
     float scale = min_scale;
     for (int i = 0; i < num_tilings; ++i, scale += scale_increment) {
@@ -299,14 +299,16 @@ TEST_F(PictureLayerTilingSetTestWithResources, ManyTilings_NotEqual) {
 TEST(PictureLayerTilingSetTest, TileSizeChange) {
   FakePictureLayerTilingClient pending_client;
   FakePictureLayerTilingClient active_client;
-  scoped_ptr<PictureLayerTilingSet> pending_set = PictureLayerTilingSet::Create(
-      PENDING_TREE, &pending_client, 1000, 1.f, 1000);
-  scoped_ptr<PictureLayerTilingSet> active_set = PictureLayerTilingSet::Create(
-      ACTIVE_TREE, &active_client, 1000, 1.f, 1000);
+  std::unique_ptr<PictureLayerTilingSet> pending_set =
+      PictureLayerTilingSet::Create(PENDING_TREE, &pending_client, 1000, 1.f,
+                                    1000);
+  std::unique_ptr<PictureLayerTilingSet> active_set =
+      PictureLayerTilingSet::Create(ACTIVE_TREE, &active_client, 1000, 1.f,
+                                    1000);
 
   gfx::Size layer_bounds(100, 100);
-  scoped_refptr<FakeDisplayListRasterSource> raster_source =
-      FakeDisplayListRasterSource::CreateFilled(layer_bounds);
+  scoped_refptr<FakeRasterSource> raster_source =
+      FakeRasterSource::CreateFilled(layer_bounds);
 
   gfx::Size tile_size1(10, 10);
   gfx::Size tile_size2(30, 30);
@@ -406,14 +408,16 @@ TEST(PictureLayerTilingSetTest, TileSizeChange) {
 TEST(PictureLayerTilingSetTest, MaxContentScale) {
   FakePictureLayerTilingClient pending_client;
   FakePictureLayerTilingClient active_client;
-  scoped_ptr<PictureLayerTilingSet> pending_set = PictureLayerTilingSet::Create(
-      PENDING_TREE, &pending_client, 1000, 1.f, 1000);
-  scoped_ptr<PictureLayerTilingSet> active_set = PictureLayerTilingSet::Create(
-      ACTIVE_TREE, &active_client, 1000, 1.f, 1000);
+  std::unique_ptr<PictureLayerTilingSet> pending_set =
+      PictureLayerTilingSet::Create(PENDING_TREE, &pending_client, 1000, 1.f,
+                                    1000);
+  std::unique_ptr<PictureLayerTilingSet> active_set =
+      PictureLayerTilingSet::Create(ACTIVE_TREE, &active_client, 1000, 1.f,
+                                    1000);
 
   gfx::Size layer_bounds(100, 105);
-  scoped_refptr<FakeDisplayListRasterSource> raster_source =
-      FakeDisplayListRasterSource::CreateEmpty(layer_bounds);
+  scoped_refptr<FakeRasterSource> raster_source =
+      FakeRasterSource::CreateEmpty(layer_bounds);
 
   // Tilings can be added of any scale, the tiling client can controls this.
   pending_set->AddTiling(1.f, raster_source);

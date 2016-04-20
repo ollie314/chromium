@@ -19,7 +19,8 @@
 #include "net/quic/p2p/quic_p2p_crypto_config.h"
 #include "net/quic/p2p/quic_p2p_stream.h"
 #include "net/quic/quic_chromium_connection_helper.h"
-#include "net/quic/quic_default_packet_writer.h"
+#include "net/quic/quic_chromium_packet_writer.h"
+#include "net/quic/test_tools/quic_session_peer.h"
 #include "net/socket/socket.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -197,7 +198,7 @@ class QuicP2PSessionTest : public ::testing::Test {
   QuicP2PSessionTest()
       : quic_helper_(base::ThreadTaskRunnerHandle::Get().get(),
                      &quic_clock_,
-                     net::QuicRandom::GetInstance()) {
+                     QuicRandom::GetInstance()) {
     // Simulate out-of-bound config handshake.
     CryptoHandshakeMessage hello_message;
     config_.ToHandshakeMessage(&hello_message);
@@ -207,8 +208,8 @@ class QuicP2PSessionTest : public ::testing::Test {
   }
 
   void CreateSessions() {
-    scoped_ptr<FakeP2PDatagramSocket> socket1(new FakeP2PDatagramSocket());
-    scoped_ptr<FakeP2PDatagramSocket> socket2(new FakeP2PDatagramSocket());
+    std::unique_ptr<FakeP2PDatagramSocket> socket1(new FakeP2PDatagramSocket());
+    std::unique_ptr<FakeP2PDatagramSocket> socket2(new FakeP2PDatagramSocket());
     socket1->ConnectWith(socket2.get());
 
     socket1_ = socket1->GetWeakPtr();
@@ -222,18 +223,18 @@ class QuicP2PSessionTest : public ::testing::Test {
                                  Perspective::IS_CLIENT);
   }
 
-  scoped_ptr<QuicP2PSession> CreateP2PSession(scoped_ptr<Socket> socket,
-                                              QuicP2PCryptoConfig crypto_config,
-                                              Perspective perspective) {
-    net::QuicDefaultPacketWriter* writer =
-        new net::QuicDefaultPacketWriter(socket.get());
-    net::IPAddressNumber ip(net::kIPv4AddressSize, 0);
-    scoped_ptr<QuicConnection> quic_connection1(new QuicConnection(
-        0, net::IPEndPoint(ip, 0), &quic_helper_, writer,
+  std::unique_ptr<QuicP2PSession> CreateP2PSession(
+      std::unique_ptr<Socket> socket,
+      QuicP2PCryptoConfig crypto_config,
+      Perspective perspective) {
+    QuicChromiumPacketWriter* writer =
+        new QuicChromiumPacketWriter(socket.get());
+    std::unique_ptr<QuicConnection> quic_connection1(new QuicConnection(
+        0, IPEndPoint(IPAddress::IPv4AllZeros(), 0), &quic_helper_, writer,
         true /* owns_writer */, perspective, QuicSupportedVersions()));
     writer->SetConnection(quic_connection1.get());
 
-    scoped_ptr<QuicP2PSession> result(
+    std::unique_ptr<QuicP2PSession> result(
         new QuicP2PSession(config_, crypto_config, std::move(quic_connection1),
                            std::move(socket)));
     result->Initialize();
@@ -249,10 +250,10 @@ class QuicP2PSessionTest : public ::testing::Test {
   QuicConfig config_;
 
   base::WeakPtr<FakeP2PDatagramSocket> socket1_;
-  scoped_ptr<QuicP2PSession> session1_;
+  std::unique_ptr<QuicP2PSession> session1_;
 
   base::WeakPtr<FakeP2PDatagramSocket> socket2_;
-  scoped_ptr<QuicP2PSession> session2_;
+  std::unique_ptr<QuicP2PSession> session2_;
 };
 
 void QuicP2PSessionTest::OnWriteResult(int result) {
@@ -268,6 +269,14 @@ void QuicP2PSessionTest::TestStreamConnection(QuicP2PSession* from_session,
   TestP2PStreamDelegate outgoing_stream_delegate;
   outgoing_stream->SetDelegate(&outgoing_stream_delegate);
   EXPECT_EQ(expected_stream_id, outgoing_stream->id());
+
+  // Add streams to write_blocked_lists of both QuicSession objects.
+  QuicWriteBlockedList* write_blocked_list1 =
+      test::QuicSessionPeer::GetWriteBlockedStreams(from_session);
+  write_blocked_list1->RegisterStream(expected_stream_id, kV3HighestPriority);
+  QuicWriteBlockedList* write_blocked_list2 =
+      test::QuicSessionPeer::GetWriteBlockedStreams(to_session);
+  write_blocked_list2->RegisterStream(expected_stream_id, kV3HighestPriority);
 
   // Send a test message to the client.
   const char kTestMessage[] = "Hi";
@@ -320,7 +329,8 @@ TEST_F(QuicP2PSessionTest, DestroySocketWhenClosed) {
 
   // The socket must be destroyed when connection is closed.
   EXPECT_TRUE(socket1_);
-  session1_->connection()->CloseConnection(net::QUIC_NO_ERROR, false);
+  session1_->connection()->CloseConnection(
+      QUIC_NO_ERROR, "test", ConnectionCloseBehavior::SILENT_CLOSE);
   EXPECT_FALSE(socket1_);
 }
 
@@ -336,6 +346,11 @@ TEST_F(QuicP2PSessionTest, TransportWriteError) {
   TestP2PStreamDelegate stream_delegate;
   stream->SetDelegate(&stream_delegate);
   EXPECT_EQ(2U, stream->id());
+
+  // Add stream to write_blocked_list.
+  QuicWriteBlockedList* write_blocked_list =
+      test::QuicSessionPeer::GetWriteBlockedStreams(session1_.get());
+  write_blocked_list->RegisterStream(stream->id(), kV3HighestPriority);
 
   socket1_->SetWriteError(ERR_INTERNET_DISCONNECTED);
 

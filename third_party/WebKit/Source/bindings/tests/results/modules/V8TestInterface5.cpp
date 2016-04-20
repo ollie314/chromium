@@ -15,10 +15,8 @@
 #include "bindings/core/v8/V8TestInterfaceEmpty.h"
 #include "bindings/modules/v8/UnionTypesModules.h"
 #include "bindings/modules/v8/V8TestInterface5.h"
-#include "core/dom/ContextFeatures.h"
 #include "core/dom/Document.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "platform/TraceEvent.h"
 #include "wtf/GetPtr.h"
 #include "wtf/RefPtr.h"
 
@@ -30,7 +28,7 @@ namespace blink {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo V8TestInterface5::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterface5::domTemplate, V8TestInterface5::refObject, V8TestInterface5::derefObject, V8TestInterface5::trace, V8TestInterface5::toActiveDOMObject, V8TestInterface5::visitDOMWrapper, V8TestInterface5::preparePrototypeAndInterfaceObject, V8TestInterface5::installConditionallyEnabledProperties, "TestInterface5", &V8TestInterfaceEmpty::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Dependent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestInterface5::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterface5::domTemplate, V8TestInterface5::trace, V8TestInterface5::toActiveScriptWrappable, V8TestInterface5::visitDOMWrapper, V8TestInterface5::preparePrototypeAndInterfaceObject, V8TestInterface5::installConditionallyEnabledProperties, "TestInterface5", &V8TestInterfaceEmpty::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Dependent };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
 #endif
@@ -42,30 +40,6 @@ const WrapperTypeInfo& TestInterface5Implementation::s_wrapperTypeInfo = V8TestI
 
 namespace TestInterface5ImplementationV8Internal {
 
-template<class CallbackInfo>
-static bool TestInterface5ImplementationCreateDataProperty(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const CallbackInfo& info)
-{
-    ASSERT(info.This()->IsObject());
-    return v8CallBoolean(v8::Local<v8::Object>::Cast(info.This())->CreateDataProperty(info.GetIsolate()->GetCurrentContext(), name, v8Value));
-}
-
-static void TestInterface5ImplementationConstructorAttributeSetterCallback(v8::Local<v8::Name>, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
-{
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
-    do {
-        v8::Local<v8::Value> data = info.Data();
-        ASSERT(data->IsExternal());
-        V8PerContextData* perContextData = V8PerContextData::from(info.Holder()->CreationContext());
-        if (!perContextData)
-            break;
-        const WrapperTypeInfo* wrapperTypeInfo = WrapperTypeInfo::unwrap(data);
-        if (!wrapperTypeInfo)
-            break;
-        TestInterface5ImplementationCreateDataProperty(v8String(info.GetIsolate(), wrapperTypeInfo->interfaceName), v8Value, info);
-    } while (false); // do ... while (false) just for use of break
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
-}
-
 static void testInterfaceAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Object> holder = info.Holder();
@@ -75,9 +49,7 @@ static void testInterfaceAttributeAttributeGetter(const v8::FunctionCallbackInfo
 
 static void testInterfaceAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestInterface5ImplementationV8Internal::testInterfaceAttributeAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void testInterfaceAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -91,28 +63,13 @@ static void testInterfaceAttributeAttributeSetter(v8::Local<v8::Value> v8Value, 
         exceptionState.throwIfNeeded();
         return;
     }
-    impl->setTestInterfaceAttribute(WTF::getPtr(cppValue));
+    impl->setTestInterfaceAttribute(cppValue);
 }
 
 static void testInterfaceAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestInterface5ImplementationV8Internal::testInterfaceAttributeAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
-}
-
-static void testInterfaceConstructorAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
-{
-    v8::Local<v8::String> propertyName = v8AtomicString(info.GetIsolate(), "testInterfaceConstructorAttribute");
-    TestInterface5ImplementationCreateDataProperty(propertyName, v8Value, info);
-}
-
-static void testInterfaceConstructorAttributeAttributeSetterCallback(v8::Local<v8::Name>, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
-{
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
-    TestInterface5ImplementationV8Internal::testInterfaceConstructorAttributeAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void doubleAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -124,9 +81,7 @@ static void doubleAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Va
 
 static void doubleAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestInterface5ImplementationV8Internal::doubleAttributeAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void doubleAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -143,9 +98,7 @@ static void doubleAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v
 static void doubleAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestInterface5ImplementationV8Internal::doubleAttributeAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void floatAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -157,9 +110,7 @@ static void floatAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Val
 
 static void floatAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestInterface5ImplementationV8Internal::floatAttributeAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void floatAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -176,9 +127,7 @@ static void floatAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8
 static void floatAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestInterface5ImplementationV8Internal::floatAttributeAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void unrestrictedDoubleAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -190,9 +139,7 @@ static void unrestrictedDoubleAttributeAttributeGetter(const v8::FunctionCallbac
 
 static void unrestrictedDoubleAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestInterface5ImplementationV8Internal::unrestrictedDoubleAttributeAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void unrestrictedDoubleAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -209,9 +156,7 @@ static void unrestrictedDoubleAttributeAttributeSetter(v8::Local<v8::Value> v8Va
 static void unrestrictedDoubleAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestInterface5ImplementationV8Internal::unrestrictedDoubleAttributeAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void unrestrictedFloatAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -223,9 +168,7 @@ static void unrestrictedFloatAttributeAttributeGetter(const v8::FunctionCallback
 
 static void unrestrictedFloatAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestInterface5ImplementationV8Internal::unrestrictedFloatAttributeAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void unrestrictedFloatAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -242,9 +185,7 @@ static void unrestrictedFloatAttributeAttributeSetter(v8::Local<v8::Value> v8Val
 static void unrestrictedFloatAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestInterface5ImplementationV8Internal::unrestrictedFloatAttributeAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void staticStringAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -254,9 +195,7 @@ static void staticStringAttributeAttributeGetter(const v8::FunctionCallbackInfo<
 
 static void staticStringAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestInterface5ImplementationV8Internal::staticStringAttributeAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void staticStringAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -270,9 +209,7 @@ static void staticStringAttributeAttributeSetter(v8::Local<v8::Value> v8Value, c
 static void staticStringAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestInterface5ImplementationV8Internal::staticStringAttributeAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void alwaysExposedAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -284,9 +221,7 @@ static void alwaysExposedAttributeAttributeGetter(const v8::FunctionCallbackInfo
 
 static void alwaysExposedAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestInterface5ImplementationV8Internal::alwaysExposedAttributeAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void alwaysExposedAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -303,9 +238,7 @@ static void alwaysExposedAttributeAttributeSetter(v8::Local<v8::Value> v8Value, 
 static void alwaysExposedAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestInterface5ImplementationV8Internal::alwaysExposedAttributeAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void workerExposedAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -317,9 +250,7 @@ static void workerExposedAttributeAttributeGetter(const v8::FunctionCallbackInfo
 
 static void workerExposedAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestInterface5ImplementationV8Internal::workerExposedAttributeAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void workerExposedAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -336,9 +267,7 @@ static void workerExposedAttributeAttributeSetter(v8::Local<v8::Value> v8Value, 
 static void workerExposedAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestInterface5ImplementationV8Internal::workerExposedAttributeAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void windowExposedAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -350,9 +279,7 @@ static void windowExposedAttributeAttributeGetter(const v8::FunctionCallbackInfo
 
 static void windowExposedAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestInterface5ImplementationV8Internal::windowExposedAttributeAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void windowExposedAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -369,9 +296,7 @@ static void windowExposedAttributeAttributeSetter(v8::Local<v8::Value> v8Value, 
 static void windowExposedAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestInterface5ImplementationV8Internal::windowExposedAttributeAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void voidMethodTestInterfaceEmptyArgMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -394,9 +319,7 @@ static void voidMethodTestInterfaceEmptyArgMethod(const v8::FunctionCallbackInfo
 
 static void voidMethodTestInterfaceEmptyArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::voidMethodTestInterfaceEmptyArgMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void voidMethodDoubleArgFloatArgMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -423,9 +346,7 @@ static void voidMethodDoubleArgFloatArgMethod(const v8::FunctionCallbackInfo<v8:
 
 static void voidMethodDoubleArgFloatArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::voidMethodDoubleArgFloatArgMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void voidMethodUnrestrictedDoubleArgUnrestrictedFloatArgMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -452,9 +373,7 @@ static void voidMethodUnrestrictedDoubleArgUnrestrictedFloatArgMethod(const v8::
 
 static void voidMethodUnrestrictedDoubleArgUnrestrictedFloatArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::voidMethodUnrestrictedDoubleArgUnrestrictedFloatArgMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void voidMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -465,9 +384,7 @@ static void voidMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
 
 static void voidMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::voidMethodMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void voidMethodMethodForMainWorld(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -478,9 +395,7 @@ static void voidMethodMethodForMainWorld(const v8::FunctionCallbackInfo<v8::Valu
 
 static void voidMethodMethodCallbackForMainWorld(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::voidMethodMethodForMainWorld(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void alwaysExposedMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -491,9 +406,7 @@ static void alwaysExposedMethodMethod(const v8::FunctionCallbackInfo<v8::Value>&
 
 static void alwaysExposedMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::alwaysExposedMethodMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void workerExposedMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -504,9 +417,7 @@ static void workerExposedMethodMethod(const v8::FunctionCallbackInfo<v8::Value>&
 
 static void workerExposedMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::workerExposedMethodMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void windowExposedMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -517,9 +428,7 @@ static void windowExposedMethodMethod(const v8::FunctionCallbackInfo<v8::Value>&
 
 static void windowExposedMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::windowExposedMethodMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void alwaysExposedStaticMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -529,9 +438,7 @@ static void alwaysExposedStaticMethodMethod(const v8::FunctionCallbackInfo<v8::V
 
 static void alwaysExposedStaticMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::alwaysExposedStaticMethodMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void workerExposedStaticMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -541,9 +448,7 @@ static void workerExposedStaticMethodMethod(const v8::FunctionCallbackInfo<v8::V
 
 static void workerExposedStaticMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::workerExposedStaticMethodMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void windowExposedStaticMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -553,9 +458,7 @@ static void windowExposedStaticMethodMethod(const v8::FunctionCallbackInfo<v8::V
 
 static void windowExposedStaticMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::windowExposedStaticMethodMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void windowAndServiceWorkerExposedMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -566,9 +469,7 @@ static void windowAndServiceWorkerExposedMethodMethod(const v8::FunctionCallback
 
 static void windowAndServiceWorkerExposedMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::windowAndServiceWorkerExposedMethodMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void voidMethodBooleanOrDOMStringArgMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -591,9 +492,7 @@ static void voidMethodBooleanOrDOMStringArgMethod(const v8::FunctionCallbackInfo
 
 static void voidMethodBooleanOrDOMStringArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::voidMethodBooleanOrDOMStringArgMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void voidMethodDoubleOrDOMStringArgMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -616,9 +515,7 @@ static void voidMethodDoubleOrDOMStringArgMethod(const v8::FunctionCallbackInfo<
 
 static void voidMethodDoubleOrDOMStringArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::voidMethodDoubleOrDOMStringArgMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void keysMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -626,19 +523,17 @@ static void keysMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
     ExceptionState exceptionState(ExceptionState::ExecutionContext, "keys", "TestInterface5", info.Holder(), info.GetIsolate());
     TestInterface5Implementation* impl = V8TestInterface5::toImpl(info.Holder());
     ScriptState* scriptState = ScriptState::current(info.GetIsolate());
-    RawPtr<Iterator> result = impl->keysForBinding(scriptState, exceptionState);
+    Iterator* result = impl->keysForBinding(scriptState, exceptionState);
     if (exceptionState.hadException()) {
         exceptionState.throwIfNeeded();
         return;
     }
-    v8SetReturnValue(info, result.release());
+    v8SetReturnValue(info, result);
 }
 
 static void keysMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::keysMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void valuesMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -646,19 +541,17 @@ static void valuesMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
     ExceptionState exceptionState(ExceptionState::ExecutionContext, "values", "TestInterface5", info.Holder(), info.GetIsolate());
     TestInterface5Implementation* impl = V8TestInterface5::toImpl(info.Holder());
     ScriptState* scriptState = ScriptState::current(info.GetIsolate());
-    RawPtr<Iterator> result = impl->valuesForBinding(scriptState, exceptionState);
+    Iterator* result = impl->valuesForBinding(scriptState, exceptionState);
     if (exceptionState.hadException()) {
         exceptionState.throwIfNeeded();
         return;
     }
-    v8SetReturnValue(info, result.release());
+    v8SetReturnValue(info, result);
 }
 
 static void valuesMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::valuesMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void entriesMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -666,19 +559,17 @@ static void entriesMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
     ExceptionState exceptionState(ExceptionState::ExecutionContext, "entries", "TestInterface5", info.Holder(), info.GetIsolate());
     TestInterface5Implementation* impl = V8TestInterface5::toImpl(info.Holder());
     ScriptState* scriptState = ScriptState::current(info.GetIsolate());
-    RawPtr<Iterator> result = impl->entriesForBinding(scriptState, exceptionState);
+    Iterator* result = impl->entriesForBinding(scriptState, exceptionState);
     if (exceptionState.hadException()) {
         exceptionState.throwIfNeeded();
         return;
     }
-    v8SetReturnValue(info, result.release());
+    v8SetReturnValue(info, result);
 }
 
 static void entriesMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::entriesMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void forEachMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -711,9 +602,7 @@ static void forEachMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
 
 static void forEachMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::forEachMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void toStringMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -724,9 +613,7 @@ static void toStringMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
 
 static void toStringMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::toStringMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void iteratorMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -734,19 +621,17 @@ static void iteratorMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
     ExceptionState exceptionState(ExceptionState::ExecutionContext, "iterator", "TestInterface5", info.Holder(), info.GetIsolate());
     TestInterface5Implementation* impl = V8TestInterface5::toImpl(info.Holder());
     ScriptState* scriptState = ScriptState::current(info.GetIsolate());
-    RawPtr<Iterator> result = impl->iterator(scriptState, exceptionState);
+    Iterator* result = impl->iterator(scriptState, exceptionState);
     if (exceptionState.hadException()) {
         exceptionState.throwIfNeeded();
         return;
     }
-    v8SetReturnValue(info, result.release());
+    v8SetReturnValue(info, result);
 }
 
 static void iteratorMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestInterface5ImplementationV8Internal::iteratorMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void indexedPropertyGetter(uint32_t index, const v8::PropertyCallbackInfo<v8::Value>& info)
@@ -760,9 +645,7 @@ static void indexedPropertyGetter(uint32_t index, const v8::PropertyCallbackInfo
 
 static void indexedPropertyGetterCallback(uint32_t index, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMIndexedProperty");
     TestInterface5ImplementationV8Internal::indexedPropertyGetter(index, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void indexedPropertySetter(uint32_t index, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
@@ -779,9 +662,7 @@ static void indexedPropertySetter(uint32_t index, v8::Local<v8::Value> v8Value, 
 
 static void indexedPropertySetterCallback(uint32_t index, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMIndexedProperty");
     TestInterface5ImplementationV8Internal::indexedPropertySetter(index, v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void indexedPropertyDeleter(uint32_t index, const v8::PropertyCallbackInfo<v8::Boolean>& info)
@@ -794,9 +675,7 @@ static void indexedPropertyDeleter(uint32_t index, const v8::PropertyCallbackInf
 
 static void indexedPropertyDeleterCallback(uint32_t index, const v8::PropertyCallbackInfo<v8::Boolean>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMIndexedProperty");
     TestInterface5ImplementationV8Internal::indexedPropertyDeleter(index, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void namedPropertyGetter(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
@@ -812,9 +691,7 @@ static void namedPropertyGetter(v8::Local<v8::Name> name, const v8::PropertyCall
 
 static void namedPropertyGetterCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMNamedProperty");
     TestInterface5ImplementationV8Internal::namedPropertyGetter(name, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void namedPropertySetter(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
@@ -835,9 +712,7 @@ static void namedPropertySetter(v8::Local<v8::Name> name, v8::Local<v8::Value> v
 
 static void namedPropertySetterCallback(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMNamedProperty");
     TestInterface5ImplementationV8Internal::namedPropertySetter(name, v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void namedPropertyQuery(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info)
@@ -856,9 +731,7 @@ static void namedPropertyQuery(v8::Local<v8::Name> name, const v8::PropertyCallb
 
 static void namedPropertyQueryCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMNamedProperty");
     TestInterface5ImplementationV8Internal::namedPropertyQuery(name, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void namedPropertyDeleter(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Boolean>& info)
@@ -872,9 +745,7 @@ static void namedPropertyDeleter(v8::Local<v8::Name> name, const v8::PropertyCal
 
 static void namedPropertyDeleterCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Boolean>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMNamedProperty");
     TestInterface5ImplementationV8Internal::namedPropertyDeleter(name, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void namedPropertyEnumerator(const v8::PropertyCallbackInfo<v8::Array>& info)
@@ -895,9 +766,7 @@ static void namedPropertyEnumerator(const v8::PropertyCallbackInfo<v8::Array>& i
 
 static void namedPropertyEnumeratorCallback(const v8::PropertyCallbackInfo<v8::Array>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMNamedProperty");
     TestInterface5ImplementationV8Internal::namedPropertyEnumerator(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 } // namespace TestInterface5ImplementationV8Internal
@@ -921,7 +790,7 @@ void V8TestInterface5::visitDOMWrapper(v8::Isolate* isolate, ScriptWrappable* sc
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
 const V8DOMConfiguration::AttributeConfiguration V8TestInterface5Attributes[] = {
-    {"testInterfaceConstructorAttribute", v8ConstructorAttributeGetter, TestInterface5ImplementationV8Internal::testInterfaceConstructorAttributeAttributeSetterCallback, 0, 0, const_cast<WrapperTypeInfo*>(&V8TestInterface5::wrapperTypeInfo), static_cast<v8::AccessControl>(v8::DEFAULT), static_cast<v8::PropertyAttribute>(v8::DontEnum), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnInstance, V8DOMConfiguration::CheckHolder},
+    {"testInterfaceConstructorAttribute", v8ConstructorAttributeGetter, 0, 0, 0, const_cast<WrapperTypeInfo*>(&V8TestInterface5::wrapperTypeInfo), static_cast<v8::AccessControl>(v8::DEFAULT), static_cast<v8::PropertyAttribute>(v8::DontEnum), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnInstance, V8DOMConfiguration::CheckHolder},
 };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
@@ -953,39 +822,45 @@ const V8DOMConfiguration::MethodConfiguration V8TestInterface5Methods[] = {
     {"toString", TestInterface5ImplementationV8Internal::toStringMethodCallback, 0, 0, static_cast<v8::PropertyAttribute>(v8::DontEnum), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype},
 };
 
-static void installV8TestInterface5Template(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+static void installV8TestInterface5Template(v8::Isolate* isolate, const DOMWrapperWorld& world, v8::Local<v8::FunctionTemplate> interfaceTemplate)
 {
-    functionTemplate->ReadOnlyPrototype();
-
-    v8::Local<v8::Signature> defaultSignature;
-    if (!RuntimeEnabledFeatures::featureNameEnabled())
-        defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "TestInterface5", V8TestInterfaceEmpty::domTemplate(isolate), V8TestInterface5::internalFieldCount, 0, 0, 0, 0, 0, 0);
-    else
-        defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "TestInterface5", V8TestInterfaceEmpty::domTemplate(isolate), V8TestInterface5::internalFieldCount,
-            V8TestInterface5Attributes, WTF_ARRAY_LENGTH(V8TestInterface5Attributes),
-            V8TestInterface5Accessors, WTF_ARRAY_LENGTH(V8TestInterface5Accessors),
-            V8TestInterface5Methods, WTF_ARRAY_LENGTH(V8TestInterface5Methods));
-    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    // Initialize the interface object's template.
+    V8DOMConfiguration::initializeDOMInterfaceTemplate(isolate, interfaceTemplate, V8TestInterface5::wrapperTypeInfo.interfaceName, V8TestInterfaceEmpty::domTemplate(isolate, world), V8TestInterface5::internalFieldCount);
+    v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
+    ALLOW_UNUSED_LOCAL(signature);
+    v8::Local<v8::ObjectTemplate> instanceTemplate = interfaceTemplate->InstanceTemplate();
     ALLOW_UNUSED_LOCAL(instanceTemplate);
-    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = interfaceTemplate->PrototypeTemplate();
     ALLOW_UNUSED_LOCAL(prototypeTemplate);
-    const V8DOMConfiguration::ConstantConfiguration V8TestInterface5Constants[] = {
-        {"UNSIGNED_LONG", 0, 0, V8DOMConfiguration::ConstantTypeUnsignedLong},
-        {"CONST_JAVASCRIPT", 1, 0, V8DOMConfiguration::ConstantTypeShort},
-    };
-    V8DOMConfiguration::installConstants(isolate, functionTemplate, prototypeTemplate, V8TestInterface5Constants, WTF_ARRAY_LENGTH(V8TestInterface5Constants));
+    // Register DOM constants, attributes and operations.
+    if (RuntimeEnabledFeatures::featureNameEnabled()) {
+        const V8DOMConfiguration::ConstantConfiguration V8TestInterface5Constants[] = {
+            {"UNSIGNED_LONG", 0, 0, V8DOMConfiguration::ConstantTypeUnsignedLong},
+            {"CONST_JAVASCRIPT", 1, 0, V8DOMConfiguration::ConstantTypeShort},
+        };
+        V8DOMConfiguration::installConstants(isolate, interfaceTemplate, prototypeTemplate, V8TestInterface5Constants, WTF_ARRAY_LENGTH(V8TestInterface5Constants));
+        V8DOMConfiguration::installAttributes(isolate, world, instanceTemplate, prototypeTemplate, V8TestInterface5Attributes, WTF_ARRAY_LENGTH(V8TestInterface5Attributes));
+        V8DOMConfiguration::installAccessors(isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate, signature, V8TestInterface5Accessors, WTF_ARRAY_LENGTH(V8TestInterface5Accessors));
+        V8DOMConfiguration::installMethods(isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate, signature, V8TestInterface5Methods, WTF_ARRAY_LENGTH(V8TestInterface5Methods));
+    } // if (RuntimeEnabledFeatures::featureNameEnabled())
+
+    // Indexed properties
     v8::IndexedPropertyHandlerConfiguration indexedPropertyHandlerConfig(TestInterface5ImplementationV8Internal::indexedPropertyGetterCallback, TestInterface5ImplementationV8Internal::indexedPropertySetterCallback, 0, TestInterface5ImplementationV8Internal::indexedPropertyDeleterCallback, indexedPropertyEnumerator<TestInterface5Implementation>, v8::Local<v8::Value>(), v8::PropertyHandlerFlags::kNone);
     instanceTemplate->SetHandler(indexedPropertyHandlerConfig);
+    // Named properties
     v8::NamedPropertyHandlerConfiguration namedPropertyHandlerConfig(TestInterface5ImplementationV8Internal::namedPropertyGetterCallback, TestInterface5ImplementationV8Internal::namedPropertySetterCallback, TestInterface5ImplementationV8Internal::namedPropertyQueryCallback, TestInterface5ImplementationV8Internal::namedPropertyDeleterCallback, TestInterface5ImplementationV8Internal::namedPropertyEnumeratorCallback, v8::Local<v8::Value>(), static_cast<v8::PropertyHandlerFlags>(int(v8::PropertyHandlerFlags::kOnlyInterceptStrings) | int(v8::PropertyHandlerFlags::kNonMasking)));
     instanceTemplate->SetHandler(namedPropertyHandlerConfig);
+
+    // Iterator (@@iterator)
     const V8DOMConfiguration::SymbolKeyedMethodConfiguration symbolKeyedIteratorConfiguration = { v8::Symbol::GetIterator, TestInterface5ImplementationV8Internal::iteratorMethodCallback, 0, v8::DontDelete, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype };
-    V8DOMConfiguration::installMethod(isolate, prototypeTemplate, defaultSignature, symbolKeyedIteratorConfiguration);
-    functionTemplate->InstanceTemplate()->SetCallAsFunctionHandler(V8TestInterface5::legacyCallCustom);
+    V8DOMConfiguration::installMethod(isolate, world, prototypeTemplate, signature, symbolKeyedIteratorConfiguration);
+
+    instanceTemplate->SetCallAsFunctionHandler(V8TestInterface5::legacyCallCustom);
 }
 
-v8::Local<v8::FunctionTemplate> V8TestInterface5::domTemplate(v8::Isolate* isolate)
+v8::Local<v8::FunctionTemplate> V8TestInterface5::domTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world)
 {
-    return V8DOMConfiguration::domClassTemplate(isolate, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestInterface5Template);
+    return V8DOMConfiguration::domClassTemplate(isolate, world, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestInterface5Template);
 }
 
 bool V8TestInterface5::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
@@ -1003,57 +878,47 @@ TestInterface5Implementation* V8TestInterface5::toImplWithTypeCheck(v8::Isolate*
     return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
 }
 
-void V8TestInterface5::preparePrototypeAndInterfaceObject(v8::Local<v8::Context> context, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate)
+void V8TestInterface5::preparePrototypeAndInterfaceObject(v8::Local<v8::Context> context, const DOMWrapperWorld& world, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate)
 {
     v8::Isolate* isolate = context->GetIsolate();
     ExecutionContext* executionContext = toExecutionContext(context);
     v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
     if (executionContext && (executionContext->isWorkerGlobalScope())) {
         const V8DOMConfiguration::AccessorConfiguration accessorConfiguration = {"workerExposedAttribute", TestInterface5ImplementationV8Internal::workerExposedAttributeAttributeGetterCallback, TestInterface5ImplementationV8Internal::workerExposedAttributeAttributeSetterCallback, 0, 0, 0, v8::DEFAULT, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-        V8DOMConfiguration::installAccessor(isolate, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfiguration);
+        V8DOMConfiguration::installAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfiguration);
     }
     if (executionContext && (executionContext->isDocument())) {
         const V8DOMConfiguration::AccessorConfiguration accessorConfiguration = {"windowExposedAttribute", TestInterface5ImplementationV8Internal::windowExposedAttributeAttributeGetterCallback, TestInterface5ImplementationV8Internal::windowExposedAttributeAttributeSetterCallback, 0, 0, 0, v8::DEFAULT, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-        V8DOMConfiguration::installAccessor(isolate, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfiguration);
+        V8DOMConfiguration::installAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfiguration);
     }
-    v8::Local<v8::Signature> defaultSignature = v8::Signature::New(isolate, domTemplate(isolate));
+    v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
     ExecutionContext* executionContext = toExecutionContext(prototypeObject->CreationContext());
     ASSERT(executionContext);
     if (executionContext && (executionContext->isWorkerGlobalScope())) {
         const V8DOMConfiguration::MethodConfiguration workerExposedMethodMethodConfiguration = {"workerExposedMethod", TestInterface5ImplementationV8Internal::workerExposedMethodMethodCallback, 0, 0, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype};
-        V8DOMConfiguration::installMethod(isolate, v8::Local<v8::Object>(), prototypeObject, interfaceObject, defaultSignature, workerExposedMethodMethodConfiguration);
+        V8DOMConfiguration::installMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, workerExposedMethodMethodConfiguration);
     }
     if (executionContext && (executionContext->isDocument())) {
         const V8DOMConfiguration::MethodConfiguration windowExposedMethodMethodConfiguration = {"windowExposedMethod", TestInterface5ImplementationV8Internal::windowExposedMethodMethodCallback, 0, 0, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype};
-        V8DOMConfiguration::installMethod(isolate, v8::Local<v8::Object>(), prototypeObject, interfaceObject, defaultSignature, windowExposedMethodMethodConfiguration);
+        V8DOMConfiguration::installMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, windowExposedMethodMethodConfiguration);
     }
     if (executionContext && (executionContext->isWorkerGlobalScope())) {
         const V8DOMConfiguration::MethodConfiguration workerExposedStaticMethodMethodConfiguration = {"workerExposedStaticMethod", TestInterface5ImplementationV8Internal::workerExposedStaticMethodMethodCallback, 0, 0, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnInterface};
-        V8DOMConfiguration::installMethod(isolate, v8::Local<v8::Object>(), prototypeObject, interfaceObject, defaultSignature, workerExposedStaticMethodMethodConfiguration);
+        V8DOMConfiguration::installMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, workerExposedStaticMethodMethodConfiguration);
     }
     if (executionContext && (executionContext->isDocument())) {
         const V8DOMConfiguration::MethodConfiguration windowExposedStaticMethodMethodConfiguration = {"windowExposedStaticMethod", TestInterface5ImplementationV8Internal::windowExposedStaticMethodMethodCallback, 0, 0, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnInterface};
-        V8DOMConfiguration::installMethod(isolate, v8::Local<v8::Object>(), prototypeObject, interfaceObject, defaultSignature, windowExposedStaticMethodMethodConfiguration);
+        V8DOMConfiguration::installMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, windowExposedStaticMethodMethodConfiguration);
     }
     if (executionContext && (executionContext->isDocument() || executionContext->isServiceWorkerGlobalScope())) {
         const V8DOMConfiguration::MethodConfiguration windowAndServiceWorkerExposedMethodMethodConfiguration = {"windowAndServiceWorkerExposedMethod", TestInterface5ImplementationV8Internal::windowAndServiceWorkerExposedMethodMethodCallback, 0, 0, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype};
-        V8DOMConfiguration::installMethod(isolate, v8::Local<v8::Object>(), prototypeObject, interfaceObject, defaultSignature, windowAndServiceWorkerExposedMethodMethodConfiguration);
+        V8DOMConfiguration::installMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, windowAndServiceWorkerExposedMethodMethodConfiguration);
     }
 }
 
-ActiveDOMObject* V8TestInterface5::toActiveDOMObject(v8::Local<v8::Object> wrapper)
+ActiveScriptWrappable* V8TestInterface5::toActiveScriptWrappable(v8::Local<v8::Object> wrapper)
 {
     return toImpl(wrapper);
-}
-
-void V8TestInterface5::refObject(ScriptWrappable* scriptWrappable)
-{
-    scriptWrappable->toImpl<TestInterface5Implementation>()->ref();
-}
-
-void V8TestInterface5::derefObject(ScriptWrappable* scriptWrappable)
-{
-    scriptWrappable->toImpl<TestInterface5Implementation>()->deref();
 }
 
 } // namespace blink

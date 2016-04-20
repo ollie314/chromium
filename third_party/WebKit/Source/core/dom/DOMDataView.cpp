@@ -7,7 +7,7 @@
 #include "bindings/core/v8/DOMDataStore.h"
 #include "bindings/core/v8/V8ArrayBuffer.h"
 #include "platform/CheckedInt.h"
-#include "wtf/ArrayBufferView.h"
+#include "wtf/typed_arrays/ArrayBufferView.h"
 
 namespace blink {
 
@@ -15,7 +15,7 @@ namespace {
 
 class DataView final : public ArrayBufferView {
 public:
-    static PassRefPtr<DataView> create(PassRefPtr<ArrayBuffer> buffer, unsigned byteOffset, unsigned byteLength)
+    static PassRefPtr<DataView> create(ArrayBuffer* buffer, unsigned byteOffset, unsigned byteLength)
     {
         RELEASE_ASSERT(byteOffset <= buffer->byteLength());
         CheckedInt<uint32_t> checkedOffset(byteOffset);
@@ -37,7 +37,7 @@ protected:
     }
 
 private:
-    DataView(PassRefPtr<ArrayBuffer> buffer, unsigned byteOffset, unsigned byteLength)
+    DataView(ArrayBuffer* buffer, unsigned byteOffset, unsigned byteLength)
         : ArrayBufferView(buffer, byteOffset)
         , m_byteLength(byteLength) { }
 
@@ -46,27 +46,21 @@ private:
 
 } // anonymous namespace
 
-PassRefPtr<DOMDataView> DOMDataView::create(PassRefPtr<DOMArrayBufferBase> prpBuffer, unsigned byteOffset, unsigned byteLength)
+DOMDataView* DOMDataView::create(DOMArrayBufferBase* buffer, unsigned byteOffset, unsigned byteLength)
 {
-    RefPtr<DOMArrayBufferBase> buffer = prpBuffer;
     RefPtr<DataView> dataView = DataView::create(buffer->buffer(), byteOffset, byteLength);
-    return adoptRef(new DOMDataView(dataView.release(), buffer.release()));
+    return new DOMDataView(dataView, buffer);
 }
 
 v8::Local<v8::Object> DOMDataView::wrap(v8::Isolate* isolate, v8::Local<v8::Object> creationContext)
 {
-    // It's possible that no one except for the new wrapper owns this object at
-    // this moment, so we have to prevent GC to collect this object until the
-    // object gets associated with the wrapper.
-    RefPtr<DOMDataView> protect(this);
-
-    ASSERT(!DOMDataStore::containsWrapper(this, isolate));
+    DCHECK(!DOMDataStore::containsWrapper(this, isolate));
 
     const WrapperTypeInfo* wrapperTypeInfo = this->wrapperTypeInfo();
     v8::Local<v8::Value> v8Buffer = toV8(buffer(), creationContext, isolate);
     if (v8Buffer.IsEmpty())
         return v8::Local<v8::Object>();
-    ASSERT(v8Buffer->IsArrayBuffer());
+    DCHECK(v8Buffer->IsArrayBuffer());
 
     v8::Local<v8::Object> wrapper = v8::DataView::New(v8Buffer.As<v8::ArrayBuffer>(), byteOffset(), byteLength());
 

@@ -9,13 +9,13 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "ui/message_center/notifier_settings.h"
 
 #if defined(ENABLE_EXTENSIONS)
@@ -107,7 +107,7 @@ void NotifierStateTracker::SetNotifierEnabled(
 
   bool add_new_item = false;
   const char* pref_name = NULL;
-  scoped_ptr<base::StringValue> id;
+  std::unique_ptr<base::StringValue> id;
   switch (notifier_id.type) {
     case NotifierId::APPLICATION:
       pref_name = prefs::kMessageCenterDisabledExtensionIds;
@@ -176,10 +176,10 @@ void NotifierStateTracker::FirePermissionLevelChangedEvent(
   extensions::api::notifications::PermissionLevel permission =
       enabled ? extensions::api::notifications::PERMISSION_LEVEL_GRANTED
               : extensions::api::notifications::PERMISSION_LEVEL_DENIED;
-  scoped_ptr<base::ListValue> args(new base::ListValue());
+  std::unique_ptr<base::ListValue> args(new base::ListValue());
   args->Append(new base::StringValue(
       extensions::api::notifications::ToString(permission)));
-  scoped_ptr<extensions::Event> event(new extensions::Event(
+  std::unique_ptr<extensions::Event> event(new extensions::Event(
       extensions::events::NOTIFICATIONS_ON_PERMISSION_LEVEL_CHANGED,
       extensions::api::notifications::OnPermissionLevelChanged::kEventName,
       std::move(args)));

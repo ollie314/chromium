@@ -33,9 +33,9 @@ namespace blink {
 
 class CORE_EXPORT HTMLLabelElement final : public HTMLElement, public FormAssociatedElement {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(HTMLLabelElement);
+    USING_GARBAGE_COLLECTED_MIXIN(HTMLLabelElement);
 public:
-    static PassRefPtrWillBeRawPtr<HTMLLabelElement> create(Document&, HTMLFormElement*);
+    static HTMLLabelElement* create(Document&, HTMLFormElement*);
     LabelableElement* control() const;
 
     bool willRespondToMouseClickEvents() override;
@@ -43,12 +43,7 @@ public:
     DECLARE_VIRTUAL_TRACE();
 
     HTMLFormElement* formOwner() const override;
-
-
-#if !ENABLE(OILPAN)
-    using Node::ref;
-    using Node::deref;
-#endif
+    HTMLFormElement* formForBinding() const;
 
 private:
     explicit HTMLLabelElement(Document&, HTMLFormElement*);
@@ -73,10 +68,6 @@ private:
     bool isFormControlElement() const override { return false; }
     bool isEnumeratable() const override { return false; }
     bool isLabelElement() const override { return true; }
-#if !ENABLE(OILPAN)
-    void refFormAssociatedElement() override { ref(); }
-    void derefFormAssociatedElement() override { deref(); }
-#endif
 
     void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
 

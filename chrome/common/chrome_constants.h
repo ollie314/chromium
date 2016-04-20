@@ -12,24 +12,9 @@
 #include "base/files/file_path.h"
 #include "build/build_config.h"
 
-#if defined(OS_WIN)
-#if defined(GOOGLE_CHROME_BUILD)
-#define PRODUCT_STRING_PATH L"Google\\Chrome"
-#elif defined(CHROMIUM_BUILD)
-#define PRODUCT_STRING_PATH L"Chromium"
-#else
-#error Unknown branding
-#endif
-#endif  // defined(OS_WIN)
-
 namespace chrome {
 
 extern const char kChromeVersion[];
-
-#if defined(OS_WIN)
-extern const char kChromeVersionEnvVar[];
-#endif
-
 extern const base::FilePath::CharType kBrowserProcessExecutableName[];
 extern const base::FilePath::CharType kHelperProcessExecutableName[];
 extern const base::FilePath::CharType kBrowserProcessExecutablePath[];
@@ -117,17 +102,6 @@ extern const int kHighestRendererOomScore;
 extern const wchar_t kMetroNavigationAndSearchMessage[];
 // Used by Metro Chrome to get information about the current tab.
 extern const wchar_t kMetroGetCurrentTabInfoMessage[];
-// Used by Metro Chrome to store activation state.
-extern const wchar_t kMetroRegistryPath[];
-extern const wchar_t kLaunchModeValue[];
-// Used to store crash report metrics using
-// content/browser_watcher/crash_reporting_metrics_win.h.
-extern const wchar_t kBrowserCrashDumpAttemptsRegistryPath[];
-extern const wchar_t kBrowserCrashDumpAttemptsRegistryPathSxS[];
-// Registry location where the browser watcher stores browser exit codes.
-// This is picked up and stored in histograms by the browser on the subsequent
-// launch.
-extern const wchar_t kBrowserExitCodesRegistryPath[];
 #endif
 
 #if defined(OS_CHROMEOS)

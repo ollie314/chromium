@@ -22,10 +22,12 @@
 #include "content/grit/content_resources.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "content/public/common/child_process_host.h"
 #include "content/public/common/url_constants.h"
 
 using base::DictionaryValue;
@@ -89,29 +91,23 @@ void CallServiceWorkerVersionMethodWithVersionID(
   (*version.get().*method)(callback);
 }
 
-void DispatchPushEventWithVersionID(
-    scoped_refptr<ServiceWorkerContextWrapper> context,
-    int64_t version_id,
-    const ServiceWorkerInternalsUI::StatusCallback& callback) {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    BrowserThread::PostTask(
-        BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(DispatchPushEventWithVersionID,
-                   context,
-                   version_id,
-                   callback));
-    return;
-  }
+base::ProcessId GetRealProcessId(int process_host_id) {
+  if (process_host_id == ChildProcessHost::kInvalidUniqueID)
+    return base::kNullProcessId;
 
-  scoped_refptr<ServiceWorkerVersion> version =
-      context->GetLiveVersion(version_id);
-  if (!version.get()) {
-    callback.Run(SERVICE_WORKER_ERROR_NOT_FOUND);
-    return;
-  }
-  std::string data = "Test push message from ServiceWorkerInternals.";
-  version->DispatchPushEvent(callback, data);
+  RenderProcessHost* rph = RenderProcessHost::FromID(process_host_id);
+  if (!rph)
+    return base::kNullProcessId;
+
+  base::ProcessHandle handle = rph->GetHandle();
+  if (handle == base::kNullProcessHandle)
+    return base::kNullProcessId;
+  // TODO(nhiroki): On Windows, |rph->GetHandle()| does not duplicate ownership
+  // of the process handle and the render host still retains it. Therefore, we
+  // cannot create a base::Process object, which provides a proper way to get a
+  // process id, from the handle. For a stopgap, we use this deprecated
+  // function that does not require the ownership (http://crbug.com/417532).
+  return base::GetProcId(handle);
 }
 
 void UpdateVersionInfo(const ServiceWorkerVersionInfo& version,
@@ -153,7 +149,9 @@ void UpdateVersionInfo(const ServiceWorkerVersionInfo& version,
   }
   info->SetString("script_url", version.script_url.spec());
   info->SetString("version_id", base::Int64ToString(version.version_id));
-  info->SetInteger("process_id", version.process_id);
+  info->SetInteger("process_id",
+                   static_cast<int>(GetRealProcessId(version.process_id)));
+  info->SetInteger("process_host_id", version.process_id);
   info->SetInteger("thread_id", version.thread_id);
   info->SetInteger("devtools_agent_route_id", version.devtools_agent_route_id);
 }
@@ -207,6 +205,7 @@ ListValue* GetVersionListValue(
 void DidGetStoredRegistrationsOnIOThread(
     scoped_refptr<ServiceWorkerContextWrapper> context,
     const GetRegistrationsCallback& callback,
+    ServiceWorkerStatusCode status,
     const std::vector<ServiceWorkerRegistrationInfo>& stored_registrations) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   BrowserThread::PostTask(
@@ -278,7 +277,7 @@ class ServiceWorkerInternalsUI::PartitionObserver
     args.push_back(new StringValue(base::Int64ToString(version_id)));
     args.push_back(new FundamentalValue(process_id));
     args.push_back(new FundamentalValue(thread_id));
-    scoped_ptr<DictionaryValue> value(new DictionaryValue());
+    std::unique_ptr<DictionaryValue> value(new DictionaryValue());
     value->SetString("message", info.error_message);
     value->SetInteger("lineNumber", info.line_number);
     value->SetInteger("columnNumber", info.column_number);
@@ -297,7 +296,7 @@ class ServiceWorkerInternalsUI::PartitionObserver
     args.push_back(new StringValue(base::Int64ToString(version_id)));
     args.push_back(new FundamentalValue(process_id));
     args.push_back(new FundamentalValue(thread_id));
-    scoped_ptr<DictionaryValue> value(new DictionaryValue());
+    std::unique_ptr<DictionaryValue> value(new DictionaryValue());
     value->SetInteger("sourceIdentifier", message.source_identifier);
     value->SetInteger("message_level", message.message_level);
     value->SetString("message", message.message);
@@ -357,10 +356,6 @@ ServiceWorkerInternalsUI::ServiceWorkerInternalsUI(WebUI* web_ui)
       base::Bind(&ServiceWorkerInternalsUI::CallServiceWorkerVersionMethod,
                  base::Unretained(this),
                  &ServiceWorkerVersion::StopWorker));
-  web_ui->RegisterMessageCallback(
-      "push",
-      base::Bind(&ServiceWorkerInternalsUI::DispatchPushEvent,
-                 base::Unretained(this)));
   web_ui->RegisterMessageCallback(
       "inspect",
       base::Bind(&ServiceWorkerInternalsUI::InspectWorker,
@@ -428,7 +423,7 @@ void ServiceWorkerInternalsUI::AddContextFromStoragePartition(
     partition_id = observer->partition_id();
   } else {
     partition_id = next_partition_id_++;
-    scoped_ptr<PartitionObserver> new_observer(
+    std::unique_ptr<PartitionObserver> new_observer(
         new PartitionObserver(partition_id, web_ui()));
     context->AddObserver(new_observer.get());
     observers_.set(reinterpret_cast<uintptr_t>(partition),
@@ -445,7 +440,7 @@ void ServiceWorkerInternalsUI::AddContextFromStoragePartition(
 
 void ServiceWorkerInternalsUI::RemoveObserverFromStoragePartition(
     StoragePartition* partition) {
-  scoped_ptr<PartitionObserver> observer(
+  std::unique_ptr<PartitionObserver> observer(
       observers_.take_and_erase(reinterpret_cast<uintptr_t>(partition)));
   if (!observer.get())
     return;
@@ -510,38 +505,15 @@ void ServiceWorkerInternalsUI::CallServiceWorkerVersionMethod(
       method, context, version_id, callback);
 }
 
-void ServiceWorkerInternalsUI::DispatchPushEvent(
-    const ListValue* args) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  int callback_id;
-  int partition_id;
-  int64_t version_id = 0;
-  std::string version_id_string;
-  const DictionaryValue* cmd_args = NULL;
-  scoped_refptr<ServiceWorkerContextWrapper> context;
-  if (!args->GetInteger(0, &callback_id) ||
-      !args->GetDictionary(1, &cmd_args) ||
-      !cmd_args->GetInteger("partition_id", &partition_id) ||
-      !GetServiceWorkerContext(partition_id, &context) ||
-      !cmd_args->GetString("version_id", &version_id_string) ||
-      !base::StringToInt64(version_id_string, &version_id)) {
-    return;
-  }
-
-  base::Callback<void(ServiceWorkerStatusCode)> callback =
-      base::Bind(OperationCompleteCallback, AsWeakPtr(), callback_id);
-  DispatchPushEventWithVersionID(context, version_id, callback);
-}
-
 void ServiceWorkerInternalsUI::InspectWorker(const ListValue* args) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   int callback_id;
   const DictionaryValue* cmd_args = NULL;
-  int process_id = 0;
+  int process_host_id = 0;
   int devtools_agent_route_id = 0;
   if (!args->GetInteger(0, &callback_id) ||
       !args->GetDictionary(1, &cmd_args) ||
-      !cmd_args->GetInteger("process_id", &process_id) ||
+      !cmd_args->GetInteger("process_host_id", &process_host_id) ||
       !cmd_args->GetInteger("devtools_agent_route_id",
                             &devtools_agent_route_id)) {
     return;
@@ -550,7 +522,8 @@ void ServiceWorkerInternalsUI::InspectWorker(const ListValue* args) {
       base::Bind(OperationCompleteCallback, AsWeakPtr(), callback_id);
   scoped_refptr<DevToolsAgentHostImpl> agent_host(
       ServiceWorkerDevToolsManager::GetInstance()
-          ->GetDevToolsAgentHostForWorker(process_id, devtools_agent_route_id));
+          ->GetDevToolsAgentHostForWorker(process_host_id,
+                                          devtools_agent_route_id));
   if (!agent_host.get()) {
     callback.Run(SERVICE_WORKER_ERROR_NOT_FOUND);
     return;

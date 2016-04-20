@@ -58,6 +58,7 @@ For Chromium contributors that have different nicks on other domains.
 | kuchhal           | kuchhal         | rahulk          |
 | levin             | dave\_levin     | levin           |
 | lfg               | lfg\_           | lfg             |
+| littledan         | littledan       | dehrenberg      |
 | luken             | luken_chromium  | luken           |
 | mark              | markmentovai    | mmentovai       |
 | mattm             | mattm\_c, mattm\_g | mattm           |
@@ -69,7 +70,7 @@ For Chromium contributors that have different nicks on other domains.
 | msw               | msw\_           | msw             |
 | nick              | nickcarter      | ncarter         |
 | oleg              |                 | olege           |
-| ortuno            | gortuno         | ortuno          |
+| ortuno            | ortuno          | ortuno          |
 | pam               | pamg            | pamg            |
 | paulirish         | paul\_irish      | paulirish       |
 | patrick           | pjohnson        | pjohnson        |

@@ -6,12 +6,11 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
@@ -24,6 +23,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/prefs/pref_service.h"
 #include "extensions/browser/app_sorting.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -107,9 +107,9 @@ class ExtensionAppModelBuilderTest : public AppListTestBase {
     model_.reset();
   }
 
-  scoped_ptr<app_list::AppListModel> model_;
-  scoped_ptr<test::TestAppListControllerDelegate> controller_;
-  scoped_ptr<ExtensionAppModelBuilder> builder_;
+  std::unique_ptr<app_list::AppListModel> model_;
+  std::unique_ptr<test::TestAppListControllerDelegate> controller_;
+  std::unique_ptr<ExtensionAppModelBuilder> builder_;
 
   base::ScopedTempDir second_profile_temp_dir_;
 

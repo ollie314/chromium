@@ -134,10 +134,9 @@
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/histogram_samples.h"
+#include "base/metrics/persistent_histogram_allocator.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/metrics/statistics_recorder.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -150,6 +149,7 @@
 #include "base/tracked_objects.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "components/metrics/data_use_tracker.h"
 #include "components/metrics/metrics_log.h"
 #include "components/metrics/metrics_log_manager.h"
 #include "components/metrics/metrics_log_uploader.h"
@@ -157,6 +157,8 @@
 #include "components/metrics/metrics_reporting_scheduler.h"
 #include "components/metrics/metrics_service_client.h"
 #include "components/metrics/metrics_state_manager.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
 #include "components/variations/entropy_provider.h"
 #include "components/variations/variations_associated_data.h"
 
@@ -257,6 +259,7 @@ void MetricsService::RegisterPrefs(PrefRegistrySimple* registry) {
   DCHECK(IsSingleThreaded());
   MetricsStateManager::RegisterPrefs(registry);
   MetricsLog::RegisterPrefs(registry);
+  DataUseTracker::RegisterPrefs(registry);
 
   registry->RegisterInt64Pref(prefs::kInstallDate, 0);
 
@@ -293,6 +296,7 @@ MetricsService::MetricsService(MetricsStateManager* state_manager,
       log_upload_in_progress_(false),
       idle_since_last_transmission_(false),
       session_id_(-1),
+      data_use_tracker_(DataUseTracker::Create(local_state_)),
       self_ptr_factory_(this),
       state_saver_factory_(this) {
   DCHECK(IsSingleThreaded());
@@ -323,6 +327,9 @@ void MetricsService::InitializeMetricsRecordingState() {
           // MetricsReportingScheduler is tied to the lifetime of |this|.
           base::Bind(&MetricsServiceClient::GetStandardUploadInterval,
                      base::Unretained(client_))));
+
+  for (MetricsProvider* provider : metrics_providers_)
+    provider->Init();
 }
 
 void MetricsService::Start() {
@@ -389,8 +396,8 @@ void MetricsService::EnableRecording() {
   if (!log_manager_.current_log())
     OpenNewLog();
 
-  for (size_t i = 0; i < metrics_providers_.size(); ++i)
-    metrics_providers_[i]->OnRecordingEnabled();
+  for (MetricsProvider* provider : metrics_providers_)
+    provider->OnRecordingEnabled();
 
   base::RemoveActionCallback(action_callback_);
   action_callback_ = base::Bind(&MetricsService::OnUserAction,
@@ -409,8 +416,8 @@ void MetricsService::DisableRecording() {
 
   base::RemoveActionCallback(action_callback_);
 
-  for (size_t i = 0; i < metrics_providers_.size(); ++i)
-    metrics_providers_[i]->OnRecordingDisabled();
+  for (MetricsProvider* provider : metrics_providers_)
+    provider->OnRecordingDisabled();
 
   PushPendingLogsToPersistentStorage();
 }
@@ -525,8 +532,8 @@ void MetricsService::RecordBreakpadHasDebugger(bool has_debugger) {
 }
 
 void MetricsService::ClearSavedStabilityMetrics() {
-  for (size_t i = 0; i < metrics_providers_.size(); ++i)
-    metrics_providers_[i]->ClearSavedStabilityMetrics();
+  for (MetricsProvider* provider : metrics_providers_)
+    provider->ClearSavedStabilityMetrics();
 
   // Reset the prefs that are managed by MetricsService/MetricsLog directly.
   local_state_->SetInteger(prefs::kStabilityCrashCount, 0);
@@ -539,6 +546,16 @@ void MetricsService::ClearSavedStabilityMetrics() {
 
 void MetricsService::PushExternalLog(const std::string& log) {
   log_manager_.StoreLog(log, MetricsLog::ONGOING_LOG);
+}
+
+UpdateUsagePrefCallbackType MetricsService::GetDataUseForwardingCallback() {
+  DCHECK(IsSingleThreaded());
+
+  if (data_use_tracker_) {
+    return data_use_tracker_->GetDataUseForwardingCallback(
+        base::ThreadTaskRunnerHandle::Get());
+  }
+  return UpdateUsagePrefCallbackType();
 }
 
 //------------------------------------------------------------------------------
@@ -678,8 +695,8 @@ void MetricsService::GetUptimes(PrefService* pref,
 
 void MetricsService::NotifyOnDidCreateMetricsLog() {
   DCHECK(IsSingleThreaded());
-  for (size_t i = 0; i < metrics_providers_.size(); ++i)
-    metrics_providers_[i]->OnDidCreateMetricsLog();
+  for (MetricsProvider* provider : metrics_providers_)
+    provider->OnDidCreateMetricsLog();
 }
 
 //------------------------------------------------------------------------------
@@ -739,6 +756,13 @@ void MetricsService::CloseCurrentLog() {
     log_manager_.DiscardCurrentLog();
     OpenNewLog();  // Start trivial log to hold our histograms.
   }
+
+  // If a persistent allocator is in use, update its internal histograms (such
+  // as how much memory is being used) before reporting.
+  base::PersistentHistogramAllocator* allocator =
+      base::GlobalHistogramAllocator::Get();
+  if (allocator)
+    allocator->UpdateTrackingHistograms();
 
   // Put incremental data (histogram deltas, and realtime stats deltas) at the
   // end of all log transmissions (initial log handles this separately).
@@ -855,13 +879,29 @@ void MetricsService::SendNextLog() {
   }
   if (!log_manager_.has_staged_log())
     log_manager_.StageNextLogForUpload();
-  SendStagedLog();
+
+  // Proceed to stage the log for upload if log size satisfies cellular log
+  // upload constrains.
+  bool upload_canceled = false;
+  bool is_cellular_logic = client_->IsUMACellularUploadLogicEnabled();
+  if (is_cellular_logic && data_use_tracker_ &&
+      !data_use_tracker_->ShouldUploadLogOnCellular(
+          log_manager_.staged_log_hash().size())) {
+    scheduler_->UploadCancelled();
+    upload_canceled = true;
+  } else {
+    SendStagedLog();
+  }
+  if (is_cellular_logic) {
+    UMA_HISTOGRAM_BOOLEAN("UMA.LogUpload.Canceled.CellularConstraint",
+                          upload_canceled);
+  }
 }
 
 bool MetricsService::ProvidersHaveInitialStabilityMetrics() {
   // Check whether any metrics provider has initial stability metrics.
-  for (size_t i = 0; i < metrics_providers_.size(); ++i) {
-    if (metrics_providers_[i]->HasInitialStabilityMetrics())
+  for (MetricsProvider* provider : metrics_providers_) {
+    if (provider->HasInitialStabilityMetrics())
       return true;
   }
 
@@ -1099,13 +1139,25 @@ void MetricsService::RecordCurrentEnvironment(MetricsLog* log) {
 
 void MetricsService::RecordCurrentHistograms() {
   DCHECK(log_manager_.current_log());
-  histogram_snapshot_manager_.PrepareDeltas(
-      base::Histogram::kNoFlags, base::Histogram::kUmaTargetedHistogramFlag);
+  histogram_snapshot_manager_.StartDeltas();
+  // "true" to the begin() call indicates that StatisticsRecorder should include
+  // histograms held in persistent storage.
+  auto end = base::StatisticsRecorder::end();
+  for (auto it = base::StatisticsRecorder::begin(true); it != end; ++it) {
+    if ((*it)->flags() & base::Histogram::kUmaTargetedHistogramFlag)
+      histogram_snapshot_manager_.PrepareDelta(*it);
+  }
+  for (MetricsProvider* provider : metrics_providers_)
+    provider->RecordHistogramSnapshots(&histogram_snapshot_manager_);
+  histogram_snapshot_manager_.FinishDeltas();
 }
 
 void MetricsService::RecordCurrentStabilityHistograms() {
   DCHECK(log_manager_.current_log());
+  // "true" indicates that StatisticsRecorder should include histograms in
+  // persistent storage.
   histogram_snapshot_manager_.PrepareDeltas(
+      base::StatisticsRecorder::begin(true), base::StatisticsRecorder::end(),
       base::Histogram::kNoFlags, base::Histogram::kUmaStabilityHistogramFlag);
 }
 

@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,7 +16,6 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/base/host_port_pair.h"
 #include "net/ssl/ssl_client_cert_type.h"
 
@@ -140,6 +140,7 @@ class BaseTestServer {
 
     // Initialize a new SSLOptions that will use the specified certificate.
     explicit SSLOptions(ServerCertificate cert);
+    SSLOptions(const SSLOptions& other);
     ~SSLOptions();
 
     // Returns the relative filename of the file that contains the
@@ -342,7 +343,7 @@ class BaseTestServer {
   HostPortPair host_port_pair_;
 
   // Holds the data sent from the server (e.g., port number).
-  scoped_ptr<base::DictionaryValue> server_data_;
+  std::unique_ptr<base::DictionaryValue> server_data_;
 
   // If |type_| is TYPE_HTTPS or TYPE_WSS, the TLS settings to use for the test
   // server.
@@ -362,7 +363,7 @@ class BaseTestServer {
   // Disable creation of anonymous FTP user?
   bool no_anonymous_ftp_user_;
 
-  scoped_ptr<ScopedPortException> allowed_port_;
+  std::unique_ptr<ScopedPortException> allowed_port_;
 
   DISALLOW_COPY_AND_ASSIGN(BaseTestServer);
 };

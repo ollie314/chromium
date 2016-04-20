@@ -20,12 +20,17 @@ import android.os.IBinder;
 import android.support.customtabs.CustomTabsIntent;
 import android.text.TextUtils;
 import android.util.Pair;
+import android.view.View;
+import android.widget.RemoteViews;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.IntentHandler;
+import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.browser.widget.TintedDrawable;
 
@@ -44,6 +49,19 @@ public class CustomTabIntentDataProvider {
      */
     public static final String EXTRA_KEEP_ALIVE = "android.support.customtabs.extra.KEEP_ALIVE";
 
+    /**
+     * Herb: Extra that indicates whether or not the Custom Tab is being launched by an Intent fired
+     * by Chrome itself.
+     */
+    public static final String EXTRA_IS_OPENED_BY_CHROME =
+            "org.chromium.chrome.browser.customtabs.IS_OPENED_BY_CHROME";
+
+    /**
+     * Herb: Extra used by the main Chrome browser to enable the bookmark icon in the menu.
+     */
+    public static final String EXTRA_SHOW_STAR_ICON =
+            "org.chromium.chrome.browser.customtabs.SHOW_STAR_ICON";
+
     private static final int MAX_CUSTOM_MENU_ITEMS = 5;
     private static final String ANIMATION_BUNDLE_PREFIX =
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? "android:activity." : "android:";
@@ -56,6 +74,7 @@ public class CustomTabIntentDataProvider {
     private final Intent mKeepAliveServiceIntent;
     private final int mTitleVisibilityState;
     private int mToolbarColor;
+    private int mBottomBarColor;
     private boolean mEnableUrlBarHiding;
     private List<CustomButtonParams> mCustomButtonParams;
     private Drawable mCloseButtonIcon;
@@ -64,8 +83,17 @@ public class CustomTabIntentDataProvider {
     private boolean mShowShareItem;
     private CustomButtonParams mToolbarButton;
     private List<CustomButtonParams> mBottombarButtons = new ArrayList<>(2);
+    private RemoteViews mRemoteViews;
+    private int[] mClickableViewIds;
+    private PendingIntent mRemoteViewsPendingIntent;
     // OnFinished listener for PendingIntents. Used for testing only.
     private PendingIntent.OnFinished mOnFinished;
+
+    /** Herb: Whether this CustomTabActivity was explicitly started by another Chrome Activity. */
+    private boolean mIsOpenedByChrome;
+
+    /** Herb: Whether or not the bookmark button should be shown. */
+    private boolean mShowBookmarkItem;
 
     /**
      * Constructs a {@link CustomTabIntentDataProvider}.
@@ -73,8 +101,11 @@ public class CustomTabIntentDataProvider {
     public CustomTabIntentDataProvider(Intent intent, Context context) {
         if (intent == null) assert false;
         mSession = IntentUtils.safeGetBinderExtra(intent, CustomTabsIntent.EXTRA_SESSION);
+        parseHerbExtras(intent, context);
+
         retrieveCustomButtons(intent, context);
         retrieveToolbarColor(intent, context);
+        retrieveBottomBarColor(intent);
         mEnableUrlBarHiding = IntentUtils.safeGetBooleanExtra(
                 intent, CustomTabsIntent.EXTRA_ENABLE_URLBAR_HIDING, true);
         mKeepAliveServiceIntent = IntentUtils.safeGetParcelableExtra(intent, EXTRA_KEEP_ALIVE);
@@ -112,6 +143,12 @@ public class CustomTabIntentDataProvider {
                 CustomTabsIntent.EXTRA_TITLE_VISIBILITY_STATE, CustomTabsIntent.NO_TITLE);
         mShowShareItem = IntentUtils.safeGetBooleanExtra(intent,
                 CustomTabsIntent.EXTRA_DEFAULT_SHARE_MENU_ITEM, false);
+        mRemoteViews = IntentUtils.safeGetParcelableExtra(intent,
+                CustomTabsIntent.EXTRA_REMOTEVIEWS);
+        mClickableViewIds = IntentUtils.safeGetIntArrayExtra(intent,
+                CustomTabsIntent.EXTRA_REMOTEVIEWS_VIEW_IDS);
+        mRemoteViewsPendingIntent = IntentUtils.safeGetParcelableExtra(intent,
+                CustomTabsIntent.EXTRA_REMOTEVIEWS_PENDINGINTENT);
     }
 
     /**
@@ -135,12 +172,21 @@ public class CustomTabIntentDataProvider {
      * Processes the color passed from the client app and updates {@link #mToolbarColor}.
      */
     private void retrieveToolbarColor(Intent intent, Context context) {
-        int color = IntentUtils.safeGetIntExtra(intent, CustomTabsIntent.EXTRA_TOOLBAR_COLOR,
-                ApiCompatibilityUtils.getColor(context.getResources(),
-                        R.color.default_primary_color));
         int defaultColor = ApiCompatibilityUtils.getColor(context.getResources(),
                 R.color.default_primary_color);
+        int color = IntentUtils.safeGetIntExtra(intent, CustomTabsIntent.EXTRA_TOOLBAR_COLOR,
+                defaultColor);
         mToolbarColor = removeTransparencyFromColor(color, defaultColor);
+    }
+
+    /**
+     * Must be called after calling {@link #retrieveToolbarColor(Intent, Context)}.
+     */
+    private void retrieveBottomBarColor(Intent intent) {
+        int defaultColor = mToolbarColor;
+        int color = IntentUtils.safeGetIntExtra(intent,
+                CustomTabsIntent.EXTRA_SECONDARY_TOOLBAR_COLOR, defaultColor);
+        mBottomBarColor = removeTransparencyFromColor(color, defaultColor);
     }
 
     /**
@@ -207,6 +253,13 @@ public class CustomTabIntentDataProvider {
     }
 
     /**
+     * @return Whether the bookmark item should be shown in the menu.
+     */
+    public boolean shouldShowBookmarkMenuItem() {
+        return mShowBookmarkItem;
+    }
+
+    /**
      * @return The params for the custom button that shows on the toolbar. If there is no applicable
      *         buttons, returns null.
      */
@@ -225,7 +278,36 @@ public class CustomTabIntentDataProvider {
      * @return Whether the bottom bar should be shown.
      */
     public boolean shouldShowBottomBar() {
-        return !mBottombarButtons.isEmpty();
+        return !mBottombarButtons.isEmpty() || mRemoteViews != null;
+    }
+
+    /**
+     * @return The color of the bottom bar, or {@link #getToolbarColor()} if not specified.
+     */
+    public int getBottomBarColor() {
+        return mBottomBarColor;
+    }
+
+    /**
+     * @return The {@link RemoteViews} to show on the bottom bar, or null if the extra is not
+     *         specified.
+     */
+    public RemoteViews getBottomBarRemoteViews() {
+        return mRemoteViews;
+    }
+
+    /**
+     * @return A array of {@link View} ids, of which the onClick event is handled by the custom tab.
+     */
+    public int[] getClickableViewIDs() {
+        return mClickableViewIds.clone();
+    }
+
+    /**
+     * @return The {@link PendingIntent} that is sent when the user clicks on the remote view.
+     */
+    public PendingIntent getRemoteViewsPendingIntent() {
+        return mRemoteViewsPendingIntent;
     }
 
     /**
@@ -340,5 +422,32 @@ public class CustomTabIntentDataProvider {
     @VisibleForTesting
     void setPendingIntentOnFinishedForTesting(PendingIntent.OnFinished onFinished) {
         mOnFinished = onFinished;
+    }
+
+    /**
+     * @return See {@link #EXTRA_IS_OPENED_BY_CHROME}.
+     */
+    boolean isOpenedByChrome() {
+        return mIsOpenedByChrome;
+    }
+
+    /**
+     * Parses out extras specifically added for Herb.
+     *
+     * @param intent Intent fired to open the CustomTabActivity.
+     * @param context Context for the package.
+     */
+    private void parseHerbExtras(Intent intent, Context context) {
+        String herbFlavor = FeatureUtilities.getHerbFlavor();
+        if (TextUtils.isEmpty(herbFlavor)
+                || TextUtils.equals(ChromeSwitches.HERB_FLAVOR_DISABLED, herbFlavor)) {
+            return;
+        }
+        if (!IntentHandler.isIntentChromeOrFirstParty(intent, context)) return;
+
+        mIsOpenedByChrome = IntentUtils.safeGetBooleanExtra(
+                intent, EXTRA_IS_OPENED_BY_CHROME, false);
+        mShowBookmarkItem = IntentUtils.safeGetBooleanExtra(
+                intent, EXTRA_SHOW_STAR_ICON, false);
     }
 }

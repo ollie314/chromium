@@ -36,7 +36,7 @@ bool GestureProviderAura::OnTouchEvent(TouchEvent* event) {
   if (!result.succeeded)
     return false;
 
-  event->set_may_cause_scrolling(result.did_generate_scroll);
+  event->set_may_cause_scrolling(result.moved_beyond_slop_region);
   pointer_state_.CleanupRemovedTouchPoints(*event);
   return true;
 }
@@ -51,7 +51,7 @@ void GestureProviderAura::OnTouchEventAck(uint32_t unique_event_id,
 
 void GestureProviderAura::OnGestureEvent(
     const GestureEventData& gesture) {
-  scoped_ptr<ui::GestureEvent> event(
+  std::unique_ptr<ui::GestureEvent> event(
       new ui::GestureEvent(gesture.x, gesture.y, gesture.flags,
                            gesture.time - base::TimeTicks(), gesture.details));
 

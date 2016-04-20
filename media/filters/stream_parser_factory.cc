@@ -14,6 +14,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "media/base/media.h"
 #include "media/base/media_switches.h"
 #include "media/formats/mpeg/adts_stream_parser.h"
 #include "media/formats/mpeg/mpeg1_audio_stream_parser.h"
@@ -21,7 +22,7 @@
 #include "media/media_features.h"
 
 #if defined(OS_ANDROID)
-#include "base/android/build_info.h"
+#include "media/base/android/media_codec_util.h"
 #endif
 
 #if defined(USE_PROPRIETARY_CODECS)
@@ -161,6 +162,10 @@ static const CodecInfo kHEVCHEV1CodecInfo = { "hev1.*", CodecInfo::VIDEO, NULL,
 static const CodecInfo kHEVCHVC1CodecInfo = { "hvc1.*", CodecInfo::VIDEO, NULL,
                                               CodecInfo::HISTOGRAM_HEVC };
 #endif
+#if BUILDFLAG(ENABLE_MP4_VP9_DEMUXING)
+static const CodecInfo kMPEG4VP09CodecInfo = {"vp09.*", CodecInfo::VIDEO, NULL,
+                                              CodecInfo::HISTOGRAM_VP9};
+#endif
 static const CodecInfo kMPEG4AACCodecInfo = { "mp4a.40.*", CodecInfo::AUDIO,
                                               &ValidateMP4ACodecID,
                                               CodecInfo::HISTOGRAM_MPEG4AAC };
@@ -189,11 +194,14 @@ static const CodecInfo kEAC3CodecInfo3 = {"mp4a.A6", CodecInfo::AUDIO, NULL,
 #endif
 
 static const CodecInfo* kVideoMP4Codecs[] = {
-    &kH264AVC1CodecInfo, &kH264AVC3CodecInfo,
+    &kH264AVC1CodecInfo,  &kH264AVC3CodecInfo,
 #if BUILDFLAG(ENABLE_HEVC_DEMUXING)
-    &kHEVCHEV1CodecInfo, &kHEVCHVC1CodecInfo,
+    &kHEVCHEV1CodecInfo,  &kHEVCHVC1CodecInfo,
 #endif
-    &kMPEG4AACCodecInfo, &kMPEG2AACLCCodecInfo, NULL};
+#if BUILDFLAG(ENABLE_MP4_VP9_DEMUXING)
+    &kMPEG4VP09CodecInfo,
+#endif
+    &kMPEG4AACCodecInfo,  &kMPEG2AACLCCodecInfo, NULL};
 
 static const CodecInfo* kAudioMP4Codecs[] = {&kMPEG4AACCodecInfo,
                                              &kMPEG2AACLCCodecInfo,
@@ -330,14 +338,30 @@ static bool VerifyCodec(
       return true;
     case CodecInfo::VIDEO:
 #if defined(OS_ANDROID)
-      // VP9 is only supported on KitKat+ (API Level 19).
-      if (codec_info->tag == CodecInfo::HISTOGRAM_VP9 &&
-          base::android::BuildInfo::GetInstance()->sdk_int() < 19) {
+      // TODO(wolenetz, dalecurtis): This should instead use MimeUtil() to avoid
+      // duplication of subtle Android behavior.  http://crbug.com/587303.
+      if (codec_info->tag == CodecInfo::HISTOGRAM_H264) {
+        if (media::IsUnifiedMediaPipelineEnabled() &&
+            !media::HasPlatformDecoderSupport()) {
+          return false;
+        }
+
+        if (!MediaCodecUtil::IsMediaCodecAvailable())
+          return false;
+      }
+      if (codec_info->tag == CodecInfo::HISTOGRAM_VP8 &&
+          !media::MediaCodecUtil::IsVp8DecoderAvailable() &&
+          !media::IsUnifiedMediaPipelineEnabled()) {
         return false;
       }
-      // Opus is only supported on Lollipop+ (API Level 21).
+      if (codec_info->tag == CodecInfo::HISTOGRAM_VP9 &&
+          !media::MediaCodecUtil::IsVp9DecoderAvailable() &&
+          !media::IsUnifiedMediaPipelineEnabled()) {
+        return false;
+      }
       if (codec_info->tag == CodecInfo::HISTOGRAM_OPUS &&
-          base::android::BuildInfo::GetInstance()->sdk_int() < 21) {
+          !media::PlatformHasOpusSupport() &&
+          !media::IsUnifiedMediaPipelineEnabled()) {
         return false;
       }
 #endif

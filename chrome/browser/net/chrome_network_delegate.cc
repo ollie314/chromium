@@ -21,8 +21,6 @@
 #include "base/metrics/sparse_histogram.h"
 #include "base/metrics/user_metrics.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_member.h"
-#include "base/prefs/pref_service.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -44,6 +42,9 @@
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/data_usage/core/data_use_aggregator.h"
 #include "components/domain_reliability/monitor.h"
+#include "components/policy/core/browser/url_blacklist_manager.h"
+#include "components/prefs/pref_member.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -70,10 +71,6 @@
 #if defined(OS_CHROMEOS)
 #include "base/sys_info.h"
 #include "chrome/common/chrome_switches.h"
-#endif
-
-#if defined(ENABLE_CONFIGURATION_POLICY)
-#include "components/policy/core/browser/url_blacklist_manager.h"
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
@@ -289,19 +286,19 @@ void RecordCacheStateStats(const net::URLRequest* request) {
 
 ChromeNetworkDelegate::ChromeNetworkDelegate(
     extensions::EventRouterForwarder* event_router,
-    BooleanPrefMember* enable_referrers)
+    BooleanPrefMember* enable_referrers,
+    const metrics::UpdateUsagePrefCallbackType& metrics_data_use_forwarder)
     : profile_(NULL),
       enable_referrers_(enable_referrers),
       enable_do_not_track_(NULL),
       force_google_safe_search_(NULL),
       force_youtube_safety_mode_(NULL),
-#if defined(ENABLE_CONFIGURATION_POLICY)
       url_blacklist_manager_(NULL),
-#endif
       domain_reliability_monitor_(NULL),
+      data_use_measurement_(metrics_data_use_forwarder),
       experimental_web_platform_features_enabled_(
-          base::CommandLine::ForCurrentProcess()
-              ->HasSwitch(switches::kEnableExperimentalWebPlatformFeatures)),
+          base::CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kEnableExperimentalWebPlatformFeatures)),
       data_use_aggregator_(nullptr),
       is_data_usage_off_the_record_(true) {
   DCHECK(enable_referrers);
@@ -382,7 +379,6 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "456327 URLRequest::ChromeNetworkDelegate::OnBeforeURLRequest"));
 
-#if defined(ENABLE_CONFIGURATION_POLICY)
   // TODO(joaodasilva): This prevents extensions from seeing URLs that are
   // blocked. However, an extension might redirect the request to another URL,
   // which is not blocked.
@@ -400,7 +396,6 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
                                     &request->url().possibly_invalid_spec()));
     return error;
   }
-#endif
 
   // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
   tracked_objects::ScopedTracker tracking_profile2(
@@ -485,9 +480,7 @@ int ChromeNetworkDelegate::OnHeadersReceived(
 void ChromeNetworkDelegate::OnBeforeRedirect(net::URLRequest* request,
                                              const GURL& new_location) {
 // Recording data use of request on redirects.
-#if !defined(OS_IOS)
   data_use_measurement_.ReportDataUseUMA(request);
-#endif
   if (domain_reliability_monitor_)
     domain_reliability_monitor_->OnBeforeRedirect(request);
   extensions_delegate_->OnBeforeRedirect(request, new_location);
@@ -517,11 +510,9 @@ void ChromeNetworkDelegate::OnNetworkBytesSent(net::URLRequest* request,
 
 void ChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
                                         bool started) {
-#if !defined(OS_IOS)
   // TODO(amohammadkhan): Verify that there is no double recording in data use
   // of redirected requests.
   data_use_measurement_.ReportDataUseUMA(request);
-#endif
   RecordNetworkErrorHistograms(request);
   if (started) {
     // Only call in for requests that were started, to obey the precondition

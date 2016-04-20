@@ -14,7 +14,6 @@
 
 #include "base/time/time.h"
 #include "base/trace_event/trace_event_argument.h"
-#include "cc/base/histograms.h"
 #include "cc/base/math_util.h"
 #include "cc/debug/debug_colors.h"
 #include "cc/debug/micro_benchmark_impl.h"
@@ -52,16 +51,18 @@ const int kMinHeightForGpuRasteredTile = 256;
 // of using the same tile size.
 const int kTileRoundUp = 64;
 
+// For performance reasons and to support compressed tile textures, tile
+// width and height should be an even multiple of 4 in size.
+const int kTileMinimalAlignment = 4;
+
 }  // namespace
 
 namespace cc {
 
-PictureLayerImpl::PictureLayerImpl(
-    LayerTreeImpl* tree_impl,
-    int id,
-    bool is_mask,
-    scoped_refptr<SyncedScrollOffset> scroll_offset)
-    : LayerImpl(tree_impl, id, scroll_offset),
+PictureLayerImpl::PictureLayerImpl(LayerTreeImpl* tree_impl,
+                                   int id,
+                                   bool is_mask)
+    : LayerImpl(tree_impl, id),
       twin_layer_(nullptr),
       tilings_(CreatePictureLayerTilingSet()),
       ideal_page_scale_(0.f),
@@ -90,10 +91,9 @@ const char* PictureLayerImpl::LayerTypeAsString() const {
   return "cc::PictureLayerImpl";
 }
 
-scoped_ptr<LayerImpl> PictureLayerImpl::CreateLayerImpl(
+std::unique_ptr<LayerImpl> PictureLayerImpl::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  return PictureLayerImpl::Create(tree_impl, id(), is_mask_,
-                                  synced_scroll_offset());
+  return PictureLayerImpl::Create(tree_impl, id(), is_mask_);
 }
 
 void PictureLayerImpl::PushPropertiesTo(LayerImpl* base_layer) {
@@ -140,7 +140,7 @@ void PictureLayerImpl::PushPropertiesTo(LayerImpl* base_layer) {
   // We always need to push properties.
   // See http://crbug.com/303943
   // TODO(danakj): Stop always pushing properties since we don't swap tilings.
-  needs_push_properties_ = true;
+  layer_tree_impl()->AddLayerShouldPushProperties(this);
 }
 
 void PictureLayerImpl::AppendQuads(RenderPass* render_pass,
@@ -230,6 +230,9 @@ void PictureLayerImpl::AppendQuads(RenderPass* render_pass,
         } else if (mode == TileDrawInfo::OOM_MODE) {
           color = DebugColors::OOMTileBorderColor();
           width = DebugColors::OOMTileBorderWidth(layer_tree_impl());
+        } else if (iter->draw_info().has_compressed_resource()) {
+          color = DebugColors::CompressedTileBorderColor();
+          width = DebugColors::CompressedTileBorderWidth(layer_tree_impl());
         } else if (iter.resolution() == HIGH_RESOLUTION) {
           color = DebugColors::HighResTileBorderColor();
           width = DebugColors::HighResTileBorderWidth(layer_tree_impl());
@@ -350,14 +353,6 @@ void PictureLayerImpl::AppendQuads(RenderPass* render_pass,
       if (geometry_rect.Intersects(scaled_viewport_for_tile_priority)) {
         append_quads_data->num_missing_tiles++;
         ++missing_tile_count;
-        // We only keep track of discardable images if we're using raster tasks,
-        // so we only gather stats in this case.
-        if (layer_tree_impl()->settings().image_decode_tasks_enabled) {
-          if (raster_source_->HasDiscardableImageInRect(geometry_rect))
-            append_quads_data->num_missing_tiles_some_image_content++;
-          else
-            append_quads_data->num_missing_tiles_no_image_content++;
-        }
       }
       int64_t checkerboarded_area =
           visible_geometry_rect.width() * visible_geometry_rect.height();
@@ -412,12 +407,7 @@ void PictureLayerImpl::AppendQuads(RenderPass* render_pass,
   CleanUpTilingsOnActiveLayer(last_append_quads_tilings_);
 }
 
-bool PictureLayerImpl::UpdateTiles(bool resourceless_software_draw) {
-  if (!resourceless_software_draw) {
-    visible_rect_for_tile_priority_ = visible_layer_rect();
-    screen_space_transform_for_tile_priority_ = ScreenSpaceTransform();
-  }
-
+bool PictureLayerImpl::UpdateTiles() {
   if (!CanHaveTilings()) {
     ideal_page_scale_ = 0.f;
     ideal_device_scale_ = 0.f;
@@ -494,17 +484,17 @@ bool PictureLayerImpl::UpdateTiles(bool resourceless_software_draw) {
 }
 
 void PictureLayerImpl::UpdateViewportRectForTilePriorityInContentSpace() {
-  // If visible_rect_for_tile_priority_ is empty or
-  // viewport_rect_for_tile_priority is set to be different from the device
-  // viewport, try to inverse project the viewport into layer space and use
-  // that. Otherwise just use visible_rect_for_tile_priority_
-  gfx::Rect visible_rect_in_content_space = visible_rect_for_tile_priority_;
+  // If visible_layer_rect() is empty or viewport_rect_for_tile_priority is
+  // set to be different from the device viewport, try to inverse project the
+  // viewport into layer space and use that. Otherwise just use
+  // visible_layer_rect().
+  gfx::Rect visible_rect_in_content_space = visible_layer_rect();
   gfx::Rect viewport_rect_for_tile_priority =
       layer_tree_impl()->ViewportRectForTilePriority();
   if (visible_rect_in_content_space.IsEmpty() ||
       layer_tree_impl()->DeviceViewport() != viewport_rect_for_tile_priority) {
     gfx::Transform view_to_layer(gfx::Transform::kSkipInitialization);
-    if (screen_space_transform_for_tile_priority_.GetInverse(&view_to_layer)) {
+    if (ScreenSpaceTransform().GetInverse(&view_to_layer)) {
       // Transform from view space to content space.
       visible_rect_in_content_space = MathUtil::ProjectEnclosingClippedRect(
           view_to_layer, viewport_rect_for_tile_priority);
@@ -536,7 +526,7 @@ PictureLayerImpl* PictureLayerImpl::GetPendingOrActiveTwinLayer() const {
 }
 
 void PictureLayerImpl::UpdateRasterSource(
-    scoped_refptr<DisplayListRasterSource> raster_source,
+    scoped_refptr<RasterSource> raster_source,
     Region* new_invalidation,
     const PictureLayerTilingSet* pending_set) {
   // The bounds and the pile size may differ if the pile wasn't updated (ie.
@@ -550,6 +540,12 @@ void PictureLayerImpl::UpdateRasterSource(
   // first frame.
   bool could_have_tilings = raster_source_.get() && CanHaveTilings();
   raster_source_.swap(raster_source);
+
+  // Only set the image decode controller when we're committing.
+  if (!pending_set) {
+    raster_source_->SetImageDecodeController(
+        layer_tree_impl()->image_decode_controller());
+  }
 
   // The |new_invalidation| must be cleared before updating tilings since they
   // access the invalidation through the PictureLayerTilingClient interface.
@@ -597,7 +593,7 @@ void PictureLayerImpl::UpdateCanUseLCDTextAfterCommit() {
 
   // Raster sources are considered const, so in order to update the state
   // a new one must be created and all tiles recreated.
-  scoped_refptr<DisplayListRasterSource> new_raster_source =
+  scoped_refptr<RasterSource> new_raster_source =
       raster_source_->CreateCloneWithoutLCDText();
   raster_source_.swap(new_raster_source);
 
@@ -642,6 +638,10 @@ void PictureLayerImpl::ReleaseResources() {
 
 void PictureLayerImpl::RecreateResources() {
   tilings_ = CreatePictureLayerTilingSet();
+  if (raster_source_) {
+    raster_source_->SetImageDecodeController(
+        layer_tree_impl()->image_decode_controller());
+  }
 
   // To avoid an edge case after lost context where the tree is up to date but
   // the tilings have not been managed, request an update draw properties
@@ -649,11 +649,7 @@ void PictureLayerImpl::RecreateResources() {
   layer_tree_impl()->set_needs_update_draw_properties();
 }
 
-skia::RefPtr<SkPicture> PictureLayerImpl::GetPicture() {
-  return raster_source_->GetFlattenedPicture();
-}
-
-Region PictureLayerImpl::GetInvalidationRegion() {
+Region PictureLayerImpl::GetInvalidationRegionForDebugging() {
   // |invalidation_| gives the invalidation contained in the source frame, but
   // is not cleared after drawing from the layer. However, update_rect() is
   // cleared once the invalidation is drawn, which is useful for debugging
@@ -779,6 +775,10 @@ gfx::Size PictureLayerImpl::CalculateTileSize(
     tile_height = MathUtil::UncheckedRoundUp(tile_height, kTileRoundUp);
     tile_height = std::min(tile_height, default_tile_height);
   }
+
+  // Ensure that tile width and height are properly aligned.
+  tile_width = MathUtil::UncheckedRoundUp(tile_width, kTileMinimalAlignment);
+  tile_height = MathUtil::UncheckedRoundUp(tile_height, kTileMinimalAlignment);
 
   // Under no circumstance should we be larger than the max texture size.
   tile_width = std::min(tile_width, max_texture_size);
@@ -1161,7 +1161,7 @@ float PictureLayerImpl::MaximumTilingContentsScale() const {
   return std::max(max_contents_scale, MinimumContentsScale());
 }
 
-scoped_ptr<PictureLayerTilingSet>
+std::unique_ptr<PictureLayerTilingSet>
 PictureLayerImpl::CreatePictureLayerTilingSet() {
   const LayerTreeSettings& settings = layer_tree_impl()->settings();
   return PictureLayerTilingSet::Create(

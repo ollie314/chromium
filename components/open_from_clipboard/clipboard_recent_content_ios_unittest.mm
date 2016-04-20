@@ -6,12 +6,16 @@
 
 #import <UIKit/UIKit.h>
 
-#include "base/ios/ios_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
 namespace {
+
+void SetPasteboardImage(UIImage* image) {
+  [[UIPasteboard generalPasteboard] setImage:image];
+}
+
 void SetPasteboardContent(const char* data) {
   [[UIPasteboard generalPasteboard]
                setValue:[NSString stringWithUTF8String:data]
@@ -33,8 +37,6 @@ class ClipboardRecentContentIOSTest : public ::testing::Test {
   }
 
   void SimulateDeviceRestart() {
-    // TODO(jif): Simulates the fact that on iOS7, the pasteboard's changeCount
-    // is reset. http://crbug.com/503609
     ResetClipboardRecentContent(kAppSpecificScheme,
                                 base::TimeDelta::FromSeconds(0));
   }
@@ -103,15 +105,9 @@ TEST_F(ClipboardRecentContentIOSTest, PasteboardURLObsolescence) {
   EXPECT_FALSE(clipboard_content_->GetRecentURLFromClipboard(&gurl));
 
   SimulateDeviceRestart();
-  if (base::ios::IsRunningOnIOS8OrLater()) {
-    // Tests that if the device is restarted, old pasteboard data is still
-    // not provided.
-    EXPECT_FALSE(clipboard_content_->GetRecentURLFromClipboard(&gurl));
-  } else {
-    // TODO(jif): Simulates the fact that on iOS7, the pasteboard's changeCount
-    // is reset. http://crbug.com/503609
-  }
-
+  // Tests that if the device is restarted, old pasteboard data is still
+  // not provided.
+  EXPECT_FALSE(clipboard_content_->GetRecentURLFromClipboard(&gurl));
 }
 
 TEST_F(ClipboardRecentContentIOSTest, SupressedPasteboard) {
@@ -143,4 +139,27 @@ TEST_F(ClipboardRecentContentIOSTest, SupressedPasteboard) {
   // supressed anymore.
   SetPasteboardContent(kRecognizedURL);
   EXPECT_TRUE(clipboard_content_->GetRecentURLFromClipboard(&gurl));
+}
+
+// Checks that if user copies something other than a string we don't cache the
+// string in pasteboard.
+TEST_F(ClipboardRecentContentIOSTest, AddingNonStringRemovesCachedString) {
+  GURL gurl;
+  SetPasteboardContent(kRecognizedURL);
+
+  // Test that recent pasteboard data is provided.
+  EXPECT_TRUE(clipboard_content_->GetRecentURLFromClipboard(&gurl));
+  EXPECT_STREQ(kRecognizedURL, gurl.spec().c_str());
+
+  // Overwrite pasteboard with an image.
+  base::scoped_nsobject<UIImage> image([[UIImage alloc] init]);
+  SetPasteboardImage(image);
+
+  // Pasteboard should appear empty.
+  EXPECT_FALSE(clipboard_content_->GetRecentURLFromClipboard(&gurl));
+
+  // Tests that if URL is added again, pasteboard provides it normally.
+  SetPasteboardContent(kRecognizedURL);
+  EXPECT_TRUE(clipboard_content_->GetRecentURLFromClipboard(&gurl));
+  EXPECT_STREQ(kRecognizedURL, gurl.spec().c_str());
 }

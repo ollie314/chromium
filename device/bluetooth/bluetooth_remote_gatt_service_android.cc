@@ -4,6 +4,8 @@
 
 #include "device/bluetooth/bluetooth_remote_gatt_service_android.h"
 
+#include <memory>
+
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "device/bluetooth/bluetooth_adapter_android.h"
@@ -16,14 +18,14 @@ using base::android::AttachCurrentThread;
 namespace device {
 
 // static
-scoped_ptr<BluetoothRemoteGattServiceAndroid>
+std::unique_ptr<BluetoothRemoteGattServiceAndroid>
 BluetoothRemoteGattServiceAndroid::Create(
     BluetoothAdapterAndroid* adapter,
     BluetoothDeviceAndroid* device,
     jobject /* BluetoothGattServiceWrapper */ bluetooth_gatt_service_wrapper,
     const std::string& instance_id,
     jobject /* ChromeBluetoothDevice */ chrome_bluetooth_device) {
-  scoped_ptr<BluetoothRemoteGattServiceAndroid> service(
+  std::unique_ptr<BluetoothRemoteGattServiceAndroid> service(
       new BluetoothRemoteGattServiceAndroid(adapter, device, instance_id));
 
   JNIEnv* env = AttachCurrentThread();
@@ -167,13 +169,13 @@ bool BluetoothRemoteGattServiceAndroid::AddIncludedService(
 void BluetoothRemoteGattServiceAndroid::Register(
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
-  error_callback.Run();
+  error_callback.Run(GATT_ERROR_NOT_SUPPORTED);
 }
 
 void BluetoothRemoteGattServiceAndroid::Unregister(
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
-  error_callback.Run();
+  error_callback.Run(GATT_ERROR_NOT_SUPPORTED);
 }
 
 void BluetoothRemoteGattServiceAndroid::CreateGattRemoteCharacteristic(

@@ -66,7 +66,7 @@ enum SubtreeModificationAction {
 // for a Node Vector that is used to store child Nodes of a given Node.
 // FIXME: Optimize the value.
 const int initialNodeVectorSize = 11;
-using NodeVector = WillBeHeapVector<RefPtrWillBeMember<Node>, initialNodeVectorSize>;
+using NodeVector = HeapVector<Member<Node>, initialNodeVectorSize>;
 
 class CORE_EXPORT ContainerNode : public Node {
 public:
@@ -80,30 +80,30 @@ public:
     bool hasOneTextChild() const { return hasOneChild() && m_firstChild->isTextNode(); }
     bool hasChildCount(unsigned) const;
 
-    PassRefPtrWillBeRawPtr<HTMLCollection> children();
+    HTMLCollection* children();
 
     unsigned countChildren() const;
 
-    PassRefPtrWillBeRawPtr<Element> querySelector(const AtomicString& selectors, ExceptionState&);
-    PassRefPtrWillBeRawPtr<StaticElementList> querySelectorAll(const AtomicString& selectors, ExceptionState&);
+    Element* querySelector(const AtomicString& selectors, ExceptionState&);
+    StaticElementList* querySelectorAll(const AtomicString& selectors, ExceptionState&);
 
-    PassRefPtrWillBeRawPtr<Node> insertBefore(PassRefPtrWillBeRawPtr<Node> newChild, Node* refChild, ExceptionState& = ASSERT_NO_EXCEPTION);
-    PassRefPtrWillBeRawPtr<Node> replaceChild(PassRefPtrWillBeRawPtr<Node> newChild, PassRefPtrWillBeRawPtr<Node> oldChild, ExceptionState& = ASSERT_NO_EXCEPTION);
-    PassRefPtrWillBeRawPtr<Node> removeChild(PassRefPtrWillBeRawPtr<Node> child, ExceptionState& = ASSERT_NO_EXCEPTION);
-    PassRefPtrWillBeRawPtr<Node> appendChild(PassRefPtrWillBeRawPtr<Node> newChild, ExceptionState& = ASSERT_NO_EXCEPTION);
+    Node* insertBefore(Node* newChild, Node* refChild, ExceptionState& = ASSERT_NO_EXCEPTION);
+    Node* replaceChild(Node* newChild, Node* oldChild, ExceptionState& = ASSERT_NO_EXCEPTION);
+    Node* removeChild(Node* child, ExceptionState& = ASSERT_NO_EXCEPTION);
+    Node* appendChild(Node* newChild, ExceptionState& = ASSERT_NO_EXCEPTION);
 
     Element* getElementById(const AtomicString& id) const;
-    PassRefPtrWillBeRawPtr<TagCollection> getElementsByTagName(const AtomicString&);
-    PassRefPtrWillBeRawPtr<TagCollection> getElementsByTagNameNS(const AtomicString& namespaceURI, const AtomicString& localName);
-    PassRefPtrWillBeRawPtr<NameNodeList> getElementsByName(const AtomicString& elementName);
-    PassRefPtrWillBeRawPtr<ClassCollection> getElementsByClassName(const AtomicString& classNames);
-    PassRefPtrWillBeRawPtr<RadioNodeList> radioNodeList(const AtomicString&, bool onlyMatchImgElements = false);
+    TagCollection* getElementsByTagName(const AtomicString&);
+    TagCollection* getElementsByTagNameNS(const AtomicString& namespaceURI, const AtomicString& localName);
+    NameNodeList* getElementsByName(const AtomicString& elementName);
+    ClassCollection* getElementsByClassName(const AtomicString& classNames);
+    RadioNodeList* radioNodeList(const AtomicString&, bool onlyMatchImgElements = false);
 
     // These methods are only used during parsing.
     // They don't send DOM mutation events or accept DocumentFragments.
-    void parserAppendChild(PassRefPtrWillBeRawPtr<Node>);
+    void parserAppendChild(Node*);
     void parserRemoveChild(Node&);
-    void parserInsertBefore(PassRefPtrWillBeRawPtr<Node> newChild, Node& refChild);
+    void parserInsertBefore(Node* newChild, Node& refChild);
     void parserTakeAllChildrenFrom(ContainerNode&);
 
     void removeChildren(SubtreeModificationAction = DispatchSubtreeModifiedEvent);
@@ -129,8 +129,6 @@ public:
 
     bool childrenOrSiblingsAffectedByDrag() const { return hasRestyleFlag(ChildrenOrSiblingsAffectedByDrag); }
     void setChildrenOrSiblingsAffectedByDrag() { setRestyleFlag(ChildrenOrSiblingsAffectedByDrag); }
-
-    bool childrenAffectedByPositionalRules() const { return hasRestyleFlag(ChildrenAffectedByForwardPositionalRules) || hasRestyleFlag(ChildrenAffectedByBackwardPositionalRules); }
 
     bool childrenAffectedByFirstChildRules() const { return hasRestyleFlag(ChildrenAffectedByFirstChildRules); }
     void setChildrenAffectedByFirstChildRules() { setRestyleFlag(ChildrenAffectedByFirstChildRules); }
@@ -160,7 +158,6 @@ public:
 
     // FIXME: These methods should all be renamed to something better than "check",
     // since it's not clear that they alter the style bits of siblings and children.
-    void checkForChildrenAdjacentRuleChanges();
     enum SiblingCheckType { FinishedParsingChildren, SiblingElementInserted, SiblingElementRemoved };
     void checkForSiblingStyleChanges(SiblingCheckType, Node* nodeBeforeChange, Node* nodeAfterChange);
     void recalcChildStyle(StyleRecalcChange);
@@ -202,8 +199,8 @@ public:
         bool isChildElementChange() const { return type == ElementInserted || type == ElementRemoved; }
 
         ChildrenChangeType type;
-        RawPtrWillBeMember<Node> siblingBeforeChange;
-        RawPtrWillBeMember<Node> siblingAfterChange;
+        Member<Node> siblingBeforeChange;
+        Member<Node> siblingAfterChange;
         ChildrenChangeSource byParser;
     };
 
@@ -218,17 +215,13 @@ protected:
 
     void invalidateNodeListCachesInAncestors(const QualifiedName* attrName = nullptr, Element* attributeOwnerElement = nullptr);
 
-#if !ENABLE(OILPAN)
-    void removeDetachedChildren();
-#endif
-
     void setFirstChild(Node* child) { m_firstChild = child; }
     void setLastChild(Node* child) { m_lastChild = child; }
 
     // Utility functions for NodeListsNodeData API.
-    template <typename Collection> PassRefPtrWillBeRawPtr<Collection> ensureCachedCollection(CollectionType);
-    template <typename Collection> PassRefPtrWillBeRawPtr<Collection> ensureCachedCollection(CollectionType, const AtomicString& name);
-    template <typename Collection> PassRefPtrWillBeRawPtr<Collection> ensureCachedCollection(CollectionType, const AtomicString& namespaceURI, const AtomicString& localName);
+    template <typename Collection> Collection* ensureCachedCollection(CollectionType);
+    template <typename Collection> Collection* ensureCachedCollection(CollectionType, const AtomicString& name);
+    template <typename Collection> Collection* ensureCachedCollection(CollectionType, const AtomicString& namespaceURI, const AtomicString& localName);
     template <typename Collection> Collection* cachedCollection(CollectionType);
 
 private:
@@ -261,17 +254,14 @@ private:
     inline bool containsConsideringHostElements(const Node&) const;
     inline bool isChildTypeAllowed(const Node& child) const;
 
-    void attachChildren(const AttachContext& = AttachContext());
-    void detachChildren(const AttachContext& = AttachContext());
-
     bool getUpperLeftCorner(FloatPoint&) const;
     bool getLowerRightCorner(FloatPoint&) const;
 
-    RawPtrWillBeMember<Node> m_firstChild;
-    RawPtrWillBeMember<Node> m_lastChild;
+    Member<Node> m_firstChild;
+    Member<Node> m_lastChild;
 };
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
 bool childAttachedAllowedWhenAttachingChildren(ContainerNode*);
 #endif
 
@@ -343,7 +333,7 @@ inline bool Node::isTreeScope() const
 
 inline void getChildNodes(ContainerNode& node, NodeVector& nodes)
 {
-    ASSERT(!nodes.size());
+    DCHECK(!nodes.size());
     for (Node* child = node.firstChild(); child; child = child->nextSibling())
         nodes.append(child);
 }

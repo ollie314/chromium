@@ -8,7 +8,6 @@
 #include "base/files/file_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/rand_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -469,7 +468,13 @@ class AutofillInteractiveTest : public InProcessBrowserTest {
 };
 
 // Test that basic form fill is working.
-IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, BasicFormFill) {
+// Flakily times out on ChromeOS http://crbug.com/585885
+#if defined(OS_CHROMEOS)
+#define MAYBE_BasicFormFill DISABLED_BasicFormFill
+#else
+#define MAYBE_BasicFormFill BasicFormFill
+#endif
+IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, MAYBE_BasicFormFill) {
   CreateTestProfile();
 
   // Load the test page.
@@ -480,8 +485,14 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, BasicFormFill) {
   TryBasicFormFill();
 }
 
+// Flaky. See http://crbug.com/516052.
+#if defined(OS_CHROMEOS)
+#define MAYBE_AutofillViaDownArrow DISABLED_AutofillViaDownArrow
+#else
+#define MAYBE_AutofillViaDownArrow AutofillViaDownArrow
+#endif
 // Test that form filling can be initiated by pressing the down arrow.
-IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, AutofillViaDownArrow) {
+IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, MAYBE_AutofillViaDownArrow) {
   CreateTestProfile();
 
   // Load the test page.
@@ -615,7 +626,14 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, DontAutofillForOutsideClick) {
 
 // Test that a field is still autofillable after the previously autofilled
 // value is deleted.
-IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, OnDeleteValueAfterAutofill) {
+// TODO(crbug.com/603488) Test is timing out flakily on CrOS.
+#if defined(OS_CHROMEOS)
+#define MAYBE_OnDeleteValueAfterAutofill DISABLED_OnDeleteValueAfterAutofill
+#else
+#define MAYBE_OnDeleteValueAfterAutofill OnDeleteValueAfterAutofill
+#endif
+IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
+                       MAYBE_OnDeleteValueAfterAutofill) {
   CreateTestProfile();
 
   // Load the test page.
@@ -644,9 +662,10 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, OnDeleteValueAfterAutofill) {
 
 // Test that an input field is not rendered with the yellow autofilled
 // background color when choosing an option from the datalist suggestion list.
-#if defined(OS_MACOSX)
-// Flakily triggers and assert on Mac.
-// http://crbug.com/419868
+#if defined(OS_MACOSX) || defined(OS_CHROMEOS)
+// Flakily triggers and assert on Mac; flakily gets empty string instead
+// of "Adam" on ChromeOS.
+// http://crbug.com/419868, http://crbug.com/595385.
 #define MAYBE_OnSelectOptionFromDatalist DISABLED_OnSelectOptionFromDatalist
 #else
 #define MAYBE_OnSelectOptionFromDatalist OnSelectOptionFromDatalist
@@ -680,7 +699,13 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
 }
 
 // Test that a JavaScript oninput event is fired after auto-filling a form.
-IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, OnInputAfterAutofill) {
+// Flakily times out on ChromeOS http://crbug.com/585885
+#if defined(OS_CHROMEOS)
+#define MAYBE_OnInputAfterAutofill DISABLED_OnInputAfterAutofill
+#else
+#define MAYBE_OnInputAfterAutofill OnInputAfterAutofill
+#endif
+IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, MAYBE_OnInputAfterAutofill) {
   CreateTestProfile();
 
   const char kOnInputScript[] =
@@ -829,7 +854,13 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, MAYBE_OnChangeAfterAutofill) {
   EXPECT_FALSE(unchanged_select_fired);
 }
 
-IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, InputFiresBeforeChange) {
+// Flakily times out on ChromeOS http://crbug.com/585885
+#if defined(OS_CHROMEOS)
+#define MAYBE_InputFiresBeforeChange DISABLED_InputFiresBeforeChange
+#else
+#define MAYBE_InputFiresBeforeChange InputFiresBeforeChange
+#endif
+IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, MAYBE_InputFiresBeforeChange) {
   CreateTestProfile();
 
   const char kInputFiresBeforeChangeScript[] =
@@ -940,7 +971,15 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
 // In the wild, the repeated fields are typically either email fields
 // (duplicated for "confirmation"); or variants that are hot-swapped via
 // JavaScript, with only one actually visible at any given time.
-IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, AutofillFormWithRepeatedField) {
+// Flakily times out on ChromeOS http://crbug.com/585885
+#if defined(OS_CHROMEOS)
+#define MAYBE_AutofillFormWithRepeatedField \
+  DISABLED_AutofillFormWithRepeatedField
+#else
+#define MAYBE_AutofillFormWithRepeatedField AutofillFormWithRepeatedField
+#endif
+IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
+                       MAYBE_AutofillFormWithRepeatedField) {
   CreateTestProfile();
 
   // Load the test page.
@@ -984,9 +1023,17 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, AutofillFormWithRepeatedField) {
   ExpectFieldValue("state_freeform", std::string());
 }
 
+// TODO(crbug.com/603488) Test is timing out flakily on CrOS.
+#if defined(OS_CHROMEOS)
+#define MAYBE_AutofillFormWithNonAutofillableField \
+  DISABLED_AutofillFormWithNonAutofillableField
+#else
+#define MAYBE_AutofillFormWithNonAutofillableField \
+  AutofillFormWithNonAutofillableField
+#endif
 // Test that we properly autofill forms with non-autofillable fields.
 IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
-                       AutofillFormWithNonAutofillableField) {
+                       MAYBE_AutofillFormWithNonAutofillableField) {
   CreateTestProfile();
 
   // Load the test page.
@@ -1270,11 +1317,12 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, MAYBE_ComparePhoneNumbers) {
 
 // Test that Autofill does not fill in read-only fields.
 // Flaky on the official cros-trunk. crbug.com/516052
-#if defined(OFFICIAL_BUILD)
+// Also flaky on ChromiumOS generally. crbug.com/585885
+#if defined(OFFICIAL_BUILD) || defined(OS_CHROMEOS)
 #define MAYBE_NoAutofillForReadOnlyFields DISABLED_NoAutofillForReadOnlyFields
 #else
 #define MAYBE_NoAutofillForReadOnlyFields NoAutofillForReadOnlyFields
-#endif  // defined(OFFICIAL_BUILD)
+#endif  // defined(OFFICIAL_BUILD) || defined(OS_CHROMEOS)
 IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
                        MAYBE_NoAutofillForReadOnlyFields) {
   std::string addr_line1("1234 H St.");
@@ -1434,8 +1482,15 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
 // Test that Chrome doesn't crash when autocomplete is disabled while the user
 // is interacting with the form.  This is a regression test for
 // http://crbug.com/160476
+// Flakily times out on ChromeOS http://crbug.com/585885
+#if defined(OS_CHROMEOS)
+#define MAYBE_DisableAutocompleteWhileFilling \
+  DISABLED_DisableAutocompleteWhileFilling
+#else
+#define MAYBE_DisableAutocompleteWhileFilling DisableAutocompleteWhileFilling
+#endif
 IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
-                       DisableAutocompleteWhileFilling) {
+                       MAYBE_DisableAutocompleteWhileFilling) {
   CreateTestProfile();
 
   // Load the test page.

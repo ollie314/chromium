@@ -4,16 +4,19 @@
 
 #include "chrome/browser/ui/views/chrome_views_delegate.h"
 
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
+#include <memory>
+
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/lifetime/keep_alive_types.h"
+#include "chrome/browser/lifetime/scoped_keep_alive.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_window_state.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/context_factory.h"
@@ -44,7 +47,6 @@
 #endif
 
 #if defined(USE_AURA) && !defined(OS_CHROMEOS)
-#include "chrome/browser/ui/host_desktop.h"
 #include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
 #include "ui/views/widget/native_widget_aura.h"
 #endif
@@ -53,14 +55,11 @@
 #include "ui/views/linux_ui/linux_ui.h"
 #endif
 
-#if defined(OS_ANDROID)
-#include "ui/views/widget/android/native_widget_android.h"
-#endif
-
 #if defined(USE_ASH)
 #include "ash/accelerators/accelerator_controller.h"
 #include "ash/shell.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "chrome/browser/ui/ash/ash_init.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #endif
@@ -131,9 +130,21 @@ bool MonitorHasTopmostAutohideTaskbarForEdge(UINT edge, HMONITOR monitor) {
     if (taskbar_data.uEdge == edge)
       taskbar = taskbar_data.hWnd;
   }
-  return ::IsWindow(taskbar) &&
-      (MonitorFromWindow(taskbar, MONITOR_DEFAULTTONULL) == monitor) &&
-      (GetWindowLong(taskbar, GWL_EXSTYLE) & WS_EX_TOPMOST);
+
+  if (::IsWindow(taskbar) &&
+      (GetWindowLong(taskbar, GWL_EXSTYLE) & WS_EX_TOPMOST)) {
+    if (MonitorFromWindow(taskbar, MONITOR_DEFAULTTONEAREST) == monitor)
+      return true;
+    // In some cases like when the autohide taskbar is on the left of the
+    // secondary monitor, the MonitorFromWindow call above fails to return the
+    // correct monitor the taskbar is on. We fallback to MonitorFromPoint for
+    // the cursor position in that case, which seems to work well.
+    POINT cursor_pos = {0};
+    GetCursorPos(&cursor_pos);
+    if (MonitorFromPoint(cursor_pos, MONITOR_DEFAULTTONEAREST) == monitor)
+      return true;
+  }
+  return false;
 }
 
 int GetAppbarAutohideEdgesOnWorkerThread(HMONITOR monitor) {
@@ -175,6 +186,7 @@ ChromeViewsDelegate::ChromeViewsDelegate() {
 }
 
 ChromeViewsDelegate::~ChromeViewsDelegate() {
+  DCHECK_EQ(0u, ref_count_);
 }
 
 void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,
@@ -185,7 +197,7 @@ void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,
   if (!prefs)
     return;
 
-  scoped_ptr<DictionaryPrefUpdate> pref_update =
+  std::unique_ptr<DictionaryPrefUpdate> pref_update =
       chrome::GetWindowPlacementDictionaryReadWrite(window_name, prefs);
   base::DictionaryValue* window_preferences = pref_update->Get();
   window_preferences->SetInteger("left", bounds.x());
@@ -195,8 +207,9 @@ void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,
   window_preferences->SetBoolean("maximized",
                                  show_state == ui::SHOW_STATE_MAXIMIZED);
   window_preferences->SetBoolean("docked", show_state == ui::SHOW_STATE_DOCKED);
-  gfx::Rect work_area(gfx::Screen::GetScreenFor(window->GetNativeView())->
-      GetDisplayNearestWindow(window->GetNativeView()).work_area());
+  gfx::Rect work_area(gfx::Screen::GetScreen()
+                          ->GetDisplayNearestWindow(window->GetNativeView())
+                          .work_area());
   window_preferences->SetInteger("work_area_left", work_area.x());
   window_preferences->SetInteger("work_area_top", work_area.y());
   window_preferences->SetInteger("work_area_right", work_area.right());
@@ -235,13 +248,9 @@ bool ChromeViewsDelegate::GetSavedWindowPlacement(
   // On Ash environment, a window won't span across displays.  Adjust
   // the bounds to fit the work area.
   gfx::NativeView window = widget->GetNativeView();
-  if (chrome::GetHostDesktopTypeForNativeView(window) ==
-      chrome::HOST_DESKTOP_TYPE_ASH) {
-    gfx::Display display = gfx::Screen::GetScreenFor(window)->
-        GetDisplayMatching(*bounds);
-    bounds->AdjustToFit(display.work_area());
-    ash::wm::GetWindowState(window)->set_minimum_visibility(true);
-  }
+  gfx::Display display = gfx::Screen::GetScreen()->GetDisplayMatching(*bounds);
+  bounds->AdjustToFit(display.work_area());
+  ash::wm::GetWindowState(window)->set_minimum_visibility(true);
 #endif
   return true;
 }
@@ -258,10 +267,6 @@ views::ViewsDelegate::ProcessMenuAcceleratorResult
 ChromeViewsDelegate::ProcessAcceleratorWhileMenuShowing(
     const ui::Accelerator& accelerator) {
 #if defined(USE_ASH)
-  // Handle ash accelerators only when a menu is opened on an ash desktop.
-  if (chrome::GetActiveDesktop() != chrome::HOST_DESKTOP_TYPE_ASH)
-    return views::ViewsDelegate::ProcessMenuAcceleratorResult::LEAVE_MENU_OPEN;
-
   ash::AcceleratorController* accelerator_controller =
       ash::Shell::GetInstance()->accelerator_controller();
 
@@ -291,10 +296,6 @@ HICON ChromeViewsDelegate::GetSmallWindowIcon() const {
   return GetSmallAppIcon();
 }
 
-bool ChromeViewsDelegate::IsWindowInMetro(gfx::NativeWindow window) const {
-  return chrome::IsNativeViewInAsh(window);
-}
-
 #elif defined(OS_LINUX) && !defined(OS_CHROMEOS)
 gfx::ImageSkia* ChromeViewsDelegate::GetDefaultWindowIcon() const {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
@@ -311,11 +312,20 @@ views::NonClientFrameView* ChromeViewsDelegate::CreateDefaultNonClientFrameView(
 #endif
 
 void ChromeViewsDelegate::AddRef() {
-  g_browser_process->AddRefModule();
+  if (ref_count_ == 0u) {
+    keep_alive_.reset(
+        new ScopedKeepAlive(KeepAliveOrigin::CHROME_VIEWS_DELEGATE,
+                            KeepAliveRestartOption::DISABLED));
+  }
+
+  ++ref_count_;
 }
 
 void ChromeViewsDelegate::ReleaseRef() {
-  g_browser_process->ReleaseModule();
+  DCHECK_NE(0u, ref_count_);
+
+  if (--ref_count_ == 0u)
+    keep_alive_.reset();
 }
 
 void ChromeViewsDelegate::OnBeforeWidgetInit(
@@ -329,6 +339,12 @@ void ChromeViewsDelegate::OnBeforeWidgetInit(
   // up with one.
   if (params->native_widget)
     return;
+
+  if (!native_widget_factory().is_null()) {
+    params->native_widget = native_widget_factory().Run(*params, delegate);
+    if (params->native_widget)
+      return;
+  }
 
 #if defined(USE_AURA) && !defined(OS_CHROMEOS)
   bool use_non_toplevel_window =
@@ -354,10 +370,7 @@ void ChromeViewsDelegate::OnBeforeWidgetInit(
   // the side effects are not as bad as the poor window manager interactions. On
   // Windows however these WM interactions are not an issue, so we open windows
   // requested as top_level as actual top level windows on the desktop.
-  use_non_toplevel_window = use_non_toplevel_window &&
-      (params->child ||
-       chrome::GetHostDesktopTypeForNativeView(params->parent) !=
-          chrome::HOST_DESKTOP_TYPE_NATIVE);
+  use_non_toplevel_window = use_non_toplevel_window && params->child;
 
   if (!ui::win::IsAeroGlassEnabled()) {
     // If we don't have composition (either because Glass is not enabled or
@@ -372,8 +385,7 @@ void ChromeViewsDelegate::OnBeforeWidgetInit(
     // windows for most things (they get blended via WS_EX_COMPOSITED, which
     // allows for animation effects, but also exceeding the bounds of the parent
     // window).
-    if (chrome::GetActiveDesktop() != chrome::HOST_DESKTOP_TYPE_ASH &&
-        params->parent &&
+    if (params->parent &&
         params->type != views::Widget::InitParams::TYPE_CONTROL &&
         params->type != views::Widget::InitParams::TYPE_WINDOW) {
       // When we set this to false, we get a DesktopNativeWidgetAura from the
@@ -389,7 +401,7 @@ void ChromeViewsDelegate::OnBeforeWidgetInit(
   }
 #endif  // USE_AURA
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(USE_ASH)
   // When we are doing straight chromeos builds, we still need to handle the
   // toplevel window case.
   // There may be a few remaining widgets in Chrome OS that are not top level,
@@ -407,23 +419,7 @@ void ChromeViewsDelegate::OnBeforeWidgetInit(
   // existence of a global WindowTreeClient, if this window is toplevel, it's
   // possible that there is no contextual state that we can use.
   if (params->parent == NULL && params->context == NULL && !params->child) {
-    // We need to make a decision about where to place this window based on the
-    // desktop type.
-    switch (chrome::GetActiveDesktop()) {
-      case chrome::HOST_DESKTOP_TYPE_NATIVE:
-        // If we're native, we should give this window its own toplevel desktop
-        // widget.
-        params->native_widget = new views::DesktopNativeWidgetAura(delegate);
-        break;
-#if defined(USE_ASH)
-      case chrome::HOST_DESKTOP_TYPE_ASH:
-        // If we're in ash, give this window the context of the main monitor.
-        params->context = ash::Shell::GetPrimaryRootWindow();
-        break;
-#endif
-      default:
-        NOTREACHED();
-    }
+    params->native_widget = new views::DesktopNativeWidgetAura(delegate);
   } else if (use_non_toplevel_window) {
     views::NativeWidgetAura* native_widget =
         new views::NativeWidgetAura(delegate);
@@ -435,18 +431,7 @@ void ChromeViewsDelegate::OnBeforeWidgetInit(
     }
     params->native_widget = native_widget;
   } else {
-    // TODO(erg): Once we've threaded context to everywhere that needs it, we
-    // should remove this check here.
-    gfx::NativeView to_check =
-        params->context ? params->context : params->parent;
-    if (chrome::GetHostDesktopTypeForNativeView(to_check) ==
-        chrome::HOST_DESKTOP_TYPE_NATIVE) {
-#if defined(OS_ANDROID)
-      params->native_widget = new views::NativeWidgetAndroid(delegate);
-#else
-      params->native_widget = new views::DesktopNativeWidgetAura(delegate);
-#endif
-    }
+    params->native_widget = new views::DesktopNativeWidgetAura(delegate);
   }
 #endif
 }

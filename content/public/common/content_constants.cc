@@ -20,13 +20,11 @@ const char kFlashPluginSwfDescription[] = "Shockwave Flash";
 const char kFlashPluginSplMimeType[] = "application/futuresplash";
 const char kFlashPluginSplExtension[] = "spl";
 const char kFlashPluginSplDescription[] = "FutureSplash Player";
-const char kSilverlightPluginMimeTypePrefix[] = "application/x-silverlight";
 
 // This number used to be limited to 32 in the past (see b/535234).
 const size_t kMaxRendererProcessCount = 82;
 const int kMaxSessionHistoryEntries = 50;
 const size_t kMaxTitleChars = 4 * 1024;
-const size_t kMaxURLChars = 2 * 1024 * 1024;
 const size_t kMaxURLDisplayChars = 32 * 1024;
 
 #if defined(GOOGLE_CHROME_BUILD)

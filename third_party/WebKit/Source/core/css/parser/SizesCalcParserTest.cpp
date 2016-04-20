@@ -20,27 +20,19 @@ struct TestCase {
     const bool dontRunInCSSCalc;
 };
 
-static void initLengthArray(CSSLengthArray& lengthArray)
-{
-    lengthArray.resize(CSSPrimitiveValue::LengthUnitTypeCount);
-    for (size_t i = 0; i < CSSPrimitiveValue::LengthUnitTypeCount; ++i)
-        lengthArray.at(i) = 0;
-}
-
 static void verifyCSSCalc(String text, double value, bool valid, unsigned fontSize, unsigned viewportWidth, unsigned viewportHeight)
 {
     CSSLengthArray lengthArray;
-    initLengthArray(lengthArray);
-    RefPtrWillBeRawPtr<CSSValue> cssValue = CSSParser::parseSingleValue(CSSPropertyLeft, text);
-    CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(cssValue.get());
+    CSSValue* cssValue = CSSParser::parseSingleValue(CSSPropertyLeft, text);
+    CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(cssValue);
     if (primitiveValue)
         primitiveValue->accumulateLengthArray(lengthArray);
     else
         ASSERT_EQ(valid, false);
-    float length = lengthArray.at(CSSPrimitiveValue::UnitTypePixels);
-    length += lengthArray.at(CSSPrimitiveValue::UnitTypeFontSize) * fontSize;
-    length += lengthArray.at(CSSPrimitiveValue::UnitTypeViewportWidth) * viewportWidth / 100.0;
-    length += lengthArray.at(CSSPrimitiveValue::UnitTypeViewportHeight) * viewportHeight / 100.0;
+    float length = lengthArray.values.at(CSSPrimitiveValue::UnitTypePixels);
+    length += lengthArray.values.at(CSSPrimitiveValue::UnitTypeFontSize) * fontSize;
+    length += lengthArray.values.at(CSSPrimitiveValue::UnitTypeViewportWidth) * viewportWidth / 100.0;
+    length += lengthArray.values.at(CSSPrimitiveValue::UnitTypeViewportHeight) * viewportHeight / 100.0;
     ASSERT_EQ(value, length);
 }
 
@@ -112,7 +104,7 @@ TEST(SizesCalcParserTest, Basic)
     data.mediaType = MediaTypeNames::screen;
     data.strictMode = true;
     data.displayMode = WebDisplayModeBrowser;
-    RefPtrWillBeRawPtr<MediaValues> mediaValues = MediaValuesCached::create(data);
+    MediaValues* mediaValues = MediaValuesCached::create(data);
 
     for (unsigned i = 0; testCases[i].input; ++i) {
         SizesCalcParser calcParser(CSSTokenizer::Scope(testCases[i].input).tokenRange(), mediaValues);
@@ -128,4 +120,4 @@ TEST(SizesCalcParserTest, Basic)
     }
 }
 
-} // namespace
+} // namespace blink

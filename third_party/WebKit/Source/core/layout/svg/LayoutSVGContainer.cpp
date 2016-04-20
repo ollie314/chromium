@@ -59,7 +59,19 @@ void LayoutSVGContainer::layout()
     // LayoutSVGViewportContainer needs to set the 'layout size changed' flag.
     determineIfLayoutSizeChanged();
 
-    SVGLayoutSupport::layoutChildren(this, selfNeedsLayout() || SVGLayoutSupport::filtersForceContainerLayout(this));
+    bool transformChanged = SVGLayoutSupport::transformToRootChanged(this);
+
+    // When hasRelativeLengths() is false, no descendants have relative lengths
+    // (hence no one is interested in viewport size changes).
+    bool layoutSizeChanged = element()->hasRelativeLengths()
+        && SVGLayoutSupport::layoutSizeOfNearestViewportChanged(this);
+
+    // If any of this container's children need to be laid out, and a filter is
+    // applied to the container, we need to issue paint invalidations for all
+    // the descendants.
+    bool forceLayoutOfChildren = selfNeedsLayout()
+        || (normalChildNeedsLayout() && SVGLayoutSupport::hasFilterResource(*this));
+    SVGLayoutSupport::layoutChildren(firstChild(), forceLayoutOfChildren, transformChanged, layoutSizeChanged);
 
     // Invalidate all resources of this client if our layout changed.
     if (everHadLayout() && needsLayout())
@@ -98,8 +110,7 @@ void LayoutSVGContainer::removeChild(LayoutObject* child)
 
 bool LayoutSVGContainer::selfWillPaint() const
 {
-    SVGResources* resources = SVGResourcesCache::cachedResourcesForLayoutObject(this);
-    return resources && resources->filter();
+    return SVGLayoutSupport::hasFilterResource(*this);
 }
 
 void LayoutSVGContainer::styleDidChange(StyleDifference diff, const ComputedStyle* oldStyle)
@@ -151,7 +162,7 @@ void LayoutSVGContainer::paint(const PaintInfo& paintInfo, const LayoutPoint&) c
 
 void LayoutSVGContainer::addOutlineRects(Vector<LayoutRect>& rects, const LayoutPoint&, IncludeBlockVisualOverflowOrNot) const
 {
-    rects.append(LayoutRect(paintInvalidationRectInLocalCoordinates()));
+    rects.append(LayoutRect(paintInvalidationRectInLocalSVGCoordinates()));
 }
 
 void LayoutSVGContainer::updateCachedBoundaries()
@@ -167,14 +178,14 @@ bool LayoutSVGContainer::nodeAtFloatPoint(HitTestResult& result, const FloatPoin
         return false;
 
     FloatPoint localPoint;
-    if (!SVGLayoutSupport::transformToUserSpaceAndCheckClipping(this, localToParentTransform(), pointInParent, localPoint))
+    if (!SVGLayoutSupport::transformToUserSpaceAndCheckClipping(this, localToSVGParentTransform(), pointInParent, localPoint))
         return false;
 
     for (LayoutObject* child = lastChild(); child; child = child->previousSibling()) {
         if (child->nodeAtFloatPoint(result, localPoint, hitTestAction)) {
             const LayoutPoint& localLayoutPoint = roundedLayoutPoint(localPoint);
             updateHitTestResult(result, localLayoutPoint);
-            if (!result.addNodeToListBasedTestResult(child->node(), localLayoutPoint))
+            if (result.addNodeToListBasedTestResult(child->node(), localLayoutPoint) == StopHitTesting)
                 return true;
         }
     }
@@ -185,7 +196,7 @@ bool LayoutSVGContainer::nodeAtFloatPoint(HitTestResult& result, const FloatPoin
         if (objectBoundingBox().contains(localPoint)) {
             const LayoutPoint& localLayoutPoint = roundedLayoutPoint(localPoint);
             updateHitTestResult(result, localLayoutPoint);
-            if (!result.addNodeToListBasedTestResult(element(), localLayoutPoint))
+            if (result.addNodeToListBasedTestResult(element(), localLayoutPoint) == StopHitTesting)
                 return true;
         }
     }
@@ -193,4 +204,4 @@ bool LayoutSVGContainer::nodeAtFloatPoint(HitTestResult& result, const FloatPoin
     return false;
 }
 
-}
+} // namespace blink

@@ -8,16 +8,17 @@
 // A class that provides common functionality for safebrowsing protocol managers
 // that communicate with Google servers.
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 
 namespace safe_browsing {
 
 struct SafeBrowsingProtocolConfig {
   SafeBrowsingProtocolConfig();
+  SafeBrowsingProtocolConfig(const SafeBrowsingProtocolConfig& other);
   ~SafeBrowsingProtocolConfig();
   std::string client_name;
   std::string url_prefix;
@@ -50,15 +51,6 @@ class SafeBrowsingProtocolManagerHelper {
                                 const std::string& version,
                                 const std::string& additional_query,
                                 bool is_extended_reporting);
-
-  // Composes a URL using |prefix|, |method| (e.g.: encodedFullHashes).
-  // |request_base64|, |client_id| and |version|. |prefix| should contain
-  // the entire url prefix including scheme, host and path.
-  static std::string ComposePver4Url(const std::string& prefix,
-                                     const std::string& method,
-                                     const std::string& request_base64,
-                                     const std::string& client_id,
-                                     const std::string& version);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(SafeBrowsingProtocolManagerHelper);

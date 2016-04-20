@@ -5,10 +5,10 @@
 #include "ui/native_theme/native_theme_base.h"
 
 #include <limits>
+#include <memory>
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
@@ -97,10 +97,6 @@ namespace ui {
 gfx::Size NativeThemeBase::GetPartSize(Part part,
                                        State state,
                                        const ExtraParams& extra) const {
-  gfx::Size size = CommonThemeGetPartSize(part, state, extra);
-  if (!size.IsEmpty())
-    return size;
-
   switch (part) {
     // Please keep these in the order of NativeTheme::Part.
     case kCheckbox:
@@ -197,9 +193,6 @@ void NativeThemeBase::Paint(SkCanvas* canvas,
 
   switch (part) {
     // Please keep these in the order of NativeTheme::Part.
-    case kComboboxArrow:
-      CommonThemePaintComboboxArrow(canvas, rect);
-      break;
     case kCheckbox:
       PaintCheckbox(canvas, state, rect, extra.button);
       break;
@@ -213,7 +206,7 @@ void NativeThemeBase::Paint(SkCanvas* canvas,
       PaintMenuPopupBackground(canvas, rect.size(), extra.menu_background);
       break;
     case kMenuItemBackground:
-      PaintMenuItemBackground(canvas, state, rect, extra.menu_list);
+      PaintMenuItemBackground(canvas, state, rect, extra.menu_item);
       break;
     case kProgressBar:
       PaintProgressBar(canvas, state, rect, extra.progress_bar);
@@ -616,12 +609,10 @@ SkRect NativeThemeBase::PaintCheckboxRadioCommon(
   else /* kNormal */
     startEndColors = kCheckboxGradientColors;
   SkColor colors[3] = {startEndColors[0], startEndColors[0], startEndColors[1]};
-  skia::RefPtr<SkShader> shader = skia::AdoptRef(
-      SkGradientShader::CreateLinear(
-          gradient_bounds, colors, NULL, 3, SkShader::kClamp_TileMode));
   SkPaint paint;
   paint.setAntiAlias(true);
-  paint.setShader(shader.get());
+  paint.setShader(SkGradientShader::MakeLinear(gradient_bounds, colors, NULL, 3,
+                                               SkShader::kClamp_TileMode));
   paint.setStyle(SkPaint::kFill_Style);
   canvas->drawRoundRect(skrect, borderRadius, borderRadius, paint);
   paint.setShader(NULL);
@@ -700,12 +691,11 @@ void NativeThemeBase::PaintButton(SkCanvas* canvas,
     std::swap(gradient_bounds[0], gradient_bounds[1]);
   SkColor colors[2] = { light_color, base_color };
 
-  skia::RefPtr<SkShader> shader = skia::AdoptRef(
-      SkGradientShader::CreateLinear(
-          gradient_bounds, colors, NULL, 2, SkShader::kClamp_TileMode));
   paint.setStyle(SkPaint::kFill_Style);
   paint.setAntiAlias(true);
-  paint.setShader(shader.get());
+  paint.setShader(
+      SkGradientShader::MakeLinear(
+          gradient_bounds, colors, NULL, 2, SkShader::kClamp_TileMode));
 
   canvas->drawRoundRect(skrect, SkIntToScalar(1), SkIntToScalar(1), paint);
   paint.setShader(NULL);
@@ -792,7 +782,7 @@ void NativeThemeBase::PaintMenuItemBackground(
     SkCanvas* canvas,
     State state,
     const gfx::Rect& rect,
-    const MenuListExtraParams& menu_list) const {
+    const MenuItemExtraParams& menu_item) const {
   // By default don't draw anything over the normal background.
 }
 
@@ -932,7 +922,7 @@ void NativeThemeBase::DrawImageInt(
     SkCanvas* sk_canvas, const gfx::ImageSkia& image,
     int src_x, int src_y, int src_w, int src_h,
     int dest_x, int dest_y, int dest_w, int dest_h) const {
-  scoped_ptr<gfx::Canvas> canvas(CommonThemeCreateCanvas(sk_canvas));
+  std::unique_ptr<gfx::Canvas> canvas(CommonThemeCreateCanvas(sk_canvas));
   canvas->DrawImageInt(image, src_x, src_y, src_w, src_h,
       dest_x, dest_y, dest_w, dest_h, true);
 }
@@ -941,7 +931,7 @@ void NativeThemeBase::DrawTiledImage(SkCanvas* sk_canvas,
     const gfx::ImageSkia& image,
     int src_x, int src_y, float tile_scale_x, float tile_scale_y,
     int dest_x, int dest_y, int w, int h) const {
-  scoped_ptr<gfx::Canvas> canvas(CommonThemeCreateCanvas(sk_canvas));
+  std::unique_ptr<gfx::Canvas> canvas(CommonThemeCreateCanvas(sk_canvas));
   canvas->TileImageInt(image, src_x, src_y, tile_scale_x,
       tile_scale_y, dest_x, dest_y, w, h);
 }

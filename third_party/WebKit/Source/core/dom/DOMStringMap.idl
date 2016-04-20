@@ -28,7 +28,6 @@
 [
     OverrideBuiltins,
     SetWrapperReferenceFrom=element,
-    WillBeGarbageCollected,
 ] interface DOMStringMap {
     [ImplementedAs=item] getter DOMString (DOMString name);
     [RaisesException] setter void (DOMString name, DOMString value);

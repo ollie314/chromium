@@ -7,7 +7,6 @@
 
 #include <map>
 
-#include "base/memory/scoped_ptr.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/password_form.h"
 
@@ -77,6 +76,7 @@ struct PasswordFormFillData {
   bool is_possible_change_password_form;
 
   PasswordFormFillData();
+  PasswordFormFillData(const PasswordFormFillData& other);
   ~PasswordFormFillData();
 };
 

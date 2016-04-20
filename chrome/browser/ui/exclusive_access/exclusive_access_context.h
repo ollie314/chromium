@@ -37,13 +37,13 @@ class ExclusiveAccessContext {
   // Currently only supported on Mac.
   virtual void UpdateFullscreenWithToolbar(bool with_toolbar);
 
-  // Toggles the toolbar state to be hidden or shown in fullscreen.
-  // Currently only supported on Mac.
-  virtual void ToggleFullscreenToolbar();
+  // Updates the toolbar state to be hidden or shown in fullscreen according to
+  // the preference's state. Only supported on Mac.
+  virtual void UpdateFullscreenToolbar();
 
   // Returns true if the window is fullscreen with additional UI elements. See
   // EnterFullscreen |with_toolbar|.
-  virtual bool IsFullscreenWithToolbar() const = 0;
+  virtual bool IsFullscreenWithToolbar() const;
 
   // Enters fullscreen and update exit bubble.
   // On Mac, the tab strip and toolbar will be shown if |with_toolbar| is true,
@@ -64,14 +64,6 @@ class ExclusiveAccessContext {
   // internal timers and/or re-display the bubble.
   virtual void OnExclusiveAccessUserInput() = 0;
 
-#if defined(OS_WIN)
-  // Sets state for entering or exiting Win8 Metro snap mode.
-  virtual void SetMetroSnapMode(bool enable);
-
-  // Returns whether the window is currently in Win8 Metro snap mode.
-  virtual bool IsInMetroSnapMode() const;
-#endif  // defined(OS_WIN)
-
   // Returns the currently active WebContents, or nullptr if there is none.
   virtual content::WebContents* GetActiveWebContents() = 0;
 
@@ -80,10 +72,10 @@ class ExclusiveAccessContext {
   // hide/unhide its download shelf widget when it is instructed to enter/exit
   // fullscreen mode.
   // Displays the download shelf associated with currently active window.
-  virtual void UnhideDownloadShelf();
+  virtual void UnhideDownloadShelf() = 0;
 
   // Hides download shelf associated with currently active window.
-  virtual void HideDownloadShelf();
+  virtual void HideDownloadShelf() = 0;
 };
 
 #endif  // CHROME_BROWSER_UI_EXCLUSIVE_ACCESS_EXCLUSIVE_ACCESS_CONTEXT_H_

@@ -26,6 +26,7 @@
 #ifndef MediaStreamTrack_h
 #define MediaStreamTrack_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "modules/EventTargetModules.h"
 #include "modules/ModulesExport.h"
@@ -42,10 +43,10 @@ class MediaStreamComponent;
 class MediaStreamTrackSourcesCallback;
 
 class MODULES_EXPORT MediaStreamTrack
-    : public RefCountedGarbageCollectedEventTargetWithInlineData<MediaStreamTrack>
+    : public EventTargetWithInlineData
+    , public ActiveScriptWrappable
     , public ActiveDOMObject
     , public MediaStreamSource::Observer {
-    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(MediaStreamTrack);
     USING_GARBAGE_COLLECTED_MIXIN(MediaStreamTrack);
     DEFINE_WRAPPERTYPEINFO();
 public:
@@ -81,7 +82,10 @@ public:
 
     // EventTarget
     const AtomicString& interfaceName() const override;
-    ExecutionContext* executionContext() const override;
+    ExecutionContext* getExecutionContext() const override;
+
+    // ActiveScriptWrappable
+    bool hasPendingActivity() const final;
 
     // ActiveDOMObject
     void stop() override;

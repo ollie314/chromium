@@ -13,17 +13,9 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/prefs/default_pref_store.h"
-#include "base/prefs/json_pref_store.h"
-#include "base/prefs/pref_filter.h"
-#include "base/prefs/pref_notifier_impl.h"
-#include "base/prefs/pref_registry.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/pref_store.h"
-#include "base/prefs/pref_value_store.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -40,7 +32,18 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/component_updater/pref_names.h"
+#include "components/policy/core/browser/browser_policy_connector.h"
+#include "components/policy/core/browser/configuration_policy_pref_store.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/default_pref_store.h"
+#include "components/prefs/json_pref_store.h"
+#include "components/prefs/pref_filter.h"
+#include "components/prefs/pref_notifier_impl.h"
+#include "components/prefs/pref_registry.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/pref_store.h"
+#include "components/prefs/pref_value_store.h"
 #include "components/search_engines/default_search_manager.h"
 #include "components/search_engines/default_search_pref_migration.h"
 #include "components/search_engines/search_engines_pref_names.h"
@@ -55,11 +58,6 @@
 #include "grit/browser_resources.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "ui/base/resource/resource_bundle.h"
-
-#if defined(ENABLE_CONFIGURATION_POLICY)
-#include "components/policy/core/browser/browser_policy_connector.h"
-#include "components/policy/core/browser/configuration_policy_pref_store.h"
-#endif
 
 #if defined(ENABLE_EXTENSIONS)
 #include "extensions/browser/pref_names.h"
@@ -193,12 +191,8 @@ const PrefHashFilter::TrackedPreferenceMetadata kTrackedPrefs[] = {
     PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
     PrefHashFilter::VALUE_IMPERSONAL
   },
-  {
-    17, sync_driver::prefs::kSyncRemainingRollbackTries,
-    PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
-    PrefHashFilter::VALUE_IMPERSONAL
-  },
+  // kSyncRemainingRollbackTries is deprecated and will be removed a few
+  // releases after M50.
   {
     18, prefs::kSafeBrowsingIncidentsSent,
     PrefHashFilter::ENFORCE_ON_LOAD,
@@ -397,7 +391,7 @@ void HandleReadError(PersistentPrefStore::PrefReadError error) {
   }
 }
 
-scoped_ptr<ProfilePrefStoreManager> CreateProfilePrefStoreManager(
+std::unique_ptr<ProfilePrefStoreManager> CreateProfilePrefStoreManager(
     const base::FilePath& profile_path) {
   std::string device_id;
 #if defined(OS_WIN) && defined(ENABLE_RLZ)
@@ -414,13 +408,9 @@ scoped_ptr<ProfilePrefStoreManager> CreateProfilePrefStoreManager(
   seed = ResourceBundle::GetSharedInstance().GetRawDataResource(
       IDR_PREF_HASH_SEED_BIN).as_string();
 #endif
-  return make_scoped_ptr(new ProfilePrefStoreManager(
-      profile_path,
-      GetTrackingConfiguration(),
-      kTrackedPrefsReportingIDsCount,
-      seed,
-      device_id,
-      g_browser_process->local_state()));
+  return base::WrapUnique(new ProfilePrefStoreManager(
+      profile_path, GetTrackingConfiguration(), kTrackedPrefsReportingIDsCount,
+      seed, device_id, g_browser_process->local_state()));
 }
 
 void PrepareFactory(
@@ -430,12 +420,10 @@ void PrepareFactory(
     scoped_refptr<PersistentPrefStore> user_pref_store,
     const scoped_refptr<PrefStore>& extension_prefs,
     bool async) {
-#if defined(ENABLE_CONFIGURATION_POLICY)
   policy::BrowserPolicyConnector* policy_connector =
       g_browser_process->browser_policy_connector();
   factory->SetManagedPolicies(policy_service, policy_connector);
   factory->SetRecommendedPolicies(policy_service, policy_connector);
-#endif  // ENABLE_CONFIGURATION_POLICY
 
 #if defined(ENABLE_SUPERVISED_USERS)
   if (supervised_user_settings) {
@@ -476,25 +464,23 @@ const char kSettingsEnforcementGroupEnforceAlwaysWithExtensionsAndDSE[] =
 
 }  // namespace internals
 
-scoped_ptr<PrefService> CreateLocalState(
+std::unique_ptr<PrefService> CreateLocalState(
     const base::FilePath& pref_filename,
     base::SequencedTaskRunner* pref_io_task_runner,
     policy::PolicyService* policy_service,
     const scoped_refptr<PrefRegistry>& pref_registry,
     bool async) {
   syncable_prefs::PrefServiceSyncableFactory factory;
-  PrepareFactory(
-      &factory,
-      policy_service,
-      NULL,  // supervised_user_settings
-      new JsonPrefStore(
-          pref_filename, pref_io_task_runner, scoped_ptr<PrefFilter>()),
-      NULL,  // extension_prefs
-      async);
+  PrepareFactory(&factory, policy_service,
+                 NULL,  // supervised_user_settings
+                 new JsonPrefStore(pref_filename, pref_io_task_runner,
+                                   std::unique_ptr<PrefFilter>()),
+                 NULL,  // extension_prefs
+                 async);
   return factory.Create(pref_registry.get());
 }
 
-scoped_ptr<syncable_prefs::PrefServiceSyncable> CreateProfilePrefs(
+std::unique_ptr<syncable_prefs::PrefServiceSyncable> CreateProfilePrefs(
     const base::FilePath& profile_path,
     base::SequencedTaskRunner* pref_io_task_runner,
     TrackedPreferenceValidationDelegate* validation_delegate,
@@ -528,7 +514,7 @@ scoped_ptr<syncable_prefs::PrefServiceSyncable> CreateProfilePrefs(
                  user_pref_store,
                  extension_prefs,
                  async);
-  scoped_ptr<syncable_prefs::PrefServiceSyncable> pref_service =
+  std::unique_ptr<syncable_prefs::PrefServiceSyncable> pref_service =
       factory.CreateSyncable(pref_registry.get());
 
   ConfigureDefaultSearchPrefMigrationToDictionaryValue(pref_service.get());

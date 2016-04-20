@@ -2,7 +2,25 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/ios/rules.gni")
 import("//testing/test.gni")
+
+bundle_data("ios_chrome_unittests_bundle_data") {
+  testonly = true
+  sources = [
+    "test/data/webdata/bookmarkimages/image.jpg",
+    "test/data/webdata/bookmarkimages/index.html",
+  ]
+  outputs = [
+    "{{bundle_resources_dir}}/{{source_root_relative_dir}}/" +
+        "{{source_file_part}}",
+  ]
+}
+
+bundle_data_xib("native_content_controller_test_xib") {
+  testonly = true
+  source = "browser/ui/native_content_controller_test.xib"
+}
 
 test("ios_chrome_unittests") {
   sources = [
@@ -17,12 +35,15 @@ test("ios_chrome_unittests") {
     "browser/installation_notifier_unittest.mm",
     "browser/metrics/ios_chrome_metrics_service_accessor_unittest.cc",
     "browser/metrics/ios_chrome_stability_metrics_provider_unittest.cc",
-    "browser/metrics/ios_stability_metrics_provider_unittest.mm",
+    "browser/metrics/mobile_session_shutdown_metrics_provider_unittest.mm",
     "browser/metrics/previous_session_info_unittest.mm",
     "browser/net/cookie_util_unittest.mm",
     "browser/net/image_fetcher_unittest.mm",
     "browser/net/metrics_network_client_unittest.mm",
     "browser/net/retryable_url_fetcher_unittest.mm",
+    "browser/passwords/password_controller_unittest.mm",
+    "browser/reading_list/reading_list_entry_unittest.cc",
+    "browser/reading_list/reading_list_model_unittest.cc",
     "browser/signin/chrome_identity_service_observer_bridge_unittest.mm",
     "browser/signin/gaia_auth_fetcher_ios_unittest.mm",
     "browser/snapshots/lru_cache_unittest.mm",
@@ -41,24 +62,28 @@ test("ios_chrome_unittests") {
   ]
 
   deps = [
+    ":ios_chrome_unittests_bundle_data",
+    ":native_content_controller_test_xib",
     "//base",
-    "//base:prefs_test_support",
     "//base/test:test_support",
     "//components/bookmarks/test",
-    "//components/enhanced_bookmarks:test_support",
     "//components/favicon_base",
     "//components/metrics",
     "//components/metrics:test_support",
+    "//components/password_manager/core/browser",
+    "//components/password_manager/core/browser:test_support",
+    "//components/password_manager/core/common",
+    "//components/prefs:test_support",
     "//components/signin/core/browser:test_support",
     "//components/signin/ios/browser:test_support",
     "//components/sync_driver:test_support",
+    "//components/syncable_prefs:test_support",
     "//components/update_client",
     "//components/version_info",
     "//ios/chrome/app",
     "//ios/chrome/browser",
     "//ios/chrome/browser:test_support",
     "//ios/chrome/common",
-    "//ios/public/test",
     "//ios/web",
     "//ios/web:test_support",
     "//net:test_support",
@@ -68,24 +93,4 @@ test("ios_chrome_unittests") {
     "//third_party/ocmock",
     "//ui/gfx:test_support",
   ]
-
-  # TODO(crbug.com/546283): once bundle resources are supported add code
-  # corresponding to the following gyp fragment:
-  #
-  # 'mac_bundle_resources': [
-  #   'browser/ui/native_content_controller_test.xib'
-  # ],
-  # 'actions': [
-  #   {
-  #     'action_name': 'copy_ios_chrome_test_data',
-  #     'variables': {
-  #       'test_data_files': [
-  #         'test/data/webdata/bookmarkimages',
-  #       ],
-  #       'test_data_prefix': 'ios/chrome',
-  #     },
-  #     'includes': [ '../../build/copy_test_data_ios.gypi' ]
-  #   },
-  # ],
-  # 'includes': ['ios_chrome_resources_bundle.gypi'],
 }

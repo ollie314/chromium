@@ -5,12 +5,18 @@
 #ifndef CONTENT_BROWSER_DOWNLOAD_DOWNLOAD_FILE_FACTORY_H_
 #define CONTENT_BROWSER_DOWNLOAD_DOWNLOAD_FILE_FACTORY_H_
 
+#include <memory>
+
+#include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
 #include "url/gurl.h"
+
+namespace crypto {
+class SecureHash;
+}
 
 namespace net {
 class BoundNetLog;
@@ -29,12 +35,9 @@ class CONTENT_EXPORT DownloadFileFactory {
   virtual ~DownloadFileFactory();
 
   virtual DownloadFile* CreateFile(
-      scoped_ptr<DownloadSaveInfo> save_info,
+      std::unique_ptr<DownloadSaveInfo> save_info,
       const base::FilePath& default_downloads_directory,
-      const GURL& url,
-      const GURL& referrer_url,
-      bool calculate_hash,
-      scoped_ptr<ByteStreamReader> stream,
+      std::unique_ptr<ByteStreamReader> byte_stream,
       const net::BoundNetLog& bound_net_log,
       base::WeakPtr<DownloadDestinationObserver> observer);
 };

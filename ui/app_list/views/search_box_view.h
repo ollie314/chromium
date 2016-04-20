@@ -106,7 +106,9 @@ class APP_LIST_EXPORT SearchBoxView : public views::View,
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Overridden from views::MenuButtonListener:
-  void OnMenuButtonClicked(View* source, const gfx::Point& point) override;
+  void OnMenuButtonClicked(views::MenuButton* source,
+                           const gfx::Point& point,
+                           const ui::Event* event) override;
 
   // Overridden from SearchBoxModelObserver:
   void IconChanged() override;
@@ -123,7 +125,7 @@ class APP_LIST_EXPORT SearchBoxView : public views::View,
   AppListViewDelegate* view_delegate_;  // Not owned.
   AppListModel* model_;  // Owned by the profile-keyed service.
 
-  scoped_ptr<AppListMenuViews> menu_;
+  std::unique_ptr<AppListMenuViews> menu_;
 
   views::View* content_container_;     // Owned by views hierarchy.
   views::ImageView* icon_view_;  // Owned by views hierarchy.

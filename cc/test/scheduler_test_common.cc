@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "cc/debug/rendering_stats_instrumentation.h"
 
 namespace cc {
@@ -37,9 +38,9 @@ std::string TestDelayBasedTimeSource::TypeString() const {
 TestDelayBasedTimeSource::~TestDelayBasedTimeSource() {
 }
 
-void FakeBeginFrameSource::DidFinishFrame(size_t remaining_frames) {
-  remaining_frames_ = remaining_frames;
-}
+FakeBeginFrameSource::FakeBeginFrameSource() {}
+
+FakeBeginFrameSource::~FakeBeginFrameSource() {}
 
 void FakeBeginFrameSource::AsValueInto(
     base::trace_event::TracedValue* dict) const {
@@ -61,22 +62,33 @@ base::TimeTicks TestBackToBackBeginFrameSource::Now() {
 }
 
 TestSyntheticBeginFrameSource::TestSyntheticBeginFrameSource(
-    scoped_ptr<DelayBasedTimeSource> time_source)
-    : SyntheticBeginFrameSource(std::move(time_source)) {}
+    base::SimpleTestTickClock* now_src,
+    OrderedSimpleTaskRunner* task_runner,
+    base::TimeDelta initial_interval)
+    : SyntheticBeginFrameSource(
+          TestDelayBasedTimeSource::Create(now_src,
+                                           initial_interval,
+                                           task_runner)) {}
 
 TestSyntheticBeginFrameSource::~TestSyntheticBeginFrameSource() {
 }
 
-scoped_ptr<FakeCompositorTimingHistory> FakeCompositorTimingHistory::Create() {
-  scoped_ptr<RenderingStatsInstrumentation> rendering_stats_instrumentation =
-      RenderingStatsInstrumentation::Create();
-  return make_scoped_ptr(new FakeCompositorTimingHistory(
+std::unique_ptr<FakeCompositorTimingHistory>
+FakeCompositorTimingHistory::Create(
+    bool using_synchronous_renderer_compositor) {
+  std::unique_ptr<RenderingStatsInstrumentation>
+      rendering_stats_instrumentation = RenderingStatsInstrumentation::Create();
+  return base::WrapUnique(new FakeCompositorTimingHistory(
+      using_synchronous_renderer_compositor,
       std::move(rendering_stats_instrumentation)));
 }
 
 FakeCompositorTimingHistory::FakeCompositorTimingHistory(
-    scoped_ptr<RenderingStatsInstrumentation> rendering_stats_instrumentation)
-    : CompositorTimingHistory(CompositorTimingHistory::NULL_UMA,
+    bool using_synchronous_renderer_compositor,
+    std::unique_ptr<RenderingStatsInstrumentation>
+        rendering_stats_instrumentation)
+    : CompositorTimingHistory(using_synchronous_renderer_compositor,
+                              CompositorTimingHistory::NULL_UMA,
                               rendering_stats_instrumentation.get()),
       rendering_stats_instrumentation_owned_(
           std::move(rendering_stats_instrumentation)) {}
@@ -177,45 +189,19 @@ base::TimeDelta FakeCompositorTimingHistory::DrawDurationEstimate() const {
   return draw_duration_;
 }
 
-scoped_ptr<TestScheduler> TestScheduler::Create(
-    base::SimpleTestTickClock* now_src,
-    SchedulerClient* client,
-    const SchedulerSettings& settings,
-    int layer_tree_host_id,
-    OrderedSimpleTaskRunner* task_runner,
-    BeginFrameSource* external_frame_source,
-    scoped_ptr<CompositorTimingHistory> compositor_timing_history) {
-  scoped_ptr<TestSyntheticBeginFrameSource> synthetic_frame_source;
-  if (!settings.use_external_begin_frame_source) {
-    synthetic_frame_source = TestSyntheticBeginFrameSource::Create(
-        now_src, task_runner, BeginFrameArgs::DefaultInterval());
-  }
-  scoped_ptr<TestBackToBackBeginFrameSource> unthrottled_frame_source =
-      TestBackToBackBeginFrameSource::Create(now_src, task_runner);
-  return make_scoped_ptr(new TestScheduler(
-      now_src, client, settings, layer_tree_host_id, task_runner,
-      external_frame_source, std::move(synthetic_frame_source),
-      std::move(unthrottled_frame_source),
-      std::move(compositor_timing_history)));
-}
-
 TestScheduler::TestScheduler(
     base::SimpleTestTickClock* now_src,
     SchedulerClient* client,
     const SchedulerSettings& scheduler_settings,
     int layer_tree_host_id,
     OrderedSimpleTaskRunner* task_runner,
-    BeginFrameSource* external_frame_source,
-    scoped_ptr<TestSyntheticBeginFrameSource> synthetic_frame_source,
-    scoped_ptr<TestBackToBackBeginFrameSource> unthrottled_frame_source,
-    scoped_ptr<CompositorTimingHistory> compositor_timing_history)
+    BeginFrameSource* begin_frame_source,
+    std::unique_ptr<CompositorTimingHistory> compositor_timing_history)
     : Scheduler(client,
                 scheduler_settings,
                 layer_tree_host_id,
                 task_runner,
-                external_frame_source,
-                std::move(synthetic_frame_source),
-                std::move(unthrottled_frame_source),
+                begin_frame_source,
                 std::move(compositor_timing_history)),
       now_src_(now_src) {}
 

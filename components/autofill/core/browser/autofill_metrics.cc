@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
+#include "base/metrics/user_metrics.h"
 #include "base/time/time.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/form_structure.h"
@@ -38,6 +39,7 @@ enum FieldTypeGroupForMetrics {
   GROUP_PASSWORD,
   GROUP_ADDRESS_LINE_3,
   GROUP_USERNAME,
+  GROUP_STREET_ADDRESS,
   NUM_FIELD_TYPE_GROUPS_FOR_METRICS
 };
 
@@ -99,6 +101,8 @@ int GetFieldTypeGroupMetric(ServerFieldType field_type,
         case ADDRESS_HOME_LINE3:
           group = GROUP_ADDRESS_LINE_3;
           break;
+        case ADDRESS_HOME_STREET_ADDRESS:
+          group = GROUP_STREET_ADDRESS;
         case ADDRESS_HOME_CITY:
           group = GROUP_ADDRESS_CITY;
           break;
@@ -129,7 +133,9 @@ int GetFieldTypeGroupMetric(ServerFieldType field_type,
 
     case CREDIT_CARD:
       switch (field_type) {
-        case CREDIT_CARD_NAME:
+        case CREDIT_CARD_NAME_FULL:
+        case CREDIT_CARD_NAME_FIRST:
+        case CREDIT_CARD_NAME_LAST:
           group = GROUP_CREDIT_CARD_NAME;
           break;
         case CREDIT_CARD_NUMBER:
@@ -272,7 +278,7 @@ void LogTypeQualityMetric(const std::string& base_name,
 void AutofillMetrics::LogCardUploadDecisionMetric(
     CardUploadDecisionMetric metric) {
   DCHECK_LT(metric, NUM_CARD_UPLOAD_DECISION_METRICS);
-  UMA_HISTOGRAM_ENUMERATION("Autofill.CardUploadDecision", metric,
+  UMA_HISTOGRAM_ENUMERATION("Autofill.CardUploadDecisionExpanded", metric,
                             NUM_CARD_UPLOAD_DECISION_METRICS);
 }
 
@@ -624,6 +630,11 @@ void AutofillMetrics::LogStoredProfileCount(size_t num_profiles) {
 }
 
 // static
+void AutofillMetrics::LogStoredLocalCreditCardCount(size_t num_local_cards) {
+  UMA_HISTOGRAM_COUNTS("Autofill.StoredLocalCreditCardCount", num_local_cards);
+}
+
+// static
 void AutofillMetrics::LogNumberOfProfilesAtAutofillableFormSubmission(
     size_t num_profiles) {
   UMA_HISTOGRAM_COUNTS(
@@ -640,6 +651,8 @@ void AutofillMetrics::LogAutofillSuggestionAcceptedIndex(int index) {
   // A maximum of 50 is enforced to minimize the number of buckets generated.
   UMA_HISTOGRAM_SPARSE_SLOWLY("Autofill.SuggestionAcceptedIndex",
                               std::min(index, 50));
+
+  base::RecordAction(base::UserMetricsAction("Autofill_SelectedSuggestion"));
 }
 
 // static
@@ -684,19 +697,14 @@ void AutofillMetrics::LogAutofillFormSubmittedState(
 }
 
 // static
-void AutofillMetrics::LogPayloadCompressionRatio(
-    int compression_ratio,
-    AutofillDownloadManager::RequestType type) {
-  switch (type) {
-    case AutofillDownloadManager::REQUEST_QUERY:
-      UMA_HISTOGRAM_PERCENTAGE("Autofill.PayloadCompressionRatio.Query",
-                               compression_ratio);
-      break;
-    case AutofillDownloadManager::REQUEST_UPLOAD:
-      UMA_HISTOGRAM_PERCENTAGE("Autofill.PayloadCompressionRatio.Upload",
-                               compression_ratio);
-      break;
-  }
+void AutofillMetrics::LogDetermineHeuristicTypesTiming(
+    const base::TimeDelta& duration) {
+  UMA_HISTOGRAM_TIMES("Autofill.Timing.DetermineHeuristicTypes", duration);
+}
+
+// static
+void AutofillMetrics::LogParseFormTiming(const base::TimeDelta& duration) {
+  UMA_HISTOGRAM_TIMES("Autofill.Timing.ParseForm", duration);
 }
 
 AutofillMetrics::FormEventLogger::FormEventLogger(bool is_for_credit_card)
@@ -720,11 +728,29 @@ void AutofillMetrics::FormEventLogger::OnDidInteractWithAutofillableForm() {
   }
 }
 
+void AutofillMetrics::FormEventLogger::OnDidPollSuggestions() {
+  if (is_for_credit_card_) {
+    base::RecordAction(
+        base::UserMetricsAction("Autofill_PolledCreditCardSuggestions"));
+  } else {
+    base::RecordAction(
+        base::UserMetricsAction("Autofill_PolledProfileSuggestions"));
+  }
+}
+
 void AutofillMetrics::FormEventLogger::OnDidShowSuggestions() {
   Log(AutofillMetrics::FORM_EVENT_SUGGESTIONS_SHOWN);
   if (!has_logged_suggestions_shown_) {
     has_logged_suggestions_shown_ = true;
     Log(AutofillMetrics::FORM_EVENT_SUGGESTIONS_SHOWN_ONCE);
+  }
+
+  if (is_for_credit_card_) {
+    base::RecordAction(
+        base::UserMetricsAction("Autofill_ShowedCreditCardSuggestions"));
+  } else {
+    base::RecordAction(
+        base::UserMetricsAction("Autofill_ShowedProfileSuggestions"));
   }
 }
 
@@ -764,6 +790,9 @@ void AutofillMetrics::FormEventLogger::OnDidFillSuggestion(
       Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED_ONCE);
     }
   }
+
+  base::RecordAction(
+      base::UserMetricsAction("Autofill_FilledCreditCardSuggestion"));
 }
 
 void AutofillMetrics::FormEventLogger::OnDidFillSuggestion(
@@ -782,6 +811,9 @@ void AutofillMetrics::FormEventLogger::OnDidFillSuggestion(
         ? AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_FILLED_ONCE
         : AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED_ONCE);
   }
+
+  base::RecordAction(
+      base::UserMetricsAction("Autofill_FilledProfileSuggestion"));
 }
 
 void AutofillMetrics::FormEventLogger::OnWillSubmitForm() {
@@ -804,6 +836,8 @@ void AutofillMetrics::FormEventLogger::OnWillSubmitForm() {
   } else {
     Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_WILL_SUBMIT_ONCE);
   }
+
+  base::RecordAction(base::UserMetricsAction("Autofill_OnWillSubmitForm"));
 }
 
 void AutofillMetrics::FormEventLogger::OnFormSubmitted() {
@@ -826,6 +860,8 @@ void AutofillMetrics::FormEventLogger::OnFormSubmitted() {
   } else {
     Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_SUBMITTED_ONCE);
   }
+
+  base::RecordAction(base::UserMetricsAction("Autofill_FormSubmitted"));
 }
 
 void AutofillMetrics::FormEventLogger::Log(FormEvent event) const {

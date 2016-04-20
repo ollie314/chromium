@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <queue>
 #include <vector>
 
@@ -18,6 +19,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
 #include "content/common/content_export.h"
+#include "content/common/gpu/media/shared_memory_region.h"
 #include "content/common/gpu/media/v4l2_device.h"
 #include "media/base/bitstream_buffer.h"
 #include "media/base/video_frame.h"
@@ -58,16 +60,16 @@ class CONTENT_EXPORT V4L2JpegDecodeAccelerator
   // the time of submission we may not have one available (and don't need one
   // to submit input to the device).
   struct JobRecord {
-    JobRecord(media::BitstreamBuffer bitstream_buffer,
+    JobRecord(const media::BitstreamBuffer& bitstream_buffer,
               scoped_refptr<media::VideoFrame> video_frame);
     ~JobRecord();
 
-    // Input image buffer.
-    media::BitstreamBuffer bitstream_buffer;
+    // Input image buffer ID.
+    int32_t bitstream_buffer_id;
+    // Memory mapped from |bitstream_buffer|.
+    SharedMemoryRegion shm;
     // Output frame buffer.
     scoped_refptr<media::VideoFrame> out_frame;
-    // Memory mapped from |bitstream_buffer|.
-    scoped_ptr<base::SharedMemory> shm;
   };
 
   void EnqueueInput();
@@ -96,7 +98,7 @@ class CONTENT_EXPORT V4L2JpegDecodeAccelerator
   void PostNotifyError(int32_t bitstream_buffer_id, Error error);
 
   // Run on |decoder_thread_| to enqueue the coming frame.
-  void DecodeTask(scoped_ptr<JobRecord> job_record);
+  void DecodeTask(std::unique_ptr<JobRecord> job_record);
 
   // Run on |decoder_thread_| to dequeue last frame and enqueue next frame.
   // This task is triggered by DevicePollTask. |event_pending| means that device

@@ -11,37 +11,36 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "components/mus/public/interfaces/accelerator_registrar.mojom.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/shell/public/cpp/application_delegate.h"
-
-namespace mojo {
-class ApplicationConnection;
-}
+#include "services/shell/public/cpp/shell_client.h"
 
 namespace mash {
 namespace browser_driver {
 
-class BrowserDriverApplicationDelegate : public mojo::ApplicationDelegate,
+class BrowserDriverApplicationDelegate : public shell::ShellClient,
                                          public mus::mojom::AcceleratorHandler {
  public:
   BrowserDriverApplicationDelegate();
   ~BrowserDriverApplicationDelegate() override;
 
  private:
-  // mojo::ApplicationDelegate:
-  void Initialize(mojo::ApplicationImpl* app) override;
-  bool ConfigureIncomingConnection(
-      mojo::ApplicationConnection* connection) override;
+  // shell::ShellClient:
+  void Initialize(shell::Connector* connector,
+                  const shell::Identity& identity,
+                  uint32_t id) override;
+  bool AcceptConnection(shell::Connection* connection) override;
+  bool ShellConnectionLost() override;
 
   // mus::mojom::AcceleratorHandler:
   void OnAccelerator(uint32_t id, mus::mojom::EventPtr event) override;
 
   void AddAccelerators();
 
-  mojo::ApplicationImpl* app_;
+  shell::Connector* connector_;
   mojo::Binding<mus::mojom::AcceleratorHandler> binding_;
+  base::WeakPtrFactory<BrowserDriverApplicationDelegate> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserDriverApplicationDelegate);
 };

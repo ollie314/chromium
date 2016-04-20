@@ -36,7 +36,12 @@ ArcBridgeService::~ArcBridgeService() {
 
 // static
 ArcBridgeService* ArcBridgeService::Get() {
-  DCHECK(g_arc_bridge_service);
+  if (!g_arc_bridge_service) {
+    // ArcBridgeService may be indirectly referenced in unit tests where
+    // ArcBridgeService is optional.
+    LOG(ERROR) << "ArcBridgeService is not ready.";
+    return nullptr;
+  }
   DCHECK(g_arc_bridge_service->CalledOnValidThread());
   return g_arc_bridge_service;
 }
@@ -49,6 +54,36 @@ bool ArcBridgeService::GetEnabled(const base::CommandLine* command_line) {
 void ArcBridgeService::AddObserver(Observer* observer) {
   DCHECK(CalledOnValidThread());
   observer_list_.AddObserver(observer);
+
+  // If any of the instances were ready before the call to AddObserver(), the
+  // |observer| won't get any readiness events. For such cases, we have to call
+  // them explicitly now to avoid a race.
+  if (app_instance())
+    observer->OnAppInstanceReady();
+  if (audio_instance())
+    observer->OnAudioInstanceReady();
+  if (auth_instance())
+    observer->OnAuthInstanceReady();
+  if (bluetooth_instance())
+    observer->OnBluetoothInstanceReady();
+  if (clipboard_instance())
+    observer->OnClipboardInstanceReady();
+  if (crash_collector_instance())
+    observer->OnCrashCollectorInstanceReady();
+  if (ime_instance())
+    observer->OnImeInstanceReady();
+  if (net_instance())
+    observer->OnNetInstanceReady();
+  if (notifications_instance())
+    observer->OnNotificationsInstanceReady();
+  if (policy_instance())
+    observer->OnPolicyInstanceReady();
+  if (power_instance())
+    observer->OnPowerInstanceReady();
+  if (process_instance())
+    observer->OnProcessInstanceReady();
+  if (video_instance())
+    observer->OnVideoInstanceReady();
 }
 
 void ArcBridgeService::RemoveObserver(Observer* observer) {
@@ -56,7 +91,7 @@ void ArcBridgeService::RemoveObserver(Observer* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
-void ArcBridgeService::OnAppInstanceReady(AppInstancePtr app_ptr) {
+void ArcBridgeService::OnAppInstanceReady(mojom::AppInstancePtr app_ptr) {
   DCHECK(CalledOnValidThread());
   temporary_app_ptr_ = std::move(app_ptr);
   temporary_app_ptr_.QueryVersion(base::Bind(
@@ -80,7 +115,30 @@ void ArcBridgeService::CloseAppChannel() {
   FOR_EACH_OBSERVER(Observer, observer_list(), OnAppInstanceClosed());
 }
 
-void ArcBridgeService::OnAuthInstanceReady(AuthInstancePtr auth_ptr) {
+void ArcBridgeService::OnAudioInstanceReady(mojom::AudioInstancePtr audio_ptr) {
+  DCHECK(CalledOnValidThread());
+  temporary_audio_ptr_ = std::move(audio_ptr);
+  temporary_audio_ptr_.QueryVersion(base::Bind(
+      &ArcBridgeService::OnAudioVersionReady, weak_factory_.GetWeakPtr()));
+}
+
+void ArcBridgeService::OnAudioVersionReady(int32_t version) {
+  DCHECK(CalledOnValidThread());
+  audio_ptr_ = std::move(temporary_audio_ptr_);
+  audio_ptr_.set_connection_error_handler(base::Bind(
+      &ArcBridgeService::CloseAudioChannel, weak_factory_.GetWeakPtr()));
+  FOR_EACH_OBSERVER(Observer, observer_list(), OnAudioInstanceReady());
+}
+
+void ArcBridgeService::CloseAudioChannel() {
+  if (!audio_ptr_)
+    return;
+
+  audio_ptr_.reset();
+  FOR_EACH_OBSERVER(Observer, observer_list(), OnAudioInstanceClosed());
+}
+
+void ArcBridgeService::OnAuthInstanceReady(mojom::AuthInstancePtr auth_ptr) {
   DCHECK(CalledOnValidThread());
   temporary_auth_ptr_ = std::move(auth_ptr);
   temporary_auth_ptr_.QueryVersion(base::Bind(
@@ -97,15 +155,40 @@ void ArcBridgeService::OnAuthVersionReady(int32_t version) {
 
 void ArcBridgeService::CloseAuthChannel() {
   DCHECK(CalledOnValidThread());
-  if (!input_ptr_)
+  if (!auth_ptr_)
     return;
 
   auth_ptr_.reset();
   FOR_EACH_OBSERVER(Observer, observer_list(), OnAuthInstanceClosed());
 }
 
+void ArcBridgeService::OnBluetoothInstanceReady(
+    mojom::BluetoothInstancePtr bluetooth_ptr) {
+  DCHECK(CalledOnValidThread());
+  temporary_bluetooth_ptr_ = std::move(bluetooth_ptr);
+  temporary_bluetooth_ptr_.QueryVersion(base::Bind(
+      &ArcBridgeService::OnBluetoothVersionReady, weak_factory_.GetWeakPtr()));
+}
+
+void ArcBridgeService::OnBluetoothVersionReady(int32_t version) {
+  DCHECK(CalledOnValidThread());
+  bluetooth_ptr_ = std::move(temporary_bluetooth_ptr_);
+  bluetooth_ptr_.set_connection_error_handler(base::Bind(
+      &ArcBridgeService::CloseBluetoothChannel, weak_factory_.GetWeakPtr()));
+  FOR_EACH_OBSERVER(Observer, observer_list(), OnBluetoothInstanceReady());
+}
+
+void ArcBridgeService::CloseBluetoothChannel() {
+  DCHECK(CalledOnValidThread());
+  if (!bluetooth_ptr_)
+    return;
+
+  bluetooth_ptr_.reset();
+  FOR_EACH_OBSERVER(Observer, observer_list(), OnBluetoothInstanceClosed());
+}
+
 void ArcBridgeService::OnClipboardInstanceReady(
-    ClipboardInstancePtr clipboard_ptr) {
+    mojom::ClipboardInstancePtr clipboard_ptr) {
   DCHECK(CalledOnValidThread());
   temporary_clipboard_ptr_ = std::move(clipboard_ptr);
   temporary_clipboard_ptr_.QueryVersion(base::Bind(
@@ -129,7 +212,35 @@ void ArcBridgeService::CloseClipboardChannel() {
   FOR_EACH_OBSERVER(Observer, observer_list(), OnClipboardInstanceClosed());
 }
 
-void ArcBridgeService::OnImeInstanceReady(ImeInstancePtr ime_ptr) {
+void ArcBridgeService::OnCrashCollectorInstanceReady(
+    mojom::CrashCollectorInstancePtr crash_collector_ptr) {
+  DCHECK(CalledOnValidThread());
+  temporary_crash_collector_ptr_ = std::move(crash_collector_ptr);
+  temporary_crash_collector_ptr_.QueryVersion(
+      base::Bind(&ArcBridgeService::OnCrashCollectorVersionReady,
+                 weak_factory_.GetWeakPtr()));
+}
+
+void ArcBridgeService::OnCrashCollectorVersionReady(int32_t version) {
+  DCHECK(CalledOnValidThread());
+  crash_collector_ptr_ = std::move(temporary_crash_collector_ptr_);
+  crash_collector_ptr_.set_connection_error_handler(
+      base::Bind(&ArcBridgeService::CloseCrashCollectorChannel,
+                 weak_factory_.GetWeakPtr()));
+  FOR_EACH_OBSERVER(Observer, observer_list(), OnCrashCollectorInstanceReady());
+}
+
+void ArcBridgeService::CloseCrashCollectorChannel() {
+  DCHECK(CalledOnValidThread());
+  if (!crash_collector_ptr_)
+    return;
+
+  crash_collector_ptr_.reset();
+  FOR_EACH_OBSERVER(Observer, observer_list(),
+                    OnCrashCollectorInstanceClosed());
+}
+
+void ArcBridgeService::OnImeInstanceReady(mojom::ImeInstancePtr ime_ptr) {
   DCHECK(CalledOnValidThread());
   temporary_ime_ptr_ = std::move(ime_ptr);
   temporary_ime_ptr_.QueryVersion(base::Bind(
@@ -153,32 +264,58 @@ void ArcBridgeService::CloseImeChannel() {
   FOR_EACH_OBSERVER(Observer, observer_list(), OnImeInstanceClosed());
 }
 
-void ArcBridgeService::OnInputInstanceReady(InputInstancePtr input_ptr) {
+void ArcBridgeService::OnIntentHelperInstanceReady(
+    mojom::IntentHelperInstancePtr intent_helper_ptr) {
   DCHECK(CalledOnValidThread());
-  temporary_input_ptr_ = std::move(input_ptr);
-  temporary_input_ptr_.QueryVersion(base::Bind(
-      &ArcBridgeService::OnInputVersionReady, weak_factory_.GetWeakPtr()));
+  temporary_intent_helper_ptr_ = std::move(intent_helper_ptr);
+  temporary_intent_helper_ptr_.QueryVersion(
+      base::Bind(&ArcBridgeService::OnIntentHelperVersionReady,
+                 weak_factory_.GetWeakPtr()));
 }
 
-void ArcBridgeService::OnInputVersionReady(int32_t version) {
+void ArcBridgeService::OnIntentHelperVersionReady(int32_t version) {
   DCHECK(CalledOnValidThread());
-  input_ptr_ = std::move(temporary_input_ptr_);
-  input_ptr_.set_connection_error_handler(base::Bind(
-      &ArcBridgeService::CloseInputChannel, weak_factory_.GetWeakPtr()));
-  FOR_EACH_OBSERVER(Observer, observer_list(), OnInputInstanceReady());
+  intent_helper_ptr_ = std::move(temporary_intent_helper_ptr_);
+  intent_helper_ptr_.set_connection_error_handler(base::Bind(
+      &ArcBridgeService::CloseIntentHelperChannel, weak_factory_.GetWeakPtr()));
+  FOR_EACH_OBSERVER(Observer, observer_list(), OnIntentHelperInstanceReady());
 }
 
-void ArcBridgeService::CloseInputChannel() {
+void ArcBridgeService::CloseIntentHelperChannel() {
   DCHECK(CalledOnValidThread());
-  if (!input_ptr_)
+  if (!intent_helper_ptr_)
     return;
 
-  input_ptr_.reset();
-  FOR_EACH_OBSERVER(Observer, observer_list(), OnInputInstanceClosed());
+  intent_helper_ptr_.reset();
+  FOR_EACH_OBSERVER(Observer, observer_list(), OnIntentHelperInstanceClosed());
+}
+
+void ArcBridgeService::OnNetInstanceReady(mojom::NetInstancePtr net_ptr) {
+  DCHECK(CalledOnValidThread());
+  temporary_net_ptr_ = std::move(net_ptr);
+  temporary_net_ptr_.QueryVersion(base::Bind(
+      &ArcBridgeService::OnNetVersionReady, weak_factory_.GetWeakPtr()));
+}
+
+void ArcBridgeService::OnNetVersionReady(int32_t version) {
+  DCHECK(CalledOnValidThread());
+  net_ptr_ = std::move(temporary_net_ptr_);
+  net_ptr_.set_connection_error_handler(base::Bind(
+      &ArcBridgeService::CloseNetChannel, weak_factory_.GetWeakPtr()));
+  FOR_EACH_OBSERVER(Observer, observer_list(), OnNetInstanceReady());
+}
+
+void ArcBridgeService::CloseNetChannel() {
+  DCHECK(CalledOnValidThread());
+  if (!net_ptr_)
+    return;
+
+  net_ptr_.reset();
+  FOR_EACH_OBSERVER(Observer, observer_list(), OnNetInstanceClosed());
 }
 
 void ArcBridgeService::OnNotificationsInstanceReady(
-    NotificationsInstancePtr notifications_ptr) {
+    mojom::NotificationsInstancePtr notifications_ptr) {
   DCHECK(CalledOnValidThread());
   temporary_notifications_ptr_ = std::move(notifications_ptr);
   temporary_notifications_ptr_.QueryVersion(
@@ -204,7 +341,32 @@ void ArcBridgeService::CloseNotificationsChannel() {
   FOR_EACH_OBSERVER(Observer, observer_list(), OnNotificationsInstanceClosed());
 }
 
-void ArcBridgeService::OnPowerInstanceReady(PowerInstancePtr power_ptr) {
+void ArcBridgeService::OnPolicyInstanceReady(
+    mojom::PolicyInstancePtr policy_ptr) {
+  DCHECK(CalledOnValidThread());
+  temporary_policy_ptr_ = std::move(policy_ptr);
+  temporary_policy_ptr_.QueryVersion(base::Bind(
+      &ArcBridgeService::OnPolicyVersionReady, weak_factory_.GetWeakPtr()));
+}
+
+void ArcBridgeService::OnPolicyVersionReady(int32_t version) {
+  DCHECK(CalledOnValidThread());
+  policy_ptr_ = std::move(temporary_policy_ptr_);
+  policy_ptr_.set_connection_error_handler(base::Bind(
+      &ArcBridgeService::ClosePolicyChannel, weak_factory_.GetWeakPtr()));
+  FOR_EACH_OBSERVER(Observer, observer_list(), OnPolicyInstanceReady());
+}
+
+void ArcBridgeService::ClosePolicyChannel() {
+  DCHECK(CalledOnValidThread());
+  if (!policy_ptr_)
+    return;
+
+  policy_ptr_.reset();
+  FOR_EACH_OBSERVER(Observer, observer_list(), OnPolicyInstanceClosed());
+}
+
+void ArcBridgeService::OnPowerInstanceReady(mojom::PowerInstancePtr power_ptr) {
   DCHECK(CalledOnValidThread());
   temporary_power_ptr_ = std::move(power_ptr);
   temporary_power_ptr_.QueryVersion(base::Bind(
@@ -228,7 +390,8 @@ void ArcBridgeService::ClosePowerChannel() {
   FOR_EACH_OBSERVER(Observer, observer_list(), OnPowerInstanceClosed());
 }
 
-void ArcBridgeService::OnProcessInstanceReady(ProcessInstancePtr process_ptr) {
+void ArcBridgeService::OnProcessInstanceReady(
+    mojom::ProcessInstancePtr process_ptr) {
   DCHECK(CalledOnValidThread());
   temporary_process_ptr_ = std::move(process_ptr);
   temporary_process_ptr_.QueryVersion(base::Bind(
@@ -252,32 +415,7 @@ void ArcBridgeService::CloseProcessChannel() {
   FOR_EACH_OBSERVER(Observer, observer_list(), OnProcessInstanceClosed());
 }
 
-void ArcBridgeService::OnSettingsInstanceReady(
-    SettingsInstancePtr settings_ptr) {
-  DCHECK(CalledOnValidThread());
-  temporary_settings_ptr_ = std::move(settings_ptr);
-  temporary_settings_ptr_.QueryVersion(base::Bind(
-      &ArcBridgeService::OnSettingsVersionReady, weak_factory_.GetWeakPtr()));
-}
-
-void ArcBridgeService::OnSettingsVersionReady(int32_t version) {
-  DCHECK(CalledOnValidThread());
-  settings_ptr_ = std::move(temporary_settings_ptr_);
-  settings_ptr_.set_connection_error_handler(base::Bind(
-      &ArcBridgeService::CloseSettingsChannel, weak_factory_.GetWeakPtr()));
-  FOR_EACH_OBSERVER(Observer, observer_list(), OnSettingsInstanceReady());
-}
-
-void ArcBridgeService::CloseSettingsChannel() {
-  DCHECK(CalledOnValidThread());
-  if (!settings_ptr_)
-    return;
-
-  settings_ptr_.reset();
-  FOR_EACH_OBSERVER(Observer, observer_list(), OnSettingsInstanceClosed());
-}
-
-void ArcBridgeService::OnVideoInstanceReady(VideoInstancePtr video_ptr) {
+void ArcBridgeService::OnVideoInstanceReady(mojom::VideoInstancePtr video_ptr) {
   DCHECK(CalledOnValidThread());
   temporary_video_ptr_ = std::move(video_ptr);
   temporary_video_ptr_.QueryVersion(base::Bind(
@@ -324,14 +462,18 @@ void ArcBridgeService::CloseAllChannels() {
   // Call all the error handlers of all the channels to both close the channel
   // and notify any observers that the channel is closed.
   CloseAppChannel();
+  CloseAudioChannel();
   CloseAuthChannel();
+  CloseBluetoothChannel();
   CloseClipboardChannel();
+  CloseCrashCollectorChannel();
   CloseImeChannel();
-  CloseInputChannel();
+  CloseIntentHelperChannel();
+  CloseNetChannel();
   CloseNotificationsChannel();
+  ClosePolicyChannel();
   ClosePowerChannel();
   CloseProcessChannel();
-  CloseSettingsChannel();
   CloseVideoChannel();
 }
 

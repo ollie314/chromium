@@ -133,6 +133,7 @@ class TestTransactionConsumer {
   const HttpResponseInfo* response_info() const {
     return trans_->GetResponseInfo();
   }
+  const HttpTransaction* transaction() const { return trans_.get(); }
   const std::string& content() const { return content_; }
 
  private:
@@ -151,7 +152,7 @@ class TestTransactionConsumer {
   void OnIOComplete(int result);
 
   State state_;
-  scoped_ptr<HttpTransaction> trans_;
+  std::unique_ptr<HttpTransaction> trans_;
   std::string content_;
   scoped_refptr<IOBuffer> read_buf_;
   int error_;
@@ -311,7 +312,7 @@ class MockNetworkLayer : public HttpTransactionFactory,
 
   // HttpTransactionFactory:
   int CreateTransaction(RequestPriority priority,
-                        scoped_ptr<HttpTransaction>* trans) override;
+                        std::unique_ptr<HttpTransaction>* trans) override;
   HttpCache* GetCache() override;
   HttpNetworkSession* GetSession() override;
 

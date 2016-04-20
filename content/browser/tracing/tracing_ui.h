@@ -24,7 +24,6 @@ class CONTENT_EXPORT TracingUI : public WebUIController {
  public:
   explicit TracingUI(WebUI* web_ui);
   ~TracingUI() override;
-  void OnMonitoringStateChanged(bool is_monitoring);
   void OnTraceUploadProgress(int64_t current, int64_t total);
   void OnTraceUploadComplete(bool success, const std::string& feedback);
 
@@ -34,8 +33,8 @@ class CONTENT_EXPORT TracingUI : public WebUIController {
   void DoUpload(const base::ListValue* args);
   void DoUploadBase64Encoded(const base::ListValue* args);
 
-  scoped_ptr<TracingDelegate> delegate_;
-  scoped_ptr<TraceUploader> trace_uploader_;
+  std::unique_ptr<TracingDelegate> delegate_;
+  std::unique_ptr<TraceUploader> trace_uploader_;
   base::WeakPtrFactory<TracingUI> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TracingUI);

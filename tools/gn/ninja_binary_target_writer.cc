@@ -51,12 +51,6 @@ namespace {
 EscapeOptions GetFlagOptions() {
   EscapeOptions opts;
   opts.mode = ESCAPE_NINJA_COMMAND;
-
-  // Some flag strings are actually multiple flags that expect to be just
-  // added to the command line. We assume that quoting is done by the
-  // buildfiles if it wants such things quoted.
-  opts.inhibit_quoting = true;
-
   return opts;
 }
 
@@ -92,49 +86,6 @@ struct IncludeWriter {
   PathOutput& path_output_;
 };
 
-// Computes the set of output files resulting from compiling the given source
-// file. If the file can be compiled and the tool exists, fills the outputs in
-// and writes the tool type to computed_tool_type. If the file is not
-// compilable, returns false.
-//
-// The target that the source belongs to is passed as an argument. In the case
-// of linking to source sets, this can be different than the target this class
-// is currently writing.
-//
-// The function can succeed with a "NONE" tool type for object files which are
-// just passed to the output. The output will always be overwritten, not
-// appended to.
-bool GetOutputFilesForSource(const Target* target,
-                             const SourceFile& source,
-                             Toolchain::ToolType* computed_tool_type,
-                             std::vector<OutputFile>* outputs) {
-  outputs->clear();
-  *computed_tool_type = Toolchain::TYPE_NONE;
-
-  SourceFileType file_type = GetSourceFileType(source);
-  if (file_type == SOURCE_UNKNOWN)
-    return false;
-  if (file_type == SOURCE_O) {
-    // Object files just get passed to the output and not compiled.
-    outputs->push_back(
-        OutputFile(target->settings()->build_settings(), source));
-    return true;
-  }
-
-  *computed_tool_type =
-      target->toolchain()->GetToolTypeForSourceType(file_type);
-  if (*computed_tool_type == Toolchain::TYPE_NONE)
-    return false;  // No tool for this file (it's a header file or something).
-  const Tool* tool = target->toolchain()->GetTool(*computed_tool_type);
-  if (!tool)
-    return false;  // Tool does not apply for this toolchain.file.
-
-  // Figure out what output(s) this compiler produces.
-  SubstitutionWriter::ApplyListToCompilerAsOutputFile(
-      target, source, tool->outputs(), outputs);
-  return !outputs->empty();
-}
-
 // Returns the language-specific suffix for precompiled header files.
 const char* GetPCHLangSuffixForToolType(Toolchain::ToolType type) {
   switch (type) {
@@ -152,14 +103,15 @@ const char* GetPCHLangSuffixForToolType(Toolchain::ToolType type) {
   }
 }
 
-std::string GetWindowsPCHObjectExtension(Toolchain::ToolType tool_type) {
+std::string GetWindowsPCHObjectExtension(Toolchain::ToolType tool_type,
+                                         const std::string& obj_extension) {
   const char* lang_suffix = GetPCHLangSuffixForToolType(tool_type);
   std::string result = ".";
   // For MSVC, annotate the obj files with the language type. For example:
-  //   obj/foo/target_name.precompile.o ->
-  //   obj/foo/target_name.precompile.cc.o
+  //   obj/foo/target_name.precompile.obj ->
+  //   obj/foo/target_name.precompile.cc.obj
   result += lang_suffix;
-  result += ".o";
+  result += obj_extension;
   return result;
 }
 
@@ -231,7 +183,8 @@ void GetPCHOutputFiles(const Target* target,
   Tool::PrecompiledHeaderType header_type = tool->precompiled_header_type();
   switch (header_type) {
     case Tool::PCH_MSVC:
-      output_extension = GetWindowsPCHObjectExtension(tool_type);
+      output_extension = GetWindowsPCHObjectExtension(
+          tool_type, output_value.substr(extension_offset - 1));
       break;
     case Tool::PCH_GCC:
       output_extension = GetGCCPCHOutputExtension(tool_type);
@@ -256,7 +209,7 @@ void AddSourceSetObjectFiles(const Target* source_set,
   // the tool if there are more than one.
   for (const auto& source : source_set->sources()) {
     Toolchain::ToolType tool_type = Toolchain::TYPE_NONE;
-    if (GetOutputFilesForSource(source_set, source, &tool_type, &tool_outputs))
+    if (source_set->GetOutputFilesForSource(source, &tool_type, &tool_outputs))
       obj_files->push_back(tool_outputs[0]);
 
     used_types.Set(GetSourceFileType(source));
@@ -662,7 +615,7 @@ void NinjaBinaryTargetWriter::WriteSources(
     // Clear the vector but maintain the max capacity to prevent reallocations.
     deps.resize(0);
     Toolchain::ToolType tool_type = Toolchain::TYPE_NONE;
-    if (!GetOutputFilesForSource(target_, source, &tool_type, &tool_outputs)) {
+    if (!target_->GetOutputFilesForSource(source, &tool_type, &tool_outputs)) {
       if (GetSourceFileType(source) == SOURCE_DEF)
         other_files->push_back(source);
       continue;  // No output for this source.
@@ -670,7 +623,7 @@ void NinjaBinaryTargetWriter::WriteSources(
 
     if (tool_type != Toolchain::TYPE_NONE) {
       // Only include PCH deps that correspond to the tool type, for instance,
-      // do not specify target_name.precompile.cc.o (a CXX PCH file) as a dep
+      // do not specify target_name.precompile.cc.obj (a CXX PCH file) as a dep
       // for the output of a C tool type.
       //
       // This makes the assumption that pch_deps only contains pch output files
@@ -680,9 +633,13 @@ void NinjaBinaryTargetWriter::WriteSources(
       if (tool->precompiled_header_type() != Tool::PCH_NONE) {
         for (const auto& dep : pch_deps) {
           const std::string& output_value = dep.value();
+          size_t extension_offset = FindExtensionOffset(output_value);
+          if (extension_offset == std::string::npos)
+            continue;
           std::string output_extension;
           if (tool->precompiled_header_type() == Tool::PCH_MSVC) {
-            output_extension = GetWindowsPCHObjectExtension(tool_type);
+            output_extension = GetWindowsPCHObjectExtension(
+                tool_type, output_value.substr(extension_offset - 1));
           } else if (tool->precompiled_header_type() == Tool::PCH_GCC) {
             output_extension = GetGCCPCHOutputExtension(tool_type);
           }
@@ -822,11 +779,19 @@ void NinjaBinaryTargetWriter::WriteLinkerStuff(
   // End of the link "build" line.
   out_ << std::endl;
 
-  // These go in the inner scope of the link line.
-  WriteLinkerFlags(optional_def_file);
-
-  WriteLibs();
-  WriteOutputExtension();
+  // The remaining things go in the inner scope of the link line.
+  if (target_->output_type() == Target::EXECUTABLE ||
+      target_->output_type() == Target::SHARED_LIBRARY ||
+      target_->output_type() == Target::LOADABLE_MODULE) {
+    WriteLinkerFlags(optional_def_file);
+    WriteLibs();
+  } else if (target_->output_type() == Target::STATIC_LIBRARY) {
+    out_ << "  arflags =";
+    RecursiveTargetConfigStringsToStream(target_, &ConfigValues::arflags,
+                                         GetFlagOptions(), out_);
+    out_ << std::endl;
+  }
+  WriteOutputSubstitutions();
   WriteSolibs(solibs);
 }
 
@@ -835,9 +800,8 @@ void NinjaBinaryTargetWriter::WriteLinkerFlags(
   out_ << "  ldflags =";
 
   // First the ldflags from the target and its config.
-  EscapeOptions flag_options = GetFlagOptions();
   RecursiveTargetConfigStringsToStream(target_, &ConfigValues::ldflags,
-                                       flag_options, out_);
+                                       GetFlagOptions(), out_);
 
   // Followed by library search paths that have been recursively pushed
   // through the dependency tree.
@@ -893,16 +857,14 @@ void NinjaBinaryTargetWriter::WriteLibs() {
   out_ << std::endl;
 }
 
-void NinjaBinaryTargetWriter::WriteOutputExtension() {
-  out_ << "  output_extension = ";
-  if (target_->output_extension().empty()) {
-    // Use the default from the tool.
-    out_ << tool_->default_output_extension();
-  } else {
-    // Use the one specified in the target. Note that the one in the target
-    // does not include the leading dot, so add that.
-    out_ << "." << target_->output_extension();
-  }
+void NinjaBinaryTargetWriter::WriteOutputSubstitutions() {
+  out_ << "  output_extension = "
+       << SubstitutionWriter::GetLinkerSubstitution(
+              target_, tool_, SUBSTITUTION_OUTPUT_EXTENSION);
+  out_ << std::endl;
+  out_ << "  output_dir = "
+       << SubstitutionWriter::GetLinkerSubstitution(
+              target_, tool_, SUBSTITUTION_OUTPUT_DIR);
   out_ << std::endl;
 }
 

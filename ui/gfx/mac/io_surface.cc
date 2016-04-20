@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "base/logging.h"
+#include "base/mac/mac_util.h"
 #include "base/mac/mach_logging.h"
 #include "base/macros.h"
 #include "ui/gfx/buffer_format_util.h"
@@ -30,6 +31,7 @@ int32_t BytesPerElement(gfx::BufferFormat format, int plane) {
       DCHECK_EQ(plane, 0);
       return 1;
     case gfx::BufferFormat::BGRA_8888:
+    case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::RGBA_8888:
       DCHECK_EQ(plane, 0);
       return 4;
@@ -47,7 +49,6 @@ int32_t BytesPerElement(gfx::BufferFormat format, int plane) {
     case gfx::BufferFormat::ETC1:
     case gfx::BufferFormat::RGBA_4444:
     case gfx::BufferFormat::RGBX_8888:
-    case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::YUV_420:
       NOTREACHED();
       return 0;
@@ -62,6 +63,7 @@ int32_t PixelFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::R_8:
       return 'L008';
     case gfx::BufferFormat::BGRA_8888:
+    case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::RGBA_8888:
       return 'BGRA';
     case gfx::BufferFormat::YUV_420_BIPLANAR:
@@ -75,7 +77,6 @@ int32_t PixelFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::ETC1:
     case gfx::BufferFormat::RGBA_4444:
     case gfx::BufferFormat::RGBX_8888:
-    case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::YUV_420:
       NOTREACHED();
       return 0;
@@ -148,7 +149,22 @@ IOSurfaceRef CreateIOSurface(const gfx::Size& size, gfx::BufferFormat format) {
                     BytesPerElement(format, 0));
   }
 
-  return IOSurfaceCreate(properties);
+  IOSurfaceRef surface = IOSurfaceCreate(properties);
+
+  // For unknown reasons, triggering this lock on OS X 10.9, on certain GPUs,
+  // causes PDFs to render incorrectly. Hopefully this check can be removed once
+  // pdfium switches to a Skia backend on Mac.
+  // https://crbug.com/594343.
+  if (!base::mac::IsOSMavericks()) {
+    // Zero-initialize the IOSurface. Calling IOSurfaceLock/IOSurfaceUnlock
+    // appears to be sufficient. https://crbug.com/584760#c17
+    IOReturn r = IOSurfaceLock(surface, 0, nullptr);
+    DCHECK_EQ(kIOReturnSuccess, r);
+    r = IOSurfaceUnlock(surface, 0, nullptr);
+    DCHECK_EQ(kIOReturnSuccess, r);
+  }
+
+  return surface;
 }
 
 }  // namespace gfx

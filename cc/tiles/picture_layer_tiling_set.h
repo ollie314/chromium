@@ -39,7 +39,7 @@ class CC_EXPORT PictureLayerTilingSet {
     size_t end;
   };
 
-  static scoped_ptr<PictureLayerTilingSet> Create(
+  static std::unique_ptr<PictureLayerTilingSet> Create(
       WhichTree tree,
       PictureLayerTilingClient* client,
       size_t tiling_interest_area_padding,
@@ -58,7 +58,7 @@ class CC_EXPORT PictureLayerTilingSet {
 
   // This function is called on the active tree during activation.
   void UpdateTilingsToCurrentRasterSourceForActivation(
-      scoped_refptr<DisplayListRasterSource> raster_source,
+      scoped_refptr<RasterSource> raster_source,
       const PictureLayerTilingSet* pending_twin_set,
       const Region& layer_invalidation,
       float minimum_contents_scale,
@@ -66,19 +66,18 @@ class CC_EXPORT PictureLayerTilingSet {
 
   // This function is called on the sync tree during commit.
   void UpdateTilingsToCurrentRasterSourceForCommit(
-      scoped_refptr<DisplayListRasterSource> raster_source,
+      scoped_refptr<RasterSource> raster_source,
       const Region& layer_invalidation,
       float minimum_contents_scale,
       float maximum_contents_scale);
 
   // This function is called on the sync tree right after commit.
   void UpdateRasterSourceDueToLCDChange(
-      const scoped_refptr<DisplayListRasterSource>& raster_source,
+      scoped_refptr<RasterSource> raster_source,
       const Region& layer_invalidation);
 
-  PictureLayerTiling* AddTiling(
-      float contents_scale,
-      scoped_refptr<DisplayListRasterSource> raster_source);
+  PictureLayerTiling* AddTiling(float contents_scale,
+                                scoped_refptr<RasterSource> raster_source);
   size_t num_tilings() const { return tilings_.size(); }
   int NumHighResTilings() const;
   PictureLayerTiling* tiling_at(size_t idx) { return tilings_[idx].get(); }
@@ -183,14 +182,14 @@ class CC_EXPORT PictureLayerTilingSet {
 
   void CopyTilingsAndPropertiesFromPendingTwin(
       const PictureLayerTilingSet* pending_twin_set,
-      const scoped_refptr<DisplayListRasterSource>& raster_source,
+      scoped_refptr<RasterSource> raster_source,
       const Region& layer_invalidation);
 
   // Remove one tiling.
   void Remove(PictureLayerTiling* tiling);
   void VerifyTilings(const PictureLayerTilingSet* pending_twin_set) const;
 
-  std::vector<scoped_ptr<PictureLayerTiling>> tilings_;
+  std::vector<std::unique_ptr<PictureLayerTiling>> tilings_;
 
   const size_t tiling_interest_area_padding_;
   const float skewport_target_time_in_seconds_;

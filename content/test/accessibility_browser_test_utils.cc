@@ -24,6 +24,7 @@ AccessibilityNotificationWaiter::AccessibilityNotificationWaiter(Shell* shell)
     : event_to_wait_for_(ui::AX_EVENT_NONE),
       loop_runner_(new MessageLoopRunner()),
       event_target_id_(0),
+      event_render_frame_host_(nullptr),
       weak_factory_(this) {
   WebContents* web_contents = shell->web_contents();
   frame_host_ = static_cast<RenderFrameHostImpl*>(
@@ -83,14 +84,21 @@ void AccessibilityNotificationWaiter::WaitForNotification() {
 }
 
 const ui::AXTree& AccessibilityNotificationWaiter::GetAXTree() const {
-  return *frame_host_->GetAXTreeForTesting();
+  CR_DEFINE_STATIC_LOCAL(ui::AXTree, empty_tree, ());
+  const ui::AXTree* tree = frame_host_->GetAXTreeForTesting();
+  if (tree)
+    return *tree;
+  return empty_tree;
 }
 
 void AccessibilityNotificationWaiter::OnAccessibilityEvent(
-    ui::AXEvent event_type, int event_target_id) {
-   if (!IsAboutBlank() && (event_to_wait_for_ == ui::AX_EVENT_NONE ||
+    RenderFrameHostImpl* rfhi,
+    ui::AXEvent event_type,
+    int event_target_id) {
+  if (!IsAboutBlank() && (event_to_wait_for_ == ui::AX_EVENT_NONE ||
                           event_to_wait_for_ == event_type)) {
     event_target_id_ = event_target_id;
+    event_render_frame_host_ = rfhi;
     loop_runner_->Quit();
   }
 }

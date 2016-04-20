@@ -10,6 +10,7 @@
 #include "net/socket/ssl_server_socket.h"
 #include "net/spdy/spdy_session.h"
 #include "net/test/net_test_suite.h"
+#include "url/url_features.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/jni_android.h"
@@ -20,12 +21,12 @@
 #include "net/android/net_jni_registrar.h"
 #endif
 
-#if defined(USE_ICU_ALTERNATIVES_ON_ANDROID)
-#include "url/android/url_jni_registrar.h"
+#if BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
+#include "url/android/url_jni_registrar.h"  // nogncheck
 #endif
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
-#include "third_party/mojo/src/mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/embedder.h"  // nogncheck
 #endif
 
 using net::internal::ClientSocketPoolBaseHelper;
@@ -42,7 +43,7 @@ int main(int argc, char** argv) {
     {"NetAndroid", net::android::RegisterJni},
     {"TestFileUtil", base::RegisterContentUriTestUtils},
     {"TestUiThreadAndroid", base::RegisterTestUiThreadAndroid},
-#if defined(USE_ICU_ALTERNATIVES_ON_ANDROID)
+#if BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
     {"UrlAndroid", url::android::RegisterJni},
 #endif
   };
@@ -68,7 +69,7 @@ int main(int argc, char** argv) {
   net::EnableSSLServerSockets();
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
-  mojo::embedder::Init();
+  mojo::edk::Init();
 #endif
 
   return base::LaunchUnitTests(

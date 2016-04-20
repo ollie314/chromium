@@ -65,7 +65,7 @@ class DragDownloadFile::DragDownloadFileUI : public DownloadItem::Observer {
         BrowserContext::GetDownloadManager(web_contents_->GetBrowserContext());
 
     RecordDownloadSource(INITIATED_BY_DRAG_N_DROP);
-    scoped_ptr<content::DownloadUrlParameters> params(
+    std::unique_ptr<content::DownloadUrlParameters> params(
         DownloadUrlParameters::FromWebContents(web_contents_, url_));
     params->set_referrer(referrer_);
     params->set_referrer_encoding(referrer_encoding_);
@@ -97,8 +97,8 @@ class DragDownloadFile::DragDownloadFileUI : public DownloadItem::Observer {
   void OnDownloadStarted(DownloadItem* item,
                          DownloadInterruptReason interrupt_reason) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
-    if (!item) {
-      DCHECK_NE(DOWNLOAD_INTERRUPT_REASON_NONE, interrupt_reason);
+    if (!item || item->GetState() != DownloadItem::IN_PROGRESS) {
+      DCHECK(!item || item->GetLastReason() != DOWNLOAD_INTERRUPT_REASON_NONE);
       on_completed_loop_->task_runner()->PostTask(
           FROM_HERE, base::Bind(on_completed_, false));
       return;

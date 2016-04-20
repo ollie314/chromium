@@ -5,9 +5,10 @@
 #ifndef UI_KEYBOARD_KEYBOARD_CONTROLLER_H_
 #define UI_KEYBOARD_KEYBOARD_CONTROLLER_H_
 
+#include <memory>
+
 #include "base/event_types.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/ime/input_method_observer.h"
@@ -65,9 +66,7 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   aura::Window* GetContainerWindow();
 
   // Whether the container window for the keyboard has been initialized.
-  bool keyboard_container_initialized() const {
-    return container_.get() != NULL;
-  }
+  bool keyboard_container_initialized() const { return container_ != nullptr; }
 
   // Reloads the content of the keyboard. No-op if the keyboard content is not
   // loaded yet.
@@ -150,11 +149,11 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   void ShowAnimationFinished();
   void HideAnimationFinished();
 
-  scoped_ptr<KeyboardUI> ui_;
-  scoped_ptr<aura::Window> container_;
+  std::unique_ptr<KeyboardUI> ui_;
+  std::unique_ptr<aura::Window> container_;
   // CallbackAnimationObserver should destructed before container_ because it
   // uses container_'s animator.
-  scoped_ptr<CallbackAnimationObserver> animation_observer_;
+  std::unique_ptr<CallbackAnimationObserver> animation_observer_;
 
   ui::InputMethod* input_method_;
   bool keyboard_visible_;

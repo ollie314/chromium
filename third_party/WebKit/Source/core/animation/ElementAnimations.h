@@ -32,6 +32,7 @@
 #define ElementAnimations_h
 
 #include "core/animation/AnimationStack.h"
+#include "core/animation/CustomCompositorAnimations.h"
 #include "core/animation/css/CSSAnimations.h"
 #include "wtf/HashCountedSet.h"
 #include "wtf/HashMap.h"
@@ -54,6 +55,10 @@ public:
     // during a style recalc. CSS Transitions are included in this stack.
     AnimationStack& animationStack() { return m_animationStack; }
     const AnimationStack& animationStack() const { return m_animationStack; }
+    // Tracks long running animations that are responsible for applying mutations
+    // from compositor worker.
+    CustomCompositorAnimations& customCompositorAnimations() { return m_customCompositorAnimations; }
+    const CustomCompositorAnimations& customCompositorAnimations() const { return m_customCompositorAnimations; }
     // Tracks the state of active CSS Animations and Transitions. The individual animations
     // will also be part of the animation stack, but the mapping betwen animation name and
     // animation is kept here.
@@ -74,27 +79,17 @@ public:
     void updateBaseComputedStyle(const ComputedStyle*);
     void clearBaseComputedStyle();
 
-#if !ENABLE(OILPAN)
-    void addEffect(KeyframeEffect* effect) { m_effects.add(effect); }
-    void dispose();
-#endif
-
     DECLARE_TRACE();
 
 private:
     bool isAnimationStyleChange() const;
 
     AnimationStack m_animationStack;
+    CustomCompositorAnimations m_customCompositorAnimations;
     CSSAnimations m_cssAnimations;
     AnimationCountedSet m_animations;
     bool m_animationStyleChange;
     RefPtr<ComputedStyle> m_baseComputedStyle;
-
-#if !ENABLE(OILPAN)
-    // TODO(oilpan): This is to avoid a reference cycle that keeps Elements
-    // alive and won't be needed once the Node hierarchy becomes traceable.
-    HeapHashSet<WeakMember<KeyframeEffect>> m_effects;
-#endif
 
     // CSSAnimations and DeferredLegacyStyleInterpolation checks if a style change is due to animation.
     friend class CSSAnimations;

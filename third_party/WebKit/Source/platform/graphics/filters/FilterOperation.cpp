@@ -25,11 +25,25 @@
 
 #include "platform/graphics/filters/FilterOperation.h"
 
+#include "platform/LengthFunctions.h"
 #include "platform/animation/AnimationUtilities.h"
+#include "platform/graphics/filters/FEGaussianBlur.h"
+#include "platform/graphics/filters/FilterEffect.h"
+#include "platform/graphics/filters/SkiaImageFilterBuilder.h"
 
 namespace blink {
 
-PassRefPtrWillBeRawPtr<FilterOperation> FilterOperation::blend(const FilterOperation* from, const FilterOperation* to, double progress)
+static inline FloatSize outsetSizeForBlur(float stdDeviation)
+{
+    IntSize kernelSize = FEGaussianBlur::calculateUnscaledKernelSize(FloatPoint(stdDeviation, stdDeviation));
+    FloatSize outset;
+    // We take the half kernel size and multiply it with three, because we run box blur three times.
+    outset.setWidth(3 * kernelSize.width() * 0.5f);
+    outset.setHeight(3 * kernelSize.height() * 0.5f);
+    return outset;
+}
+
+FilterOperation* FilterOperation::blend(const FilterOperation* from, const FilterOperation* to, double progress)
 {
     ASSERT(from || to);
     if (to)
@@ -43,7 +57,15 @@ DEFINE_TRACE(ReferenceFilterOperation)
     FilterOperation::trace(visitor);
 }
 
-PassRefPtrWillBeRawPtr<FilterOperation> BasicColorMatrixFilterOperation::blend(const FilterOperation* from, double progress) const
+FloatRect ReferenceFilterOperation::mapRect(const FloatRect& rect) const
+{
+    const auto* lastEffect = m_filter ? m_filter->lastEffect() : nullptr;
+    if (!lastEffect)
+        return rect;
+    return lastEffect->mapRectRecursive(rect);
+}
+
+FilterOperation* BasicColorMatrixFilterOperation::blend(const FilterOperation* from, double progress) const
 {
     double fromAmount;
     if (from) {
@@ -82,7 +104,7 @@ PassRefPtrWillBeRawPtr<FilterOperation> BasicColorMatrixFilterOperation::blend(c
     return BasicColorMatrixFilterOperation::create(result, m_type);
 }
 
-PassRefPtrWillBeRawPtr<FilterOperation> BasicComponentTransferFilterOperation::blend(const FilterOperation* from, double progress) const
+FilterOperation* BasicComponentTransferFilterOperation::blend(const FilterOperation* from, double progress) const
 {
     double fromAmount;
     if (from) {
@@ -120,7 +142,18 @@ PassRefPtrWillBeRawPtr<FilterOperation> BasicComponentTransferFilterOperation::b
     return BasicComponentTransferFilterOperation::create(result, m_type);
 }
 
-PassRefPtrWillBeRawPtr<FilterOperation> BlurFilterOperation::blend(const FilterOperation* from, double progress) const
+FloatRect BlurFilterOperation::mapRect(const FloatRect& rect) const
+{
+    // Matches FEGaussianBlur::mapRect.
+    float stdDeviation = floatValueForLength(m_stdDeviation, 0);
+    FloatSize outsetSize = outsetSizeForBlur(stdDeviation);
+    FloatRect mappedRect = rect;
+    mappedRect.inflateX(outsetSize.width());
+    mappedRect.inflateY(outsetSize.height());
+    return mappedRect;
+}
+
+FilterOperation* BlurFilterOperation::blend(const FilterOperation* from, double progress) const
 {
     LengthType lengthType = m_stdDeviation.type();
     if (!from)
@@ -130,7 +163,18 @@ PassRefPtrWillBeRawPtr<FilterOperation> BlurFilterOperation::blend(const FilterO
     return BlurFilterOperation::create(m_stdDeviation.blend(fromOp->m_stdDeviation, progress, ValueRangeNonNegative));
 }
 
-PassRefPtrWillBeRawPtr<FilterOperation> DropShadowFilterOperation::blend(const FilterOperation* from, double progress) const
+FloatRect DropShadowFilterOperation::mapRect(const FloatRect& rect) const
+{
+    FloatSize outsetSize = outsetSizeForBlur(m_stdDeviation);
+    FloatRect mappedRect = rect;
+    mappedRect.inflateX(outsetSize.width());
+    mappedRect.inflateY(outsetSize.height());
+    mappedRect.moveBy(m_location);
+    mappedRect.unite(rect);
+    return mappedRect;
+}
+
+FilterOperation* DropShadowFilterOperation::blend(const FilterOperation* from, double progress) const
 {
     if (!from) {
         return DropShadowFilterOperation::create(
@@ -143,7 +187,26 @@ PassRefPtrWillBeRawPtr<FilterOperation> DropShadowFilterOperation::blend(const F
     return DropShadowFilterOperation::create(
         blink::blend(fromOp->location(), m_location, progress),
         blink::blend(fromOp->stdDeviation(), m_stdDeviation, progress),
-        blink::blend(fromOp->color(), m_color, progress));
+        blink::blend(fromOp->getColor(), m_color, progress));
+}
+
+FloatRect BoxReflectFilterOperation::mapRect(const FloatRect& rect) const
+{
+    return m_reflection.mapRect(rect);
+}
+
+FilterOperation* BoxReflectFilterOperation::blend(const FilterOperation* from, double progress) const
+{
+    ASSERT_NOT_REACHED();
+    return nullptr;
+}
+
+bool BoxReflectFilterOperation::operator==(const FilterOperation& o) const
+{
+    if (!isSameType(o))
+        return false;
+    const auto& other = static_cast<const BoxReflectFilterOperation&>(o);
+    return m_reflection == other.m_reflection;
 }
 
 } // namespace blink

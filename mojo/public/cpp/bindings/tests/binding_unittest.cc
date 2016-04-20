@@ -10,11 +10,11 @@
 #include <stdint.h>
 #include <utility>
 
+#include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "mojo/message_pump/message_pump_mojo.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "mojo/public/cpp/system/macros.h"
 #include "mojo/public/interfaces/bindings/tests/sample_interfaces.mojom.h"
 #include "mojo/public/interfaces/bindings/tests/sample_service.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -32,7 +32,7 @@ class BindingTestBase : public testing::Test {
  private:
   base::MessageLoop loop_;
 
-  MOJO_DISALLOW_COPY_AND_ASSIGN(BindingTestBase);
+  DISALLOW_COPY_AND_ASSIGN(BindingTestBase);
 };
 
 class ServiceImpl : public sample::Service {
@@ -56,7 +56,7 @@ class ServiceImpl : public sample::Service {
 
   bool* const was_deleted_;
 
-  MOJO_DISALLOW_COPY_AND_ASSIGN(ServiceImpl);
+  DISALLOW_COPY_AND_ASSIGN(ServiceImpl);
 };
 
 // BindingTest -----------------------------------------------------------------
@@ -101,7 +101,7 @@ TEST_F(BindingTest, DestroyClosesMessagePipe) {
   };
   {
     Binding<sample::Service> binding(&impl, std::move(request));
-    ptr->Frobinate(nullptr, sample::Service::BAZ_OPTIONS_REGULAR, nullptr,
+    ptr->Frobinate(nullptr, sample::Service::BazOptions::REGULAR, nullptr,
                    called_cb);
     run_loop2.Run();
     EXPECT_TRUE(called);
@@ -114,7 +114,7 @@ TEST_F(BindingTest, DestroyClosesMessagePipe) {
 
   // And calls should fail.
   called = false;
-  ptr->Frobinate(nullptr, sample::Service::BAZ_OPTIONS_REGULAR, nullptr,
+  ptr->Frobinate(nullptr, sample::Service::BazOptions::REGULAR, nullptr,
                  called_cb);
   loop().RunUntilIdle();
   EXPECT_FALSE(called);
@@ -181,7 +181,7 @@ class ServiceImplWithBinding : public ServiceImpl {
   Binding<sample::Service> binding_;
   base::Closure closure_;
 
-  MOJO_DISALLOW_COPY_AND_ASSIGN(ServiceImplWithBinding);
+  DISALLOW_COPY_AND_ASSIGN(ServiceImplWithBinding);
 };
 
 // Tests that the binding may be deleted in the connection error handler.
@@ -210,7 +210,7 @@ TEST_F(BindingTest, Unbind) {
     called = true;
     run_loop.Quit();
   };
-  ptr->Frobinate(nullptr, sample::Service::BAZ_OPTIONS_REGULAR, nullptr,
+  ptr->Frobinate(nullptr, sample::Service::BazOptions::REGULAR, nullptr,
                  called_cb);
   run_loop.Run();
   EXPECT_TRUE(called);
@@ -219,7 +219,7 @@ TEST_F(BindingTest, Unbind) {
   auto request = binding.Unbind();
   EXPECT_FALSE(binding.is_bound());
   // All calls should fail when not bound...
-  ptr->Frobinate(nullptr, sample::Service::BAZ_OPTIONS_REGULAR, nullptr,
+  ptr->Frobinate(nullptr, sample::Service::BazOptions::REGULAR, nullptr,
                  called_cb);
   loop().RunUntilIdle();
   EXPECT_FALSE(called);
@@ -233,7 +233,7 @@ TEST_F(BindingTest, Unbind) {
     called = true;
     run_loop2.Quit();
   };
-  ptr->Frobinate(nullptr, sample::Service::BAZ_OPTIONS_REGULAR, nullptr,
+  ptr->Frobinate(nullptr, sample::Service::BazOptions::REGULAR, nullptr,
                  called_cb2);
   run_loop2.Run();
   EXPECT_TRUE(called);
@@ -247,11 +247,11 @@ class IntegerAccessorImpl : public sample::IntegerAccessor {
  private:
   // sample::IntegerAccessor implementation.
   void GetInteger(const GetIntegerCallback& callback) override {
-    callback.Run(1, sample::ENUM_VALUE);
+    callback.Run(1, sample::Enum::VALUE);
   }
   void SetInteger(int64_t data, sample::Enum type) override {}
 
-  MOJO_DISALLOW_COPY_AND_ASSIGN(IntegerAccessorImpl);
+  DISALLOW_COPY_AND_ASSIGN(IntegerAccessorImpl);
 };
 
 TEST_F(BindingTest, SetInterfacePtrVersion) {
@@ -273,7 +273,7 @@ TEST_F(BindingTest, PauseResume) {
   ServiceImpl impl;
   Binding<sample::Service> binding(&impl, std::move(request));
   binding.PauseIncomingMethodCallProcessing();
-  ptr->Frobinate(nullptr, sample::Service::BAZ_OPTIONS_REGULAR, nullptr,
+  ptr->Frobinate(nullptr, sample::Service::BazOptions::REGULAR, nullptr,
                  called_cb);
   EXPECT_FALSE(called);
   loop().RunUntilIdle();
@@ -337,7 +337,7 @@ TEST_F(StrongBindingTest, DestroyClosesMessagePipe) {
   };
   {
     StrongBinding<sample::Service> binding(&impl, std::move(request));
-    ptr->Frobinate(nullptr, sample::Service::BAZ_OPTIONS_REGULAR, nullptr,
+    ptr->Frobinate(nullptr, sample::Service::BazOptions::REGULAR, nullptr,
                    called_cb);
     run_loop2.Run();
     EXPECT_TRUE(called);
@@ -362,7 +362,7 @@ class ServiceImplWithStrongBinding : public ServiceImpl {
  private:
   StrongBinding<sample::Service> binding_;
 
-  MOJO_DISALLOW_COPY_AND_ASSIGN(ServiceImplWithStrongBinding);
+  DISALLOW_COPY_AND_ASSIGN(ServiceImplWithStrongBinding);
 };
 
 // Tests the typical case, where the implementation object owns the

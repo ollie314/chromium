@@ -97,7 +97,7 @@ class SQLiteCursorTest : public testing::Test,
   base::MessageLoop message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
-  scoped_ptr<AndroidHistoryProviderService> service_;
+  std::unique_ptr<AndroidHistoryProviderService> service_;
   base::CancelableTaskTracker cancelable_tracker_;
   TestingProfile* testing_profile_;
   history::HistoryService* hs_;
@@ -151,7 +151,7 @@ TEST_F(SQLiteCursorTest, Run) {
   row.set_url(GURL("http://www.google.com/"));
   std::vector<unsigned char> favicon_data;
   favicon_data.push_back(1);
-  base::RefCountedBytes *data_bytes =
+  scoped_refptr<base::RefCountedBytes> data_bytes =
       base::RefCountedBytes::TakeVector(&favicon_data);
   row.set_favicon(data_bytes);
   row.set_last_visit_time(Time::Now());

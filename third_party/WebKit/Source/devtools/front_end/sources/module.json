@@ -14,10 +14,15 @@
         },
         {
             "type": "@WebInspector.ActionDelegate",
+            "category": "Debugger",
             "actionId": "debugger.toggle-pause",
             "iconClass": "pause-toolbar-item",
             "className": "WebInspector.SourcesPanel.RevealingActionDelegate",
             "contextTypes": ["WebInspector.SourcesPanel", "WebInspector.ShortcutRegistry.ForwardedShortcut"],
+            "options": [
+                { "value": true, "title": "Pause script execution" },
+                { "value": false, "title": "Resume script execution" }
+            ],
             "bindings": [
                 {
                     "platform": "windows,linux",
@@ -67,23 +72,6 @@
         },
         {
             "type": "@WebInspector.ActionDelegate",
-            "actionId": "debugger.step-into-async",
-            "experiment": "stepIntoAsync",
-            "className": "WebInspector.SourcesPanel.DebuggingActionDelegate",
-            "contextTypes": ["WebInspector.SourcesPanel"],
-            "bindings": [
-                {
-                    "platform": "windows,linux",
-                    "shortcut": "Alt+F11 Alt+Ctrl+;"
-                },
-                {
-                    "platform": "mac",
-                    "shortcut": "Alt+F11 Alt+Meta+;"
-                }
-            ]
-        },
-        {
-            "type": "@WebInspector.ActionDelegate",
             "actionId": "debugger.step-out",
             "className": "WebInspector.SourcesPanel.DebuggingActionDelegate",
             "title": "Step out of current function",
@@ -123,6 +111,7 @@
             "actionId": "sources.search.toggle",
             "title": "Search all files",
             "className": "WebInspector.AdvancedSearchView.ActionDelegate",
+            "category": "DevTools",
             "bindings": [
                 {
                     "platform": "mac",
@@ -136,10 +125,15 @@
         },
         {
             "type": "@WebInspector.ActionDelegate",
+            "category": "Debugger",
             "actionId": "debugger.toggle-breakpoints-active",
             "iconClass": "breakpoint-toolbar-item",
             "className": "WebInspector.SourcesPanel.DebuggingActionDelegate",
             "contextTypes": ["WebInspector.SourcesPanel"],
+            "options": [
+                { "value": true, "title": "Deactivate breakpoints" },
+                { "value": false, "title": "Activate breakpoints" }
+            ],
             "bindings": [
                 {
                     "platform": "windows,linux",
@@ -295,9 +289,9 @@
             "settingType": "enum",
             "defaultValue": "original",
             "options": [
-                ["None", "none"],
-                ["All", "all"],
-                ["Trailing", "trailing"]
+                { "title": "Do not show whitespace characters", "text": "None", "value": "none" },
+                { "title": "Show all whitespace characters", "text": "All", "value": "all" },
+                { "title": "Show trailing whitespace characters", "text": "Trailing", "value": "trailing" }
             ]
         },
         {
@@ -315,14 +309,6 @@
             "settingName": "cssSourceMapsEnabled",
             "settingType": "boolean",
             "defaultValue": true
-        },
-        {
-            "type": "setting",
-            "title": "Auto-reload generated CSS",
-            "parentSettingName": "cssSourceMapsEnabled",
-            "settingName": "cssReloadEnabled",
-            "settingType": "boolean",
-            "defaultValue": false
         },
         {
             "type": "drawer-view",
@@ -350,7 +336,6 @@
     "scripts": [
         "UIList.js",
         "AddSourceMapURLDialog.js",
-        "AsyncOperationsSidebarPane.js",
         "CallStackSidebarPane.js",
         "SimpleHistoryManager.js",
         "EditingLocationHistoryManager.js",
@@ -358,6 +343,7 @@
         "FilePathScoreFunction.js",
         "FilteredUISourceCodeListDelegate.js",
         "UISourceCodeFrame.js",
+        "SourceMapNamesResolver.js",
         "JavaScriptBreakpointsSidebarPane.js",
         "JavaScriptOutlineDialog.js",
         "JavaScriptSourceFrame.js",
@@ -365,7 +351,6 @@
         "NavigatorView.js",
         "RevisionHistoryView.js",
         "ScopeChainSidebarPane.js",
-        "ServiceWorkersSidebarPane.js",
         "SourcesNavigator.js",
         "StyleSheetOutlineDialog.js",
         "TabbedEditorContainer.js",

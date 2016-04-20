@@ -78,9 +78,10 @@ MirrorResponseHeaderDictionary ParseMirrorResponseHeader(
       DLOG(WARNING) << "Unexpected GAIA header field '" << field << "'.";
       continue;
     }
-    dictionary[field.substr(0, delim).as_string()] =
-        net::UnescapeURLComponent(field.substr(delim + 1).as_string(),
-                                  net::UnescapeRule::URL_SPECIAL_CHARS);
+    dictionary[field.substr(0, delim).as_string()] = net::UnescapeURLComponent(
+        field.substr(delim + 1).as_string(),
+        net::UnescapeRule::PATH_SEPARATORS |
+            net::UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS);
   }
   return dictionary;
 }
@@ -142,6 +143,9 @@ ManageAccountsParams::ManageAccountsParams()
   route_id = 0;
 #endif  // !defined(OS_IOS)
 }
+
+ManageAccountsParams::ManageAccountsParams(const ManageAccountsParams& other) =
+    default;
 
 bool SettingsAllowSigninCookies(
     const content_settings::CookieSettings* cookie_settings) {

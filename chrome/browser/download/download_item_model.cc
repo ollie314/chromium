@@ -170,11 +170,16 @@ base::string16 InterruptReasonStatusMessage(
     case content::DOWNLOAD_INTERRUPT_REASON_SERVER_FORBIDDEN:
       string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_FORBIDDEN;
       break;
+    case content::DOWNLOAD_INTERRUPT_REASON_SERVER_UNREACHABLE:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS_UNREACHABLE;
+      break;
+
     case content::DOWNLOAD_INTERRUPT_REASON_NONE:
       NOTREACHED();
       // fallthrough
     case content::DOWNLOAD_INTERRUPT_REASON_SERVER_NO_RANGE:
     case content::DOWNLOAD_INTERRUPT_REASON_FILE_FAILED:
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_HASH_MISMATCH:
       string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS;
   }
 
@@ -250,11 +255,15 @@ base::string16 InterruptReasonMessage(content::DownloadInterruptReason reason) {
     case content::DOWNLOAD_INTERRUPT_REASON_SERVER_FORBIDDEN:
       string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_FORBIDDEN;
       break;
+    case content::DOWNLOAD_INTERRUPT_REASON_SERVER_UNREACHABLE:
+      string_id = IDS_DOWNLOAD_INTERRUPTED_DESCRIPTION_UNREACHABLE;
+      break;
     case content::DOWNLOAD_INTERRUPT_REASON_NONE:
       NOTREACHED();
       // fallthrough
     case content::DOWNLOAD_INTERRUPT_REASON_SERVER_NO_RANGE:
     case content::DOWNLOAD_INTERRUPT_REASON_FILE_FAILED:
+    case content::DOWNLOAD_INTERRUPT_REASON_FILE_HASH_MISMATCH:
       string_id = IDS_DOWNLOAD_INTERRUPTED_STATUS;
   }
 

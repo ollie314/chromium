@@ -17,14 +17,15 @@
 #include "ash/test/cursor_manager_test_api.h"
 #include "ash/test/shell_test_api.h"
 #include "ash/test/test_shelf_delegate.h"
+#include "ash/wm/common/wm_event.h"
 #include "ash/wm/drag_window_resizer.h"
 #include "ash/wm/window_state.h"
-#include "ash/wm/wm_event.h"
+#include "ash/wm/window_state_aura.h"
+#include "base/i18n/rtl.h"
 #include "base/win/windows_version.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/hit_test.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/window_util.h"
@@ -143,8 +144,8 @@ class PanelWindowResizerTest : public test::AshTestBase {
   // are reordered appropriately.
   void DragAlongShelfReorder(int dx, int dy) {
     gfx::Point origin(0, 0);
-    scoped_ptr<aura::Window> w1(CreatePanelWindow(origin));
-    scoped_ptr<aura::Window> w2(CreatePanelWindow(origin));
+    std::unique_ptr<aura::Window> w1(CreatePanelWindow(origin));
+    std::unique_ptr<aura::Window> w2(CreatePanelWindow(origin));
     std::vector<aura::Window*> window_order_original;
     std::vector<aura::Window*> window_order_swapped;
     window_order_original.push_back(w1.get());
@@ -173,7 +174,7 @@ class PanelWindowResizerTest : public test::AshTestBase {
   }
 
  private:
-  scoped_ptr<WindowResizer> resizer_;
+  std::unique_ptr<WindowResizer> resizer_;
   ShelfModel* model_;
   test::TestShelfDelegate* shelf_delegate_;
 
@@ -188,7 +189,7 @@ class PanelWindowResizerTextDirectionTest
   virtual ~PanelWindowResizerTextDirectionTest() {}
 
   void SetUp() override {
-    original_locale = l10n_util::GetApplicationLocale(std::string());
+    original_locale_ = base::i18n::GetConfiguredLocale();
     if (is_rtl_)
       base::i18n::SetICUDefaultLocale("he");
     PanelWindowResizerTest::SetUp();
@@ -197,13 +198,13 @@ class PanelWindowResizerTextDirectionTest
 
   void TearDown() override {
     if (is_rtl_)
-      base::i18n::SetICUDefaultLocale(original_locale);
+      base::i18n::SetICUDefaultLocale(original_locale_);
     PanelWindowResizerTest::TearDown();
   }
 
  private:
   bool is_rtl_;
-  std::string original_locale;
+  std::string original_locale_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelWindowResizerTextDirectionTest);
 };
@@ -230,9 +231,8 @@ TEST_F(PanelWindowResizerTest, PanelDetachReattachBottom) {
  if (!SupportsHostWindowResize())
     return;
 
-  scoped_ptr<aura::Window> window(
-      CreatePanelWindow(gfx::Point(0, 0)));
-  DetachReattachTest(window.get(), 0, -1);
+ std::unique_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
+ DetachReattachTest(window.get(), 0, -1);
 }
 
 TEST_F(PanelWindowResizerTest, PanelDetachReattachLeft) {
@@ -241,8 +241,7 @@ TEST_F(PanelWindowResizerTest, PanelDetachReattachLeft) {
 
   ash::Shell* shell = ash::Shell::GetInstance();
   shell->SetShelfAlignment(SHELF_ALIGNMENT_LEFT, shell->GetPrimaryRootWindow());
-  scoped_ptr<aura::Window> window(
-      CreatePanelWindow(gfx::Point(0, 0)));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
   DetachReattachTest(window.get(), 1, 0);
 }
 
@@ -253,20 +252,8 @@ TEST_F(PanelWindowResizerTest, PanelDetachReattachRight) {
   ash::Shell* shell = ash::Shell::GetInstance();
   shell->SetShelfAlignment(SHELF_ALIGNMENT_RIGHT,
                            shell->GetPrimaryRootWindow());
-  scoped_ptr<aura::Window> window(
-      CreatePanelWindow(gfx::Point(0, 0)));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
   DetachReattachTest(window.get(), -1, 0);
-}
-
-TEST_F(PanelWindowResizerTest, PanelDetachReattachTop) {
- if (!SupportsHostWindowResize())
-    return;
-
-  ash::Shell* shell = ash::Shell::GetInstance();
-  shell->SetShelfAlignment(SHELF_ALIGNMENT_TOP, shell->GetPrimaryRootWindow());
-  scoped_ptr<aura::Window> window(
-      CreatePanelWindow(gfx::Point(0, 0)));
-  DetachReattachTest(window.get(), 0, 1);
 }
 
 // Tests that a drag continues when the shelf is hidden. This occurs as part of
@@ -274,8 +261,7 @@ TEST_F(PanelWindowResizerTest, PanelDetachReattachTop) {
 TEST_F(PanelWindowResizerTest, DetachThenHideShelf) {
   if (!SupportsHostWindowResize())
     return;
-  scoped_ptr<aura::Window> window(
-      CreatePanelWindow(gfx::Point(0, 0)));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
   wm::WindowState* state = wm::GetWindowState(window.get());
   gfx::Rect expected_bounds = window->GetBoundsInScreen();
   expected_bounds.set_y(expected_bounds.y() - 100);
@@ -307,8 +293,7 @@ TEST_F(PanelWindowResizerTest, PanelDetachReattachMultipleDisplays) {
 
   UpdateDisplay("600x400,600x400");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
-  scoped_ptr<aura::Window> window(
-      CreatePanelWindow(gfx::Point(600, 0)));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(600, 0)));
   EXPECT_EQ(root_windows[1], window->GetRootWindow());
   DetachReattachTest(window.get(), 0, -1);
 }
@@ -319,8 +304,7 @@ TEST_F(PanelWindowResizerTest, DetachThenDragAcrossDisplays) {
 
   UpdateDisplay("600x400,600x400");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
-  scoped_ptr<aura::Window> window(
-      CreatePanelWindow(gfx::Point(0, 0)));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
   gfx::Rect initial_bounds = window->GetBoundsInScreen();
   EXPECT_EQ(root_windows[0], window->GetRootWindow());
   DragStart(window.get());
@@ -348,8 +332,7 @@ TEST_F(PanelWindowResizerTest, DetachAcrossDisplays) {
 
   UpdateDisplay("600x400,600x400");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
-  scoped_ptr<aura::Window> window(
-      CreatePanelWindow(gfx::Point(0, 0)));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
   gfx::Rect initial_bounds = window->GetBoundsInScreen();
   EXPECT_EQ(root_windows[0], window->GetRootWindow());
   DragStart(window.get());
@@ -368,8 +351,7 @@ TEST_F(PanelWindowResizerTest, DetachThenAttachToSecondDisplay) {
 
   UpdateDisplay("600x400,600x600");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
-  scoped_ptr<aura::Window> window(
-      CreatePanelWindow(gfx::Point(0, 0)));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
   gfx::Rect initial_bounds = window->GetBoundsInScreen();
   EXPECT_EQ(root_windows[0], window->GetRootWindow());
 
@@ -401,8 +383,7 @@ TEST_F(PanelWindowResizerTest, AttachToSecondDisplay) {
 
   UpdateDisplay("600x400,600x600");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
-  scoped_ptr<aura::Window> window(
-      CreatePanelWindow(gfx::Point(0, 0)));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
   gfx::Rect initial_bounds = window->GetBoundsInScreen();
   EXPECT_EQ(root_windows[0], window->GetRootWindow());
 
@@ -427,9 +408,8 @@ TEST_F(PanelWindowResizerTest, AttachToSecondFullscreenDisplay) {
 
   UpdateDisplay("600x400,600x600");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
-  scoped_ptr<aura::Window> window(
-      CreatePanelWindow(gfx::Point(0, 0)));
-  scoped_ptr<aura::Window> fullscreen(
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
+  std::unique_ptr<aura::Window> fullscreen(
       CreateTestWindowInShellWithBounds(gfx::Rect(600, 0, 101, 101)));
   wm::GetWindowState(fullscreen.get())->Activate();
   const wm::WMEvent event(wm::WM_EVENT_TOGGLE_FULLSCREEN);
@@ -458,8 +438,7 @@ TEST_F(PanelWindowResizerTest, AttachToSecondFullscreenDisplay) {
 }
 
 TEST_F(PanelWindowResizerTest, RevertDragRestoresAttachment) {
-  scoped_ptr<aura::Window> window(
-      CreatePanelWindow(gfx::Point(0, 0)));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
   EXPECT_TRUE(wm::GetWindowState(window.get())->panel_attached());
   EXPECT_EQ(kShellWindowId_PanelContainer, window->parent()->id());
   DragStart(window.get());
@@ -486,7 +465,7 @@ TEST_F(PanelWindowResizerTest, RevertDragRestoresAttachment) {
 }
 
 TEST_F(PanelWindowResizerTest, DragMovesToPanelLayer) {
-  scoped_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
   DragStart(window.get());
   DragMove(0, -100);
   DragEnd();
@@ -524,9 +503,10 @@ TEST_P(PanelWindowResizerTransientTest, PanelWithTransientChild) {
   if (!SupportsHostWindowResize())
     return;
 
-  scoped_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
-  scoped_ptr<aura::Window> child(CreateTestWindowInShellWithDelegateAndType(
-      NULL, transient_window_type_, 0, gfx::Rect(20, 20, 150, 40)));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(gfx::Point(0, 0)));
+  std::unique_ptr<aura::Window> child(
+      CreateTestWindowInShellWithDelegateAndType(
+          NULL, transient_window_type_, 0, gfx::Rect(20, 20, 150, 40)));
   ::wm::AddTransientChild(window.get(), child.get());
   if (window->parent() != child->parent())
     window->parent()->AddChild(child.get());

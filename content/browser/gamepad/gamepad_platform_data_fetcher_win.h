@@ -5,6 +5,8 @@
 #ifndef CONTENT_BROWSER_GAMEPAD_GAMEPAD_PLATFORM_DATA_FETCHER_WIN_H_
 #define CONTENT_BROWSER_GAMEPAD_GAMEPAD_PLATFORM_DATA_FETCHER_WIN_H_
 
+#include <memory>
+
 #include "build/build_config.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -18,7 +20,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/scoped_native_library.h"
@@ -49,10 +50,8 @@ class GamepadPlatformDataFetcherWin : public GamepadDataFetcher {
   typedef DWORD (WINAPI *XInputGetStateFunc)(
       DWORD dwUserIndex, XINPUT_STATE* pState);
 
-  // Get functions from dynamically loaded xinput1_3.dll. We don't use
-  // DELAYLOAD because the import library for Win8 SDK pulls xinput1_4 which
-  // isn't redistributable. Returns true if loading was successful. We include
-  // xinput1_3.dll with Chrome.
+  // Get functions from dynamically loading the xinput dll.
+  // Returns true if loading was successful.
   bool GetXInputDllFunctions();
 
   // Scan for connected XInput and DirectInput gamepads.
@@ -71,7 +70,6 @@ class GamepadPlatformDataFetcherWin : public GamepadDataFetcher {
 
   // Function pointers to XInput functionality, retrieved in
   // |GetXinputDllFunctions|.
-  XInputEnableFunc xinput_enable_;
   XInputGetCapabilitiesFunc xinput_get_capabilities_;
   XInputGetStateFunc xinput_get_state_;
 
@@ -89,7 +87,7 @@ class GamepadPlatformDataFetcherWin : public GamepadDataFetcher {
   };
   PlatformPadState platform_pad_state_[blink::WebGamepads::itemsLengthCap];
 
-  scoped_ptr<RawInputDataFetcher> raw_input_fetcher_;
+  std::unique_ptr<RawInputDataFetcher> raw_input_fetcher_;
 
   DISALLOW_COPY_AND_ASSIGN(GamepadPlatformDataFetcherWin);
 };

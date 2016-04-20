@@ -22,16 +22,17 @@ class InspectorHandler {
   InspectorHandler();
   virtual ~InspectorHandler();
 
-  void SetClient(scoped_ptr<Client> client);
+  void SetClient(std::unique_ptr<Client> client);
   void SetRenderFrameHost(RenderFrameHostImpl* host);
 
   void TargetCrashed();
   void TargetDetached(const std::string& reason);
 
   Response Enable();
+  Response Disable();
 
  private:
-  scoped_ptr<Client> client_;
+  std::unique_ptr<Client> client_;
   RenderFrameHostImpl* host_;
 
   DISALLOW_COPY_AND_ASSIGN(InspectorHandler);

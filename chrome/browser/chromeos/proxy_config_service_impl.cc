@@ -9,7 +9,6 @@
 #include "base/callback.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/net/proxy_config_handler.h"
@@ -20,6 +19,7 @@
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/onc/onc_utils.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/prefs/pref_service.h"
 #include "components/proxy_config/pref_proxy_config_tracker_impl.h"
 #include "components/proxy_config/proxy_config_dictionary.h"
 #include "components/proxy_config/proxy_prefs.h"
@@ -38,9 +38,9 @@ bool GetProxyConfig(const PrefService* profile_prefs,
                     const NetworkState& network,
                     net::ProxyConfig* proxy_config,
                     ::onc::ONCSource* onc_source) {
-  scoped_ptr<ProxyConfigDictionary> proxy_dict =
-      proxy_config::GetProxyConfigForNetwork(
-          profile_prefs, local_state_prefs, network, onc_source);
+  std::unique_ptr<ProxyConfigDictionary> proxy_dict =
+      proxy_config::GetProxyConfigForNetwork(profile_prefs, local_state_prefs,
+                                             network, onc_source);
   if (!proxy_dict)
     return false;
   return PrefProxyConfigTrackerImpl::PrefConfigToNetConfig(*proxy_dict,
@@ -160,7 +160,7 @@ bool ProxyConfigServiceImpl::IgnoreProxy(const PrefService* profile_prefs,
   if (onc_source == ::onc::ONC_SOURCE_DEVICE_POLICY) {
     const user_manager::User* logged_in_user =
         user_manager::UserManager::Get()->GetLoggedInUser();
-    if (logged_in_user->is_affiliated()) {
+    if (logged_in_user->IsAffiliated()) {
       VLOG(1) << "Respecting proxy for network, as logged-in user belongs to "
               << "the domain the device is enrolled to.";
       return false;
@@ -240,7 +240,8 @@ void ProxyConfigServiceImpl::DetermineEffectiveConfigFromDefaultNetwork() {
     PrefProxyConfigTrackerImpl::OnProxyConfigChanged(effective_config_state,
                                                      effective_config);
     if (VLOG_IS_ON(1) && !update_pending()) {  // Update was successful.
-      scoped_ptr<base::DictionaryValue> config_dict(effective_config.ToValue());
+      std::unique_ptr<base::DictionaryValue> config_dict(
+          effective_config.ToValue());
       VLOG(1) << this << ": Proxy changed: "
               << ProxyPrefs::ConfigStateToDebugString(active_config_state_)
               << ", " << *config_dict;

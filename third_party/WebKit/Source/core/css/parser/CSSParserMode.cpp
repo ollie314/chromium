@@ -29,11 +29,14 @@
 #include "core/dom/Document.h"
 #include "core/frame/Settings.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
+#include "core/html/imports/HTMLImportTreeRoot.h"
+#include "core/html/imports/HTMLImportsController.h"
 
 namespace blink {
 
 CSSParserContext::CSSParserContext(CSSParserMode mode, UseCounter* useCounter)
     : m_mode(mode)
+    , m_matchMode(mode)
     , m_isHTMLDocument(false)
     , m_useLegacyBackgroundSizeShorthandBehavior(false)
     , m_shouldCheckContentSecurityPolicy(DoNotCheckContentSecurityPolicy)
@@ -45,7 +48,6 @@ CSSParserContext::CSSParserContext(const Document& document, UseCounter* useCoun
     : m_baseURL(baseURL.isNull() ? document.baseURL() : baseURL)
     , m_charset(charset)
     , m_mode(document.inQuirksMode() ? HTMLQuirksMode : HTMLStandardMode)
-    , m_referrer(m_baseURL.strippedForUseAsReferrer(), document.referrerPolicy())
     , m_isHTMLDocument(document.isHTMLDocument())
     , m_useLegacyBackgroundSizeShorthandBehavior(document.settings() ? document.settings()->useLegacyBackgroundSizeShorthandBehavior() : false)
     , m_shouldCheckContentSecurityPolicy(DoNotCheckContentSecurityPolicy)
@@ -55,13 +57,18 @@ CSSParserContext::CSSParserContext(const Document& document, UseCounter* useCoun
         m_shouldCheckContentSecurityPolicy = DoNotCheckContentSecurityPolicy;
     else
         m_shouldCheckContentSecurityPolicy = CheckContentSecurityPolicy;
+
+    if (HTMLImportsController* importsController = document.importsController())
+        m_matchMode = importsController->master()->inQuirksMode() ? HTMLQuirksMode : HTMLStandardMode;
+    else
+        m_matchMode = m_mode;
 }
 
 CSSParserContext::CSSParserContext(const CSSParserContext& other, UseCounter* useCounter)
     : m_baseURL(other.m_baseURL)
     , m_charset(other.m_charset)
     , m_mode(other.m_mode)
-    , m_referrer(other.m_referrer)
+    , m_matchMode(other.m_matchMode)
     , m_isHTMLDocument(other.m_isHTMLDocument)
     , m_useLegacyBackgroundSizeShorthandBehavior(other.m_useLegacyBackgroundSizeShorthandBehavior)
     , m_shouldCheckContentSecurityPolicy(other.m_shouldCheckContentSecurityPolicy)
@@ -74,6 +81,7 @@ bool CSSParserContext::operator==(const CSSParserContext& other) const
     return m_baseURL == other.m_baseURL
         && m_charset == other.m_charset
         && m_mode == other.m_mode
+        && m_matchMode == other.m_matchMode
         && m_isHTMLDocument == other.m_isHTMLDocument
         && m_useLegacyBackgroundSizeShorthandBehavior == other.m_useLegacyBackgroundSizeShorthandBehavior;
 }

@@ -24,6 +24,8 @@
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/extension_pref_value_map.h"
+#include "extensions/browser/extension_pref_value_map_factory.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_l10n_util.h"
@@ -105,6 +107,12 @@ void DoLoadExtension(Profile* profile,
     return;
   const std::string loaded_extension_id =
       GetComponentLoader(profile)->Add(manifest, file_path);
+  // Register IME extension with ExtensionPrefValueMap.
+  ExtensionPrefValueMapFactory::GetForBrowserContext(profile)
+      ->RegisterExtension(extension_id,
+                          base::Time(),  // install_time.
+                          true,          // is_enabled.
+                          true);         // is_incognito_enabled.
   DCHECK_EQ(loaded_extension_id, extension_id);
 }
 
@@ -166,15 +174,17 @@ void ComponentExtensionIMEManagerImpl::Unload(Profile* profile,
   GetComponentLoader(profile)->Remove(extension_id);
 }
 
-scoped_ptr<base::DictionaryValue> ComponentExtensionIMEManagerImpl::GetManifest(
+std::unique_ptr<base::DictionaryValue>
+ComponentExtensionIMEManagerImpl::GetManifest(
     const std::string& manifest_string) {
   std::string error;
   JSONStringValueDeserializer deserializer(manifest_string);
-  scoped_ptr<base::Value> manifest = deserializer.Deserialize(NULL, &error);
+  std::unique_ptr<base::Value> manifest =
+      deserializer.Deserialize(NULL, &error);
   if (!manifest.get())
     LOG(ERROR) << "Failed at getting manifest";
 
-  return scoped_ptr<base::DictionaryValue>(
+  return std::unique_ptr<base::DictionaryValue>(
       static_cast<base::DictionaryValue*>(manifest.release()));
 }
 
@@ -303,7 +313,7 @@ void ComponentExtensionIMEManagerImpl::ReadComponentExtensionsInfo(
     if (component_ime.manifest.empty())
       continue;
 
-    scoped_ptr<base::DictionaryValue> manifest =
+    std::unique_ptr<base::DictionaryValue> manifest =
         GetManifest(component_ime.manifest);
     if (!manifest.get())
       continue;

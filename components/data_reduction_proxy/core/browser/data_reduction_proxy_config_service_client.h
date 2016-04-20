@@ -5,12 +5,14 @@
 #ifndef COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_CONFIG_SERVICE_CLIENT_H_
 #define COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_CONFIG_SERVICE_CLIENT_H_
 
+#include <stdint.h>
+
+#include <memory>
 #include <string>
 
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -20,9 +22,15 @@
 #include "net/url_request/url_fetcher_delegate.h"
 #include "url/gurl.h"
 
+#if defined(OS_ANDROID)
+#include "base/android/application_status_listener.h"
+#endif  // OS_ANDROID
+
 namespace net {
 class HostPortPair;
+class HttpRequestHeaders;
 class HttpResponseHeaders;
+struct LoadTimingInfo;
 class URLFetcher;
 class URLRequestContextGetter;
 class URLRequestStatus;
@@ -47,6 +55,32 @@ const net::BackoffEntry::Policy& GetBackoffPolicy();
 // Retrieves the Data Reduction Proxy configuration from a remote service. This
 // object lives on the IO thread.
 // TODO(jeremyim): Rename the class to DataReductionProxyConfigGetter(?).
+//
+// The client config module is a state machine with 2 states:
+// 1) Chrome has a config. Requests will attempt to use DRP with that config.
+// 2) Chrome doesn’t have a config. Requests will go direct.
+//
+// When Chrome starts up, if there is a cached config on disk, it is loaded. Go
+// to state (1). Otherwise, go to state (2).
+//
+// When a config fetch finishes, move to state (1). If already in state (1),
+// replace the existing config.
+//
+// When in state (1), if a response comes back 407 whose request was made with
+// the existing config, invalidate the existing config and move to state (2).
+// Retry the request on the direct path.
+//
+// The following events will trigger a config fetch, without invalidating the
+// existing config. The existing config will be replaced when the async config
+// fetch returns.
+// * Starting Chrome.
+// * Using a config whose refresh_duration has expired (see
+//   components/data_reduction_proxy/proto/client_config.proto).
+// * Getting a IP address change event notification.
+//
+// Config fetches are async and subject to a backoff policy. On Android, the
+// fetch policy is different if Chrome is in the background. Every time a config
+// is fetched, it is written to the disk.
 class DataReductionProxyConfigServiceClient
     : public net::NetworkChangeNotifier::IPAddressObserver,
       public net::URLFetcherDelegate {
@@ -55,7 +89,7 @@ class DataReductionProxyConfigServiceClient
   // the |DataReductionProxyConfigClient|, with the exception of |params|
   // which this instance will own.
   DataReductionProxyConfigServiceClient(
-      scoped_ptr<DataReductionProxyParams> params,
+      std::unique_ptr<DataReductionProxyParams> params,
       const net::BackoffEntry::Policy& backoff_policy,
       DataReductionProxyRequestOptions* request_options,
       DataReductionProxyMutableConfigValues* config_values,
@@ -84,10 +118,14 @@ class DataReductionProxyConfigServiceClient
 
   // Examines |response_headers| to determine if an authentication failure
   // occurred on a Data Reduction Proxy. Returns true if authentication failure
-  // occured and fetches a new config.
+  // occured, and the session key specified in |request_headers| matches the
+  // current session in use by the client. If an authentication failure is
+  // detected,  it fetches a new config.
   bool ShouldRetryDueToAuthFailure(
+      const net::HttpRequestHeaders& request_headers,
       const net::HttpResponseHeaders* response_headers,
-      const net::HostPortPair& proxy_server);
+      const net::HostPortPair& proxy_server,
+      const net::LoadTimingInfo& load_timing_info);
 
  protected:
   // Retrieves the backoff entry object being used to throttle request failures.
@@ -102,6 +140,12 @@ class DataReductionProxyConfigServiceClient
   // configuration.
   void SetConfigRefreshTimer(const base::TimeDelta& delay);
 
+#if defined(OS_ANDROID)
+  // Returns true if Chromium is in background.
+  // Virtualized for mocking.
+  virtual bool IsApplicationStateBackground() const;
+#endif
+
  private:
   friend class TestDataReductionProxyConfigServiceClient;
 
@@ -110,7 +154,7 @@ class DataReductionProxyConfigServiceClient
   base::TimeDelta CalculateNextConfigRefreshTime(
       bool fetch_succeeded,
       const base::TimeDelta& config_expiration,
-      const base::TimeDelta& backoff_delay) const;
+      const base::TimeDelta& backoff_delay);
 
   // Override of net::NetworkChangeNotifier::IPAddressObserver.
   void OnIPAddressChanged() override;
@@ -127,7 +171,7 @@ class DataReductionProxyConfigServiceClient
   // Returns a fetcher to retrieve the Data Reduction Proxy configuration.
   // |secure_proxy_check_url| is the url from which to retrieve the config.
   // |request_body| is the request body sent to the configuration service.
-  scoped_ptr<net::URLFetcher> GetURLFetcherForConfig(
+  std::unique_ptr<net::URLFetcher> GetURLFetcherForConfig(
       const GURL& secure_proxy_check_url,
       const std::string& request_body);
 
@@ -145,7 +189,13 @@ class DataReductionProxyConfigServiceClient
   // parsed and applied.
   bool ParseAndApplyProxyConfig(const ClientConfig& config);
 
-  scoped_ptr<DataReductionProxyParams> params_;
+#if defined(OS_ANDROID)
+  // Listens to when Chromium comes to foreground and fetches new client config
+  // if the config fetch is pending.
+  void OnApplicationStateChange(base::android::ApplicationState new_state);
+#endif
+
+  std::unique_ptr<DataReductionProxyParams> params_;
 
   // The caller must ensure that the |request_options_| outlives this instance.
   DataReductionProxyRequestOptions* request_options_;
@@ -186,14 +236,25 @@ class DataReductionProxyConfigServiceClient
   base::OneShotTimer config_refresh_timer_;
 
   // A |net::URLFetcher| to retrieve the Data Reduction Proxy configuration.
-  scoped_ptr<net::URLFetcher> fetcher_;
+  std::unique_ptr<net::URLFetcher> fetcher_;
 
   // Used to correlate the start and end of requests.
   net::BoundNetLog bound_net_log_;
 
   // Used to determine the latency in retrieving the Data Reduction Proxy
   // configuration.
-  base::Time config_fetch_start_time_;
+  base::TimeTicks config_fetch_start_time_;
+
+#if defined(OS_ANDROID)
+  // Listens to the application transitions from foreground to background or
+  // vice versa.
+  std::unique_ptr<base::android::ApplicationStatusListener>
+      app_status_listener_;
+
+  // True if config needs to be fetched when the application comes to
+  // foreground.
+  bool foreground_fetch_pending_;
+#endif
 
   // Keeps track of whether the previous request to a Data Reduction Proxy
   // failed to authenticate. This is necessary in the situation where a new
@@ -201,6 +262,14 @@ class DataReductionProxyConfigServiceClient
   // failed to authenticate, since the new configuration marks |backoff_entry_|
   // with a success, resulting in no net increase in the backoff timer.
   bool previous_request_failed_authentication_;
+
+  // Number of failed fetch attempts before the config is fetched successfully.
+  // It is reset to 0 every time there is a change in IP address, or when the
+  // config is fetched successfully.
+  int32_t failed_attempts_before_success_;
+
+  // Time when the IP address last changed.
+  base::TimeTicks last_ip_address_change_;
 
   // Enforce usage on the IO thread.
   base::ThreadChecker thread_checker_;

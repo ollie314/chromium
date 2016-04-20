@@ -43,26 +43,26 @@ public:
     DECLARE_NODE_FACTORY(HTMLTableElement);
 
     HTMLTableCaptionElement* caption() const;
-    void setCaption(PassRefPtrWillBeRawPtr<HTMLTableCaptionElement>, ExceptionState&);
+    void setCaption(HTMLTableCaptionElement*, ExceptionState&);
 
     HTMLTableSectionElement* tHead() const;
-    void setTHead(PassRefPtrWillBeRawPtr<HTMLTableSectionElement>, ExceptionState&);
+    void setTHead(HTMLTableSectionElement*, ExceptionState&);
 
     HTMLTableSectionElement* tFoot() const;
-    void setTFoot(PassRefPtrWillBeRawPtr<HTMLTableSectionElement>, ExceptionState&);
+    void setTFoot(HTMLTableSectionElement*, ExceptionState&);
 
-    PassRefPtrWillBeRawPtr<HTMLTableSectionElement> createTHead();
+    HTMLTableSectionElement* createTHead();
     void deleteTHead();
-    PassRefPtrWillBeRawPtr<HTMLTableSectionElement> createTFoot();
+    HTMLTableSectionElement* createTFoot();
     void deleteTFoot();
-    PassRefPtrWillBeRawPtr<HTMLTableSectionElement> createTBody();
-    PassRefPtrWillBeRawPtr<HTMLTableCaptionElement> createCaption();
+    HTMLTableSectionElement* createTBody();
+    HTMLTableCaptionElement* createCaption();
     void deleteCaption();
-    PassRefPtrWillBeRawPtr<HTMLTableRowElement> insertRow(int index, ExceptionState&);
+    HTMLTableRowElement* insertRow(int index, ExceptionState&);
     void deleteRow(int index, ExceptionState&);
 
-    PassRefPtrWillBeRawPtr<HTMLTableRowsCollection> rows();
-    PassRefPtrWillBeRawPtr<HTMLCollection> tBodies();
+    HTMLTableRowsCollection* rows();
+    HTMLCollection* tBodies();
 
     const AtomicString& rules() const;
     const AtomicString& summary() const;
@@ -89,9 +89,9 @@ private:
     enum TableRules { UnsetRules, NoneRules, GroupsRules, RowsRules, ColsRules, AllRules };
     enum CellBorders { NoBorders, SolidBorders, InsetBorders, SolidBordersColsOnly, SolidBordersRowsOnly };
 
-    CellBorders cellBorders() const;
+    CellBorders getCellBorders() const;
 
-    PassRefPtrWillBeRawPtr<StylePropertySet> createSharedCellStyle();
+    StylePropertySet* createSharedCellStyle();
 
     HTMLTableSectionElement* lastBody() const;
 
@@ -104,7 +104,7 @@ private:
                                 // are present, to none otherwise).
 
     unsigned short m_padding;
-    RefPtrWillBeMember<StylePropertySet> m_sharedCellStyle;
+    Member<StylePropertySet> m_sharedCellStyle;
 };
 
 } // namespace blink

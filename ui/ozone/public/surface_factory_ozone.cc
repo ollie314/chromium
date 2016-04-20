@@ -23,25 +23,25 @@ intptr_t SurfaceFactoryOzone::GetNativeDisplay() {
   return 0;
 }
 
-scoped_ptr<SurfaceOzoneEGL> SurfaceFactoryOzone::CreateEGLSurfaceForWidget(
+std::unique_ptr<SurfaceOzoneEGL> SurfaceFactoryOzone::CreateEGLSurfaceForWidget(
     gfx::AcceleratedWidget widget) {
   return nullptr;
 }
 
-scoped_ptr<SurfaceOzoneEGL>
+std::unique_ptr<SurfaceOzoneEGL>
 SurfaceFactoryOzone::CreateSurfacelessEGLSurfaceForWidget(
     gfx::AcceleratedWidget widget) {
   return nullptr;
 }
 
-scoped_ptr<SurfaceOzoneCanvas> SurfaceFactoryOzone::CreateCanvasForWidget(
+std::unique_ptr<SurfaceOzoneCanvas> SurfaceFactoryOzone::CreateCanvasForWidget(
     gfx::AcceleratedWidget widget) {
   return nullptr;
 }
 
-const int32_t* SurfaceFactoryOzone::GetEGLSurfaceProperties(
-    const int32_t* desired_attributes) {
-  return desired_attributes;
+std::vector<gfx::BufferFormat> SurfaceFactoryOzone::GetScanoutFormats(
+    gfx::AcceleratedWidget widget) {
+  return std::vector<gfx::BufferFormat>();
 }
 
 scoped_refptr<ui::NativePixmap> SurfaceFactoryOzone::CreateNativePixmap(
@@ -54,6 +54,8 @@ scoped_refptr<ui::NativePixmap> SurfaceFactoryOzone::CreateNativePixmap(
 
 scoped_refptr<ui::NativePixmap>
 SurfaceFactoryOzone::CreateNativePixmapFromHandle(
+    gfx::Size size,
+    gfx::BufferFormat format,
     const gfx::NativePixmapHandle& handle) {
   return nullptr;
 }

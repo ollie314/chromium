@@ -11,7 +11,6 @@
 #include "base/files/file_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner_util.h"
@@ -19,9 +18,9 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/component_updater/supervised_user_whitelist_installer.h"
-#include "chrome/browser/net/file_downloader.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -42,6 +41,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_manager_base.h"
@@ -50,7 +50,7 @@
 #include "content/public/browser/user_metrics.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
 #include "chrome/browser/supervised_user/legacy/custodian_profile_downloader_service.h"
 #include "chrome/browser/supervised_user/legacy/custodian_profile_downloader_service_factory.h"
 #include "chrome/browser/supervised_user/legacy/permission_request_creator_sync.h"
@@ -255,6 +255,14 @@ void SupervisedUserService::AddURLAccessRequest(
       callback, 0);
 }
 
+void SupervisedUserService::ReportURL(const GURL& url,
+                                      const SuccessCallback& callback) {
+  if (url_reporter_)
+    url_reporter_->ReportUrl(url, callback);
+  else
+    callback.Run(false);
+}
+
 void SupervisedUserService::AddExtensionUpdateRequest(
     const std::string& extension_id,
     const base::Version& version,
@@ -326,7 +334,7 @@ base::string16 SupervisedUserService::GetExtensionsLockedMessage() const {
                                     base::UTF8ToUTF16(GetCustodianName()));
 }
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
 void SupervisedUserService::InitSync(const std::string& refresh_token) {
   StartSetupSync();
 
@@ -359,7 +367,7 @@ void SupervisedUserService::RegisterAndInitSync(
 
   // Fetch the custodian's profile information, to store the name.
   // TODO(pamg): If --google-profile-info (flag: switches::kGoogleProfileInfo)
-  // is ever enabled, take the name from the ProfileInfoCache instead.
+  // is ever enabled, take the name from the ProfileAttributesStorage instead.
   CustodianProfileDownloaderService* profile_downloader_service =
       CustodianProfileDownloaderServiceFactory::GetForProfile(
           custodian_profile);
@@ -367,7 +375,7 @@ void SupervisedUserService::RegisterAndInitSync(
       base::Bind(&SupervisedUserService::OnCustodianProfileDownloaded,
                  weak_ptr_factory_.GetWeakPtr()));
 }
-#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
+#endif  // !defined(OS_ANDROID)
 
 void SupervisedUserService::AddNavigationBlockedCallback(
     const NavigationBlockedCallback& callback) {
@@ -391,8 +399,13 @@ void SupervisedUserService::RemoveObserver(
 }
 
 void SupervisedUserService::AddPermissionRequestCreator(
-    scoped_ptr<PermissionRequestCreator> creator) {
+    std::unique_ptr<PermissionRequestCreator> creator) {
   permissions_creators_.push_back(creator.release());
+}
+
+void SupervisedUserService::SetSafeSearchURLReporter(
+    std::unique_ptr<SafeSearchURLReporter> reporter) {
+  url_reporter_ = std::move(reporter);
 }
 
 SupervisedUserService::URLFilterContext::URLFilterContext()
@@ -444,7 +457,7 @@ bool SupervisedUserService::URLFilterContext::HasBlacklist() const {
 }
 
 void SupervisedUserService::URLFilterContext::SetManualHosts(
-    scoped_ptr<std::map<std::string, bool> > host_map) {
+    std::unique_ptr<std::map<std::string, bool>> host_map) {
   ui_url_filter_->SetManualHosts(host_map.get());
   BrowserThread::PostTask(
       BrowserThread::IO,
@@ -454,7 +467,7 @@ void SupervisedUserService::URLFilterContext::SetManualHosts(
 }
 
 void SupervisedUserService::URLFilterContext::SetManualURLs(
-    scoped_ptr<std::map<GURL, bool> > url_map) {
+    std::unique_ptr<std::map<GURL, bool>> url_map) {
   ui_url_filter_->SetManualURLs(url_map.get());
   BrowserThread::PostTask(
       BrowserThread::IO,
@@ -476,10 +489,9 @@ void SupervisedUserService::URLFilterContext::InitAsyncURLChecker(
     const scoped_refptr<net::URLRequestContextGetter>& context) {
   ui_url_filter_->InitAsyncURLChecker(context.get());
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&SupervisedUserURLFilter::InitAsyncURLChecker,
-                 io_url_filter_, context));
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&SupervisedUserURLFilter::InitAsyncURLChecker, io_url_filter_,
+                 base::RetainedRef(context)));
 }
 
 bool SupervisedUserService::URLFilterContext::HasAsyncURLChecker() const {
@@ -516,7 +528,7 @@ void SupervisedUserService::SetActive(bool active) {
 
   if (!delegate_ || !delegate_->SetActive(active_)) {
     if (active_) {
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
       SupervisedUserPrefMappingServiceFactory::GetForBrowserContext(profile_)
           ->Init();
 
@@ -593,13 +605,14 @@ void SupervisedUserService::SetActive(bool active) {
     UpdateManualHosts();
     UpdateManualURLs();
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
     // TODO(bauerb): Get rid of the platform-specific #ifdef here.
     // http://crbug.com/313377
     BrowserList::AddObserver(this);
 #endif
   } else {
     permissions_creators_.clear();
+    url_reporter_.reset();
 
     pref_change_registrar_.Remove(
         prefs::kDefaultSupervisedUserFilteringBehavior);
@@ -613,7 +626,7 @@ void SupervisedUserService::SetActive(bool active) {
     FOR_EACH_OBSERVER(
         SupervisedUserServiceObserver, observer_list_, OnURLFilterChanged());
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
     if (waiting_for_sync_initialization_)
       ProfileSyncServiceFactory::GetForProfile(profile_)->RemoveObserver(this);
 
@@ -624,7 +637,7 @@ void SupervisedUserService::SetActive(bool active) {
   }
 }
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
 void SupervisedUserService::OnCustodianProfileDownloaded(
     const base::string16& full_name) {
   profile_->GetPrefs()->SetString(prefs::kSupervisedUserCustodianName,
@@ -645,10 +658,12 @@ void SupervisedUserService::OnSupervisedUserRegistered(
         signin->GetAuthenticatedAccountInfo().email);
 
     // The supervised user profile is now ready for use.
-    ProfileManager* profile_manager = g_browser_process->profile_manager();
-    ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
-    size_t index = cache.GetIndexOfProfileWithPath(profile_->GetPath());
-    cache.SetIsOmittedProfileAtIndex(index, false);
+    ProfileAttributesEntry* entry = nullptr;
+    bool has_entry =
+        g_browser_process->profile_manager()->GetProfileAttributesStorage().
+            GetProfileAttributesWithPath(profile_->GetPath(), &entry);
+    DCHECK(has_entry);
+    entry->SetIsOmitted(false);
   } else {
     DCHECK_EQ(std::string(), token);
   }
@@ -674,8 +689,7 @@ void SupervisedUserService::FinishSetupSyncWhenReady() {
   // Continue in FinishSetupSync() once the Sync backend has been initialized.
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
-  if (service->IsBackendInitialized() &&
-      service->backend_mode() == ProfileSyncService::SYNC) {
+  if (service->IsBackendInitialized()) {
     FinishSetupSync();
   } else {
     service->AddObserver(this);
@@ -687,7 +701,6 @@ void SupervisedUserService::FinishSetupSync() {
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
   DCHECK(service->IsBackendInitialized());
-  DCHECK(service->backend_mode() == ProfileSyncService::SYNC);
 
   // Sync nothing (except types which are set via GetPreferredDataTypes).
   bool sync_everything = false;
@@ -696,7 +709,7 @@ void SupervisedUserService::FinishSetupSync() {
 
   // Notify ProfileSyncService that we are done with configuration.
   service->SetSetupInProgress(false);
-  service->SetSyncSetupCompleted();
+  service->SetFirstSetupComplete();
 }
 #endif
 
@@ -785,7 +798,7 @@ void SupervisedUserService::OnSafeSitesSettingChanged() {
 
   bool use_online_check =
       supervised_users::IsSafeSitesOnlineCheckEnabled(profile_);
-  if (use_online_check != !url_filter_context_.HasAsyncURLChecker()) {
+  if (use_online_check != url_filter_context_.HasAsyncURLChecker()) {
     if (use_online_check)
       url_filter_context_.InitAsyncURLChecker(profile_->GetRequestContext());
     else
@@ -795,6 +808,7 @@ void SupervisedUserService::OnSafeSitesSettingChanged() {
 
 void SupervisedUserService::OnSiteListsChanged(
     const std::vector<scoped_refptr<SupervisedUserSiteList> >& site_lists) {
+  whitelists_ = site_lists;
   url_filter_context_.LoadWhitelists(site_lists);
 }
 
@@ -838,10 +852,11 @@ void SupervisedUserService::LoadBlacklistFromFile(const base::FilePath& path) {
                  base::Unretained(this)));
 }
 
-void SupervisedUserService::OnBlacklistDownloadDone(const base::FilePath& path,
-                                                    bool success) {
+void SupervisedUserService::OnBlacklistDownloadDone(
+    const base::FilePath& path,
+    FileDownloader::Result result) {
   DCHECK(blacklist_state_ == BlacklistLoadState::LOAD_STARTED);
-  if (success) {
+  if (FileDownloader::IsSuccess(result)) {
     LoadBlacklistFromFile(path);
   } else {
     LOG(WARNING) << "Blacklist download failed";
@@ -866,7 +881,7 @@ void SupervisedUserService::UpdateBlacklist() {
 void SupervisedUserService::UpdateManualHosts() {
   const base::DictionaryValue* dict =
       profile_->GetPrefs()->GetDictionary(prefs::kSupervisedUserManualHosts);
-  scoped_ptr<std::map<std::string, bool> > host_map(
+  std::unique_ptr<std::map<std::string, bool>> host_map(
       new std::map<std::string, bool>());
   for (base::DictionaryValue::Iterator it(*dict); !it.IsAtEnd(); it.Advance()) {
     bool allow = false;
@@ -883,7 +898,7 @@ void SupervisedUserService::UpdateManualHosts() {
 void SupervisedUserService::UpdateManualURLs() {
   const base::DictionaryValue* dict =
       profile_->GetPrefs()->GetDictionary(prefs::kSupervisedUserManualURLs);
-  scoped_ptr<std::map<GURL, bool> > url_map(new std::map<GURL, bool>());
+  std::unique_ptr<std::map<GURL, bool>> url_map(new std::map<GURL, bool>());
   for (base::DictionaryValue::Iterator it(*dict); !it.IsAtEnd(); it.Advance()) {
     bool allow = false;
     bool result = it.value().GetAsBoolean(&allow);
@@ -1019,12 +1034,11 @@ syncer::ModelTypeSet SupervisedUserService::GetPreferredDataTypes() const {
   return result;
 }
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
 void SupervisedUserService::OnStateChanged() {
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
-  if (waiting_for_sync_initialization_ && service->IsBackendInitialized() &&
-      service->backend_mode() == ProfileSyncService::SYNC) {
+  if (waiting_for_sync_initialization_ && service->IsBackendInitialized()) {
     waiting_for_sync_initialization_ = false;
     service->RemoveObserver(this);
     FinishSetupSync();
@@ -1045,10 +1059,9 @@ void SupervisedUserService::OnBrowserSetLastActive(Browser* browser) {
 
   is_profile_active_ = profile_became_active;
 }
-#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
+#endif  // !defined(OS_ANDROID)
 
 void SupervisedUserService::OnSiteListUpdated() {
   FOR_EACH_OBSERVER(
       SupervisedUserServiceObserver, observer_list_, OnURLFilterChanged());
 }
-

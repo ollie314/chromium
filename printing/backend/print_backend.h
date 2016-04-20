@@ -23,6 +23,7 @@ namespace printing {
 
 struct PRINTING_EXPORT PrinterBasicInfo {
   PrinterBasicInfo();
+  PrinterBasicInfo(const PrinterBasicInfo& other);
   ~PrinterBasicInfo();
 
   std::string printer_name;
@@ -36,6 +37,7 @@ typedef std::vector<PrinterBasicInfo> PrinterList;
 
 struct PRINTING_EXPORT PrinterSemanticCapsAndDefaults {
   PrinterSemanticCapsAndDefaults();
+  PrinterSemanticCapsAndDefaults(const PrinterSemanticCapsAndDefaults& other);
   ~PrinterSemanticCapsAndDefaults();
 
   bool collate_capable;
@@ -65,6 +67,7 @@ struct PRINTING_EXPORT PrinterSemanticCapsAndDefaults {
 
 struct PRINTING_EXPORT PrinterCapsAndDefaults {
   PrinterCapsAndDefaults();
+  PrinterCapsAndDefaults(const PrinterCapsAndDefaults& other);
   ~PrinterCapsAndDefaults();
 
   std::string printer_capabilities;

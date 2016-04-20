@@ -13,6 +13,7 @@
 
 #include <list>
 #include <map>
+#include <memory>
 #include <queue>
 #include <utility>
 #include <vector>
@@ -20,13 +21,14 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
-#include "base/memory/shared_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "content/common/content_export.h"
+#include "content/common/gpu/media/gpu_video_decode_accelerator_helpers.h"
+#include "content/common/gpu/media/shared_memory_region.h"
 #include "content/common/gpu/media/vaapi_wrapper.h"
 #include "media/base/bitstream_buffer.h"
 #include "media/video/picture.h"
@@ -55,9 +57,9 @@ class CONTENT_EXPORT VaapiVideoDecodeAccelerator
   class VaapiDecodeSurface;
 
   VaapiVideoDecodeAccelerator(
-      const base::Callback<bool(void)>& make_context_current,
-      const base::Callback<
-          void(uint32_t, uint32_t, scoped_refptr<gl::GLImage>)>& bind_image);
+      const MakeGLContextCurrentCallback& make_context_current_cb,
+      const BindGLImageCallback& bind_image_cb);
+
   ~VaapiVideoDecodeAccelerator() override;
 
   // media::VideoDecodeAccelerator implementation.
@@ -69,7 +71,10 @@ class CONTENT_EXPORT VaapiVideoDecodeAccelerator
   void Flush() override;
   void Reset() override;
   void Destroy() override;
-  bool CanDecodeOnIOThread() override;
+  bool TryToSetupDecodeOnSeparateThread(
+      const base::WeakPtr<Client>& decode_client,
+      const scoped_refptr<base::SingleThreadTaskRunner>& decode_task_runner)
+      override;
 
   static media::VideoDecodeAccelerator::SupportedProfiles
       GetSupportedProfiles();
@@ -180,10 +185,6 @@ class CONTENT_EXPORT VaapiVideoDecodeAccelerator
   // available.
   scoped_refptr<VaapiDecodeSurface> CreateSurface();
 
-
-  // Client-provided GL state.
-  base::Callback<bool(void)> make_context_current_;
-
   // VAVDA state.
   enum State {
     // Initialize() not called yet or failed.
@@ -210,8 +211,7 @@ class CONTENT_EXPORT VaapiVideoDecodeAccelerator
     ~InputBuffer();
 
     int32_t id;
-    size_t size;
-    scoped_ptr<base::SharedMemory> shm;
+    std::unique_ptr<SharedMemoryRegion> shm;
   };
 
   // Queue for incoming input buffers.
@@ -274,15 +274,15 @@ class CONTENT_EXPORT VaapiVideoDecodeAccelerator
 
   // To expose client callbacks from VideoDecodeAccelerator.
   // NOTE: all calls to these objects *MUST* be executed on message_loop_.
-  scoped_ptr<base::WeakPtrFactory<Client> > client_ptr_factory_;
+  std::unique_ptr<base::WeakPtrFactory<Client>> client_ptr_factory_;
   base::WeakPtr<Client> client_;
 
   // Accelerators come after vaapi_wrapper_ to ensure they are destroyed first.
-  scoped_ptr<VaapiH264Accelerator> h264_accelerator_;
-  scoped_ptr<VaapiVP8Accelerator> vp8_accelerator_;
-  scoped_ptr<VaapiVP9Accelerator> vp9_accelerator_;
+  std::unique_ptr<VaapiH264Accelerator> h264_accelerator_;
+  std::unique_ptr<VaapiVP8Accelerator> vp8_accelerator_;
+  std::unique_ptr<VaapiVP9Accelerator> vp9_accelerator_;
   // After *_accelerator_ to ensure correct destruction order.
-  scoped_ptr<AcceleratedVideoDecoder> decoder_;
+  std::unique_ptr<AcceleratedVideoDecoder> decoder_;
 
   base::Thread decoder_thread_;
   // Use this to post tasks to |decoder_thread_| instead of
@@ -305,10 +305,11 @@ class CONTENT_EXPORT VaapiVideoDecodeAccelerator
   size_t requested_num_pics_;
   gfx::Size requested_pic_size_;
 
-  // Binds the provided GLImage to a givenr client texture ID & texture target
-  // combination in GLES.
-  base::Callback<void(uint32_t, uint32_t, scoped_refptr<gl::GLImage>)>
-      bind_image_;
+  // Callback to make GL context current.
+  MakeGLContextCurrentCallback make_context_current_cb_;
+
+  // Callback to bind a GLImage to a given texture.
+  BindGLImageCallback bind_image_cb_;
 
   // The WeakPtrFactory for |weak_this_|.
   base::WeakPtrFactory<VaapiVideoDecodeAccelerator> weak_this_factory_;

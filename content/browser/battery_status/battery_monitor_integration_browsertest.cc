@@ -82,7 +82,7 @@ class FakeBatteryMonitor : public device::BatteryMonitor {
     }
   }
 
-  scoped_ptr<BatteryUpdateSubscription> subscription_;
+  std::unique_ptr<BatteryUpdateSubscription> subscription_;
   mojo::StrongBinding<BatteryMonitor> binding_;
   BatteryStatusCallback callback_;
 };
@@ -93,6 +93,13 @@ class TestContentBrowserClient : public ContentBrowserClient {
  public:
   void RegisterRenderProcessMojoServices(ServiceRegistry* registry) override {
     registry->AddService(base::Bind(&FakeBatteryMonitor::Create));
+  }
+
+  void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
+                                      int child_process_id) override {
+    // Necessary for passing kIsolateSitesForTesting flag to the renderer.
+    ShellContentBrowserClient::Get()->AppendExtraCommandLineSwitches(
+        command_line, child_process_id);
   }
 
 #if defined(OS_ANDROID)

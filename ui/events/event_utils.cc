@@ -15,8 +15,8 @@ namespace {
 int g_custom_event_types = ET_LAST;
 }  // namespace
 
-scoped_ptr<Event> EventFromNative(const base::NativeEvent& native_event) {
-  scoped_ptr<Event> event;
+std::unique_ptr<Event> EventFromNative(const base::NativeEvent& native_event) {
+  std::unique_ptr<Event> event;
   EventType type = EventTypeFromNative(native_event);
   switch(type) {
     case ET_KEY_PRESSED:
@@ -71,7 +71,7 @@ bool ShouldDefaultToNaturalScroll() {
 }
 
 gfx::Display::TouchSupport GetInternalDisplayTouchSupport() {
-  gfx::Screen* screen = gfx::Screen::GetScreenByType(gfx::SCREEN_TYPE_NATIVE);
+  gfx::Screen* screen = gfx::Screen::GetScreen();
   // No screen in some unit tests.
   if (!screen)
     return gfx::Display::TOUCH_SUPPORT_UNKNOWN;

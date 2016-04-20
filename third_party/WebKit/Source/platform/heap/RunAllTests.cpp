@@ -30,7 +30,6 @@
 
 #include "platform/EventTracer.h"
 #include "platform/heap/Heap.h"
-#include "wtf/MainThread.h"
 #include <base/bind.h>
 #include <base/test/launcher/unit_test_launcher.h>
 #include <base/test/test_suite.h>
@@ -55,7 +54,7 @@ int runHelper(base::TestSuite* testSuite)
     BlinkTestEnvironmentScope blinkTestEnvironment;
     blink::ThreadState::current()->registerTraceDOMWrappers(0, 0);
     int result = testSuite->Run();
-    blink::Heap::collectAllGarbage();
+    blink::ThreadHeap::collectAllGarbage();
     return result;
 }
 

@@ -42,7 +42,7 @@ const int kConfigureDelayMs = 500;
 const int kResumeDelayMs = 500;
 
 // The EDID specification marks the top bit of the manufacturer id as reserved.
-const int16_t kReservedManufacturerID = 1 << 15;
+const int16_t kReservedManufacturerID = static_cast<int16_t>(1 << 15);
 
 struct DisplayState {
   DisplaySnapshot* display = nullptr;  // Not owned.
@@ -303,11 +303,9 @@ bool DisplayConfigurator::DisplayLayoutManagerImpl::GetDisplayLayout(
     case MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED:
     case MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED: {
       if ((new_display_state == MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED &&
-           states.size() != 2) ||
+           states.size() != 2 && num_on_displays != 2) ||
           (new_display_state == MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED &&
-           states.size() <= 2) ||
-          (num_on_displays != 0 &&
-           num_on_displays != static_cast<int>(displays.size()))) {
+           num_on_displays <= 2)) {
         LOG(WARNING) << "Ignoring request to enter extended mode with "
                      << states.size() << " connected display(s) and "
                      << num_on_displays << " turned on";
@@ -508,7 +506,7 @@ DisplayConfigurator::~DisplayConfigurator() {
 }
 
 void DisplayConfigurator::SetDelegateForTesting(
-    scoped_ptr<NativeDisplayDelegate> display_delegate) {
+    std::unique_ptr<NativeDisplayDelegate> display_delegate) {
   DCHECK(!native_display_delegate_);
 
   native_display_delegate_ = std::move(display_delegate);
@@ -519,9 +517,12 @@ void DisplayConfigurator::SetInitialDisplayPower(
     chromeos::DisplayPowerState power_state) {
   DCHECK_EQ(current_display_state_, MULTIPLE_DISPLAY_STATE_INVALID);
   requested_power_state_ = current_power_state_ = power_state;
+  NotifyPowerStateObservers();
 }
 
-void DisplayConfigurator::Init(bool is_panel_fitting_enabled) {
+void DisplayConfigurator::Init(
+    std::unique_ptr<NativeDisplayDelegate> display_delegate,
+    bool is_panel_fitting_enabled) {
   is_panel_fitting_enabled_ = is_panel_fitting_enabled;
   if (!configure_display_ || display_externally_controlled_)
     return;
@@ -529,7 +530,7 @@ void DisplayConfigurator::Init(bool is_panel_fitting_enabled) {
   // If the delegate is already initialized don't update it (For example, tests
   // set their own delegates).
   if (!native_display_delegate_) {
-    native_display_delegate_ = CreatePlatformNativeDisplayDelegate();
+    native_display_delegate_ = std::move(display_delegate);
     native_display_delegate_->AddObserver(this);
   }
 }
@@ -609,6 +610,7 @@ void DisplayConfigurator::ForceInitialConfigure(
   if (!configure_display_ || display_externally_controlled_)
     return;
 
+  DCHECK(native_display_delegate_);
   native_display_delegate_->Initialize();
 
   // ForceInitialConfigure should be the first configuration so there shouldn't
@@ -824,12 +826,15 @@ bool DisplayConfigurator::SetColorCalibrationProfile(
   return false;
 }
 
-bool DisplayConfigurator::SetGammaRamp(
+bool DisplayConfigurator::SetColorCorrection(
     int64_t display_id,
-    const std::vector<GammaRampRGBEntry>& lut) {
+    const std::vector<GammaRampRGBEntry>& degamma_lut,
+    const std::vector<GammaRampRGBEntry>& gamma_lut,
+    const std::vector<float>& correction_matrix) {
   for (const DisplaySnapshot* display : cached_displays_) {
     if (display->display_id() == display_id)
-      return native_display_delegate_->SetGammaRamp(*display, lut);
+      return native_display_delegate_->SetColorCorrection(
+          *display, degamma_lut, gamma_lut, correction_matrix);
   }
 
   return false;
@@ -879,7 +884,7 @@ void DisplayConfigurator::SetDisplayMode(MultipleDisplayState new_state) {
     if (mirroring_controller_ &&
         new_state == MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED)
       mirroring_controller_->SetSoftwareMirroring(false);
-    NotifyObservers(true, new_state);
+    NotifyDisplayStateObservers(true, new_state);
     return;
   }
 
@@ -1014,6 +1019,7 @@ void DisplayConfigurator::OnConfigured(
 
   cached_displays_ = displays;
   if (success) {
+    chromeos::DisplayPowerState old_power_state = current_power_state_;
     current_display_state_ = new_display_state;
     current_power_state_ = new_power_state;
 
@@ -1034,10 +1040,13 @@ void DisplayConfigurator::OnConfigured(
     // present).
     if (!requested_power_state_change_)
       requested_power_state_ = new_power_state;
+
+    if (old_power_state != current_power_state_)
+      NotifyPowerStateObservers();
   }
 
   configuration_task_.reset();
-  NotifyObservers(success, new_display_state);
+  NotifyDisplayStateObservers(success, new_display_state);
   CallAndClearInProgressCallbacks(success);
 
   if (success && !configure_timer_.IsRunning() &&
@@ -1090,7 +1099,7 @@ void DisplayConfigurator::RestoreRequestedPowerStateAfterResume() {
                   base::Bind(&DoNothing));
 }
 
-void DisplayConfigurator::NotifyObservers(
+void DisplayConfigurator::NotifyDisplayStateObservers(
     bool success,
     MultipleDisplayState attempted_state) {
   if (success) {
@@ -1101,6 +1110,11 @@ void DisplayConfigurator::NotifyObservers(
         Observer, observers_, OnDisplayModeChangeFailed(cached_displays_,
                                                         attempted_state));
   }
+}
+
+void DisplayConfigurator::NotifyPowerStateObservers() {
+  FOR_EACH_OBSERVER(
+      Observer, observers_, OnPowerStateChanged(current_power_state_));
 }
 
 int64_t DisplayConfigurator::AddVirtualDisplay(gfx::Size display_size) {
@@ -1140,6 +1154,10 @@ bool DisplayConfigurator::RemoveVirtualDisplay(int64_t display_id) {
   last_virtual_display_id_ = max_display_id & 0xff;
 
   return true;
+}
+
+bool DisplayConfigurator::IsDisplayOn() const {
+  return current_power_state_ != chromeos::DISPLAY_POWER_ALL_OFF;
 }
 
 }  // namespace ui

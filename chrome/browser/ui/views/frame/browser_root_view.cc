@@ -63,7 +63,7 @@ bool BrowserRootView::CanDrop(const ui::OSExchangeData& data) {
 void BrowserRootView::OnDragEntered(const ui::DropTargetEvent& event) {
   if (ShouldForwardToTabStrip(event)) {
     forwarding_to_tab_strip_ = true;
-    scoped_ptr<ui::DropTargetEvent> mapped_event(
+    std::unique_ptr<ui::DropTargetEvent> mapped_event(
         MapEventToTabStrip(event, event.data()));
     tabstrip()->OnDragEntered(*mapped_event.get());
   }
@@ -71,7 +71,7 @@ void BrowserRootView::OnDragEntered(const ui::DropTargetEvent& event) {
 
 int BrowserRootView::OnDragUpdated(const ui::DropTargetEvent& event) {
   if (ShouldForwardToTabStrip(event)) {
-    scoped_ptr<ui::DropTargetEvent> mapped_event(
+    std::unique_ptr<ui::DropTargetEvent> mapped_event(
         MapEventToTabStrip(event, event.data()));
     if (!forwarding_to_tab_strip_) {
       tabstrip()->OnDragEntered(*mapped_event.get());
@@ -115,7 +115,7 @@ int BrowserRootView::OnPerformDrop(const ui::DropTargetEvent& event) {
     mapped_data.SetURL(url, base::string16());
   }
   forwarding_to_tab_strip_ = false;
-  scoped_ptr<ui::DropTargetEvent> mapped_event(
+  std::unique_ptr<ui::DropTargetEvent> mapped_event(
       MapEventToTabStrip(event, mapped_data));
   return tabstrip()->OnPerformDrop(*mapped_event);
 }
@@ -176,10 +176,10 @@ bool BrowserRootView::OnMouseWheel(const ui::MouseWheelEvent& event) {
 }
 
 void BrowserRootView::OnMouseExited(const ui::MouseEvent& event) {
-  // Reset such that the tab switch always occurs halfway through a smooth
-  // scroll.
+  // Reset the remainders so tab switches occur halfway through a smooth scroll.
   scroll_remainder_x_ = 0;
   scroll_remainder_y_ = 0;
+  RootView::OnMouseExited(event);
 }
 
 void BrowserRootView::OnEventProcessingStarted(ui::Event* event) {

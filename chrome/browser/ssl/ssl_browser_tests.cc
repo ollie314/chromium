@@ -12,7 +12,6 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
-#include "base/prefs/pref_service.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -50,6 +49,8 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/network_time/network_time_tracker.h"
+#include "components/prefs/pref_service.h"
 #include "components/security_interstitials/core/controller_client.h"
 #include "components/security_interstitials/core/metrics_helper.h"
 #include "components/security_state/security_state_model.h"
@@ -247,7 +248,7 @@ class SSLInterstitialTimerObserver {
   const content::WebContents* web_contents_;
   SSLErrorHandler::TimerStartedCallback callback_;
 
-  scoped_ptr<base::RunLoop> message_loop_runner_;
+  std::unique_ptr<base::RunLoop> message_loop_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLInterstitialTimerObserver);
 };
@@ -478,7 +479,7 @@ class SSLUITest
     CheckAuthenticationBrokenState(tab, net::CERT_STATUS_DATE_INVALID,
                                    AuthState::SHOWING_INTERSTITIAL);
 
-    scoped_ptr<SSLCertReporter> ssl_cert_reporter =
+    std::unique_ptr<SSLCertReporter> ssl_cert_reporter =
         certificate_reporting_test_utils::SetUpMockSSLCertReporter(
             &run_loop, expect_report);
 
@@ -523,12 +524,13 @@ class SSLUITest
     ASSERT_TRUE(https_server_expired_.Start());
     ASSERT_NO_FATAL_FAILURE(SetUpMockReporter());
 
-    // Set up the build and current clock times to be more than a year apart.
-    scoped_ptr<base::SimpleTestClock> mock_clock(new base::SimpleTestClock());
-    mock_clock->SetNow(base::Time::NowFromSystemTime());
-    mock_clock->Advance(base::TimeDelta::FromDays(367));
-    SSLErrorHandler::SetClockForTest(mock_clock.get());
-    ssl_errors::SetBuildTimeForTesting(base::Time::NowFromSystemTime());
+    // Set network time back ten minutes, which is sufficient to
+    // trigger the reporting.
+    g_browser_process->network_time_tracker()->UpdateNetworkTime(
+        base::Time::Now() - base::TimeDelta::FromMinutes(10),
+        base::TimeDelta::FromMilliseconds(1),   /* resolution */
+        base::TimeDelta::FromMilliseconds(500), /* latency */
+        base::TimeTicks::Now() /* posting time of this update */);
 
     // Opt in to sending reports for invalid certificate chains.
     certificate_reporting_test_utils::SetCertReportingOptIn(browser, opt_in);
@@ -539,7 +541,7 @@ class SSLUITest
     CheckAuthenticationBrokenState(tab, net::CERT_STATUS_DATE_INVALID,
                                    AuthState::SHOWING_INTERSTITIAL);
 
-    scoped_ptr<SSLCertReporter> ssl_cert_reporter =
+    std::unique_ptr<SSLCertReporter> ssl_cert_reporter =
         certificate_reporting_test_utils::SetUpMockSSLCertReporter(
             &run_loop, expect_report);
 
@@ -898,15 +900,36 @@ IN_PROC_BROWSER_TEST_F(SSLUITestIgnoreLocalhostCertErrors,
   EXPECT_EQ(title, expected_title);
 }
 
-IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPSErrorCausedByClock) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPSErrorCausedByClockUsingBuildTime) {
   ASSERT_TRUE(https_server_expired_.Start());
 
   // Set up the build and current clock times to be more than a year apart.
-  scoped_ptr<base::SimpleTestClock> mock_clock(new base::SimpleTestClock());
+  std::unique_ptr<base::SimpleTestClock> mock_clock(
+      new base::SimpleTestClock());
   mock_clock->SetNow(base::Time::NowFromSystemTime());
   mock_clock->Advance(base::TimeDelta::FromDays(367));
   SSLErrorHandler::SetClockForTest(mock_clock.get());
   ssl_errors::SetBuildTimeForTesting(base::Time::NowFromSystemTime());
+
+  ui_test_utils::NavigateToURL(browser(), https_server_expired_.GetURL("/"));
+  WebContents* clock_tab = browser()->tab_strip_model()->GetActiveWebContents();
+  content::WaitForInterstitialAttach(clock_tab);
+  InterstitialPage* clock_interstitial = clock_tab->GetInterstitialPage();
+  ASSERT_TRUE(clock_interstitial);
+  EXPECT_EQ(BadClockBlockingPage::kTypeForTesting,
+            clock_interstitial->GetDelegateForTesting()->GetTypeForTesting());
+}
+
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPSErrorCausedByClockUsingNetwork) {
+  ASSERT_TRUE(https_server_expired_.Start());
+
+  // Set network forward ten minutes, which is sufficient to trigger
+  // the interstitial.
+  g_browser_process->network_time_tracker()->UpdateNetworkTime(
+      base::Time::Now() + base::TimeDelta::FromMinutes(10),
+      base::TimeDelta::FromMilliseconds(1),   /* resolution */
+      base::TimeDelta::FromMilliseconds(500), /* latency */
+      base::TimeTicks::Now() /* posting time of this update */);
 
   ui_test_utils::NavigateToURL(browser(), https_server_expired_.GetURL("/"));
   WebContents* clock_tab = browser()->tab_strip_model()->GetActiveWebContents();
@@ -928,6 +951,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest,
       browser(), embedded_test_server()->GetURL("/ssl/google.html"));
   WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
   NavigationEntry* entry = tab->GetController().GetActiveEntry();
+  content::RenderFrameHost* rfh = tab->GetMainFrame();
   ASSERT_TRUE(entry);
 
   // Now go to a bad HTTPS page that shows an interstitial.
@@ -941,13 +965,10 @@ IN_PROC_BROWSER_TEST_F(SSLUITest,
   // Simulate user clicking on back button (crbug.com/39248).
   chrome::GoBack(browser(), CURRENT_TAB);
 
-  // Wait until we hear the load failure, and make sure we haven't swapped out
-  // the previous page.  Prevents regression of http://crbug.com/82667.
-  // TODO(creis/nick): Move the swapped-out part of this test into content
-  // and remove IsRenderViewHostSwappedOut from the public API.
+  // Wait until we hear the load failure, and make sure we haven't changed
+  // the previous RFH.  Prevents regression of http://crbug.com/82667.
   load_failed_observer.Wait();
-  EXPECT_FALSE(content::RenderFrameHostTester::IsRenderFrameHostSwappedOut(
-      tab->GetMainFrame()));
+  EXPECT_EQ(rfh, tab->GetMainFrame());
 
   // We should be back at the original good page.
   EXPECT_FALSE(browser()->tab_strip_model()->GetActiveWebContents()->
@@ -1120,7 +1141,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestWSSInvalidCertAndGoForward) {
 
 // Ensure that non-standard origins are marked correctly when the
 // MarkNonSecureAs field trial is enabled.
-IN_PROC_BROWSER_TEST_F(SSLUITest, TestMarkNonSecureAs) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, MarkFileAsNonSecure) {
   scoped_refptr<base::FieldTrial> trial =
       base::FieldTrialList::CreateFieldTrial(
           "MarkNonSecureAs",
@@ -1134,21 +1155,66 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestMarkNonSecureAs) {
       ChromeSecurityStateModelClient::FromWebContents(contents);
   ASSERT_TRUE(model_client);
 
-  ui_test_utils::NavigateToURL(browser(), GURL("file:/"));
+  ui_test_utils::NavigateToURL(browser(), GURL("file:///"));
   EXPECT_EQ(security_state::SecurityStateModel::NONE,
             model_client->GetSecurityInfo().security_level);
+}
+
+IN_PROC_BROWSER_TEST_F(SSLUITest, MarkAboutAsNonSecure) {
+  scoped_refptr<base::FieldTrial> trial =
+      base::FieldTrialList::CreateFieldTrial(
+          "MarkNonSecureAs",
+          security_state::switches::kMarkNonSecureAsNonSecure);
+
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(contents);
+
+  ChromeSecurityStateModelClient* model_client =
+      ChromeSecurityStateModelClient::FromWebContents(contents);
+  ASSERT_TRUE(model_client);
 
   ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
   EXPECT_EQ(security_state::SecurityStateModel::NONE,
             model_client->GetSecurityInfo().security_level);
+}
+
+IN_PROC_BROWSER_TEST_F(SSLUITest, MarkDataAsNonSecure) {
+  scoped_refptr<base::FieldTrial> trial =
+      base::FieldTrialList::CreateFieldTrial(
+          "MarkNonSecureAs",
+          security_state::switches::kMarkNonSecureAsNonSecure);
+
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(contents);
+
+  ChromeSecurityStateModelClient* model_client =
+      ChromeSecurityStateModelClient::FromWebContents(contents);
+  ASSERT_TRUE(model_client);
 
   ui_test_utils::NavigateToURL(browser(), GURL("data:text/plain,hello"));
   EXPECT_EQ(security_state::SecurityStateModel::NONE,
             model_client->GetSecurityInfo().security_level);
+}
+
+IN_PROC_BROWSER_TEST_F(SSLUITest, MarkBlobAsNonSecure) {
+  scoped_refptr<base::FieldTrial> trial =
+      base::FieldTrialList::CreateFieldTrial(
+          "MarkNonSecureAs",
+          security_state::switches::kMarkNonSecureAsNonSecure);
+
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(contents);
+
+  ChromeSecurityStateModelClient* model_client =
+      ChromeSecurityStateModelClient::FromWebContents(contents);
+  ASSERT_TRUE(model_client);
 
   ui_test_utils::NavigateToURL(
       browser(),
-      GURL("blob:chrome%3A//newtab/49a463bb-fac8-476c-97bf-5d7076c3ea1a"));
+      GURL("blob:chrome://newtab/49a463bb-fac8-476c-97bf-5d7076c3ea1a"));
   EXPECT_EQ(security_state::SecurityStateModel::NONE,
             model_client->GetSecurityInfo().security_level);
 }
@@ -1221,7 +1287,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITestWithClientCert, TestWSSClientCert) {
   // cert selection.
   Profile* profile = Profile::FromBrowserContext(tab->GetBrowserContext());
   DCHECK(profile);
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("ISSUER.CN", "pywebsocket");
   HostContentSettingsMapFactory::GetForProfile(profile)
       ->SetWebsiteSettingDefaultScope(

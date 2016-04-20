@@ -17,6 +17,7 @@ struct ExtensionMsg_AccessibilityEventParams;
 
 namespace extensions {
 
+class AutomationInternalCustomBindings;
 class AutomationMessageFilter;
 
 struct TreeCache {
@@ -25,9 +26,11 @@ struct TreeCache {
 
   int tab_id;
   int tree_id;
+  int parent_node_id_from_parent_tree;
 
   gfx::Vector2d location_offset;
   ui::AXTree tree;
+  AutomationInternalCustomBindings* owner;
 };
 
 struct TreeChangeObserver {
@@ -47,6 +50,8 @@ class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
   void OnMessageReceived(const IPC::Message& message);
 
   TreeCache* GetTreeCacheFromTreeID(int tree_id);
+
+  ui::AXNode* GetParent(ui::AXNode* node, TreeCache** in_out_cache);
 
   ScriptContext* context() const {
     return ObjectBackedNativeHandler::context();
@@ -85,6 +90,14 @@ class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
   void RemoveTreeChangeObserver(
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
+  void GetFocus(const v8::FunctionCallbackInfo<v8::Value>& args);
+
+  // Given an initial TreeCache, return the TreeCache and node of the focused
+  // node within this tree or a focused descendant tree.
+  bool GetFocusInternal(TreeCache* top_cache,
+                        TreeCache** out_cache,
+                        ui::AXNode** out_node);
+
   void RouteTreeIDFunction(const std::string& name,
                            void (*callback)(v8::Isolate* isolate,
                                             v8::ReturnValue<v8::Value> result,
@@ -115,52 +128,12 @@ class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
   // Access the cached accessibility trees and properties of their nodes.
   //
 
-  // Args: int ax_tree_id, int node_id, Returns: int parent_node_id.
-  void GetParentID(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // Args: int ax_tree_id, int node_id, Returns: int child_count.
-  void GetChildCount(const v8::FunctionCallbackInfo<v8::Value>& args);
-
   // Args: int ax_tree_id, int node_id, Returns: int child_id.
   void GetChildIDAtIndex(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // Args: int ax_tree_id, int node_id, Returns: int index_in_parent.
-  void GetIndexInParent(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   // Args: int ax_tree_id, int node_id
   // Returns: JS object with a string key for each state flag that's set.
   void GetState(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // Args: int ax_tree_id, int node_id, Returns: string role_name
-  void GetRole(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // Args: int ax_tree_id, int node_id
-  // Returns: JS object with {left, top, width, height}
-  void GetLocation(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // Args: int ax_tree_id, int node_id, string attribute_name
-  // Returns: string attribute_value.
-  void GetStringAttribute(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // Args: int ax_tree_id, int node_id, string attribute_name
-  // Returns: bool attribute_value.
-  void GetBoolAttribute(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // Args: int ax_tree_id, int node_id, string attribute_name
-  // Returns: int attribute_value.
-  void GetIntAttribute(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // Args: int ax_tree_id, int node_id, string attribute_name
-  // Returns: float attribute_value.
-  void GetFloatAttribute(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // Args: int ax_tree_id, int node_id, string attribute_name
-  // Returns: JS array of int attribute_values.
-  void GetIntListAttribute(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // Args: int ax_tree_id, int node_id, string attribute_name
-  // Returns: string attribute_value.
-  void GetHtmlAttribute(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   //
   // Helper functions.
@@ -173,6 +146,9 @@ class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
   void UpdateOverallTreeChangeObserverFilter();
 
   // AXTreeDelegate implementation.
+  void OnNodeDataWillChange(ui::AXTree* tree,
+                            const ui::AXNodeData& old_node_data,
+                            const ui::AXNodeData& new_node_data) override;
   void OnTreeDataChanged(ui::AXTree* tree) override;
   void OnNodeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
   void OnSubtreeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
@@ -195,6 +171,7 @@ class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
   api::automation::TreeChangeObserverFilter
       tree_change_observer_overall_filter_;
   std::vector<int> deleted_node_ids_;
+  std::vector<int> text_changed_node_ids_;
 
   DISALLOW_COPY_AND_ASSIGN(AutomationInternalCustomBindings);
 };

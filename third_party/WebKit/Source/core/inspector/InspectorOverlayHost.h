@@ -32,16 +32,15 @@
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
 #include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
-class CORE_EXPORT InspectorOverlayHost final : public RefCountedWillBeGarbageCollectedFinalized<InspectorOverlayHost>, public ScriptWrappable {
+class CORE_EXPORT InspectorOverlayHost final : public GarbageCollectedFinalized<InspectorOverlayHost>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<InspectorOverlayHost> create()
+    static InspectorOverlayHost* create()
     {
-        return adoptRefWillBeNoop(new InspectorOverlayHost());
+        return new InspectorOverlayHost();
     }
     ~InspectorOverlayHost();
     DECLARE_TRACE();
@@ -55,7 +54,7 @@ public:
     void nextSelector();
     void previousSelector();
 
-    class Listener : public WillBeGarbageCollectedMixin {
+    class Listener : public GarbageCollectedMixin {
     public:
         virtual ~Listener() { }
         virtual void overlayResumed() = 0;
@@ -72,7 +71,7 @@ public:
 private:
     InspectorOverlayHost();
 
-    RawPtrWillBeMember<Listener> m_listener;
+    Member<Listener> m_listener;
 
 };
 

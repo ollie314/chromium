@@ -14,23 +14,30 @@ DesktopMediaPickerCocoa::DesktopMediaPickerCocoa() {
 DesktopMediaPickerCocoa::~DesktopMediaPickerCocoa() {
 }
 
-void DesktopMediaPickerCocoa::Show(content::WebContents* web_contents,
-                                   gfx::NativeWindow context,
-                                   gfx::NativeWindow parent,
-                                   const base::string16& app_name,
-                                   const base::string16& target_name,
-                                   scoped_ptr<DesktopMediaList> media_list,
-                                   const DoneCallback& done_callback) {
+void DesktopMediaPickerCocoa::Show(
+    content::WebContents* web_contents,
+    gfx::NativeWindow context,
+    gfx::NativeWindow parent,
+    const base::string16& app_name,
+    const base::string16& target_name,
+    std::unique_ptr<DesktopMediaList> screen_list,
+    std::unique_ptr<DesktopMediaList> window_list,
+    std::unique_ptr<DesktopMediaList> tab_list,
+    bool request_audio,
+    const DoneCallback& done_callback) {
   controller_.reset([[DesktopMediaPickerController alloc]
-      initWithMediaList:std::move(media_list)
-                 parent:parent
-               callback:done_callback
-                appName:app_name
-             targetName:target_name]);
+      initWithScreenList:std::move(screen_list)
+              windowList:std::move(window_list)
+                 tabList:std::move(tab_list)
+                  parent:parent
+                callback:done_callback
+                 appName:app_name
+              targetName:target_name
+            requestAudio:request_audio]);
   [controller_ showWindow:nil];
 }
 
 // static
-scoped_ptr<DesktopMediaPicker> DesktopMediaPicker::Create() {
-  return scoped_ptr<DesktopMediaPicker>(new DesktopMediaPickerCocoa());
+std::unique_ptr<DesktopMediaPicker> DesktopMediaPicker::Create() {
+  return std::unique_ptr<DesktopMediaPicker>(new DesktopMediaPickerCocoa());
 }

@@ -5,14 +5,15 @@
 #ifndef CHROMEOS_AUDIO_AUDIO_DEVICES_PREF_HANDLER_IMPL_H_
 #define CHROMEOS_AUDIO_AUDIO_DEVICES_PREF_HANDLER_IMPL_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/observer_list.h"
-#include "base/prefs/pref_change_registrar.h"
 #include "base/values.h"
 #include "chromeos/audio/audio_devices_pref_handler.h"
 #include "chromeos/chromeos_export.h"
+#include "components/prefs/pref_change_registrar.h"
 
 class PrefRegistrySimple;
 class PrefService;
@@ -35,9 +36,12 @@ class CHROMEOS_EXPORT AudioDevicesPrefHandlerImpl
   bool GetMuteValue(const AudioDevice& device) override;
   void SetMuteValue(const AudioDevice& device, bool mute_on) override;
 
-  AudioDeviceState GetDeviceState(const AudioDevice& device) override;
-  void SetDeviceState(const AudioDevice& device,
-                      AudioDeviceState state) override;
+  void SetDeviceActive(const AudioDevice& device,
+                       bool active,
+                       bool activate_by_user) override;
+  bool GetDeviceActive(const AudioDevice& device,
+                       bool* active,
+                       bool* activate_by_user) override;
 
   bool GetAudioOutputAllowedValue() override;
 
@@ -79,9 +83,9 @@ class CHROMEOS_EXPORT AudioDevicesPrefHandlerImpl
   // Notifies the AudioPrefObserver for audio policy pref changes.
   void NotifyAudioPolicyChange();
 
-  scoped_ptr<base::DictionaryValue> device_mute_settings_;
-  scoped_ptr<base::DictionaryValue> device_volume_settings_;
-  scoped_ptr<base::DictionaryValue> device_state_settings_;
+  std::unique_ptr<base::DictionaryValue> device_mute_settings_;
+  std::unique_ptr<base::DictionaryValue> device_volume_settings_;
+  std::unique_ptr<base::DictionaryValue> device_state_settings_;
 
   PrefService* local_state_;  // not owned
 

@@ -5,11 +5,12 @@
 #ifndef ASH_WM_OVERVIEW_WINDOW_SELECTOR_ITEM_H_
 #define ASH_WM_OVERVIEW_WINDOW_SELECTOR_ITEM_H_
 
+#include <memory>
+
 #include "ash/ash_export.h"
 #include "ash/wm/overview/scoped_transform_overview_window.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "ui/aura/scoped_window_targeter.h"
 #include "ui/aura/window_observer.h"
 #include "ui/gfx/geometry/rect.h"
@@ -86,9 +87,10 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
   // dispatched when the bounds of a window change.
   void RecomputeWindowTransforms();
 
-  // Sends an a11y focus alert so that, if chromevox is enabled, the window
-  // label is read.
-  void SendFocusAlert() const;
+  // Sends an accessibility event indicating that this window became selected
+  // so that it's highlighted and announced if accessibility features are
+  // enabled.
+  void SendAccessibleSelectionEvent();
 
   // Sets if the item is dimmed in the overview. Changing the value will also
   // change the visibility of the transform windows.
@@ -149,7 +151,7 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
   bool in_bounds_update_;
 
   // Label under the window displaying its active tab name.
-  scoped_ptr<views::Widget> window_label_;
+  std::unique_ptr<views::Widget> window_label_;
 
   // View for the label under the window.
   OverviewLabelButton* window_label_button_view_;

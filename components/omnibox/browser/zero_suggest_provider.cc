@@ -11,11 +11,11 @@
 #include "base/json/json_string_value_serializer.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/user_metrics.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/top_sites.h"
@@ -30,6 +30,7 @@
 #include "components/omnibox/browser/search_provider.h"
 #include "components/omnibox/browser/verbatim_match.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/url_formatter/url_formatter.h"
 #include "components/variations/net/variations_http_headers.h"
@@ -85,6 +86,7 @@ void ZeroSuggestProvider::RegisterProfilePrefs(
 
 void ZeroSuggestProvider::Start(const AutocompleteInput& input,
                                 bool minimal_changes) {
+  TRACE_EVENT0("omnibox", "ZeroSuggestProvider::Start");
   matches_.clear();
   if (!input.from_omnibox_focus() ||
       input.type() == metrics::OmniboxInputType::INVALID)
@@ -288,9 +290,8 @@ AutocompleteMatch ZeroSuggestProvider::NavigationToMatch(
   match.destination_url = navigation.url();
 
   // Zero suggest results should always omit protocols and never appear bold.
-  const std::string languages(client()->GetAcceptLanguages());
   match.contents = url_formatter::FormatUrl(
-      navigation.url(), languages, url_formatter::kFormatUrlOmitAll,
+      navigation.url(), url_formatter::kFormatUrlOmitAll,
       net::UnescapeRule::SPACES, nullptr, nullptr, nullptr);
   match.fill_into_edit +=
       AutocompleteInput::FormattedStringWithEquivalentMeaning(
@@ -382,13 +383,12 @@ void ZeroSuggestProvider::ConvertResultsToAutocompleteMatches() {
     }
     const base::string16 current_query_string16(
         base::ASCIIToUTF16(current_query_));
-    const std::string languages(client()->GetAcceptLanguages());
     for (size_t i = 0; i < most_visited_urls_.size(); i++) {
       const history::MostVisitedURL& url = most_visited_urls_[i];
       SearchSuggestionParser::NavigationResult nav(
           client()->GetSchemeClassifier(), url.url,
           AutocompleteMatchType::NAVSUGGEST, url.title, std::string(), false,
-          relevance, true, current_query_string16, languages);
+          relevance, true, current_query_string16);
       matches_.push_back(NavigationToMatch(nav));
       --relevance;
     }

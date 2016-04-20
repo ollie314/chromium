@@ -5,13 +5,14 @@
 #include <cryptohi.h>
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/test/https_forwarder.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/policy/affiliation_test_helper.h"
 #include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -27,6 +28,7 @@
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_map.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/common/content_switches.h"
@@ -251,7 +253,7 @@ class EnterprisePlatformKeysTest
     chromeos::FakeSessionManagerClient* fake_session_manager_client =
         new chromeos::FakeSessionManagerClient;
     chromeos::DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
-        scoped_ptr<chromeos::SessionManagerClient>(
+        std::unique_ptr<chromeos::SessionManagerClient>(
             fake_session_manager_client));
 
     if (GetParam().device_status_ == DEVICE_STATUS_ENROLLED) {
@@ -323,6 +325,10 @@ class EnterprisePlatformKeysTest
   void TearDownOnMainThread() override {
     ExtensionApiTest::TearDownOnMainThread();
 
+    if (chromeos::LoginDisplayHost::default_host())
+      chromeos::LoginDisplayHost::default_host()->Finalize();
+    base::MessageLoop::current()->RunUntilIdle();
+
     if (GetParam().system_token_ == SYSTEM_TOKEN_EXISTS) {
       base::RunLoop loop;
       content::BrowserThread::PostTask(
@@ -355,7 +361,7 @@ class EnterprisePlatformKeysTest
     GURL update_manifest_url(net::URLRequestMockHTTPJob::GetMockUrl(
         update_manifest_path.MaybeAsASCII()));
 
-    scoped_ptr<base::ListValue> forcelist(new base::ListValue);
+    std::unique_ptr<base::ListValue> forcelist(new base::ListValue);
     forcelist->AppendString(base::StringPrintf(
         "%s;%s", kTestExtensionID, update_manifest_url.spec().c_str()));
 
@@ -421,7 +427,7 @@ class EnterprisePlatformKeysTest
   }
 
   policy::DevicePolicyCrosTestHelper device_policy_test_helper_;
-  scoped_ptr<crypto::ScopedTestSystemNSSKeySlot> test_system_slot_;
+  std::unique_ptr<crypto::ScopedTestSystemNSSKeySlot> test_system_slot_;
   policy::MockConfigurationPolicyProvider policy_provider_;
   FakeGaia fake_gaia_;
   chromeos::HTTPSForwarder gaia_https_forwarder_;

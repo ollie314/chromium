@@ -141,6 +141,15 @@ class PrecacheManagerTest : public testing::Test {
                  base::Bind(&TestURLFetcherCallback::CreateURLFetcher,
                             base::Unretained(&url_callback_))) {}
 
+  ~PrecacheManagerTest() {
+    // precache_manager_'s constructor releases a PrecacheDatabase and deletes
+    // it on the DB thread. PrecacheDatabase already has a pending Init call
+    // which will assert in debug builds because the directory passed to it is
+    // deleted. So manually ensure that the task is run before browser_context_
+    // is destructed.
+    base::MessageLoop::current()->RunUntilIdle();
+  }
+
  protected:
   void SetUp() override {
     base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
@@ -156,8 +165,8 @@ class PrecacheManagerTest : public testing::Test {
   }
 
   // Must be declared first so that it is destroyed last.
-  content::TestBrowserContext browser_context_;
   content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::TestBrowserContext browser_context_;
   PrecacheManagerUnderTest precache_manager_;
   TestURLFetcherCallback url_callback_;
   net::FakeURLFetcherFactory factory_;
@@ -308,6 +317,7 @@ TEST_F(PrecacheManagerTest, RecordStatsForFetchDuringPrecaching) {
                           Pair("Precache.Fetch.PercentCompleted", 1),
                           Pair("Precache.Fetch.ResponseBytes.Network", 1),
                           Pair("Precache.Fetch.ResponseBytes.Total", 1),
+                          Pair("Precache.Fetch.TimeToComplete", 1),
                           Pair("Precache.Latency.Prefetch", 1)));
 }
 
@@ -380,6 +390,7 @@ TEST_F(PrecacheManagerTest, DeleteExpiredPrecacheHistory) {
   expected_histogram_count_map["Precache.Fetch.PercentCompleted"]++;
   expected_histogram_count_map["Precache.Fetch.ResponseBytes.Network"]++;
   expected_histogram_count_map["Precache.Fetch.ResponseBytes.Total"]++;
+  expected_histogram_count_map["Precache.Fetch.TimeToComplete"]++;
   expected_histogram_count_map["Precache.Latency.Prefetch"] += 3;
 
   precache_manager_.CancelPrecaching();
@@ -406,6 +417,7 @@ TEST_F(PrecacheManagerTest, DeleteExpiredPrecacheHistory) {
   precache_manager_.RecordStatsForFetch(GURL("http://old-fetch.com"), GURL(),
                                         base::TimeDelta(), kCurrentTime, 1000,
                                         true);
+  expected_histogram_count_map["Precache.Fetch.TimeToComplete"]++;
   expected_histogram_count_map["Precache.Latency.NonPrefetch"]++;
   expected_histogram_count_map["Precache.Latency.NonPrefetch.NonTopHosts"]++;
 

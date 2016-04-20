@@ -9,8 +9,7 @@
 #include "build/build_config.h"
 #include "cc/output/context_provider.h"
 #include "cc/surfaces/surface_manager.h"
-#include "content/browser/gpu/compositor_util.h"
-#include "content/common/gpu/client/gl_helper.h"
+#include "content/browser/compositor/gl_helper.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/test/in_process_context_factory.h"
@@ -18,15 +17,14 @@
 namespace content {
 
 NoTransportImageTransportFactory::NoTransportImageTransportFactory()
-    : surface_manager_(UseSurfacesEnabled() ? new cc::SurfaceManager : nullptr),
+    : surface_manager_(new cc::SurfaceManager),
       // The context factory created here is for unit tests, thus passing in
       // true in constructor.
       context_factory_(
-          new ui::InProcessContextFactory(true, surface_manager_.get())) {
-}
+          new ui::InProcessContextFactory(true, surface_manager_.get())) {}
 
 NoTransportImageTransportFactory::~NoTransportImageTransportFactory() {
-  scoped_ptr<GLHelper> lost_gl_helper = std::move(gl_helper_);
+  std::unique_ptr<GLHelper> lost_gl_helper = std::move(gl_helper_);
   FOR_EACH_OBSERVER(
       ImageTransportFactoryObserver, observer_list_, OnLostResources());
 }

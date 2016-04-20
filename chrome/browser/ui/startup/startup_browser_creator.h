@@ -99,29 +99,14 @@ class StartupBrowserCreator {
     return show_main_browser_window_;
   }
 
+  bool show_desktop_search_redirection_infobar() const {
+    return show_desktop_search_redirection_infobar_;
+  }
+
   // For faking that no profiles have been launched yet.
   static void ClearLaunchedProfilesForTesting();
 
   static void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
-
-#if defined(OS_WIN)
-  // Setting Chrome as the default browser in Windows 10+ requires a specific
-  // url to be opened through openwith.exe. This url is intercepted in
-  // ProcessCmdLineImpl when the callback is set. See DefaultBrowserWorker in
-  // shell_integration.h for more details. Only call this on the UI
-  // thread.
-  //
-  // Returns false when the default browser callback was already set which
-  // results in a no-op.
-  static bool SetDefaultBrowserCallback(const base::Closure& callback);
-
-  // Clears the callback when it isn't needed anymore. Only call this on the UI
-  // thread.
-  static void ClearDefaultBrowserCallback();
-
-  // Returns the url used to set Chrome as the default browser asynchronously.
-  static const wchar_t* GetDefaultBrowserUrl();
-#endif  // defined(OS_WIN)
 
  private:
   friend class CloudPrintProxyPolicyTest;
@@ -133,22 +118,23 @@ class StartupBrowserCreator {
                            ReadingWasRestartedAfterRestart);
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest, UpdateWithTwoProfiles);
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest, LastUsedProfileActivated);
-  FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorWinTest,
-                           GetURLsFromCommandLineWithDesktopSearchURL);
 
-  // Returns the list of URLs to open from the command line. The returned
-  // vector is empty if the user didn't specify any URLs on the command line.
+  bool ProcessCmdLineImpl(const base::CommandLine& command_line,
+                          const base::FilePath& cur_dir,
+                          bool process_startup,
+                          Profile* last_used_profile,
+                          const Profiles& last_opened_profiles);
+
+  // Returns the list of URLs to open from the command line. The returned vector
+  // is empty if the user didn't specify any URLs on the command line.
+  // |show_search_redirection_infobar| is set to true if an infobar should be
+  // shown to inform the user that a desktop search has been redirected to the
+  // default search engine.
   static std::vector<GURL> GetURLsFromCommandLine(
       const base::CommandLine& command_line,
       const base::FilePath& cur_dir,
-      Profile* profile);
-
-  static bool ProcessCmdLineImpl(const base::CommandLine& command_line,
-                                 const base::FilePath& cur_dir,
-                                 bool process_startup,
-                                 Profile* last_used_profile,
-                                 const Profiles& last_opened_profiles,
-                                 StartupBrowserCreator* browser_creator);
+      Profile* profile,
+      bool* show_desktop_search_redirection_infobar);
 
   // This function performs command-line handling and is invoked only after
   // start up (for example when we get a start request for another process).
@@ -182,6 +168,10 @@ class StartupBrowserCreator {
   // Whether the browser window should be shown immediately after it has been
   // created. Default is true.
   bool show_main_browser_window_;
+
+  // Whether an infobar should be shown to inform the user that a desktop search
+  // has been redirected to the default search engine.
+  bool show_desktop_search_redirection_infobar_;
 
   // True if we have already read and reset the preference kWasRestarted. (A
   // member variable instead of a static variable inside WasRestarted because

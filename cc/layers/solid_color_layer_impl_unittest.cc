@@ -9,13 +9,13 @@
 #include <vector>
 
 #include "cc/layers/append_quads_data.h"
-#include "cc/layers/layer_settings.h"
 #include "cc/layers/solid_color_layer.h"
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/test/fake_impl_task_runner_provider.h"
 #include "cc/test/fake_layer_tree_host.h"
 #include "cc/test/layer_test_common.h"
 #include "cc/test/test_task_graph_runner.h"
+#include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/single_thread_proxy.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -24,7 +24,7 @@ namespace cc {
 namespace {
 
 TEST(SolidColorLayerImplTest, VerifyTilingCompleteAndNoOverlap) {
-  scoped_ptr<RenderPass> render_pass = RenderPass::Create();
+  std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
 
   gfx::Size layer_size = gfx::Size(800, 600);
   gfx::Rect visible_layer_rect = gfx::Rect(layer_size);
@@ -33,12 +33,11 @@ TEST(SolidColorLayerImplTest, VerifyTilingCompleteAndNoOverlap) {
   TestTaskGraphRunner task_graph_runner;
   FakeLayerTreeHostImpl host_impl(&task_runner_provider, nullptr,
                                   &task_graph_runner);
-  scoped_ptr<SolidColorLayerImpl> layer =
+  std::unique_ptr<SolidColorLayerImpl> layer =
       SolidColorLayerImpl::Create(host_impl.active_tree(), 1);
   layer->draw_properties().visible_layer_rect = visible_layer_rect;
   layer->SetBounds(layer_size);
   layer->SetForceRenderSurface(true);
-  layer->draw_properties().render_target = layer.get();
 
   AppendQuadsData data;
   layer->AppendQuads(render_pass.get(), &data);
@@ -50,7 +49,7 @@ TEST(SolidColorLayerImplTest, VerifyTilingCompleteAndNoOverlap) {
 TEST(SolidColorLayerImplTest, VerifyCorrectBackgroundColorInQuad) {
   SkColor test_color = 0xFFA55AFF;
 
-  scoped_ptr<RenderPass> render_pass = RenderPass::Create();
+  std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
 
   gfx::Size layer_size = gfx::Size(100, 100);
   gfx::Rect visible_layer_rect = gfx::Rect(layer_size);
@@ -59,13 +58,12 @@ TEST(SolidColorLayerImplTest, VerifyCorrectBackgroundColorInQuad) {
   TestTaskGraphRunner task_graph_runner;
   FakeLayerTreeHostImpl host_impl(&task_runner_provider, nullptr,
                                   &task_graph_runner);
-  scoped_ptr<SolidColorLayerImpl> layer =
+  std::unique_ptr<SolidColorLayerImpl> layer =
       SolidColorLayerImpl::Create(host_impl.active_tree(), 1);
   layer->draw_properties().visible_layer_rect = visible_layer_rect;
   layer->SetBounds(layer_size);
   layer->SetBackgroundColor(test_color);
   layer->SetForceRenderSurface(true);
-  layer->draw_properties().render_target = layer.get();
 
   AppendQuadsData data;
   layer->AppendQuads(render_pass.get(), &data);
@@ -79,7 +77,7 @@ TEST(SolidColorLayerImplTest, VerifyCorrectBackgroundColorInQuad) {
 TEST(SolidColorLayerImplTest, VerifyCorrectOpacityInQuad) {
   const float opacity = 0.5f;
 
-  scoped_ptr<RenderPass> render_pass = RenderPass::Create();
+  std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
 
   gfx::Size layer_size = gfx::Size(100, 100);
   gfx::Rect visible_layer_rect = gfx::Rect(layer_size);
@@ -88,13 +86,12 @@ TEST(SolidColorLayerImplTest, VerifyCorrectOpacityInQuad) {
   TestTaskGraphRunner task_graph_runner;
   FakeLayerTreeHostImpl host_impl(&task_runner_provider, nullptr,
                                   &task_graph_runner);
-  scoped_ptr<SolidColorLayerImpl> layer =
+  std::unique_ptr<SolidColorLayerImpl> layer =
       SolidColorLayerImpl::Create(host_impl.active_tree(), 1);
   layer->draw_properties().visible_layer_rect = visible_layer_rect;
   layer->SetBounds(layer_size);
   layer->draw_properties().opacity = opacity;
   layer->SetForceRenderSurface(true);
-  layer->draw_properties().render_target = layer.get();
 
   AppendQuadsData data;
   layer->AppendQuads(render_pass.get(), &data);
@@ -108,7 +105,7 @@ TEST(SolidColorLayerImplTest, VerifyCorrectOpacityInQuad) {
 TEST(SolidColorLayerImplTest, VerifyCorrectBlendModeInQuad) {
   const SkXfermode::Mode blend_mode = SkXfermode::kMultiply_Mode;
 
-  scoped_ptr<RenderPass> render_pass = RenderPass::Create();
+  std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
 
   gfx::Size layer_size = gfx::Size(100, 100);
   gfx::Rect visible_layer_rect = gfx::Rect(layer_size);
@@ -117,7 +114,7 @@ TEST(SolidColorLayerImplTest, VerifyCorrectBlendModeInQuad) {
   TestTaskGraphRunner task_graph_runner;
   FakeLayerTreeHostImpl host_impl(&task_runner_provider, nullptr,
                                   &task_graph_runner);
-  scoped_ptr<SolidColorLayerImpl> layer =
+  std::unique_ptr<SolidColorLayerImpl> layer =
       SolidColorLayerImpl::Create(host_impl.active_tree(), 1);
   layer->SetBounds(layer_size);
   layer->set_draw_blend_mode(blend_mode);
@@ -134,31 +131,28 @@ TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
   gfx::Size layer_size = gfx::Size(100, 100);
   gfx::Rect visible_layer_rect = gfx::Rect(layer_size);
 
-  LayerSettings layer_settings;
-
-  scoped_refptr<SolidColorLayer> layer =
-      SolidColorLayer::Create(layer_settings);
+  scoped_refptr<SolidColorLayer> layer = SolidColorLayer::Create();
   layer->SetBounds(layer_size);
   layer->SetForceRenderSurface(true);
 
-  scoped_refptr<Layer> root = Layer::Create(layer_settings);
+  scoped_refptr<Layer> root = Layer::Create();
   root->AddChild(layer);
 
   FakeLayerTreeHostClient client(FakeLayerTreeHostClient::DIRECT_3D);
   TestTaskGraphRunner task_graph_runner;
-  scoped_ptr<FakeLayerTreeHost> host =
+  std::unique_ptr<FakeLayerTreeHost> host =
       FakeLayerTreeHost::Create(&client, &task_graph_runner);
   host->SetRootLayer(root);
 
-  LayerTreeHostCommon::CalcDrawPropsMainInputs inputs(root.get(),
-                                                      gfx::Size(500, 500));
-  LayerTreeHostCommon::CalculateDrawProperties(&inputs);
+  LayerTreeHostCommon::CalcDrawPropsMainInputsForTesting inputs(
+      root.get(), gfx::Size(500, 500));
+  LayerTreeHostCommon::CalculateDrawPropertiesForTesting(&inputs);
 
   EXPECT_FALSE(layer->contents_opaque());
   layer->SetBackgroundColor(SkColorSetARGBInline(255, 10, 20, 30));
   EXPECT_TRUE(layer->contents_opaque());
   {
-    scoped_ptr<SolidColorLayerImpl> layer_impl =
+    std::unique_ptr<SolidColorLayerImpl> layer_impl =
         SolidColorLayerImpl::Create(host->host_impl()->active_tree(),
                                     layer->id());
     layer->PushPropertiesTo(layer_impl.get());
@@ -170,7 +164,7 @@ TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
     // should be the full tile.
     layer_impl->draw_properties().opacity = 1;
 
-    scoped_ptr<RenderPass> render_pass = RenderPass::Create();
+    std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
 
     AppendQuadsData data;
     layer_impl->AppendQuads(render_pass.get(), &data);
@@ -184,7 +178,7 @@ TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
   layer->SetBackgroundColor(SkColorSetARGBInline(254, 10, 20, 30));
   EXPECT_FALSE(layer->contents_opaque());
   {
-    scoped_ptr<SolidColorLayerImpl> layer_impl =
+    std::unique_ptr<SolidColorLayerImpl> layer_impl =
         SolidColorLayerImpl::Create(host->host_impl()->active_tree(),
                                     layer->id());
     layer->PushPropertiesTo(layer_impl.get());
@@ -196,7 +190,7 @@ TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
     // should be empty.
     layer_impl->draw_properties().opacity = 1;
 
-    scoped_ptr<RenderPass> render_pass = RenderPass::Create();
+    std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
 
     AppendQuadsData data;
     layer_impl->AppendQuads(render_pass.get(), &data);

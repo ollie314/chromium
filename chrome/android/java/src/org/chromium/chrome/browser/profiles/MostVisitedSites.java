@@ -29,7 +29,8 @@ public class MostVisitedSites {
          *             visited URLs).
          */
         @CalledByNative("MostVisitedURLsObserver")
-        public void onMostVisitedURLsAvailable(String[] titles, String[] urls);
+        public void onMostVisitedURLsAvailable(
+                String[] titles, String[] urls, String[] whitelistIconPaths);
 
         /**
          * This is called when the list of popular URLs is initially available or updated.
@@ -89,10 +90,11 @@ public class MostVisitedSites {
     public void setMostVisitedURLsObserver(final MostVisitedURLsObserver observer, int numSites) {
         MostVisitedURLsObserver wrappedObserver = new MostVisitedURLsObserver() {
             @Override
-            public void onMostVisitedURLsAvailable(String[] titles, String[] urls) {
+            public void onMostVisitedURLsAvailable(
+                    String[] titles, String[] urls, String[] whitelistIconPaths) {
                 // Don't notify observer if we've already been destroyed.
                 if (mNativeMostVisitedSites != 0) {
-                    observer.onMostVisitedURLsAvailable(titles, urls);
+                    observer.onMostVisitedURLsAvailable(titles, urls, whitelistIconPaths);
                 }
             }
             @Override
@@ -129,10 +131,16 @@ public class MostVisitedSites {
 
     /**
      * Blacklists a URL from the most visited URLs list.
-     * @param url The URL to be blacklisted.
      */
-    public void blacklistUrl(String url) {
-        nativeBlacklistUrl(mNativeMostVisitedSites, url);
+    public void addBlacklistedUrl(String url) {
+        nativeAddOrRemoveBlacklistedUrl(mNativeMostVisitedSites, url, true);
+    }
+
+    /**
+     * Removes a URL from the most visited URLs blacklist.
+     */
+    public void removeBlacklistedUrl(String url) {
+        nativeAddOrRemoveBlacklistedUrl(mNativeMostVisitedSites, url, false);
     }
 
     /**
@@ -159,7 +167,8 @@ public class MostVisitedSites {
             MostVisitedURLsObserver observer, int numSites);
     private native void nativeGetURLThumbnail(long nativeMostVisitedSites, String url,
             ThumbnailCallback callback);
-    private native void nativeBlacklistUrl(long nativeMostVisitedSites, String url);
+    private native void nativeAddOrRemoveBlacklistedUrl(long nativeMostVisitedSites, String url,
+            boolean addUrl);
     private native void nativeRecordTileTypeMetrics(long nativeMostVisitedSites, int[] tileTypes);
     private native void nativeRecordOpenedMostVisitedItem(long nativeMostVisitedSites, int index,
             int tileType);

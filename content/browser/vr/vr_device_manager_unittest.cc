@@ -2,12 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "content/browser/vr/vr_device_manager.h"
+
+#include <memory>
+#include <utility>
+
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
-#include "base/memory/scoped_ptr.h"
 #include "content/browser/vr/test/fake_vr_device.h"
 #include "content/browser/vr/test/fake_vr_device_provider.h"
-#include "content/browser/vr/vr_device_manager.h"
 #include "content/browser/vr/vr_device_provider.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -24,7 +27,7 @@ class VRDeviceManagerTest : public testing::Test {
 
  protected:
   FakeVRDeviceProvider* provider_;
-  scoped_ptr<VRDeviceManager> device_manager_;
+  std::unique_ptr<VRDeviceManager> device_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(VRDeviceManagerTest);
 };
@@ -36,9 +39,9 @@ VRDeviceManagerTest::~VRDeviceManagerTest() {
 }
 
 void VRDeviceManagerTest::SetUp() {
-  scoped_ptr<FakeVRDeviceProvider> provider(new FakeVRDeviceProvider());
+  std::unique_ptr<FakeVRDeviceProvider> provider(new FakeVRDeviceProvider());
   provider_ = provider.get();
-  device_manager_.reset(new VRDeviceManager(provider.Pass()));
+  device_manager_.reset(new VRDeviceManager(std::move(provider)));
 }
 
 TEST_F(VRDeviceManagerTest, InitializationTest) {
@@ -46,15 +49,15 @@ TEST_F(VRDeviceManagerTest, InitializationTest) {
 
   // Calling GetDevices should initialize the service if it hasn't been
   // initialized yet or the providesr have been released.
-  // The VRService should initialize each of it's providers upon it's own
+  // The mojom::VRService should initialize each of it's providers upon it's own
   // initialization.
-  mojo::Array<VRDeviceInfoPtr> webvr_devices;
+  mojo::Array<mojom::VRDeviceInfoPtr> webvr_devices;
   webvr_devices = device_manager_->GetVRDevices();
   EXPECT_TRUE(provider_->IsInitialized());
 }
 
 TEST_F(VRDeviceManagerTest, GetDevicesBasicTest) {
-  mojo::Array<VRDeviceInfoPtr> webvr_devices;
+  mojo::Array<mojom::VRDeviceInfoPtr> webvr_devices;
   webvr_devices = device_manager_->GetVRDevices();
   // Calling GetVRDevices should initialize the providers.
   EXPECT_TRUE(provider_->IsInitialized());
@@ -65,7 +68,7 @@ TEST_F(VRDeviceManagerTest, GetDevicesBasicTest) {
   VRDevice* queried_device = device_manager_->GetDevice(1);
   EXPECT_EQ(nullptr, queried_device);
 
-  scoped_ptr<FakeVRDevice> device1(new FakeVRDevice(provider_));
+  std::unique_ptr<FakeVRDevice> device1(new FakeVRDevice(provider_));
   provider_->AddDevice(device1.get());
   webvr_devices = device_manager_->GetVRDevices();
   // Should have successfully returned one device.
@@ -73,7 +76,7 @@ TEST_F(VRDeviceManagerTest, GetDevicesBasicTest) {
   // The WebVRDevice index should match the device id.
   EXPECT_EQ(webvr_devices[0]->index, device1->id());
 
-  scoped_ptr<FakeVRDevice> device2(new FakeVRDevice(provider_));
+  std::unique_ptr<FakeVRDevice> device2(new FakeVRDevice(provider_));
   provider_->AddDevice(device2.get());
   webvr_devices = device_manager_->GetVRDevices();
   // Should have successfully returned two devices.

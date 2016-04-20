@@ -13,8 +13,8 @@ namespace {
 // SiteEngagementService.EngagementScoreBucket_* histogram. If these bases
 // change, the EngagementScoreBuckets suffix in histograms.xml should be
 // updated.
-const int kEngagementBucketHistogramBuckets[] = {0,  10, 20, 30, 40,
-                                                 50, 60, 70, 80, 90};
+const int kEngagementBucketHistogramBuckets[] = {0,  10, 20, 30, 40, 50,
+                                                 60, 70, 80, 90, 100};
 
 }  // namespace
 
@@ -32,6 +32,12 @@ const char SiteEngagementMetrics::kMedianEngagementHistogram[] =
 
 const char SiteEngagementMetrics::kEngagementScoreHistogram[] =
     "SiteEngagementService.EngagementScore";
+
+const char SiteEngagementMetrics::kEngagementScoreHistogramHTTP[] =
+    "SiteEngagementService.EngagementScore.HTTP";
+
+const char SiteEngagementMetrics::kEngagementScoreHistogramHTTPS[] =
+    "SiteEngagementService.EngagementScore.HTTPS";
 
 const char SiteEngagementMetrics::kOriginsWithMaxEngagementHistogram[] =
     "SiteEngagementService.OriginsWithMaxEngagement";
@@ -51,6 +57,12 @@ const char SiteEngagementMetrics::kEngagementBucketHistogramBase[] =
 const char SiteEngagementMetrics::kDaysSinceLastShortcutLaunchHistogram[] =
     "SiteEngagementService.DaysSinceLastShortcutLaunch";
 
+const char SiteEngagementMetrics::kScoreDecayedFromHistogram[] =
+    "SiteEngagementService.ScoreDecayedFrom";
+
+const char SiteEngagementMetrics::kScoreDecayedToHistogram[] =
+    "SiteEngagementService.ScoreDecayedTo";
+
 void SiteEngagementMetrics::RecordTotalSiteEngagement(double total_engagement) {
   UMA_HISTOGRAM_COUNTS_10000(kTotalEngagementHistogram, total_engagement);
 }
@@ -68,7 +80,7 @@ void SiteEngagementMetrics::RecordMedianEngagement(double median_engagement) {
 }
 
 void SiteEngagementMetrics::RecordEngagementScores(
-    std::map<GURL, double> score_map) {
+    const std::map<GURL, double>& score_map) {
   if (score_map.size() == 0)
     return;
 
@@ -78,7 +90,16 @@ void SiteEngagementMetrics::RecordEngagementScores(
 
   for (const auto& value : score_map) {
     UMA_HISTOGRAM_COUNTS_100(kEngagementScoreHistogram, value.second);
-    score_buckets.lower_bound(value.second)->second++;
+    if (value.first.SchemeIs(url::kHttpsScheme))
+      UMA_HISTOGRAM_COUNTS_100(kEngagementScoreHistogramHTTPS, value.second);
+    else if (value.first.SchemeIs(url::kHttpScheme))
+      UMA_HISTOGRAM_COUNTS_100(kEngagementScoreHistogramHTTP, value.second);
+
+    auto bucket = score_buckets.lower_bound(value.second);
+    if (bucket == score_buckets.end())
+      continue;
+
+    bucket->second++;
   }
 
   for (const auto& b : score_buckets) {
@@ -114,6 +135,14 @@ void SiteEngagementMetrics::RecordEngagement(EngagementType type) {
 
 void SiteEngagementMetrics::RecordDaysSinceLastShortcutLaunch(int days) {
   UMA_HISTOGRAM_COUNTS_100(kDaysSinceLastShortcutLaunchHistogram, days);
+}
+
+void SiteEngagementMetrics::RecordScoreDecayedFrom(double score) {
+  UMA_HISTOGRAM_COUNTS_100(kScoreDecayedFromHistogram, score);
+}
+
+void SiteEngagementMetrics::RecordScoreDecayedTo(double score) {
+  UMA_HISTOGRAM_COUNTS_100(kScoreDecayedToHistogram, score);
 }
 
 // static

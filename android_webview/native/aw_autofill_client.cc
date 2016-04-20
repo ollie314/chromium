@@ -13,13 +13,13 @@
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/logging.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/pref_service_factory.h"
 #include "components/autofill/core/browser/autofill_popup_delegate.h"
 #include "components/autofill/core/browser/suggestion.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/pref_service_factory.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
@@ -192,9 +192,9 @@ bool AwAutofillClient::IsContextSecure(const GURL& form_origin) {
   // Note: The implementation below is a copy of the one in
   // ChromeAutofillClient::IsContextSecure, and should be kept in sync
   // until crbug.com/505388 gets implemented.
-  return ssl_status.security_style ==
-      content::SECURITY_STYLE_AUTHENTICATED &&
-      ssl_status.content_status == content::SSLStatus::NORMAL_CONTENT;
+  return ssl_status.security_style == content::SECURITY_STYLE_AUTHENTICATED &&
+         !(ssl_status.content_status &
+           content::SSLStatus::RAN_INSECURE_CONTENT);
 }
 
 void AwAutofillClient::SuggestionSelected(JNIEnv* env,
@@ -217,6 +217,7 @@ void AwAutofillClient::ShowAutofillSettings() {
 
 void AwAutofillClient::ShowUnmaskPrompt(
     const autofill::CreditCard& card,
+    UnmaskCardReason reason,
     base::WeakPtr<autofill::CardUnmaskDelegate> delegate) {
   NOTIMPLEMENTED();
 }
@@ -233,7 +234,7 @@ void AwAutofillClient::ConfirmSaveCreditCardLocally(
 
 void AwAutofillClient::ConfirmSaveCreditCardToCloud(
     const autofill::CreditCard& card,
-    scoped_ptr<base::DictionaryValue> legal_message,
+    std::unique_ptr<base::DictionaryValue> legal_message,
     const base::Closure& callback) {
   NOTIMPLEMENTED();
 }

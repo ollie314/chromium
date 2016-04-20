@@ -35,10 +35,11 @@ class WindowPrivate {
 
   void set_visible(bool visible) { window_->visible_ = visible; }
 
-  void set_drawn(bool drawn) { window_->drawn_ = drawn; }
-  bool drawn() { return window_->drawn_; }
+  void set_parent_drawn(bool drawn) { window_->parent_drawn_ = drawn; }
+  bool parent_drawn() { return window_->parent_drawn_; }
 
-  void set_id(Id id) { window_->id_ = id; }
+  void set_server_id(Id id) { window_->server_id_ = id; }
+  Id server_id() { return window_->server_id_; }
 
   void set_connection(WindowTreeConnection* connection) {
     window_->connection_ = connection;
@@ -62,6 +63,7 @@ class WindowPrivate {
   void LocalRemoveTransientWindow(Window* child) {
     window_->LocalRemoveTransientWindow(child);
   }
+  void LocalUnsetModal() { window_->is_modal_ = false; }
   void LocalReorder(Window* relative, mojom::OrderDirection direction) {
     window_->LocalReorder(relative, direction);
   }
@@ -74,8 +76,9 @@ class WindowPrivate {
       const std::vector<gfx::Rect>& additional_client_areas) {
     window_->LocalSetClientArea(client_area, additional_client_areas);
   }
-  void LocalSetDrawn(bool drawn) { window_->LocalSetDrawn(drawn); }
+  void LocalSetParentDrawn(bool drawn) { window_->LocalSetParentDrawn(drawn); }
   void LocalSetVisible(bool visible) { window_->LocalSetVisible(visible); }
+  void LocalSetOpacity(float opacity) { window_->LocalSetOpacity(opacity); }
   void LocalSetPredefinedCursor(mojom::Cursor cursor) {
     window_->LocalSetPredefinedCursor(cursor);
   }
@@ -90,7 +93,7 @@ class WindowPrivate {
  private:
   Window* window_;
 
-  MOJO_DISALLOW_COPY_AND_ASSIGN(WindowPrivate);
+  DISALLOW_COPY_AND_ASSIGN(WindowPrivate);
 };
 
 }  // namespace mus

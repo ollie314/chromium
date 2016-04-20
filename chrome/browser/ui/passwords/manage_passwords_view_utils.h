@@ -24,11 +24,18 @@ enum class PasswordTittleType {
   UPDATE_PASSWORD,  // update plain password
 };
 
+class Profile;
+
 // The desired width and height in pixels for an account avatar.
 extern const int kAvatarImageSize;
 
 // Crops and scales |image_skia| to the desired size for an account avatar.
 gfx::ImageSkia ScaleImageForAccountAvatar(gfx::ImageSkia image_skia);
+
+// Returns the upper and lower label to be displayed in the account chooser UI
+// for |form|.
+std::pair<base::string16, base::string16> GetCredentialLabelsForAccountChooser(
+    const autofill::PasswordForm& form);
 
 // Sets the formatted |title| in the Save Password bubble or the Update Password
 // bubble (depending on |dialog_type|). If the registry controlled domain of
@@ -67,18 +74,9 @@ void GetManagePasswordsDialogTitleText(const GURL& user_visible_url,
 // branding.
 void GetAccountChooserDialogTitleTextAndLinkRange(
     bool is_smartlock_branding_enabled,
+    bool many_accounts,
     base::string16* title,
     gfx::Range* title_link_range);
-
-// Sets the formatted |explanation| in the Auto sign-in prompt.
-// If |is_smartlock_branding_enabled| is true, sets the
-// |explanation_link_range| for the "Google Smart Lock" text range to be set
-// visibly as a hyperlink in the prompt, otherwise chooses the title which
-// doesn't contain Smart Lock branding.
-void GetAutoSigninPromptFirstRunExperienceExplanation(
-    bool is_smartlock_branding_enabled,
-    base::string16* explanation,
-    gfx::Range* explanation_link_range);
 
 // Loads |smartlock_string_id| or |default_string_id| string from the resources
 // and substitutes the placeholder with the correct password manager branding
@@ -94,5 +92,9 @@ void GetBrandedTextAndLinkRange(
 
 // Returns an username in the form that should be shown in the bubble.
 base::string16 GetDisplayUsername(const autofill::PasswordForm& form);
+
+// Check if |profile| syncing the Auto sign-in settings (by checking that user
+// syncs the PRIORITY_PREFERENCE). The view appearance might depend on it.
+bool IsSyncingAutosignSetting(Profile* profile);
 
 #endif  // CHROME_BROWSER_UI_PASSWORDS_MANAGE_PASSWORDS_VIEW_UTILS_H_

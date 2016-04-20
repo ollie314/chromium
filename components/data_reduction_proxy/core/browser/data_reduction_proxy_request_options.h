@@ -81,18 +81,9 @@ class DataReductionProxyRequestOptions {
 
   // Adds a 'Chrome-Proxy' header to |request_headers| with the data reduction
   // proxy authentication credentials. Only adds this header if the
-  // provided |proxy_server| is a data reduction proxy and not the data
-  // reduction proxy's CONNECT server.
+  // provided |proxy_server| is a data reduction proxy.
   void MaybeAddRequestHeader(const net::ProxyServer& proxy_server,
                              net::HttpRequestHeaders* request_headers);
-
-  // Adds a 'Chrome-Proxy' header to |request_headers| with the data reduction
-  // proxy authentication credentials. Only adds this header if the provided
-  // |proxy_server| is the data reduction proxy's CONNECT server. Must be called
-  // on the IO thread.
-  void MaybeAddProxyTunnelRequestHandler(
-      const net::HostPortPair& proxy_server,
-      net::HttpRequestHeaders* request_headers);
 
   // Stores the supplied key and sets up credentials suitable for authenticating
   // with the data reduction proxy.
@@ -111,6 +102,10 @@ class DataReductionProxyRequestOptions {
 
   // Invalidates the secure session credentials.
   void Invalidate();
+
+  // Parses |request_headers| and returns the value of the session key.
+  std::string GetSessionKeyFromRequestHeaders(
+      const net::HttpRequestHeaders& request_headers) const;
 
  protected:
   void SetHeader(net::HttpRequestHeaders* headers);
@@ -135,18 +130,6 @@ class DataReductionProxyRequestOptions {
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyRequestOptionsTest,
                            AuthHashForSalt);
 
-  // Returns the version of Chromium that is being used.
-  std::string ChromiumVersion() const;
-
-  // Returns the build and patch numbers of |version|. If |version| isn't of the
-  // form xx.xx.xx.xx build and patch are not modified.
-  void GetChromiumBuildAndPatch(const std::string& version,
-                                std::string* build,
-                                std::string* patch) const;
-
-  // Updates client type, build, and patch.
-  void UpdateVersion();
-
   // Updates the value of the experiments to be run and regenerate the header if
   // necessary.
   void UpdateExperiments();
@@ -163,14 +146,6 @@ class DataReductionProxyRequestOptions {
   // Generates and updates the session ID and credentials.
   void UpdateCredentials();
 
-  // Adds authentication headers only if |expects_ssl| is true and
-  // |proxy_server| is a data reduction proxy used for ssl tunneling via
-  // HTTP CONNECT, or |expect_ssl| is false and |proxy_server| is a data
-  // reduction proxy for HTTP traffic.
-  void MaybeAddRequestHeaderImpl(const net::HostPortPair& proxy_server,
-                                 bool expect_ssl,
-                                 net::HttpRequestHeaders* request_headers);
-
   // Regenerates the |header_value_| string which is concatenated to the
   // Chrome-proxy header.
   void RegenerateRequestHeaderValue();
@@ -183,7 +158,6 @@ class DataReductionProxyRequestOptions {
 
   // Name of the client and version of the data reduction proxy protocol to use.
   std::string client_;
-  std::string version_;
   std::string session_;
   std::string credentials_;
   std::string secure_session_;

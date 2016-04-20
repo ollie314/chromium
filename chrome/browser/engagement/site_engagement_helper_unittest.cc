@@ -4,6 +4,7 @@
 
 #include "chrome/browser/engagement/site_engagement_helper.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/test/histogram_tester.h"
 #include "base/timer/mock_timer.h"
 #include "base/values.h"
@@ -20,6 +21,11 @@
 
 class SiteEngagementHelperTest : public ChromeRenderViewHostTestHarness {
  public:
+  void SetUp() override {
+    ChromeRenderViewHostTestHarness::SetUp();
+    SiteEngagementScore::SetParamValuesForTesting();
+  }
+
   SiteEngagementHelper* GetHelper(content::WebContents* web_contents) {
     SiteEngagementHelper::CreateForWebContents(web_contents);
     SiteEngagementHelper* helper =
@@ -64,13 +70,13 @@ class SiteEngagementHelperTest : public ChromeRenderViewHostTestHarness {
 
   // Set a pause timer on the input tracker for test purposes.
   void SetInputTrackerPauseTimer(SiteEngagementHelper* helper,
-                                 scoped_ptr<base::Timer> timer) {
+                                 std::unique_ptr<base::Timer> timer) {
     helper->input_tracker_.SetPauseTimerForTesting(std::move(timer));
   }
 
   // Set a pause timer on the input tracker for test purposes.
   void SetMediaTrackerPauseTimer(SiteEngagementHelper* helper,
-                                 scoped_ptr<base::Timer> timer) {
+                                 std::unique_ptr<base::Timer> timer) {
     helper->media_tracker_.SetPauseTimerForTesting(std::move(timer));
   }
 
@@ -141,8 +147,8 @@ TEST_F(SiteEngagementHelperTest, MouseDownEventEngagementAccumulation) {
   UserInputAccumulation(blink::WebInputEvent::MouseDown);
 }
 
-TEST_F(SiteEngagementHelperTest, MouseWheelEventEngagementAccumulation) {
-  UserInputAccumulation(blink::WebInputEvent::MouseWheel);
+TEST_F(SiteEngagementHelperTest, ScrollEventEngagementAccumulation) {
+  UserInputAccumulation(blink::WebInputEvent::GestureScrollBegin);
 }
 
 TEST_F(SiteEngagementHelperTest, GestureEngagementAccumulation) {
@@ -208,7 +214,7 @@ TEST_F(SiteEngagementHelperTest, MediaEngagement) {
 
   base::MockTimer* media_tracker_timer = new base::MockTimer(true, false);
   SiteEngagementHelper* helper = GetHelper(contents);
-  SetMediaTrackerPauseTimer(helper, make_scoped_ptr(media_tracker_timer));
+  SetMediaTrackerPauseTimer(helper, base::WrapUnique(media_tracker_timer));
   SiteEngagementService* service =
       SiteEngagementServiceFactory::GetForProfile(profile());
   DCHECK(service);
@@ -296,9 +302,12 @@ TEST_F(SiteEngagementHelperTest, MixedInputEngagementAccumulation) {
   EXPECT_DOUBLE_EQ(0.5, service->GetScore(url1));
   EXPECT_EQ(0, service->GetScore(url2));
   histograms.ExpectTotalCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                              1);
+                              2);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_NAVIGATION, 1);
+  histograms.ExpectBucketCount(
+      SiteEngagementMetrics::kEngagementTypeHistogram,
+      SiteEngagementMetrics::ENGAGEMENT_FIRST_DAILY_ENGAGEMENT, 1);
 
   HandleUserInputAndRestartTracking(helper, blink::WebInputEvent::RawKeyDown);
   HandleUserInputAndRestartTracking(helper,
@@ -311,7 +320,7 @@ TEST_F(SiteEngagementHelperTest, MixedInputEngagementAccumulation) {
   EXPECT_DOUBLE_EQ(0.75, service->GetScore(url1));
   EXPECT_EQ(0, service->GetScore(url2));
   histograms.ExpectTotalCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                              6);
+                              7);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_NAVIGATION, 1);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
@@ -321,8 +330,12 @@ TEST_F(SiteEngagementHelperTest, MixedInputEngagementAccumulation) {
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_TOUCH_GESTURE,
                                2);
+  histograms.ExpectBucketCount(
+      SiteEngagementMetrics::kEngagementTypeHistogram,
+      SiteEngagementMetrics::ENGAGEMENT_FIRST_DAILY_ENGAGEMENT, 1);
 
-  HandleUserInputAndRestartTracking(helper, blink::WebInputEvent::MouseWheel);
+  HandleUserInputAndRestartTracking(helper,
+                                    blink::WebInputEvent::GestureScrollBegin);
   HandleUserInputAndRestartTracking(helper, blink::WebInputEvent::MouseDown);
   HandleMediaPlaying(helper, true);
   HandleUserInputAndRestartTracking(helper,
@@ -332,11 +345,11 @@ TEST_F(SiteEngagementHelperTest, MixedInputEngagementAccumulation) {
   EXPECT_DOUBLE_EQ(0.93, service->GetScore(url1));
   EXPECT_EQ(0, service->GetScore(url2));
   histograms.ExpectTotalCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                              11);
+                              12);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_MOUSE, 2);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                               SiteEngagementMetrics::ENGAGEMENT_WHEEL, 1);
+                               SiteEngagementMetrics::ENGAGEMENT_SCROLL, 1);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_TOUCH_GESTURE,
                                3);
@@ -346,6 +359,9 @@ TEST_F(SiteEngagementHelperTest, MixedInputEngagementAccumulation) {
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_MEDIA_HIDDEN,
                                1);
+  histograms.ExpectBucketCount(
+      SiteEngagementMetrics::kEngagementTypeHistogram,
+      SiteEngagementMetrics::ENGAGEMENT_FIRST_DAILY_ENGAGEMENT, 1);
 
   Navigate(url2);
   TrackingStarted(helper);
@@ -362,7 +378,7 @@ TEST_F(SiteEngagementHelperTest, MixedInputEngagementAccumulation) {
   EXPECT_DOUBLE_EQ(0.6, service->GetScore(url2));
   EXPECT_DOUBLE_EQ(1.53, service->GetTotalEngagementPoints());
   histograms.ExpectTotalCount(SiteEngagementMetrics::kEngagementTypeHistogram,
-                              14);
+                              16);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_NAVIGATION, 2);
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
@@ -370,6 +386,9 @@ TEST_F(SiteEngagementHelperTest, MixedInputEngagementAccumulation) {
   histograms.ExpectBucketCount(SiteEngagementMetrics::kEngagementTypeHistogram,
                                SiteEngagementMetrics::ENGAGEMENT_TOUCH_GESTURE,
                                4);
+  histograms.ExpectBucketCount(
+      SiteEngagementMetrics::kEngagementTypeHistogram,
+      SiteEngagementMetrics::ENGAGEMENT_FIRST_DAILY_ENGAGEMENT, 2);
 }
 
 TEST_F(SiteEngagementHelperTest, CheckTimerAndCallbacks) {
@@ -380,8 +399,8 @@ TEST_F(SiteEngagementHelperTest, CheckTimerAndCallbacks) {
   base::MockTimer* input_tracker_timer = new base::MockTimer(true, false);
   base::MockTimer* media_tracker_timer = new base::MockTimer(true, false);
   SiteEngagementHelper* helper = GetHelper(contents);
-  SetInputTrackerPauseTimer(helper, make_scoped_ptr(input_tracker_timer));
-  SetMediaTrackerPauseTimer(helper, make_scoped_ptr(media_tracker_timer));
+  SetInputTrackerPauseTimer(helper, base::WrapUnique(input_tracker_timer));
+  SetMediaTrackerPauseTimer(helper, base::WrapUnique(media_tracker_timer));
 
   SiteEngagementService* service =
       SiteEngagementServiceFactory::GetForProfile(profile());
@@ -488,8 +507,8 @@ TEST_F(SiteEngagementHelperTest, ShowAndHide) {
   base::MockTimer* input_tracker_timer = new base::MockTimer(true, false);
   base::MockTimer* media_tracker_timer = new base::MockTimer(true, false);
   SiteEngagementHelper* helper = GetHelper(contents);
-  SetInputTrackerPauseTimer(helper, make_scoped_ptr(input_tracker_timer));
-  SetMediaTrackerPauseTimer(helper, make_scoped_ptr(media_tracker_timer));
+  SetInputTrackerPauseTimer(helper, base::WrapUnique(input_tracker_timer));
+  SetMediaTrackerPauseTimer(helper, base::WrapUnique(media_tracker_timer));
 
   Navigate(url1);
   input_tracker_timer->Fire();
@@ -539,7 +558,7 @@ TEST_F(SiteEngagementHelperTest, SingleTabNavigation) {
 
   base::MockTimer* input_tracker_timer = new base::MockTimer(true, false);
   SiteEngagementHelper* helper = GetHelper(contents);
-  SetInputTrackerPauseTimer(helper, make_scoped_ptr(input_tracker_timer));
+  SetInputTrackerPauseTimer(helper, base::WrapUnique(input_tracker_timer));
 
   // Navigation should start the initial delay timer.
   Navigate(url1);

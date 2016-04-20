@@ -4,8 +4,8 @@
 
 #include "net/dns/record_rdata.h"
 
-#include "base/memory/scoped_ptr.h"
-#include "net/base/ip_address_number.h"
+#include <memory>
+
 #include "net/dns/dns_response.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -17,8 +17,8 @@ base::StringPiece MakeStringPiece(const uint8_t* data, unsigned size) {
 }
 
 TEST(RecordRdataTest, ParseSrvRecord) {
-  scoped_ptr<SrvRecordRdata> record1_obj;
-  scoped_ptr<SrvRecordRdata> record2_obj;
+  std::unique_ptr<SrvRecordRdata> record1_obj;
+  std::unique_ptr<SrvRecordRdata> record2_obj;
 
   // These are just the rdata portions of the DNS records, rather than complete
   // records, but it works well enough for this test.
@@ -61,7 +61,7 @@ TEST(RecordRdataTest, ParseSrvRecord) {
 }
 
 TEST(RecordRdataTest, ParseARecord) {
-  scoped_ptr<ARecordRdata> record_obj;
+  std::unique_ptr<ARecordRdata> record_obj;
 
   // These are just the rdata portions of the DNS records, rather than complete
   // records, but it works well enough for this test.
@@ -76,13 +76,13 @@ TEST(RecordRdataTest, ParseARecord) {
   record_obj = ARecordRdata::Create(record_strpiece, parser);
   ASSERT_TRUE(record_obj != NULL);
 
-  ASSERT_EQ("127.0.0.1", IPAddressToString(record_obj->address()));
+  ASSERT_EQ("127.0.0.1", record_obj->address().ToString());
 
   ASSERT_TRUE(record_obj->IsEqual(record_obj.get()));
 }
 
 TEST(RecordRdataTest, ParseAAAARecord) {
-  scoped_ptr<AAAARecordRdata> record_obj;
+  std::unique_ptr<AAAARecordRdata> record_obj;
 
   // These are just the rdata portions of the DNS records, rather than complete
   // records, but it works well enough for this test.
@@ -98,14 +98,13 @@ TEST(RecordRdataTest, ParseAAAARecord) {
   record_obj = AAAARecordRdata::Create(record_strpiece, parser);
   ASSERT_TRUE(record_obj != NULL);
 
-  ASSERT_EQ("1234:5678::9",
-            IPAddressToString(record_obj->address()));
+  ASSERT_EQ("1234:5678::9", record_obj->address().ToString());
 
   ASSERT_TRUE(record_obj->IsEqual(record_obj.get()));
 }
 
 TEST(RecordRdataTest, ParseCnameRecord) {
-  scoped_ptr<CnameRecordRdata> record_obj;
+  std::unique_ptr<CnameRecordRdata> record_obj;
 
   // These are just the rdata portions of the DNS records, rather than complete
   // records, but it works well enough for this test.
@@ -125,7 +124,7 @@ TEST(RecordRdataTest, ParseCnameRecord) {
 }
 
 TEST(RecordRdataTest, ParsePtrRecord) {
-  scoped_ptr<PtrRecordRdata> record_obj;
+  std::unique_ptr<PtrRecordRdata> record_obj;
 
   // These are just the rdata portions of the DNS records, rather than complete
   // records, but it works well enough for this test.
@@ -145,7 +144,7 @@ TEST(RecordRdataTest, ParsePtrRecord) {
 }
 
 TEST(RecordRdataTest, ParseTxtRecord) {
-  scoped_ptr<TxtRecordRdata> record_obj;
+  std::unique_ptr<TxtRecordRdata> record_obj;
 
   // These are just the rdata portions of the DNS records, rather than complete
   // records, but it works well enough for this test.
@@ -170,7 +169,7 @@ TEST(RecordRdataTest, ParseTxtRecord) {
 }
 
 TEST(RecordRdataTest, ParseNsecRecord) {
-  scoped_ptr<NsecRecordRdata> record_obj;
+  std::unique_ptr<NsecRecordRdata> record_obj;
 
   // These are just the rdata portions of the DNS records, rather than complete
   // records, but it works well enough for this test.

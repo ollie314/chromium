@@ -35,6 +35,7 @@
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
+#include "core/frame/UseCounter.h"
 #include "core/frame/VisualViewport.h"
 #include "core/html/HTMLBodyElement.h"
 #include "core/html/HTMLHeadElement.h"
@@ -56,9 +57,9 @@ using namespace HTMLNames;
 
 class ImageEventListener : public EventListener {
 public:
-    static PassRefPtrWillBeRawPtr<ImageEventListener> create(ImageDocument* document)
+    static ImageEventListener* create(ImageDocument* document)
     {
-        return adoptRefWillBeNoop(new ImageEventListener(document));
+        return new ImageEventListener(document);
     }
     static const ImageEventListener* cast(const EventListener* listener)
     {
@@ -84,14 +85,14 @@ private:
 
     virtual void handleEvent(ExecutionContext*, Event*);
 
-    RawPtrWillBeMember<ImageDocument> m_doc;
+    Member<ImageDocument> m_doc;
 };
 
 class ImageDocumentParser : public RawDataDocumentParser {
 public:
-    static PassRefPtrWillBeRawPtr<ImageDocumentParser> create(ImageDocument* document)
+    static ImageDocumentParser* create(ImageDocument* document)
     {
-        return adoptRefWillBeNoop(new ImageDocumentParser(document));
+        return new ImageDocumentParser(document);
     }
 
     ImageDocument* document() const
@@ -103,6 +104,7 @@ private:
     ImageDocumentParser(ImageDocument* document)
         : RawDataDocumentParser(document)
     {
+        UseCounter::count(document, UseCounter::ImageDocument);
     }
 
     void appendBytes(const char*, size_t) override;
@@ -146,9 +148,7 @@ void ImageDocumentParser::appendBytes(const char* data, size_t length)
         document()->cachedImage()->appendData(data, length);
     }
 
-    // TODO(esprehn): These null checks on Document don't make sense, document()
-    // will ASSERT if it was null. Do these want to check isDetached() ?
-    if (document())
+    if (!isDetached())
         document()->imageUpdated();
 }
 
@@ -171,14 +171,14 @@ void ImageDocumentParser::finish()
             if (fileName.isEmpty())
                 fileName = document()->url().host();
             document()->setTitle(imageTitle(fileName, size));
+            if (isDetached())
+                return;
         }
 
         document()->imageUpdated();
     }
 
-    // TODO(esprehn): These null checks on Document don't make sense, document()
-    // will ASSERT if it was null. Do these want to check isDetached() ?
-    if (document())
+    if (!isDetached())
         document()->finishedParsing();
 }
 
@@ -196,61 +196,52 @@ ImageDocument::ImageDocument(const DocumentInit& initializer)
     lockCompatibilityMode();
 }
 
-PassRefPtrWillBeRawPtr<DocumentParser> ImageDocument::createParser()
+DocumentParser* ImageDocument::createParser()
 {
     return ImageDocumentParser::create(this);
 }
 
-void ImageDocument::createDocumentStructure(bool loadingMultipartContent)
+void ImageDocument::createDocumentStructure()
 {
-    RefPtrWillBeRawPtr<HTMLHtmlElement> rootElement = HTMLHtmlElement::create(*this);
+    HTMLHtmlElement* rootElement = HTMLHtmlElement::create(*this);
     appendChild(rootElement);
     rootElement->insertedByParser();
 
-    if (frame())
-        frame()->loader().dispatchDocumentElementAvailable();
-    // Normally, ImageDocument creates an HTMLImageElement that doesn't actually load
-    // anything, and the ImageDocument routes the main resource data into the HTMLImageElement's
-    // ImageResource. However, the main resource pipeline doesn't know how to handle multipart content.
-    // For multipart content, we instead stop streaming data through the main resource and re-request
-    // the data directly.
-    if (loadingMultipartContent)
-        loader()->stopLoading();
+    frame()->loader().dispatchDocumentElementAvailable();
+    frame()->loader().runScriptsAtDocumentElementAvailable();
+    if (isStopped())
+        return; // runScriptsAtDocumentElementAvailable can detach the frame.
 
-    RefPtrWillBeRawPtr<HTMLHeadElement> head = HTMLHeadElement::create(*this);
-    RefPtrWillBeRawPtr<HTMLMetaElement> meta = HTMLMetaElement::create(*this);
+    HTMLHeadElement* head = HTMLHeadElement::create(*this);
+    HTMLMetaElement* meta = HTMLMetaElement::create(*this);
     meta->setAttribute(nameAttr, "viewport");
     meta->setAttribute(contentAttr, "width=device-width, minimum-scale=0.1");
     head->appendChild(meta);
 
-    RefPtrWillBeRawPtr<HTMLBodyElement> body = HTMLBodyElement::create(*this);
+    HTMLBodyElement* body = HTMLBodyElement::create(*this);
     body->setAttribute(styleAttr, "margin: 0px;");
 
-    if (frame())
-        frame()->loader().client()->dispatchWillInsertBody();
+    frame()->loader().client()->dispatchWillInsertBody();
 
     m_imageElement = HTMLImageElement::create(*this);
     m_imageElement->setAttribute(styleAttr, "-webkit-user-select: none");
-    // If the image is multipart, we neglect to mention to the HTMLImageElement that it's in an
-    // ImageDocument, so that it requests the image normally.
-    if (!loadingMultipartContent)
-        m_imageElement->setLoadingImageDocument();
-    m_imageElement->setSrc(url().string());
+    m_imageElement->setLoadingImageDocument();
+    m_imageElement->setSrc(url().getString());
     body->appendChild(m_imageElement.get());
+    if (loader() && m_imageElement->cachedImage())
+        m_imageElement->cachedImage()->responseReceived(loader()->response(), nullptr);
 
     if (shouldShrinkToFit()) {
         // Add event listeners
-        RefPtrWillBeRawPtr<EventListener> listener = ImageEventListener::create(this);
+        EventListener* listener = ImageEventListener::create(this);
         if (LocalDOMWindow* domWindow = this->domWindow())
             domWindow->addEventListener("resize", listener, false);
         if (m_shrinkToFitMode == Desktop)
-            m_imageElement->addEventListener("click", listener.release(), false);
+            m_imageElement->addEventListener("click", listener, false);
     }
 
     rootElement->appendChild(head);
     rootElement->appendChild(body);
-    if (loadingMultipartContent)
-        finishedParsing();
 }
 
 float ImageDocument::scale() const
@@ -319,7 +310,7 @@ void ImageDocument::imageUpdated()
     if (m_imageSizeIsKnown)
         return;
 
-    updateLayoutTreeIfNeeded();
+    updateLayoutTree();
     if (!m_imageElement->cachedImage() || m_imageElement->cachedImage()->imageSize(LayoutObject::shouldRespectImageOrientation(m_imageElement->layoutObject()), pageZoomFactor(this)).isEmpty())
         return;
 
@@ -415,25 +406,21 @@ void ImageDocument::windowSizeChanged(ScaleType type)
 
 ImageResource* ImageDocument::cachedImage()
 {
-    bool loadingMultipartContent = loader() && loader()->loadingMultipartContent();
-    if (!m_imageElement)
-        createDocumentStructure(loadingMultipartContent);
+    if (!m_imageElement) {
+        createDocumentStructure();
+        if (isStopped()) {
+            m_imageElement = nullptr;
+            return nullptr;
+        }
+    }
 
-    return loadingMultipartContent ? nullptr : m_imageElement->cachedImage();
+    return m_imageElement->cachedImage();
 }
 
 bool ImageDocument::shouldShrinkToFit() const
 {
     return frame()->isMainFrame();
 }
-
-#if !ENABLE(OILPAN)
-void ImageDocument::dispose()
-{
-    m_imageElement = nullptr;
-    HTMLDocument::dispose();
-}
-#endif
 
 DEFINE_TRACE(ImageDocument)
 {
@@ -460,4 +447,4 @@ bool ImageEventListener::operator==(const EventListener& listener) const
     return false;
 }
 
-}
+} // namespace blink

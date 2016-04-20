@@ -101,7 +101,7 @@ void BackgroundTracingManagerImpl::WhenIdle(
 }
 
 bool BackgroundTracingManagerImpl::SetActiveScenario(
-    scoped_ptr<BackgroundTracingConfig> config,
+    std::unique_ptr<BackgroundTracingConfig> config,
     const BackgroundTracingManager::ReceiveCallback& receive_callback,
     DataFiltering data_filtering) {
   CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
@@ -136,7 +136,7 @@ bool BackgroundTracingManagerImpl::SetActiveScenario(
                    base::Unretained(this)));
   }
 
-  scoped_ptr<const content::BackgroundTracingConfigImpl> config_impl(
+  std::unique_ptr<const content::BackgroundTracingConfigImpl> config_impl(
       static_cast<BackgroundTracingConfigImpl*>(config.release()));
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
@@ -188,7 +188,7 @@ bool BackgroundTracingManagerImpl::SetActiveScenario(
 }
 
 bool BackgroundTracingManagerImpl::HasActiveScenario() {
-  return config_;
+  return !!config_;
 }
 
 bool BackgroundTracingManagerImpl::IsTracingForTesting() {
@@ -400,7 +400,7 @@ void BackgroundTracingManagerImpl::StartTracing(
 }
 
 void BackgroundTracingManagerImpl::OnFinalizeStarted(
-    scoped_ptr<const base::DictionaryValue> metadata,
+    std::unique_ptr<const base::DictionaryValue> metadata,
     base::RefCountedString* file_contents) {
   CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
@@ -452,7 +452,8 @@ void BackgroundTracingManagerImpl::AddCustomMetadata(
     TracingControllerImpl::TraceDataSink* trace_data_sink) const {
   base::DictionaryValue metadata_dict;
 
-  scoped_ptr<base::DictionaryValue> config_dict(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> config_dict(
+      new base::DictionaryValue());
   config_->IntoDict(config_dict.get());
   metadata_dict.Set("config", std::move(config_dict));
 
@@ -515,6 +516,8 @@ BackgroundTracingManagerImpl::GetCategoryFilterStringForCategoryPreset(
       return "benchmark,toplevel,startup,disabled-by-default-file,"
              "disabled-by-default-toplevel.flow,"
              "disabled-by-default-ipc.flow";
+    case BackgroundTracingConfigImpl::CategoryPreset::BENCHMARK_BLINK_GC:
+      return "blink_gc,disabled-by-default-blink_gc";
     case BackgroundTracingConfigImpl::CategoryPreset::BLINK_STYLE:
       return "blink_style";
   }

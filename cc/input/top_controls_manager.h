@@ -5,8 +5,9 @@
 #ifndef CC_INPUT_TOP_CONTROLS_MANAGER_H_
 #define CC_INPUT_TOP_CONTROLS_MANAGER_H_
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "cc/input/top_controls_state.h"
 #include "cc/layers/layer_impl.h"
@@ -33,7 +34,7 @@ class CC_EXPORT TopControlsManager
     HIDING_CONTROLS
   };
 
-  static scoped_ptr<TopControlsManager> Create(
+  static std::unique_ptr<TopControlsManager> Create(
       TopControlsManagerClient* client,
       float top_controls_show_threshold,
       float top_controls_hide_threshold);
@@ -44,7 +45,7 @@ class CC_EXPORT TopControlsManager
   float TopControlsShownRatio() const;
   float TopControlsHeight() const;
 
-  bool has_animation() const { return top_controls_animation_; }
+  bool has_animation() const { return !!top_controls_animation_; }
   AnimationDirection animation_direction() { return animation_direction_; }
 
   void UpdateTopControlsState(TopControlsState constraints,
@@ -79,7 +80,7 @@ class CC_EXPORT TopControlsManager
   TopControlsManagerClient* client_;  // The client manages the lifecycle of
                                       // this.
 
-  scoped_ptr<KeyframedFloatAnimationCurve> top_controls_animation_;
+  std::unique_ptr<KeyframedFloatAnimationCurve> top_controls_animation_;
   AnimationDirection animation_direction_;
   TopControlsState permitted_state_;
 

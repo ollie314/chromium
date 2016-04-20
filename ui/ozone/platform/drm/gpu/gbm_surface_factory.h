@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/threading/thread_checker.h"
@@ -21,7 +22,7 @@ class GbmSurfaceless;
 
 class GbmSurfaceFactory : public SurfaceFactoryOzone {
  public:
-  GbmSurfaceFactory(DrmThreadProxy* drm_thread);
+  explicit GbmSurfaceFactory(DrmThreadProxy* drm_thread);
   ~GbmSurfaceFactory() override;
 
   void RegisterSurface(gfx::AcceleratedWidget widget, GbmSurfaceless* surface);
@@ -30,15 +31,16 @@ class GbmSurfaceFactory : public SurfaceFactoryOzone {
 
   // SurfaceFactoryOzone:
   intptr_t GetNativeDisplay() override;
-  const int32_t* GetEGLSurfaceProperties(const int32_t* desired_list) override;
+  std::vector<gfx::BufferFormat> GetScanoutFormats(
+      gfx::AcceleratedWidget widget) override;
   bool LoadEGLGLES2Bindings(
       AddGLLibraryCallback add_gl_library,
       SetGLGetProcAddressProcCallback set_gl_get_proc_address) override;
-  scoped_ptr<SurfaceOzoneCanvas> CreateCanvasForWidget(
+  std::unique_ptr<SurfaceOzoneCanvas> CreateCanvasForWidget(
       gfx::AcceleratedWidget widget) override;
-  scoped_ptr<ui::SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
+  std::unique_ptr<ui::SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
       gfx::AcceleratedWidget w) override;
-  scoped_ptr<SurfaceOzoneEGL> CreateSurfacelessEGLSurfaceForWidget(
+  std::unique_ptr<SurfaceOzoneEGL> CreateSurfacelessEGLSurfaceForWidget(
       gfx::AcceleratedWidget widget) override;
   scoped_refptr<ui::NativePixmap> CreateNativePixmap(
       gfx::AcceleratedWidget widget,
@@ -46,6 +48,8 @@ class GbmSurfaceFactory : public SurfaceFactoryOzone {
       gfx::BufferFormat format,
       gfx::BufferUsage usage) override;
   scoped_refptr<NativePixmap> CreateNativePixmapFromHandle(
+      gfx::Size size,
+      gfx::BufferFormat format,
       const gfx::NativePixmapHandle& handle) override;
 
  private:

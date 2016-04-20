@@ -5,12 +5,12 @@
 #ifndef CONTENT_RENDERER_FETCHERS_RESOURCE_FETCHER_IMPL_H_
 #define CONTENT_RENDERER_FETCHERS_RESOURCE_FETCHER_IMPL_H_
 
+#include <memory>
 #include <string>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/timer/timer.h"
 #include "content/public/renderer/resource_fetcher.h"
 #include "content/renderer/fetchers/web_url_loader_client_impl.h"
@@ -23,6 +23,7 @@ class GURL;
 namespace blink {
 class WebFrame;
 class WebURLLoader;
+enum class WebCachePolicy;
 }
 
 namespace content {
@@ -35,7 +36,7 @@ class ResourceFetcherImpl : public ResourceFetcher,
   void SetBody(const std::string& body) override;
   void SetHeader(const std::string& header, const std::string& value) override;
   void SetSkipServiceWorker(bool skip_service_worker) override;
-  void SetCachePolicy(blink::WebURLRequest::CachePolicy policy) override;
+  void SetCachePolicy(blink::WebCachePolicy policy) override;
   void SetLoaderOptions(const blink::WebURLLoaderOptions& options) override;
   void Start(blink::WebFrame* frame,
              blink::WebURLRequest::RequestContext request_context,
@@ -59,7 +60,7 @@ class ResourceFetcherImpl : public ResourceFetcher,
   void OnLoadComplete() override;
   void Cancel() override;
 
-  scoped_ptr<blink::WebURLLoader> loader_;
+  std::unique_ptr<blink::WebURLLoader> loader_;
 
   // Options to send to the loader.
   blink::WebURLLoaderOptions options_;

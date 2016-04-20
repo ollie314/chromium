@@ -10,7 +10,6 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/threading/worker_pool.h"
 #include "build/build_config.h"
@@ -25,6 +24,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/net_log/chrome_net_log.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/resource_context.h"
@@ -132,10 +132,10 @@ OffTheRecordProfileIOData::Handle::CreateIsolatedAppRequestContextGetter(
   StoragePartitionDescriptor descriptor(partition_path, in_memory);
   DCHECK_EQ(app_request_context_getter_map_.count(descriptor), 0u);
 
-  scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
+  std::unique_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
       protocol_handler_interceptor(
-          ProtocolHandlerRegistryFactory::GetForBrowserContext(profile_)->
-              CreateJobInterceptorFactory());
+          ProtocolHandlerRegistryFactory::GetForBrowserContext(profile_)
+              ->CreateJobInterceptorFactory());
   ChromeURLRequestContextGetter* context =
       ChromeURLRequestContextGetter::CreateForIsolatedApp(
           profile_, io_data_, descriptor,
@@ -166,9 +166,9 @@ void OffTheRecordProfileIOData::Handle::LazyInitialize() const {
   io_data_->InitializeOnUIThread(profile_);
 }
 
-scoped_ptr<ProfileIOData::ChromeURLRequestContextGetterVector>
+std::unique_ptr<ProfileIOData::ChromeURLRequestContextGetterVector>
 OffTheRecordProfileIOData::Handle::GetAllContextGetters() {
-  scoped_ptr<ChromeURLRequestContextGetterVector> context_getters(
+  std::unique_ptr<ChromeURLRequestContextGetterVector> context_getters(
       new ChromeURLRequestContextGetterVector());
   ChromeURLRequestContextGetterMap::iterator iter =
       app_request_context_getter_map_.begin();
@@ -193,7 +193,7 @@ OffTheRecordProfileIOData::~OffTheRecordProfileIOData() {
 }
 
 void OffTheRecordProfileIOData::InitializeInternal(
-    scoped_ptr<ChromeNetworkDelegate> chrome_network_delegate,
+    std::unique_ptr<ChromeNetworkDelegate> chrome_network_delegate,
     ProfileParams* profile_params,
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) const {
@@ -224,9 +224,8 @@ void OffTheRecordProfileIOData::InitializeInternal(
       io_thread_globals->url_request_backoff_manager.get());
 
   // For incognito, we use the default non-persistent HttpServerPropertiesImpl.
-  set_http_server_properties(
-      scoped_ptr<net::HttpServerProperties>(
-          new net::HttpServerPropertiesImpl()));
+  set_http_server_properties(std::unique_ptr<net::HttpServerProperties>(
+      new net::HttpServerPropertiesImpl()));
   main_context->set_http_server_properties(http_server_properties());
 
   // For incognito, we use a non-persistent channel ID store.
@@ -238,12 +237,11 @@ void OffTheRecordProfileIOData::InitializeInternal(
   main_context->set_channel_id_service(channel_id_service);
 
   using content::CookieStoreConfig;
-  main_context->set_cookie_store(
-      CreateCookieStore(CookieStoreConfig(
-          base::FilePath(),
-          CookieStoreConfig::EPHEMERAL_SESSION_COOKIES,
-          NULL,
-          profile_params->cookie_monster_delegate.get())));
+  main_cookie_store_ = CreateCookieStore(CookieStoreConfig(
+      base::FilePath(), CookieStoreConfig::EPHEMERAL_SESSION_COOKIES, NULL,
+      profile_params->cookie_monster_delegate.get()));
+  main_context->set_cookie_store(main_cookie_store_.get());
+  main_cookie_store_->SetChannelIDServiceID(channel_id_service->GetUniqueID());
 
   http_network_session_ = CreateHttpNetworkSession(*profile_params);
   main_http_factory_ = CreateMainHttpFactory(
@@ -255,7 +253,7 @@ void OffTheRecordProfileIOData::InitializeInternal(
       new net::FtpNetworkLayer(main_context->host_resolver()));
 #endif  // !defined(DISABLE_FTP_SUPPORT)
 
-  scoped_ptr<net::URLRequestJobFactoryImpl> main_job_factory(
+  std::unique_ptr<net::URLRequestJobFactoryImpl> main_job_factory(
       new net::URLRequestJobFactoryImpl());
 
   InstallProtocolHandlers(main_job_factory.get(), protocol_handlers);
@@ -295,17 +293,13 @@ void OffTheRecordProfileIOData::
       io_thread_globals->url_request_backoff_manager.get());
   // All we care about for extensions is the cookie store. For incognito, we
   // use a non-persistent cookie store.
-  net::CookieMonster* extensions_cookie_store =
-      content::CreateCookieStore(content::CookieStoreConfig())->
-          GetCookieMonster();
+  content::CookieStoreConfig cookie_config;
   // Enable cookies for chrome-extension URLs.
-  const char* const schemes[] = {
-      extensions::kExtensionScheme
-  };
-  extensions_cookie_store->SetCookieableSchemes(schemes, arraysize(schemes));
-  extensions_context->set_cookie_store(extensions_cookie_store);
+  cookie_config.cookieable_schemes.push_back(extensions::kExtensionScheme);
+  extensions_cookie_store_ = content::CreateCookieStore(cookie_config);
+  extensions_context->set_cookie_store(extensions_cookie_store_.get());
 
-  scoped_ptr<net::URLRequestJobFactoryImpl> extensions_job_factory(
+  std::unique_ptr<net::URLRequestJobFactoryImpl> extensions_job_factory(
       new net::URLRequestJobFactoryImpl());
   // TODO(shalev): The extensions_job_factory has a NULL NetworkDelegate.
   // Without a network_delegate, this protocol handler will never
@@ -316,7 +310,7 @@ void OffTheRecordProfileIOData::
   extensions_job_factory_ = SetUpJobFactoryDefaults(
       std::move(extensions_job_factory),
       content::URLRequestInterceptorScopedVector(),
-      scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>(), NULL,
+      std::unique_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>(), NULL,
       ftp_factory_.get());
   extensions_context->set_job_factory(extensions_job_factory_.get());
 }
@@ -324,7 +318,7 @@ void OffTheRecordProfileIOData::
 net::URLRequestContext* OffTheRecordProfileIOData::InitializeAppRequestContext(
     net::URLRequestContext* main_context,
     const StoragePartitionDescriptor& partition_descriptor,
-    scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
+    std::unique_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
         protocol_handler_interceptor,
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) const {
@@ -340,16 +334,15 @@ net::URLRequestContext* OffTheRecordProfileIOData::InitializeAppRequestContext(
       content::CreateCookieStore(content::CookieStoreConfig()));
 
   // Use a separate in-memory cache for the app.
-  scoped_ptr<net::HttpCache> app_http_cache =
-      CreateHttpFactory(http_network_session_.get(),
-                        net::HttpCache::DefaultBackend::InMemory(0));
+  std::unique_ptr<net::HttpCache> app_http_cache = CreateHttpFactory(
+      http_network_session_.get(), net::HttpCache::DefaultBackend::InMemory(0));
 
   context->SetHttpTransactionFactory(std::move(app_http_cache));
 
-  scoped_ptr<net::URLRequestJobFactoryImpl> job_factory(
+  std::unique_ptr<net::URLRequestJobFactoryImpl> job_factory(
       new net::URLRequestJobFactoryImpl());
   InstallProtocolHandlers(job_factory.get(), protocol_handlers);
-  scoped_ptr<net::URLRequestJobFactory> top_job_factory;
+  std::unique_ptr<net::URLRequestJobFactory> top_job_factory;
   top_job_factory = SetUpJobFactoryDefaults(
       std::move(job_factory), std::move(request_interceptors),
       std::move(protocol_handler_interceptor), main_context->network_delegate(),
@@ -376,7 +369,7 @@ net::URLRequestContext*
 OffTheRecordProfileIOData::AcquireIsolatedAppRequestContext(
     net::URLRequestContext* main_context,
     const StoragePartitionDescriptor& partition_descriptor,
-    scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
+    std::unique_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
         protocol_handler_interceptor,
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) const {

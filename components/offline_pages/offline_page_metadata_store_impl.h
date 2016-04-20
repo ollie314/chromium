@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/files/file_path.h"
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -41,11 +42,13 @@ class OfflinePageMetadataStoreImpl : public OfflinePageMetadataStore {
   void Load(const LoadCallback& callback) override;
   void AddOrUpdateOfflinePage(const OfflinePageItem& offline_page_record,
                               const UpdateCallback& callback) override;
-  void RemoveOfflinePages(const std::vector<int64_t>& bookmark_ids,
+  void RemoveOfflinePages(const std::vector<int64_t>& offline_ids,
                           const UpdateCallback& callback) override;
   void Reset(const ResetCallback& callback) override;
 
  private:
+  friend class OfflinePageMetadataStoreImplTest;
+
   void LoadContinuation(const LoadCallback& callback, bool success);
   void LoadDone(const LoadCallback& callback,
                 bool success,
@@ -60,10 +63,19 @@ class OfflinePageMetadataStoreImpl : public OfflinePageMetadataStore {
           entries_to_save,
       scoped_ptr<std::vector<std::string>> keys_to_remove,
       const UpdateCallback& callback);
+
   void UpdateDone(const OfflinePageMetadataStore::UpdateCallback& callback,
                   bool success);
 
   void ResetDone(const ResetCallback& callback, bool success);
+
+  // Called when a database has to be migrated from old bookmark ids
+  // to new offline ids.
+  // TODO(bburns): Perhaps remove this eventually?
+  void DatabaseUpdateDone(const OfflinePageMetadataStore::LoadCallback& cb,
+                          LoadStatus status,
+                          const std::vector<OfflinePageItem>& result,
+                          bool success);
 
   scoped_refptr<base::SequencedTaskRunner> background_task_runner_;
   base::FilePath database_dir_;

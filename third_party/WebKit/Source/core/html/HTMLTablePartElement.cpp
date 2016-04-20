@@ -30,10 +30,9 @@
 #include "core/css/CSSImageValue.h"
 #include "core/css/StylePropertySet.h"
 #include "core/dom/Document.h"
-#include "core/dom/shadow/ComposedTreeTraversal.h"
+#include "core/dom/shadow/FlatTreeTraversal.h"
 #include "core/html/HTMLTableElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
-#include "platform/weborigin/Referrer.h"
 
 namespace blink {
 
@@ -53,9 +52,8 @@ void HTMLTablePartElement::collectStyleForPresentationAttribute(const QualifiedN
     } else if (name == backgroundAttr) {
         String url = stripLeadingAndTrailingHTMLSpaces(value);
         if (!url.isEmpty()) {
-            RefPtrWillBeRawPtr<CSSImageValue> imageValue = CSSImageValue::create(url, document().completeURL(url));
-            imageValue->setReferrer(Referrer(document().outgoingReferrer(), document().referrerPolicy()));
-            style->setProperty(CSSProperty(CSSPropertyBackgroundImage, imageValue.release()));
+            CSSImageValue* imageValue = CSSImageValue::create(url, document().completeURL(url));
+            style->setProperty(CSSProperty(CSSPropertyBackgroundImage, imageValue));
         }
     } else if (name == valignAttr) {
         if (equalIgnoringCase(value, "top"))
@@ -89,10 +87,10 @@ void HTMLTablePartElement::collectStyleForPresentationAttribute(const QualifiedN
 
 HTMLTableElement* HTMLTablePartElement::findParentTable() const
 {
-    ContainerNode* parent = ComposedTreeTraversal::parent(*this);
+    ContainerNode* parent = FlatTreeTraversal::parent(*this);
     while (parent && !isHTMLTableElement(*parent))
-        parent = ComposedTreeTraversal::parent(*parent);
+        parent = FlatTreeTraversal::parent(*parent);
     return toHTMLTableElement(parent);
 }
 
-}
+} // namespace blink

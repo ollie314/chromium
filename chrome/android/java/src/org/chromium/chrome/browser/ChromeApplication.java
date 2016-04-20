@@ -26,7 +26,6 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ApplicationStateListener;
 import org.chromium.base.BuildInfo;
 import org.chromium.base.CommandLineInitUtil;
-import org.chromium.base.PathUtils;
 import org.chromium.base.ResourceExtractor;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
@@ -64,14 +63,13 @@ import org.chromium.chrome.browser.omaha.RequestGenerator;
 import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
 import org.chromium.chrome.browser.physicalweb.PhysicalWebBleClient;
 import org.chromium.chrome.browser.policy.PolicyAuditor;
-import org.chromium.chrome.browser.preferences.AccessibilityPreferences;
 import org.chromium.chrome.browser.preferences.LocationSettings;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.preferences.autofill.AutofillPreferences;
 import org.chromium.chrome.browser.preferences.password.SavePasswordsPreferences;
-import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferences;
+import org.chromium.chrome.browser.preferences.privacy.ClearBrowsingDataPreferences;
 import org.chromium.chrome.browser.preferences.website.SingleWebsitePreferences;
 import org.chromium.chrome.browser.printing.PrintingControllerFactory;
 import org.chromium.chrome.browser.rlz.RevenueStats;
@@ -119,11 +117,10 @@ public class ChromeApplication extends ContentApplication {
             "com.google.android.apps.chrome.ChromeMobileApplication.BOOT_TIMESTAMP";
     private static final long BOOT_TIMESTAMP_MARGIN_MS = 1000;
     private static final String PREF_LOCALE = "locale";
-    private static final float FLOAT_EPSILON = 0.001f;
-    private static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "chrome";
     private static final String DEV_TOOLS_SERVER_SOCKET_PREFIX = "chrome";
     private static final String SESSIONS_UUID_PREF_KEY = "chromium.sync.sessions.id";
 
+    private static boolean sIsFinishedCachingNativeFlags;
     private static DocumentTabModelSelector sDocumentTabModelSelector;
 
     /**
@@ -189,6 +186,14 @@ public class ChromeApplication extends ContentApplication {
     private PrintingController mPrintingController;
 
     /**
+     * This is called during early initialization in order to set up ChildProcessLauncher
+     * for certain Chrome packaging configurations
+     */
+    public ChildProcessLauncher.ChildProcessCreationParams getChildProcessCreationParams() {
+        return null;
+    }
+
+    /**
      * This is called once per ChromeApplication instance, which get created per process
      * (browser OR renderer).  Don't stick anything in here that shouldn't be called multiple times
      * during Chrome's lifetime.
@@ -208,7 +213,8 @@ public class ChromeApplication extends ContentApplication {
                 }
 
                 // For multiwindow mode we do not track keyboard visibility.
-                return activity != null && MultiWindowUtils.getInstance().isMultiWindow(activity);
+                return activity != null
+                        && MultiWindowUtils.getInstance().isLegacyMultiWindow(activity);
             }
         });
 
@@ -247,6 +253,7 @@ public class ChromeApplication extends ContentApplication {
         assert mIsProcessInitialized;
 
         onForegroundSessionStart();
+        cacheNativeFlags();
     }
 
     /**
@@ -259,9 +266,8 @@ public class ChromeApplication extends ContentApplication {
         ChildProcessLauncher.onBroughtToForeground();
         mBackgroundProcessing.startTimers();
         updatePasswordEchoState();
-        updateFontSize();
+        FontSizePrefs.getInstance(this).onSystemFontScaleChanged();
         updateAcceptLanguages();
-        changeAppStatus(true);
         mVariationsSession.start(getApplicationContext());
         mPowerBroadcastReceiver.onForegroundSessionStart();
 
@@ -283,7 +289,6 @@ public class ChromeApplication extends ContentApplication {
         mBackgroundProcessing.suspendTimers();
         flushPersistentData();
         mIsStarted = false;
-        changeAppStatus(false);
         mPowerBroadcastReceiver.onForegroundSessionEnd();
 
         ChildProcessLauncher.onSentToBackground();
@@ -415,7 +420,6 @@ public class ChromeApplication extends ContentApplication {
         if (!BuildInfo.hasLanguageApkSplits(this)) {
             ResourceExtractor.setResourcesToExtract(ResourceBundle.getActiveLocaleResources());
         }
-        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX, this);
     }
 
     /**
@@ -524,10 +528,7 @@ public class ChromeApplication extends ContentApplication {
             return;
         }
         Intent intent = PreferencesLauncher.createIntentForSettingsPage(activity,
-                PrivacyPreferences.class.getName());
-        Bundle arguments = new Bundle();
-        arguments.putBoolean(PrivacyPreferences.SHOW_CLEAR_BROWSING_DATA_EXTRA, true);
-        intent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, arguments);
+                ClearBrowsingDataPreferences.class.getName());
         activity.startActivity(intent);
     }
 
@@ -601,12 +602,7 @@ public class ChromeApplication extends ContentApplication {
         }
     }
 
-    protected void changeAppStatus(boolean inForeground) {
-        nativeChangeAppStatus(inForeground);
-    }
-
     private static native void nativeRemoveSessionCookies();
-    private static native void nativeChangeAppStatus(boolean inForeground);
     private static native String nativeGetBrowserUserAgent();
     private static native void nativeFlushPersistentData();
 
@@ -776,41 +772,6 @@ public class ChromeApplication extends ContentApplication {
     }
 
     /**
-     * Update the font size after changing the Android accessibility system setting.  Doing so kills
-     * the Activities but it doesn't kill the ChromeApplication, so this should be called in
-     * {@link #onStart} instead of {@link #initialize}.
-     */
-    private void updateFontSize() {
-        // This method is currently broken. http://crbug.com/439108
-        // Skip it (with the consequence of not updating the text scaling factor when the user
-        // changes system font size) rather than incurring the broken behavior.
-        // TODO(newt): fix this.
-        if (true) return;
-
-        FontSizePrefs fontSizePrefs = FontSizePrefs.getInstance(getApplicationContext());
-
-        // Set font scale factor as the product of the system and browser scale settings.
-        float browserTextScale = PreferenceManager
-                .getDefaultSharedPreferences(this)
-                .getFloat(AccessibilityPreferences.PREF_TEXT_SCALE, 1.0f);
-        float fontScale = getResources().getConfiguration().fontScale * browserTextScale;
-
-        float scaleDelta = Math.abs(fontScale - fontSizePrefs.getFontScaleFactor());
-        if (scaleDelta >= FLOAT_EPSILON) {
-            fontSizePrefs.setFontScaleFactor(fontScale);
-        }
-
-        // If force enable zoom has not been manually set, set it automatically based on
-        // font scale factor.
-        boolean shouldForceZoom =
-                fontScale >= AccessibilityPreferences.FORCE_ENABLE_ZOOM_THRESHOLD_MULTIPLIER;
-        if (!fontSizePrefs.getUserSetForceEnableZoom()
-                && fontSizePrefs.getForceEnableZoom() != shouldForceZoom) {
-            fontSizePrefs.setForceEnableZoom(shouldForceZoom);
-        }
-    }
-
-    /**
      * Update the accept languages after changing Android locale setting. Doing so kills the
      * Activities but it doesn't kill the ChromeApplication, so this should be called in
      * {@link #onStart} instead of {@link #initialize}.
@@ -825,7 +786,8 @@ public class ChromeApplication extends ContentApplication {
             // So cache-clearing may not be effective if URL rendering can happen before
             // OnBrowsingDataRemoverDone() is called, in which case we may have to reload as well.
             // Check if it can happen.
-            instance.clearBrowsingData(null, new int[]{ BrowsingDataType.CACHE });
+            instance.clearBrowsingData(
+                    null, new int[]{ BrowsingDataType.CACHE }, TimePeriod.EVERYTHING);
         }
     }
 
@@ -854,5 +816,16 @@ public class ChromeApplication extends ContentApplication {
         if (PrefServiceBridge.getInstance().getPasswordEchoEnabled() == systemEnabled) return;
 
         PrefServiceBridge.getInstance().setPasswordEchoEnabled(systemEnabled);
+    }
+
+    /**
+     * Caches flags that are needed by Activities that launch before the native library is loaded
+     * and stores them in SharedPreferences. Because this function is called during launch after the
+     * library has loaded, they won't affect the next launch until Chrome is restarted.
+     */
+    private void cacheNativeFlags() {
+        if (sIsFinishedCachingNativeFlags) return;
+        FeatureUtilities.cacheNativeFlags();
+        sIsFinishedCachingNativeFlags = true;
     }
 }

@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <utility>
 
 #include "base/command_line.h"
@@ -343,15 +344,15 @@ TEST(PermissionsTest, CreateUnion) {
 
   URLPatternSet effective_hosts;
 
-  scoped_ptr<const PermissionSet> set1;
-  scoped_ptr<const PermissionSet> set2;
-  scoped_ptr<const PermissionSet> union_set;
+  std::unique_ptr<const PermissionSet> set1;
+  std::unique_ptr<const PermissionSet> set2;
+  std::unique_ptr<const PermissionSet> union_set;
 
   const APIPermissionInfo* permission_info =
     PermissionsInfo::GetInstance()->GetByID(APIPermission::kSocket);
   permission = permission_info->CreateAPIPermission();
   {
-    scoped_ptr<base::ListValue> value(new base::ListValue());
+    std::unique_ptr<base::ListValue> value(new base::ListValue());
     value->Append(new base::StringValue("tcp-connect:*.example.com:80"));
     value->Append(new base::StringValue("udp-bind::8080"));
     value->Append(new base::StringValue("udp-send-to::8888"));
@@ -396,7 +397,7 @@ TEST(PermissionsTest, CreateUnion) {
 
   permission = permission_info->CreateAPIPermission();
   {
-    scoped_ptr<base::ListValue> value(new base::ListValue());
+    std::unique_ptr<base::ListValue> value(new base::ListValue());
     value->Append(new base::StringValue("tcp-connect:*.example.com:80"));
     value->Append(new base::StringValue("udp-send-to::8899"));
     ASSERT_TRUE(permission->FromValue(value.get(), NULL, NULL));
@@ -410,7 +411,7 @@ TEST(PermissionsTest, CreateUnion) {
 
   permission = permission_info->CreateAPIPermission();
   {
-    scoped_ptr<base::ListValue> value(new base::ListValue());
+    std::unique_ptr<base::ListValue> value(new base::ListValue());
     value->Append(new base::StringValue("tcp-connect:*.example.com:80"));
     value->Append(new base::StringValue("udp-bind::8080"));
     value->Append(new base::StringValue("udp-send-to::8888"));
@@ -465,9 +466,9 @@ TEST(PermissionsTest, CreateIntersection) {
 
   URLPatternSet effective_hosts;
 
-  scoped_ptr<const PermissionSet> set1;
-  scoped_ptr<const PermissionSet> set2;
-  scoped_ptr<const PermissionSet> new_set;
+  std::unique_ptr<const PermissionSet> set1;
+  std::unique_ptr<const PermissionSet> set2;
+  std::unique_ptr<const PermissionSet> new_set;
 
   const APIPermissionInfo* permission_info =
     PermissionsInfo::GetInstance()->GetByID(APIPermission::kSocket);
@@ -477,7 +478,7 @@ TEST(PermissionsTest, CreateIntersection) {
   apis1.insert(APIPermission::kBackground);
   permission = permission_info->CreateAPIPermission();
   {
-    scoped_ptr<base::ListValue> value(new base::ListValue());
+    std::unique_ptr<base::ListValue> value(new base::ListValue());
     value->Append(new base::StringValue("tcp-connect:*.example.com:80"));
     value->Append(new base::StringValue("udp-bind::8080"));
     value->Append(new base::StringValue("udp-send-to::8888"));
@@ -514,7 +515,7 @@ TEST(PermissionsTest, CreateIntersection) {
   apis2.insert(APIPermission::kPlugin);
   permission = permission_info->CreateAPIPermission();
   {
-    scoped_ptr<base::ListValue> value(new base::ListValue());
+    std::unique_ptr<base::ListValue> value(new base::ListValue());
     value->Append(new base::StringValue("udp-bind::8080"));
     value->Append(new base::StringValue("udp-send-to::8888"));
     value->Append(new base::StringValue("udp-send-to::8899"));
@@ -525,7 +526,7 @@ TEST(PermissionsTest, CreateIntersection) {
   expected_apis.insert(APIPermission::kTab);
   permission = permission_info->CreateAPIPermission();
   {
-    scoped_ptr<base::ListValue> value(new base::ListValue());
+    std::unique_ptr<base::ListValue> value(new base::ListValue());
     value->Append(new base::StringValue("udp-bind::8080"));
     value->Append(new base::StringValue("udp-send-to::8888"));
     ASSERT_TRUE(permission->FromValue(value.get(), NULL, NULL));
@@ -577,9 +578,9 @@ TEST(PermissionsTest, CreateDifference) {
 
   URLPatternSet effective_hosts;
 
-  scoped_ptr<const PermissionSet> set1;
-  scoped_ptr<const PermissionSet> set2;
-  scoped_ptr<const PermissionSet> new_set;
+  std::unique_ptr<const PermissionSet> set1;
+  std::unique_ptr<const PermissionSet> set2;
+  std::unique_ptr<const PermissionSet> new_set;
 
   const APIPermissionInfo* permission_info =
     PermissionsInfo::GetInstance()->GetByID(APIPermission::kSocket);
@@ -589,7 +590,7 @@ TEST(PermissionsTest, CreateDifference) {
   apis1.insert(APIPermission::kBackground);
   permission = permission_info->CreateAPIPermission();
   {
-    scoped_ptr<base::ListValue> value(new base::ListValue());
+    std::unique_ptr<base::ListValue> value(new base::ListValue());
     value->Append(new base::StringValue("tcp-connect:*.example.com:80"));
     value->Append(new base::StringValue("udp-bind::8080"));
     value->Append(new base::StringValue("udp-send-to::8888"));
@@ -614,7 +615,7 @@ TEST(PermissionsTest, CreateDifference) {
   apis2.insert(APIPermission::kPlugin);
   permission = permission_info->CreateAPIPermission();
   {
-    scoped_ptr<base::ListValue> value(new base::ListValue());
+    std::unique_ptr<base::ListValue> value(new base::ListValue());
     value->Append(new base::StringValue("tcp-connect:*.example.com:80"));
     value->Append(new base::StringValue("udp-send-to::8899"));
     ASSERT_TRUE(permission->FromValue(value.get(), NULL, NULL));
@@ -624,7 +625,7 @@ TEST(PermissionsTest, CreateDifference) {
   expected_apis.insert(APIPermission::kBackground);
   permission = permission_info->CreateAPIPermission();
   {
-    scoped_ptr<base::ListValue> value(new base::ListValue());
+    std::unique_ptr<base::ListValue> value(new base::ListValue());
     value->Append(new base::StringValue("udp-bind::8080"));
     value->Append(new base::StringValue("udp-send-to::8888"));
     ASSERT_TRUE(permission->FromValue(value.get(), NULL, NULL));
@@ -685,7 +686,7 @@ TEST(PermissionsTest, IsPrivilegeIncrease) {
     { "plugin3", true },  // none -> plugin
 #endif
     { "storage", false },  // none -> storage
-    { "notifications", false },  // none -> notifications
+    { "notifications", true },  // none -> notifications
     { "platformapp1", false },  // host permissions for platform apps
     { "platformapp2", true },  // API permissions for platform apps
     { "media_galleries1", true },  // all -> read|all
@@ -758,7 +759,6 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kInlineInstallPrivate);
   skip.insert(APIPermission::kIdltest);
   skip.insert(APIPermission::kLogPrivate);
-  skip.insert(APIPermission::kNotifications);
   skip.insert(APIPermission::kNotificationProvider);
   skip.insert(APIPermission::kOverrideEscFullscreen);
   skip.insert(APIPermission::kPointerLock);
@@ -844,7 +844,6 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kMediaRouterPrivate);
   skip.insert(APIPermission::kMetricsPrivate);
   skip.insert(APIPermission::kPreferencesPrivate);
-  skip.insert(APIPermission::kPrincipalsPrivate);
   skip.insert(APIPermission::kImageWriterPrivate);
   skip.insert(APIPermission::kResourcesPrivate);
   skip.insert(APIPermission::kRtcPrivate);
@@ -1309,7 +1308,7 @@ testing::AssertionResult ShowsAllHostsWarning(const std::string& pattern) {
               DictionaryBuilder()
                   .Set("name", "TLDWildCardTest")
                   .Set("version", "0.1.0")
-                  .Set("permissions", std::move(ListBuilder().Append(pattern)))
+                  .Set("permissions", ListBuilder().Append(pattern).Build())
                   .Build())
           .Build();
 
@@ -1589,8 +1588,8 @@ TEST(PermissionsTest, IsHostPrivilegeIncrease) {
   URLPatternSet elist2;
   URLPatternSet slist1;
   URLPatternSet slist2;
-  scoped_ptr<const PermissionSet> set1;
-  scoped_ptr<const PermissionSet> set2;
+  std::unique_ptr<const PermissionSet> set1;
+  std::unique_ptr<const PermissionSet> set2;
   APIPermissionSet empty_perms;
   elist1.AddPattern(
       URLPattern(URLPattern::SCHEME_HTTP, "http://www.google.com.hk/path"));
@@ -1688,9 +1687,9 @@ TEST(PermissionsTest, IsEmpty) {
   APIPermissionSet empty_apis;
   URLPatternSet empty_extent;
 
-  scoped_ptr<const PermissionSet> empty(new PermissionSet());
+  std::unique_ptr<const PermissionSet> empty(new PermissionSet());
   EXPECT_TRUE(empty->IsEmpty());
-  scoped_ptr<const PermissionSet> perm_set;
+  std::unique_ptr<const PermissionSet> perm_set;
 
   perm_set.reset(new PermissionSet(empty_apis, ManifestPermissionSet(),
                                    empty_extent, empty_extent));

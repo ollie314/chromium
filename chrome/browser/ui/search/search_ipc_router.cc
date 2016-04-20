@@ -33,7 +33,7 @@ bool IsProviderValid(const base::string16& provider) {
 
 SearchIPCRouter::SearchIPCRouter(content::WebContents* web_contents,
                                  Delegate* delegate,
-                                 scoped_ptr<Policy> policy)
+                                 std::unique_ptr<Policy> policy)
     : WebContentsObserver(web_contents),
       delegate_(delegate),
       policy_(std::move(policy)),
@@ -210,8 +210,7 @@ void SearchIPCRouter::OnFocusOmnibox(int page_seq_no,
 void SearchIPCRouter::OnSearchBoxNavigate(
     int page_seq_no,
     const GURL& url,
-    WindowOpenDisposition disposition,
-    bool is_most_visited_item_url) const {
+    WindowOpenDisposition disposition) const {
   if (page_seq_no != commit_counter_)
     return;
 
@@ -219,7 +218,7 @@ void SearchIPCRouter::OnSearchBoxNavigate(
   if (!policy_->ShouldProcessNavigateToURL(is_active_tab_))
     return;
 
-  delegate_->NavigateToURL(url, disposition, is_most_visited_item_url);
+  delegate_->NavigateToURL(url, disposition);
 }
 
 void SearchIPCRouter::OnDeleteMostVisitedItem(int page_seq_no,
@@ -337,7 +336,7 @@ void SearchIPCRouter::set_delegate_for_testing(Delegate* delegate) {
   delegate_ = delegate;
 }
 
-void SearchIPCRouter::set_policy_for_testing(scoped_ptr<Policy> policy) {
+void SearchIPCRouter::set_policy_for_testing(std::unique_ptr<Policy> policy) {
   DCHECK(policy.get());
   policy_.reset(policy.release());
 }

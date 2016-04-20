@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -18,17 +19,17 @@
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
+#include "cc/scheduler/begin_frame_source.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
-#include "content/browser/compositor/delegated_frame_host.h"
 #include "content/browser/compositor/image_transport_factory.h"
 #include "content/browser/compositor/owned_mailbox.h"
-#include "content/browser/renderer_host/begin_frame_observer_proxy.h"
+#include "content/browser/renderer_host/delegated_frame_host.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
 #include "content/common/cursors/webcursor.h"
+#include "content/public/common/context_menu_params.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/aura/client/cursor_client_observer.h"
 #include "ui/aura/client/focus_change_observer.h"
@@ -82,6 +83,7 @@ class LegacyRenderWidgetHostHWND;
 
 class OverscrollController;
 class RenderFrameHostImpl;
+class RenderViewHostDelegateView;
 class RenderWidgetHostImpl;
 class RenderWidgetHostView;
 class TouchSelectionControllerClientAura;
@@ -90,14 +92,14 @@ class TouchSelectionControllerClientAura;
 class CONTENT_EXPORT RenderWidgetHostViewAura
     : public RenderWidgetHostViewBase,
       public DelegatedFrameHostClient,
-      public BeginFrameObserverProxyClient,
       public ui::TextInputClient,
       public gfx::DisplayObserver,
       public aura::WindowTreeHostObserver,
       public aura::WindowDelegate,
       public aura::client::ActivationDelegate,
       public aura::client::FocusChangeObserver,
-      public aura::client::CursorClientObserver {
+      public aura::client::CursorClientObserver,
+      public cc::BeginFrameObserverBase {
  public:
   // When |is_guest_view_hack| is true, this view isn't really the view for
   // the |widget|, a RenderWidgetHostViewGuest is.
@@ -131,7 +133,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
                    const gfx::Rect& pos) override;
   void InitAsFullscreen(RenderWidgetHostView* reference_host_view) override;
-  void MovePluginWindows(const std::vector<WebPluginGeometry>& moves) override;
   void Focus() override;
   void UpdateCursor(const WebCursor& cursor) override;
   void SetIsLoading(bool is_loading) override;
@@ -162,7 +163,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
       const base::Callback<void(const gfx::Rect&, bool)>& callback) override;
   bool CanCopyToVideoFrame() const override;
   void BeginFrameSubscription(
-      scoped_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) override;
+      std::unique_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) override;
   void EndFrameSubscription() override;
   bool HasAcceleratedSurface(const gfx::Size& desired_size) override;
   void GetScreenInfo(blink::WebScreenInfo* results) override;
@@ -174,40 +175,39 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
                        InputEventAckState ack_result) override;
   void ProcessAckedTouchEvent(const TouchEventWithLatencyInfo& touch,
                               InputEventAckState ack_result) override;
-  scoped_ptr<SyntheticGestureTarget> CreateSyntheticGestureTarget() override;
+  std::unique_ptr<SyntheticGestureTarget> CreateSyntheticGestureTarget()
+      override;
   InputEventAckState FilterInputEvent(
       const blink::WebInputEvent& input_event) override;
   BrowserAccessibilityManager* CreateBrowserAccessibilityManager(
-      BrowserAccessibilityDelegate* delegate) override;
+      BrowserAccessibilityDelegate* delegate, bool for_root_frame) override;
   gfx::AcceleratedWidget AccessibilityGetAcceleratedWidget() override;
   gfx::NativeViewAccessible AccessibilityGetNativeViewAccessible() override;
   void ShowDisambiguationPopup(const gfx::Rect& rect_pixels,
                                const SkBitmap& zoomed_bitmap) override;
   bool LockMouse() override;
   void UnlockMouse() override;
-  void OnSwapCompositorFrame(uint32_t output_surface_id,
-                             scoped_ptr<cc::CompositorFrame> frame) override;
+  void OnSwapCompositorFrame(
+      uint32_t output_surface_id,
+      std::unique_ptr<cc::CompositorFrame> frame) override;
   void ClearCompositorFrame() override;
   void DidStopFlinging() override;
   void OnDidNavigateMainFrameToNewPage() override;
   void LockCompositingSurface() override;
   void UnlockCompositingSurface() override;
   uint32_t GetSurfaceIdNamespace() override;
-  uint32_t SurfaceIdNamespaceAtPoint(const gfx::Point& point,
+  uint32_t SurfaceIdNamespaceAtPoint(cc::SurfaceHittestDelegate* delegate,
+                                     const gfx::Point& point,
                                      gfx::Point* transformed_point) override;
   void ProcessMouseEvent(const blink::WebMouseEvent& event) override;
   void ProcessMouseWheelEvent(const blink::WebMouseWheelEvent& event) override;
   void ProcessTouchEvent(const blink::WebTouchEvent& event,
                          const ui::LatencyInfo& latency) override;
+  void ProcessGestureEvent(const blink::WebGestureEvent& event,
+                           const ui::LatencyInfo& latency) override;
   void TransformPointToLocalCoordSpace(const gfx::Point& point,
                                        cc::SurfaceId original_surface,
                                        gfx::Point* transformed_point) override;
-
-#if defined(OS_WIN)
-  void SetParentNativeViewAccessible(
-      gfx::NativeViewAccessible accessible_parent) override;
-  gfx::NativeViewId GetParentForWindowlessPlugin() const override;
-#endif
 
   // Overridden from ui::TextInputClient:
   void SetCompositionText(const ui::CompositionText& composition) override;
@@ -286,11 +286,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
                    const gfx::Point& new_origin) override;
 
 #if defined(OS_WIN)
-  // Sets the cutout rects from constrained windows. These are rectangles that
-  // windowed NPAPI plugins shouldn't paint in. Overwrites any previous cutout
-  // rects.
-  void UpdateConstrainedWindowRects(const std::vector<gfx::Rect>& rects);
-
   // Updates the cursor clip region. Used for mouse locking.
   void UpdateMouseLockRegion();
 
@@ -330,12 +325,19 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   }
 
   // Called when the context menu is about to be displayed.
-  void OnShowContextMenu();
+  // Returns true if the context menu should be displayed. We only return false
+  // on Windows if the context menu is being displayed in response to a long
+  // press gesture. On Windows we should be consistent like other apps and
+  // display the menu when the touch is released.
+  bool OnShowContextMenu(const ContextMenuParams& params);
 
   // Used in tests to set a mock client for touch selection controller. It will
   // create a new touch selection controller for the new client.
   void SetSelectionControllerClientForTest(
-      scoped_ptr<TouchSelectionControllerClientAura> client);
+      std::unique_ptr<TouchSelectionControllerClientAura> client);
+
+  // Exposed for tests.
+  cc::SurfaceId SurfaceIdForTesting() const override;
 
  protected:
   ~RenderWidgetHostViewAura() override;
@@ -346,6 +348,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   DelegatedFrameHost* GetDelegatedFrameHost() const {
     return delegated_frame_host_.get();
   }
+
   const ui::MotionEventAura& pointer_state() const { return pointer_state_; }
 
  private:
@@ -444,7 +447,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   bool DelegatedFrameHostIsVisible() const override;
   gfx::Size DelegatedFrameHostDesiredSizeInDIP() const override;
   bool DelegatedFrameCanCreateResizeLock() const override;
-  scoped_ptr<ResizeLock> DelegatedFrameHostCreateResizeLock(
+  std::unique_ptr<ResizeLock> DelegatedFrameHostCreateResizeLock(
       bool defer_compositor_lock) override;
   void DelegatedFrameHostResizeLockWasReleased() override;
   void DelegatedFrameHostSendCompositorSwapAck(
@@ -457,9 +460,11 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void DelegatedFrameHostUpdateVSyncParameters(
       const base::TimeTicks& timebase,
       const base::TimeDelta& interval) override;
+  void SetBeginFrameSource(cc::BeginFrameSource* source) override;
 
-  // BeginFrameObserverProxyClient implementation.
-  void SendBeginFrame(const cc::BeginFrameArgs& args) override;
+  // cc::BeginFrameObserverBase implementation.
+  bool OnBeginFrameDerivedImpl(const cc::BeginFrameArgs& args) override;
+  void OnBeginFrameSourcePausedChanged(bool paused) override;
 
   // Detaches |this| from the input method object.
   void DetachFromInputMethod();
@@ -490,7 +495,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // Returns true if the |event| passed in can be forwarded to the renderer.
   bool CanRendererHandleEvent(const ui::MouseEvent* event,
                               bool mouse_locked,
-                              bool selection_popup);
+                              bool selection_popup) const;
 
   // Returns true when we can do SurfaceHitTesting for the event type.
   bool ShouldRouteEvent(const ui::Event* event) const;
@@ -515,17 +520,24 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // handled if it should not be further processed.
   void HandleGestureForTouchSelection(ui::GestureEvent* event);
 
+  // Forwards a mouse event to this view's parent window delegate.
+  void ForwardMouseEventToParent(ui::MouseEvent* event);
+
+  // Returns the RenderViewHostDelegateView instance for this view. Returns
+  // NULL on failure.
+  RenderViewHostDelegateView* GetRenderViewHostDelegateView();
+
   // The model object.
   RenderWidgetHostImpl* const host_;
 
   aura::Window* window_;
 
-  scoped_ptr<DelegatedFrameHost> delegated_frame_host_;
+  std::unique_ptr<DelegatedFrameHost> delegated_frame_host_;
 
-  scoped_ptr<WindowObserver> window_observer_;
+  std::unique_ptr<WindowObserver> window_observer_;
 
   // Tracks the ancestors of the RWHVA window for window location changes.
-  scoped_ptr<WindowAncestorObserver> ancestor_window_observer_;
+  std::unique_ptr<WindowAncestorObserver> ancestor_window_observer_;
 
   // Are we in the process of closing?  Tracked so fullscreen views can avoid
   // sending a second shutdown request to the host when they lose the focus
@@ -546,7 +558,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 
   class EventFilterForPopupExit;
   friend class EventFilterForPopupExit;
-  scoped_ptr<ui::EventHandler> event_filter_for_popup_exit_;
+  std::unique_ptr<ui::EventHandler> event_filter_for_popup_exit_;
 
   // True when content is being loaded. Used to show an hourglass cursor.
   bool is_loading_;
@@ -582,12 +594,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // Current tooltip text.
   base::string16 tooltip_;
 
-  // The size and scale of the last software compositing frame that was swapped.
-  gfx::Size last_swapped_software_frame_size_;
-  float last_swapped_software_frame_scale_factor_;
-
-  // If non-NULL we're in OnPaint() and this is the supplied canvas.
-  gfx::Canvas* paint_canvas_;
+  // The begin frame source being observed.  Null if none.
+  cc::BeginFrameSource* begin_frame_source_;
+  bool needs_begin_frames_;
 
   // Used to record the last position of the mouse.
   // While the mouse is locked, they store the last known position just as mouse
@@ -606,7 +615,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 
   // Used to track the state of the window we're created from. Only used when
   // created fullscreen.
-  scoped_ptr<aura::WindowTracker> host_tracker_;
+  std::unique_ptr<aura::WindowTracker> host_tracker_;
 
   // Used to track the last cursor visibility update that was sent to the
   // renderer via NotifyRendererOfCursorVisibilityState().
@@ -618,17 +627,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   CursorVisibilityState cursor_visibility_state_in_renderer_;
 
 #if defined(OS_WIN)
-  // The list of rectangles from constrained windows over this view. Windowed
-  // NPAPI plugins shouldn't draw over them.
-  std::vector<gfx::Rect> constrained_rects_;
-
-  typedef std::map<HWND, WebPluginGeometry> PluginWindowMoves;
-  // Contains information about each windowed plugin's clip and cutout rects (
-  // from the renderer). This is needed because when the transient windows
-  // over this view changes, we need this information in order to create a new
-  // region for the HWND.
-  PluginWindowMoves plugin_window_moves_;
-
   // The LegacyRenderWidgetHostHWND class provides a dummy HWND which is used
   // for accessibility, as the container for windowless plugins like
   // Flash/Silverlight, etc and for legacy drivers for trackpoints/trackpads,
@@ -645,17 +643,18 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // exercise.
   bool legacy_window_destroyed_;
 
-  // Set to true when a context menu is being displayed. Reset to false when
-  // a mouse leave is received in this context.
-  bool showing_context_menu_;
+  // Contains a copy of the last context menu request parameters. Only set when
+  // we receive a request to show the context menu on a long press.
+  std::unique_ptr<ContextMenuParams> last_context_menu_params_;
 #endif
 
   bool has_snapped_to_boundary_;
 
-  scoped_ptr<TouchSelectionControllerClientAura> selection_controller_client_;
-  scoped_ptr<ui::TouchSelectionController> selection_controller_;
+  std::unique_ptr<TouchSelectionControllerClientAura>
+      selection_controller_client_;
+  std::unique_ptr<ui::TouchSelectionController> selection_controller_;
 
-  scoped_ptr<OverscrollController> overscroll_controller_;
+  std::unique_ptr<OverscrollController> overscroll_controller_;
 
   // The last scroll offset of the view.
   gfx::Vector2dF last_scroll_offset_;
@@ -664,7 +663,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 
   std::vector<ui::LatencyInfo> software_latency_info_;
 
-  scoped_ptr<aura::client::ScopedTooltipDisabler> tooltip_disabler_;
+  std::unique_ptr<aura::client::ScopedTooltipDisabler> tooltip_disabler_;
 
   // True when this view acts as a platform view hack for a
   // RenderWidgetHostViewGuest.
@@ -677,13 +676,16 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // compositing surface and showing the disambiguation popup.
   gfx::Vector2dF disambiguation_scroll_offset_;
 
-  BeginFrameObserverProxy begin_frame_observer_proxy_;
-
   // This flag when set ensures that we send over a notification to blink that
   // the current view has focus. Defaults to false.
   bool set_focus_on_mouse_down_or_key_event_;
 
   float device_scale_factor_;
+
+  // Allows tests to send gesture events for testing without first sending a
+  // corresponding touch sequence, as would be required by
+  // RenderWidgetHostInputEventRouter.
+  bool disable_input_event_router_for_testing_;
 
   base::WeakPtrFactory<RenderWidgetHostViewAura> weak_ptr_factory_;
 

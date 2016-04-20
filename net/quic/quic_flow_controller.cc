@@ -68,19 +68,20 @@ bool QuicFlowController::UpdateHighestReceivedOffset(
 
 void QuicFlowController::AddBytesSent(QuicByteCount bytes_sent) {
   if (bytes_sent_ + bytes_sent > send_window_offset_) {
-    LOG(DFATAL) << ENDPOINT << "Stream " << id_ << " Trying to send an extra "
-                << bytes_sent << " bytes, when bytes_sent = " << bytes_sent_
-                << ", and send_window_offset_ = " << send_window_offset_;
+    QUIC_BUG << ENDPOINT << "Stream " << id_ << " Trying to send an extra "
+             << bytes_sent << " bytes, when bytes_sent = " << bytes_sent_
+             << ", and send_window_offset_ = " << send_window_offset_;
     bytes_sent_ = send_window_offset_;
 
     // This is an error on our side, close the connection as soon as possible.
-    connection_->SendConnectionCloseWithDetails(
+    connection_->CloseConnection(
         QUIC_FLOW_CONTROL_SENT_TOO_MUCH_DATA,
         base::StringPrintf(
             "%llu bytes over send window offset",
             static_cast<unsigned long long>(send_window_offset_ -
                                             (bytes_sent_ + bytes_sent)))
-            .c_str());
+            .c_str(),
+        ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return;
   }
 
@@ -107,10 +108,6 @@ void QuicFlowController::MaybeIncreaseMaxWindowSize() {
   // this method will increase the receive window size (subject to a reasonable
   // upper bound).  For simplicity this algorithm is deliberately asymmetric, in
   // that it may increase window size but never decreases.
-
-  if (!FLAGS_quic_auto_tune_receive_window) {
-    return;
-  }
 
   // Keep track of timing between successive window updates.
   QuicTime now = connection_->clock()->ApproximateNow();

@@ -5,6 +5,7 @@
 #ifndef CONTENT_UTILITY_IN_PROCESS_UTILITY_THREAD_H_
 #define CONTENT_UTILITY_IN_PROCESS_UTILITY_THREAD_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
@@ -29,7 +30,7 @@ class InProcessUtilityThread : public base::Thread {
   void InitInternal();
 
   InProcessChildThreadParams params_;
-  scoped_ptr<ChildProcess> child_process_;
+  std::unique_ptr<ChildProcess> child_process_;
 
   DISALLOW_COPY_AND_ASSIGN(InProcessUtilityThread);
 };

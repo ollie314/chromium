@@ -15,6 +15,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/win/win_util.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/startup_metric_utils/common/pre_read_field_trial_utils_win.h"
 #include "content/public/common/content_switches.h"
 
 namespace {
@@ -113,7 +114,7 @@ ChromeWatcherCommandLine::~ChromeWatcherCommandLine() {
       << "Handles left untaken.";
 }
 
-scoped_ptr<ChromeWatcherCommandLine>
+std::unique_ptr<ChromeWatcherCommandLine>
 ChromeWatcherCommandLine::InterpretCommandLine(
     const base::CommandLine& command_line) {
   base::win::ScopedHandle on_initialized_event_handle;
@@ -125,9 +126,9 @@ ChromeWatcherCommandLine::InterpretCommandLine(
   if (!InterpretChromeWatcherCommandLine(
       command_line, &parent_process_handle, &main_thread_id,
       &on_initialized_event_handle))
-    return scoped_ptr<ChromeWatcherCommandLine>();
+    return std::unique_ptr<ChromeWatcherCommandLine>();
 
-  return scoped_ptr<ChromeWatcherCommandLine>(new ChromeWatcherCommandLine(
+  return std::unique_ptr<ChromeWatcherCommandLine>(new ChromeWatcherCommandLine(
       on_initialized_event_handle.Take(), parent_process_handle.Take(),
       main_thread_id));
 }
@@ -154,6 +155,12 @@ base::CommandLine GenerateChromeWatcherCommandLine(
   AppendHandleSwitch(kOnIninitializedEventHandleSwitch, on_initialized_event,
                      &command_line);
   AppendHandleSwitch(kParentHandleSwitch, parent_process, &command_line);
+
+#if defined(OS_WIN)
+  if (startup_metric_utils::GetPreReadOptions().use_prefetch_argument)
+    command_line.AppendArg(switches::kPrefetchArgumentWatcher);
+#endif  // defined(OS_WIN)
+
   return command_line;
 }
 

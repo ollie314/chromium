@@ -17,7 +17,6 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/api/tab_capture/offscreen_tab.h"
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry.h"
-#include "chrome/browser/extensions/extension_renderer_state.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
@@ -73,6 +72,45 @@ bool OptionsSpecifyAudioOrVideo(const TabCapture::CaptureOptions& options) {
 
 bool IsAcceptableOffscreenTabUrl(const GURL& url) {
   return url.is_valid() && (url.SchemeIsHTTPOrHTTPS() || url.SchemeIs("data"));
+}
+
+// Removes all mandatory and optional constraint entries that start with the
+// "goog" prefix.  These are never needed and may cause the renderer-side
+// getUserMedia() call to fail.  http://crbug.com/579729
+//
+// TODO(miu): Remove once tabCapture API is migrated to new constraints spec.
+// http://crbug.com/579729
+void FilterDeprecatedGoogConstraints(TabCapture::CaptureOptions* options) {
+  const auto FilterGoogKeysFromDictionary = [](base::DictionaryValue* dict) {
+    std::vector<std::string> bad_keys;
+    base::DictionaryValue::Iterator it(*dict);
+    for (; !it.IsAtEnd(); it.Advance()) {
+      if (it.key().find("goog") == 0)
+        bad_keys.push_back(it.key());
+    }
+    for (const std::string& k : bad_keys) {
+      std::unique_ptr<base::Value> ignored;
+      dict->RemoveWithoutPathExpansion(k, &ignored);
+    }
+  };
+
+  if (options->audio_constraints) {
+    FilterGoogKeysFromDictionary(
+        &options->audio_constraints->mandatory.additional_properties);
+    if (options->audio_constraints->optional) {
+      FilterGoogKeysFromDictionary(
+          &options->audio_constraints->optional->additional_properties);
+    }
+  }
+
+  if (options->video_constraints) {
+    FilterGoogKeysFromDictionary(
+        &options->video_constraints->mandatory.additional_properties);
+    if (options->video_constraints->optional) {
+      FilterGoogKeysFromDictionary(
+          &options->video_constraints->optional->additional_properties);
+    }
+  }
 }
 
 // Add Chrome-specific source identifiers to the MediaStreamConstraints objects
@@ -160,13 +198,13 @@ const char* const kMediaRouterExtensionIds[] = {
 };
 
 bool TabCaptureCaptureFunction::RunSync() {
-  scoped_ptr<api::tab_capture::Capture::Params> params =
+  std::unique_ptr<api::tab_capture::Capture::Params> params =
       TabCapture::Capture::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
   // Figure out the active WebContents and retrieve the needed ids.
-  Browser* target_browser = chrome::FindAnyBrowser(
-      GetProfile(), include_incognito(), chrome::GetActiveDesktop());
+  Browser* target_browser =
+      chrome::FindAnyBrowser(GetProfile(), include_incognito());
   if (!target_browser) {
     error_ = kFindingTabError;
     return false;
@@ -208,6 +246,7 @@ bool TabCaptureCaptureFunction::RunSync() {
     error_ = kCapturingSameTab;
     return false;
   }
+  FilterDeprecatedGoogConstraints(&params->options);
   AddMediaStreamSourceConstraints(target_contents, &params->options);
 
   // At this point, everything is set up in the browser process.  It's now up to
@@ -234,7 +273,7 @@ bool TabCaptureGetCapturedTabsFunction::RunSync() {
 }
 
 bool TabCaptureCaptureOffscreenTabFunction::RunSync() {
-  scoped_ptr<TabCapture::CaptureOffscreenTab::Params> params =
+  std::unique_ptr<TabCapture::CaptureOffscreenTab::Params> params =
       TabCapture::CaptureOffscreenTab::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -286,6 +325,7 @@ bool TabCaptureCaptureOffscreenTabFunction::RunSync() {
     SetError(kCapturingSameOffscreenTab);
     return false;
   }
+  FilterDeprecatedGoogConstraints(&params->options);
   AddMediaStreamSourceConstraints(offscreen_tab->web_contents(),
                                   &params->options);
 

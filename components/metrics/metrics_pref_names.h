@@ -26,6 +26,7 @@ extern const char kMetricsResetIds[];
 extern const char kMetricsReportingEnabled[];
 extern const char kMetricsReportingEnabledTimestamp[];
 extern const char kMetricsSessionID[];
+extern const char kMetricsLastSeenPrefix[];
 extern const char kStabilityBreakpadRegistrationSuccess[];
 extern const char kStabilityBreakpadRegistrationFail[];
 extern const char kStabilityChildProcessCrashCount[];
@@ -52,6 +53,11 @@ extern const char kStabilityStatsVersion[];
 extern const char kUninstallLaunchCount[];
 extern const char kUninstallMetricsPageLoadCount[];
 extern const char kUninstallMetricsUptimeSec[];
+
+// For measuring data use for throttling UMA log uploads on cellular.
+extern const char kUmaCellDataUse[];
+extern const char kUserCellDataUse[];
+
 }  // namespace prefs
 }  // namespace metrics
 

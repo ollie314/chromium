@@ -41,13 +41,13 @@ namespace blink {
 
 void PrintTo(const CSSLengthArray& lengthArray, ::std::ostream* os)
 {
-    for (size_t i = 0; i < CSSPrimitiveValue::LengthUnitTypeCount; ++i)
-        *os << lengthArray.at(i) << ' ';
+    for (double x : lengthArray.values)
+        *os << x << ' ';
 }
 
 namespace {
 
-void testAccumulatePixelsAndPercent(const CSSToLengthConversionData& conversionData, PassRefPtrWillBeRawPtr<CSSCalcExpressionNode> expression, float expectedPixels, float expectedPercent)
+void testAccumulatePixelsAndPercent(const CSSToLengthConversionData& conversionData, CSSCalcExpressionNode* expression, float expectedPixels, float expectedPercent)
 {
     PixelsAndPercent value(0, 0);
     expression->accumulatePixelsAndPercent(conversionData, value);
@@ -55,26 +55,20 @@ void testAccumulatePixelsAndPercent(const CSSToLengthConversionData& conversionD
     EXPECT_EQ(expectedPercent, value.percent);
 }
 
-void initLengthArray(CSSLengthArray& lengthArray)
-{
-    lengthArray.resize(CSSPrimitiveValue::LengthUnitTypeCount);
-    for (size_t i = 0; i < CSSPrimitiveValue::LengthUnitTypeCount; ++i)
-        lengthArray.at(i) = 0;
-}
-
 CSSLengthArray& setLengthArray(CSSLengthArray& lengthArray, String text)
 {
-    initLengthArray(lengthArray);
-    RefPtrWillBeRawPtr<MutableStylePropertySet> propertySet = MutableStylePropertySet::create(HTMLQuirksMode);
+    for (double& x : lengthArray.values)
+        x = 0;
+    MutableStylePropertySet* propertySet = MutableStylePropertySet::create(HTMLQuirksMode);
     propertySet->setProperty(CSSPropertyLeft, text);
-    toCSSPrimitiveValue(propertySet->getPropertyCSSValue(CSSPropertyLeft).get())->accumulateLengthArray(lengthArray);
+    toCSSPrimitiveValue(propertySet->getPropertyCSSValue(CSSPropertyLeft))->accumulateLengthArray(lengthArray);
     return lengthArray;
 }
 
 bool lengthArraysEqual(CSSLengthArray& a, CSSLengthArray& b)
 {
     for (size_t i = 0; i < CSSPrimitiveValue::LengthUnitTypeCount; ++i) {
-        if (a.at(i) != b.at(i))
+        if (a.values.at(i) != b.values.at(i))
             return false;
     }
     return true;
@@ -164,27 +158,26 @@ TEST(CSSCalculationValue, RefCountLeak)
 TEST(CSSCalculationValue, AddToLengthUnitValues)
 {
     CSSLengthArray expectation, actual;
-    initLengthArray(expectation);
     EXPECT_TRUE(lengthArraysEqual(expectation, setLengthArray(actual, "0")));
 
-    expectation.at(CSSPrimitiveValue::UnitTypePixels) = 10;
+    expectation.values.at(CSSPrimitiveValue::UnitTypePixels) = 10;
     EXPECT_TRUE(lengthArraysEqual(expectation, setLengthArray(actual, "10px")));
 
-    expectation.at(CSSPrimitiveValue::UnitTypePixels) = 0;
-    expectation.at(CSSPrimitiveValue::UnitTypePercentage) = 20;
+    expectation.values.at(CSSPrimitiveValue::UnitTypePixels) = 0;
+    expectation.values.at(CSSPrimitiveValue::UnitTypePercentage) = 20;
     EXPECT_TRUE(lengthArraysEqual(expectation, setLengthArray(actual, "20%")));
 
-    expectation.at(CSSPrimitiveValue::UnitTypePixels) = 30;
-    expectation.at(CSSPrimitiveValue::UnitTypePercentage) = -40;
+    expectation.values.at(CSSPrimitiveValue::UnitTypePixels) = 30;
+    expectation.values.at(CSSPrimitiveValue::UnitTypePercentage) = -40;
     EXPECT_TRUE(lengthArraysEqual(expectation, setLengthArray(actual, "calc(30px - 40%)")));
 
-    expectation.at(CSSPrimitiveValue::UnitTypePixels) = 90;
-    expectation.at(CSSPrimitiveValue::UnitTypePercentage) = 10;
+    expectation.values.at(CSSPrimitiveValue::UnitTypePixels) = 90;
+    expectation.values.at(CSSPrimitiveValue::UnitTypePercentage) = 10;
     EXPECT_TRUE(lengthArraysEqual(expectation, setLengthArray(actual, "calc(1in + 10% - 6px)")));
 
-    expectation.at(CSSPrimitiveValue::UnitTypePixels) = 15;
-    expectation.at(CSSPrimitiveValue::UnitTypeFontSize) = 20;
-    expectation.at(CSSPrimitiveValue::UnitTypePercentage) = -40;
+    expectation.values.at(CSSPrimitiveValue::UnitTypePixels) = 15;
+    expectation.values.at(CSSPrimitiveValue::UnitTypeFontSize) = 20;
+    expectation.values.at(CSSPrimitiveValue::UnitTypePercentage) = -40;
     EXPECT_TRUE(lengthArraysEqual(expectation, setLengthArray(actual, "calc((1 * 2) * (5px + 20em / 2) - 80% / (3 - 1) + 5px)")));
 }
 

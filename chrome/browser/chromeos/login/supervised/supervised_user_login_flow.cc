@@ -8,8 +8,6 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/supervised/supervised_user_authentication.h"
@@ -21,6 +19,8 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/common/chrome_switches.h"
 #include "chromeos/login/auth/key.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -137,7 +137,7 @@ void SupervisedUserLoginFlow::OnPasswordChangeDataLoaded(
     return;
   }
   base::Base64Decode(base64_signature, &signature);
-  scoped_ptr<base::DictionaryValue> data_copy(password_data->DeepCopy());
+  std::unique_ptr<base::DictionaryValue> data_copy(password_data->DeepCopy());
   cryptohome::KeyDefinition key(password,
                                 kCryptohomeSupervisedUserKeyLabel,
                                 kCryptohomeSupervisedUserKeyPrivileges);
@@ -184,7 +184,7 @@ void SupervisedUserLoginFlow::OnPasswordChangeDataLoaded(
 }
 
 void SupervisedUserLoginFlow::OnNewKeyAdded(
-    scoped_ptr<base::DictionaryValue> password_data) {
+    std::unique_ptr<base::DictionaryValue> password_data) {
   VLOG(1) << "New key added";
   SupervisedUserAuthentication* auth =
       ChromeUserManager::Get()->GetSupervisedUserManager()->GetAuthentication();
@@ -228,7 +228,7 @@ void SupervisedUserLoginFlow::OnAuthenticationFailure(
 }
 
 void SupervisedUserLoginFlow::OnPasswordUpdated(
-    scoped_ptr<base::DictionaryValue> password_data) {
+    std::unique_ptr<base::DictionaryValue> password_data) {
   VLOG(1) << "Updated password for supervised user";
 
   SupervisedUserAuthentication* auth =

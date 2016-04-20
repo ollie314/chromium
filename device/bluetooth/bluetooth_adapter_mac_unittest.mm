@@ -2,15 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "device/bluetooth/bluetooth_adapter_mac.h"
+
+#include <memory>
+
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/test/test_simple_task_runner.h"
 #include "build/build_config.h"
 #include "device/bluetooth/bluetooth_adapter.h"
-#include "device/bluetooth/bluetooth_adapter_mac.h"
 #include "device/bluetooth/bluetooth_discovery_session.h"
 #include "device/bluetooth/bluetooth_discovery_session_outcome.h"
 #include "device/bluetooth/bluetooth_low_energy_device_mac.h"
+#include "device/bluetooth/test/mock_bluetooth_cbperipheral_mac.h"
 #include "device/bluetooth/test/mock_bluetooth_central_manager_mac.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/ocmock/OCMock/OCMock.h"
@@ -25,7 +29,7 @@
 
 namespace {
 // |kTestHashAddress| is the hash corresponding to identifier |kTestNSUUID|.
-NSString* const kTestNSUUID = @"00000000-1111-2222-3333-444444444444";
+const char* const kTestNSUUID = "00000000-1111-2222-3333-444444444444";
 const std::string kTestHashAddress = "D1:6F:E3:22:FD:5B";
 const int kTestRssi = 0;
 }  // namespace
@@ -56,25 +60,14 @@ class BluetoothAdapterMacTest : public testing::Test {
     return adapter_->GetDevice(address);
   }
 
-  CBPeripheral* CreateMockPeripheral(NSString* identifier) {
+  CBPeripheral* CreateMockPeripheral(const char* identifier) {
     if (!BluetoothAdapterMac::IsLowEnergyAvailable()) {
       LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
       return nil;
     }
-    Class peripheral_class = NSClassFromString(@"CBPeripheral");
-    id mock_peripheral =
-        [[OCMockObject mockForClass:[peripheral_class class]] retain];
-    [static_cast<CBPeripheral*>([[mock_peripheral stub]
-        andReturnValue:@(CBPeripheralStateDisconnected)])
-        performSelector:@selector(state)];
-    [[[mock_peripheral stub] andReturn:[NSString string]] name];
-    Class uuid_class = NSClassFromString(@"NSUUID");
-    [[[mock_peripheral stub]
-        andReturn:[[uuid_class performSelector:@selector(UUID)]
-                      performSelector:@selector(initWithUUIDString:)
-                           withObject:identifier]] identifier];
-
-    return mock_peripheral;
+    base::scoped_nsobject<MockCBPeripheral> mock_peripheral(
+        [[MockCBPeripheral alloc] initWithUTF8StringIdentifier:identifier]);
+    return [mock_peripheral.get().peripheral retain];
   }
 
   NSDictionary* CreateAdvertisementData() {
@@ -82,8 +75,7 @@ class BluetoothAdapterMacTest : public testing::Test {
       CBAdvertisementDataIsConnectable : @(YES),
       CBAdvertisementDataServiceDataKey : [NSDictionary dictionary],
     };
-    [advertisement_data retain];
-    return advertisement_data;
+    return [advertisement_data retain];
   }
 
   std::string GetHashAddress(CBPeripheral* peripheral) {
@@ -98,7 +90,7 @@ class BluetoothAdapterMacTest : public testing::Test {
 
   void AddLowEnergyDevice(BluetoothLowEnergyDeviceMac* device) {
     adapter_mac_->devices_.set(device->GetAddress(),
-                               scoped_ptr<BluetoothDevice>(device));
+                               std::unique_ptr<BluetoothDevice>(device));
   }
 
   int NumDevices() { return adapter_mac_->devices_.size(); }
@@ -116,9 +108,11 @@ class BluetoothAdapterMacTest : public testing::Test {
       LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
       return false;
     }
-    mock_central_manager_ = [[MockCentralManager alloc] init];
+    mock_central_manager_.reset([[MockCentralManager alloc] init]);
     [mock_central_manager_ setState:desired_state];
-    adapter_mac_->SetCentralManagerForTesting(mock_central_manager_);
+    CBCentralManager* centralManager =
+        (CBCentralManager*)mock_central_manager_.get();
+    adapter_mac_->SetCentralManagerForTesting(centralManager);
     return true;
   }
 
@@ -153,7 +147,7 @@ class BluetoothAdapterMacTest : public testing::Test {
   BluetoothAdapterMac* adapter_mac_;
 
   // Owned by |adapter_mac_|.
-  id mock_central_manager_ = NULL;
+  base::scoped_nsobject<MockCentralManager> mock_central_manager_;
 
   int callback_count_;
   int error_callback_count_;
@@ -170,7 +164,7 @@ TEST_F(BluetoothAdapterMacTest, AddDiscoverySessionWithLowEnergyFilter) {
   EXPECT_EQ(0, [mock_central_manager_ scanForPeripheralsCallCount]);
   EXPECT_EQ(0, NumDiscoverySessions());
 
-  scoped_ptr<BluetoothDiscoveryFilter> discovery_filter(
+  std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter(
       new BluetoothDiscoveryFilter(
           BluetoothDiscoveryFilter::Transport::TRANSPORT_LE));
   AddDiscoverySession(discovery_filter.get());
@@ -188,7 +182,7 @@ TEST_F(BluetoothAdapterMacTest, AddDiscoverySessionWithLowEnergyFilter) {
 TEST_F(BluetoothAdapterMacTest, AddSecondDiscoverySessionWithLowEnergyFilter) {
   if (!SetMockCentralManager(CBCentralManagerStatePoweredOn))
     return;
-  scoped_ptr<BluetoothDiscoveryFilter> discovery_filter(
+  std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter(
       new BluetoothDiscoveryFilter(
           BluetoothDiscoveryFilter::Transport::TRANSPORT_LE));
   AddDiscoverySession(discovery_filter.get());
@@ -212,7 +206,7 @@ TEST_F(BluetoothAdapterMacTest, RemoveDiscoverySessionWithLowEnergyFilter) {
     return;
   EXPECT_EQ(0, [mock_central_manager_ scanForPeripheralsCallCount]);
 
-  scoped_ptr<BluetoothDiscoveryFilter> discovery_filter(
+  std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter(
       new BluetoothDiscoveryFilter(
           BluetoothDiscoveryFilter::Transport::TRANSPORT_LE));
   AddDiscoverySession(discovery_filter.get());
@@ -238,7 +232,7 @@ TEST_F(BluetoothAdapterMacTest, RemoveDiscoverySessionWithLowEnergyFilterFail) {
   EXPECT_EQ(0, [mock_central_manager_ stopScanCallCount]);
   EXPECT_EQ(0, NumDiscoverySessions());
 
-  scoped_ptr<BluetoothDiscoveryFilter> discovery_filter(
+  std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter(
       new BluetoothDiscoveryFilter(
           BluetoothDiscoveryFilter::Transport::TRANSPORT_LE));
   RemoveDiscoverySession(discovery_filter.get());
@@ -251,14 +245,20 @@ TEST_F(BluetoothAdapterMacTest, RemoveDiscoverySessionWithLowEnergyFilterFail) {
 }
 
 TEST_F(BluetoothAdapterMacTest, CheckGetPeripheralHashAddress) {
-  base::scoped_nsobject<id> mock_peripheral(CreateMockPeripheral(kTestNSUUID));
+  if (!SetMockCentralManager(CBCentralManagerStatePoweredOn))
+    return;
+  base::scoped_nsobject<CBPeripheral> mock_peripheral(
+      CreateMockPeripheral(kTestNSUUID));
   if (mock_peripheral.get() == nil)
     return;
   EXPECT_EQ(kTestHashAddress, GetHashAddress(mock_peripheral));
 }
 
 TEST_F(BluetoothAdapterMacTest, LowEnergyDeviceUpdatedNewDevice) {
-  base::scoped_nsobject<id> mock_peripheral(CreateMockPeripheral(kTestNSUUID));
+  if (!SetMockCentralManager(CBCentralManagerStatePoweredOn))
+    return;
+  base::scoped_nsobject<CBPeripheral> mock_peripheral(
+      CreateMockPeripheral(kTestNSUUID));
   if (mock_peripheral.get() == nil)
     return;
   base::scoped_nsobject<NSDictionary> advertisement_data(
@@ -272,7 +272,10 @@ TEST_F(BluetoothAdapterMacTest, LowEnergyDeviceUpdatedNewDevice) {
 }
 
 TEST_F(BluetoothAdapterMacTest, LowEnergyDeviceUpdatedOldDevice) {
-  base::scoped_nsobject<id> mock_peripheral(CreateMockPeripheral(kTestNSUUID));
+  if (!SetMockCentralManager(CBCentralManagerStatePoweredOn))
+    return;
+  base::scoped_nsobject<CBPeripheral> mock_peripheral(
+      CreateMockPeripheral(kTestNSUUID));
   if (mock_peripheral.get() == nil)
     return;
   base::scoped_nsobject<NSDictionary> advertisement_data(
@@ -302,7 +305,10 @@ TEST_F(BluetoothAdapterMacTest, LowEnergyDeviceUpdatedOldDevice) {
 }
 
 TEST_F(BluetoothAdapterMacTest, UpdateDevicesRemovesLowEnergyDevice) {
-  base::scoped_nsobject<id> mock_peripheral(CreateMockPeripheral(kTestNSUUID));
+  if (!SetMockCentralManager(CBCentralManagerStatePoweredOn))
+    return;
+  base::scoped_nsobject<CBPeripheral> mock_peripheral(
+      CreateMockPeripheral(kTestNSUUID));
   if (mock_peripheral.get() == nil)
     return;
   base::scoped_nsobject<NSDictionary> advertisement_data(

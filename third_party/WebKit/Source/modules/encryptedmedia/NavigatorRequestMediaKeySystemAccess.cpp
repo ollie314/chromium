@@ -9,17 +9,17 @@
 #include "core/dom/DOMException.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/frame/Deprecation.h"
 #include "core/frame/OriginsUsingFeatures.h"
-#include "core/frame/UseCounter.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "modules/encryptedmedia/EncryptedMediaUtils.h"
 #include "modules/encryptedmedia/MediaKeySession.h"
 #include "modules/encryptedmedia/MediaKeySystemAccess.h"
 #include "modules/encryptedmedia/MediaKeysController.h"
 #include "platform/EncryptedMediaRequest.h"
+#include "platform/Histogram.h"
 #include "platform/Logging.h"
 #include "platform/network/ParsedContentType.h"
-#include "public/platform/Platform.h"
 #include "public/platform/WebEncryptedMediaClient.h"
 #include "public/platform/WebEncryptedMediaRequest.h"
 #include "public/platform/WebMediaKeySystemConfiguration.h"
@@ -91,7 +91,7 @@ public:
     // EncryptedMediaRequest implementation.
     WebString keySystem() const override { return m_keySystem; }
     const WebVector<WebMediaKeySystemConfiguration>& supportedConfigurations() const override { return m_supportedConfigurations; }
-    SecurityOrigin* securityOrigin() const override { return m_resolver->executionContext()->securityOrigin(); }
+    SecurityOrigin* getSecurityOrigin() const override { return m_resolver->getExecutionContext()->getSecurityOrigin(); }
     void requestSucceeded(WebContentDecryptionModuleAccess*) override;
     void requestNotSupported(const WebString& errorMessage) override;
 
@@ -190,11 +190,13 @@ void MediaKeySystemAccessInitializer::checkVideoCapabilityRobustness() const
             break;
     }
 
-    if (hasVideoCapabilities)
-        Platform::current()->histogramEnumeration("Media.EME.Widevine.VideoCapability.HasEmptyRobustness", hasEmptyRobustness, 2);
+    if (hasVideoCapabilities) {
+        DEFINE_THREAD_SAFE_STATIC_LOCAL(EnumerationHistogram, emptyRobustnessHistogram, new EnumerationHistogram("Media.EME.Widevine.VideoCapability.HasEmptyRobustness", 2));
+        emptyRobustnessHistogram.count(hasEmptyRobustness);
+    }
 
     if (hasEmptyRobustness) {
-        m_resolver->executionContext()->addConsoleMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel,
+        m_resolver->getExecutionContext()->addConsoleMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel,
             "It is recommended that a robustness level be specified. Not specifying the robustness level could "
             "result in unexpected behavior in the future, potentially including failure to play."));
     }
@@ -228,12 +230,12 @@ ScriptPromise NavigatorRequestMediaKeySystemAccess::requestMediaKeySystemAccess(
     }
 
     // 3-4. 'May Document use powerful features?' check.
-    ExecutionContext* executionContext = scriptState->executionContext();
+    ExecutionContext* executionContext = scriptState->getExecutionContext();
     String errorMessage;
     if (executionContext->isSecureContext(errorMessage)) {
         UseCounter::count(executionContext, UseCounter::EncryptedMediaSecureOrigin);
     } else {
-        UseCounter::countDeprecation(executionContext, UseCounter::EncryptedMediaInsecureOrigin);
+        Deprecation::countDeprecation(executionContext, UseCounter::EncryptedMediaInsecureOrigin);
         // TODO(ddorwin): Implement the following:
         // Reject promise with a new DOMException whose name is NotSupportedError.
     }

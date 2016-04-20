@@ -32,24 +32,28 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/SerializedScriptValue.h"
-#include "core/frame/LocalDOMWindow.h"
+#include "core/dom/CrossThreadTask.h"
+#include "core/frame/Deprecation.h"
+#include "core/frame/UseCounter.h"
+#include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/workers/DedicatedWorkerThread.h"
+#include "core/workers/InProcessWorkerObjectProxy.h"
 #include "core/workers/WorkerClients.h"
-#include "core/workers/WorkerObjectProxy.h"
 #include "core/workers/WorkerThreadStartupData.h"
 
 namespace blink {
 
-PassRefPtrWillBeRawPtr<DedicatedWorkerGlobalScope> DedicatedWorkerGlobalScope::create(DedicatedWorkerThread* thread, PassOwnPtr<WorkerThreadStartupData> startupData, double timeOrigin)
+DedicatedWorkerGlobalScope* DedicatedWorkerGlobalScope::create(DedicatedWorkerThread* thread, PassOwnPtr<WorkerThreadStartupData> startupData, double timeOrigin)
 {
     // Note: startupData is finalized on return. After the relevant parts has been
     // passed along to the created 'context'.
-    RefPtrWillBeRawPtr<DedicatedWorkerGlobalScope> context = adoptRefWillBeNoop(new DedicatedWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, thread, timeOrigin, startupData->m_starterOriginPrivilegeData.release(), startupData->m_workerClients.release()));
+    DedicatedWorkerGlobalScope* context = new DedicatedWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, thread, timeOrigin, startupData->m_starterOriginPrivilegeData.release(), startupData->m_workerClients.release());
     context->applyContentSecurityPolicyFromVector(*startupData->m_contentSecurityPolicyHeaders);
-    return context.release();
+    context->setAddressSpace(startupData->m_addressSpace);
+    return context;
 }
 
-DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(const KURL& url, const String& userAgent, DedicatedWorkerThread* thread, double timeOrigin, PassOwnPtr<SecurityOrigin::PrivilegeData> starterOriginPrivilegeData, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
+DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(const KURL& url, const String& userAgent, DedicatedWorkerThread* thread, double timeOrigin, PassOwnPtr<SecurityOrigin::PrivilegeData> starterOriginPrivilegeData, WorkerClients* workerClients)
     : WorkerGlobalScope(url, userAgent, thread, timeOrigin, starterOriginPrivilegeData, workerClients)
 {
 }
@@ -63,7 +67,7 @@ const AtomicString& DedicatedWorkerGlobalScope::interfaceName() const
     return EventTargetNames::DedicatedWorkerGlobalScope;
 }
 
-void DedicatedWorkerGlobalScope::postMessage(ExecutionContext* context, PassRefPtr<SerializedScriptValue> message, const MessagePortArray* ports, ExceptionState& exceptionState)
+void DedicatedWorkerGlobalScope::postMessage(ExecutionContext* context, PassRefPtr<SerializedScriptValue> message, const MessagePortArray& ports, ExceptionState& exceptionState)
 {
     // Disentangle the port in preparation for sending it to the remote context.
     OwnPtr<MessagePortChannelArray> channels = MessagePort::disentanglePorts(context, ports, exceptionState);
@@ -74,42 +78,29 @@ void DedicatedWorkerGlobalScope::postMessage(ExecutionContext* context, PassRefP
 
 DedicatedWorkerThread* DedicatedWorkerGlobalScope::thread() const
 {
-    return static_cast<DedicatedWorkerThread*>(Base::thread());
+    return static_cast<DedicatedWorkerThread*>(WorkerGlobalScope::thread());
 }
 
-class UseCounterTask : public ExecutionContextTask {
-public:
-    static PassOwnPtr<UseCounterTask> createCount(UseCounter::Feature feature) { return adoptPtr(new UseCounterTask(feature, false)); }
-    static PassOwnPtr<UseCounterTask> createDeprecation(UseCounter::Feature feature) { return adoptPtr(new UseCounterTask(feature, true)); }
+static void countOnDocument(UseCounter::Feature feature, ExecutionContext* context)
+{
+    ASSERT(context->isDocument());
+    UseCounter::count(context, feature);
+}
 
-private:
-    UseCounterTask(UseCounter::Feature feature, bool isDeprecation)
-        : m_feature(feature)
-        , m_isDeprecation(isDeprecation)
-    {
-    }
-
-    void performTask(ExecutionContext* context) override
-    {
-        ASSERT(context->isDocument());
-        if (m_isDeprecation)
-            UseCounter::countDeprecation(context, m_feature);
-        else
-            UseCounter::count(context, m_feature);
-    }
-
-    UseCounter::Feature m_feature;
-    bool m_isDeprecation;
-};
+static void countDeprecationOnDocument(UseCounter::Feature feature, ExecutionContext* context)
+{
+    ASSERT(context->isDocument());
+    Deprecation::countDeprecation(context, feature);
+}
 
 void DedicatedWorkerGlobalScope::countFeature(UseCounter::Feature feature) const
 {
-    thread()->workerObjectProxy().postTaskToMainExecutionContext(UseCounterTask::createCount(feature));
+    thread()->workerObjectProxy().postTaskToMainExecutionContext(createCrossThreadTask(&countOnDocument, feature));
 }
 
 void DedicatedWorkerGlobalScope::countDeprecation(UseCounter::Feature feature) const
 {
-    thread()->workerObjectProxy().postTaskToMainExecutionContext(UseCounterTask::createDeprecation(feature));
+    thread()->workerObjectProxy().postTaskToMainExecutionContext(createCrossThreadTask(&countDeprecationOnDocument, feature));
 }
 
 DEFINE_TRACE(DedicatedWorkerGlobalScope)

@@ -32,6 +32,7 @@
 
 #if OS(POSIX)
 
+#include "wtf/CurrentTime.h"
 #include "wtf/DateMath.h"
 #include "wtf/HashMap.h"
 #include "wtf/OwnPtr.h"
@@ -40,8 +41,7 @@
 #include "wtf/ThreadSpecific.h"
 #include "wtf/ThreadingPrimitives.h"
 #include "wtf/WTFThreadData.h"
-#include "wtf/dtoa.h"
-#include "wtf/dtoa/cached-powers.h"
+#include "wtf/dtoa/double-conversion.h"
 #include <errno.h>
 #include <limits.h>
 #include <sched.h>
@@ -74,7 +74,6 @@ void initializeThreading()
     StringImpl::empty16Bit();
     atomicallyInitializedStaticMutex = new Mutex;
     wtfThreadData();
-    s_dtoaP5Mutex = new Mutex;
     initializeDates();
     // Force initialization of static DoubleToStringConverter converter variable
     // inside EcmaScriptConverter function while we are in single thread mode.

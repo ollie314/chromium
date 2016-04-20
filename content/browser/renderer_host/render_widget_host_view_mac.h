@@ -9,8 +9,10 @@
 #include <IOSurface/IOSurface.h>
 #include <stddef.h>
 #include <stdint.h>
+
 #include <list>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -18,11 +20,12 @@
 
 #include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
-#include "content/browser/compositor/browser_compositor_view_mac.h"
-#include "content/browser/compositor/delegated_frame_host.h"
+#include "cc/scheduler/begin_frame_source.h"
+#include "cc/surfaces/surface_id.h"
+#include "content/browser/renderer_host/browser_compositor_view_mac.h"
+#include "content/browser/renderer_host/delegated_frame_host.h"
 #include "content/browser/renderer_host/input/mouse_wheel_rails_filter_mac.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
@@ -67,20 +70,18 @@ class Layer;
                       RenderWidgetHostViewMacOwner,
                       NSTextInputClient> {
  @private
-  scoped_ptr<content::RenderWidgetHostViewMac> renderWidgetHostView_;
+  std::unique_ptr<content::RenderWidgetHostViewMac> renderWidgetHostView_;
   // This ivar is the cocoa delegate of the NSResponder.
   base::scoped_nsobject<NSObject<RenderWidgetHostViewMacDelegate>>
       responderDelegate_;
   BOOL canBeKeyView_;
   BOOL closeOnDeactivate_;
   BOOL opaque_;
-  scoped_ptr<content::RenderWidgetHostViewMacEditCommandHelper>
+  std::unique_ptr<content::RenderWidgetHostViewMacEditCommandHelper>
       editCommand_helper_;
 
   // Is YES if there was a mouse-down as yet unbalanced with a mouse-up.
   BOOL hasOpenMouseDown_;
-
-  NSWindow* lastWindow_;  // weak
 
   // The cursor for the page. This is passed up from the renderer.
   base::scoped_nsobject<NSCursor> currentCursor_;
@@ -130,6 +131,9 @@ class Layer;
   // Underline information of the |markedText_|.
   std::vector<blink::WebCompositionUnderline> underlines_;
 
+  // Replacement range information received from |setMarkedText:|.
+  gfx::Range setMarkedTextReplacementRange_;
+
   // Indicates if doCommandBySelector method receives any edit command when
   // handling a key down event.
   BOOL hasEditCommands_;
@@ -138,12 +142,6 @@ class Layer;
   // handling a key down event, not including inserting commands, eg. insertTab,
   // etc.
   content::EditCommands editCommands_;
-
-  // The plugin that currently has focus (-1 if no plugin has focus).
-  int focusedPluginIdentifier_;
-
-  // Whether or not plugin IME is currently enabled active.
-  BOOL pluginImeActive_;
 
   // Whether the previous mouse event was ignored due to hitTest check.
   BOOL mouseEventWasIgnored_;
@@ -156,7 +154,7 @@ class Layer;
   // the view that some as-yet-undefined gesture is starting. Capture the
   // information about the gesture's beginning event here. It will be used to
   // create a specific gesture begin event later.
-  scoped_ptr<blink::WebGestureEvent> gestureBeginEvent_;
+  std::unique_ptr<blink::WebGestureEvent> gestureBeginEvent_;
 
   // To avoid accidental pinches, require that a certain zoom threshold be
   // reached before forwarding it to the browser. Use |pinchUnusedAmount_| to
@@ -200,13 +198,6 @@ class Layer;
 - (void)cancelComposition;
 // Confirm ongoing composition.
 - (void)confirmComposition;
-// Enables or disables plugin IME.
-- (void)setPluginImeActive:(BOOL)active;
-// Updates the current plugin focus state.
-- (void)pluginFocusChanged:(BOOL)focused forPlugin:(int)pluginId;
-// Evaluates the event in the context of plugin IME, if plugin IME is enabled.
-// Returns YES if the event was handled.
-- (BOOL)postProcessEventForPluginIme:(NSEvent*)event;
 - (void)updateCursor:(NSCursor*)cursor;
 - (NSRect)firstViewRectForCharacterRange:(NSRange)theRange
                              actualRange:(NSRangePointer)actualRange;
@@ -239,7 +230,8 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
       public DelegatedFrameHostClient,
       public ui::AcceleratedWidgetMacNSView,
       public IPC::Sender,
-      public gfx::DisplayObserver {
+      public gfx::DisplayObserver,
+      public cc::BeginFrameObserverBase {
  public:
   // The view will associate itself with the given widget. The native view must
   // be hooked up immediately to the view hierarchy, or else when it is
@@ -281,8 +273,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   gfx::Rect GetViewBounds() const override;
   void SetShowingContextMenu(bool showing) override;
   void SetActive(bool active) override;
-  void SetWindowVisibility(bool visible) override;
-  void WindowFrameChanged() override;
   void ShowDefinitionForSelection() override;
   bool SupportsSpeech() const override;
   void SpeakSelection() override;
@@ -294,7 +284,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
                    const gfx::Rect& pos) override;
   void InitAsFullscreen(RenderWidgetHostView* reference_host_view) override;
-  void MovePluginWindows(const std::vector<WebPluginGeometry>& moves) override;
   void Focus() override;
   void UpdateCursor(const WebCursor& cursor) override;
   void SetIsLoading(bool is_loading) override;
@@ -323,16 +312,15 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
       const base::Callback<void(const gfx::Rect&, bool)>& callback) override;
   bool CanCopyToVideoFrame() const override;
   void BeginFrameSubscription(
-      scoped_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) override;
+      std::unique_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) override;
   void EndFrameSubscription() override;
-  void OnSwapCompositorFrame(uint32_t output_surface_id,
-                             scoped_ptr<cc::CompositorFrame> frame) override;
+  void OnSwapCompositorFrame(
+      uint32_t output_surface_id,
+      std::unique_ptr<cc::CompositorFrame> frame) override;
   void ClearCompositorFrame() override;
   BrowserAccessibilityManager* CreateBrowserAccessibilityManager(
-      BrowserAccessibilityDelegate* delegate) override;
+      BrowserAccessibilityDelegate* delegate, bool for_root_frame) override;
   gfx::Point AccessibilityOriginInScreen(const gfx::Rect& bounds) override;
-  bool PostProcessEventForPluginIme(
-      const NativeWebKeyboardEvent& event) override;
 
   bool HasAcceleratedSurface(const gfx::Size& desired_size) override;
   void GetScreenInfo(blink::WebScreenInfo* results) override;
@@ -345,16 +333,24 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void UnlockMouse() override;
   void WheelEventAck(const blink::WebMouseWheelEvent& event,
                      InputEventAckState ack_result) override;
+  void GestureEventAck(const blink::WebGestureEvent& event,
+                       InputEventAckState ack_result) override;
 
-  scoped_ptr<SyntheticGestureTarget> CreateSyntheticGestureTarget() override;
+  std::unique_ptr<SyntheticGestureTarget> CreateSyntheticGestureTarget()
+      override;
 
   uint32_t GetSurfaceIdNamespace() override;
-  uint32_t SurfaceIdNamespaceAtPoint(const gfx::Point& point,
+  uint32_t SurfaceIdNamespaceAtPoint(cc::SurfaceHittestDelegate* delegate,
+                                     const gfx::Point& point,
                                      gfx::Point* transformed_point) override;
   // Returns true when we can do SurfaceHitTesting for the event type.
   bool ShouldRouteEvent(const blink::WebInputEvent& event) const;
   void ProcessMouseEvent(const blink::WebMouseEvent& event) override;
   void ProcessMouseWheelEvent(const blink::WebMouseWheelEvent& event) override;
+  void ProcessTouchEvent(const blink::WebTouchEvent& event,
+                         const ui::LatencyInfo& latency) override;
+  void ProcessGestureEvent(const blink::WebGestureEvent& event,
+                           const ui::LatencyInfo& latency) override;
   void TransformPointToLocalCoordSpace(const gfx::Point& point,
                                        cc::SurfaceId original_surface,
                                        gfx::Point* transformed_point) override;
@@ -371,12 +367,12 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // Forwards the mouse event to the renderer.
   void ForwardMouseEvent(const blink::WebMouseEvent& event);
 
+  // Called when RenderWidget wants to start BeginFrame scheduling or stop.
+  void OnSetNeedsBeginFrames(bool needs_begin_frames);
+
   void KillSelf();
 
   void SetTextInputActive(bool active);
-
-  // Sends completed plugin IME notification and text back to the renderer.
-  void PluginImeCompositionCompleted(const base::string16& text, int plugin_id);
 
   const std::string& selected_text() const { return selected_text_; }
   const gfx::Range& composition_range() const { return composition_range_; }
@@ -456,16 +452,16 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   BrowserCompositorViewState browser_compositor_state_;
 
   // Delegated frame management and compositor.
-  scoped_ptr<DelegatedFrameHost> delegated_frame_host_;
-  scoped_ptr<ui::Layer> root_layer_;
+  std::unique_ptr<DelegatedFrameHost> delegated_frame_host_;
+  std::unique_ptr<ui::Layer> root_layer_;
 
   // Container for ui::Compositor the CALayer tree drawn by it.
-  scoped_ptr<BrowserCompositorMac> browser_compositor_;
+  std::unique_ptr<BrowserCompositorMac> browser_compositor_;
 
   // Placeholder that is allocated while browser_compositor_ is NULL,
   // indicating that a BrowserCompositorViewMac may be allocated. This is to
   // help in recycling the internals of BrowserCompositorViewMac.
-  scoped_ptr<BrowserCompositorMacPlaceholder>
+  std::unique_ptr<BrowserCompositorMacPlaceholder>
       browser_compositor_placeholder_;
 
   // Set when the currently-displayed frame is the minimum scale. Used to
@@ -501,7 +497,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   bool DelegatedFrameHostIsVisible() const override;
   gfx::Size DelegatedFrameHostDesiredSizeInDIP() const override;
   bool DelegatedFrameCanCreateResizeLock() const override;
-  scoped_ptr<ResizeLock> DelegatedFrameHostCreateResizeLock(
+  std::unique_ptr<ResizeLock> DelegatedFrameHostCreateResizeLock(
       bool defer_compositor_lock) override;
   void DelegatedFrameHostResizeLockWasReleased() override;
   void DelegatedFrameHostSendCompositorSwapAck(
@@ -514,6 +510,11 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void DelegatedFrameHostUpdateVSyncParameters(
       const base::TimeTicks& timebase,
       const base::TimeDelta& interval) override;
+  void SetBeginFrameSource(cc::BeginFrameSource* source) override;
+
+  // cc::BeginFrameObserverBase implementation.
+  bool OnBeginFrameDerivedImpl(const cc::BeginFrameArgs& args) override;
+  void OnBeginFrameSourcePausedChanged(bool paused) override;
 
   // AcceleratedWidgetMacNSView implementation.
   NSView* AcceleratedWidgetGetNSView() const override;
@@ -524,6 +525,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // Transition from being in the Suspended state to being in the Destroyed
   // state, if appropriate (see BrowserCompositorViewState for details).
   void DestroySuspendedBrowserCompositorViewIfNeeded();
+
+  // Exposed for testing.
+  cc::SurfaceId SurfaceIdForTesting() const override;
 
  private:
   friend class RenderWidgetHostViewMacTest;
@@ -546,8 +550,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void DestroyBrowserCompositorView();
 
   // IPC message handlers.
-  void OnPluginFocusChanged(bool focused, int plugin_id);
-  void OnStartPluginIme();
   void OnGetRenderedTextCompleted(const std::string& text);
 
   // Send updated vsync parameters to the renderer.
@@ -577,6 +579,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // RenderWidgetHostViewGuest.
   bool is_guest_view_hack_;
 
+  // True if gestures are generated for mouse wheel events.
+  bool wheel_gestures_enabled_;
+
   // selected text on the renderer.
   std::string selected_text_;
 
@@ -596,6 +601,10 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // to SendVSyncParametersToRenderer(), and refreshed regularly thereafter.
   base::TimeTicks vsync_timebase_;
   base::TimeDelta vsync_interval_;
+
+  // The begin frame source being observed.  Null if none.
+  cc::BeginFrameSource* begin_frame_source_;
+  bool needs_begin_frames_;
 
   // The current composition character range and its bounds.
   gfx::Range composition_range_;

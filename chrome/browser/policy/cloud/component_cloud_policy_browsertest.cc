@@ -201,7 +201,8 @@ class ComponentCloudPolicyTest : public ExtensionBrowserTest {
     SigninManager* signin_manager =
         SigninManagerFactory::GetForProfile(browser()->profile());
     ASSERT_TRUE(signin_manager);
-    signin_manager->SignOut(signin_metrics::SIGNOUT_TEST);
+    signin_manager->SignOut(signin_metrics::SIGNOUT_TEST,
+                            signin_metrics::SignoutDelete::IGNORE_METRIC);
   }
 #endif
 
@@ -217,7 +218,7 @@ class ComponentCloudPolicyTest : public ExtensionBrowserTest {
 
   LocalPolicyTestServer test_server_;
   scoped_refptr<const extensions::Extension> extension_;
-  scoped_ptr<ExtensionTestMessageListener> event_listener_;
+  std::unique_ptr<ExtensionTestMessageListener> event_listener_;
 };
 
 IN_PROC_BROWSER_TEST_F(ComponentCloudPolicyTest, FetchExtensionPolicy) {

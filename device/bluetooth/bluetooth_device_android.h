@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/android/jni_android.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -27,7 +29,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDeviceAndroid final
   // The ChromeBluetoothDevice instance will hold a Java reference
   // to |bluetooth_device_wrapper|.
   //
-  // TODO(scheib): Return a scoped_ptr<>, but then adapter will need to handle
+  // TODO(scheib): Return a std::unique_ptr<>, but then adapter will need to
+  // handle
   // this correctly. http://crbug.com/506416
   static BluetoothDeviceAndroid* Create(
       BluetoothAdapterAndroid* adapter,
@@ -42,7 +45,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDeviceAndroid final
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject();
 
   // Get owning BluetoothAdapter cast to BluetoothAdapterAndroid.
-  BluetoothAdapterAndroid* GetAdapter() {
+  BluetoothAdapterAndroid* GetAndroidAdapter() {
     return static_cast<BluetoothAdapterAndroid*>(adapter_);
   }
 
@@ -58,6 +61,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDeviceAndroid final
   uint16_t GetVendorID() const override;
   uint16_t GetProductID() const override;
   uint16_t GetDeviceID() const override;
+  uint16_t GetAppearance() const override;
   bool IsPaired() const override;
   bool IsConnected() const override;
   bool IsGattConnected() const override;

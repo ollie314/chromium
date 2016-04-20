@@ -8,16 +8,7 @@
 
 namespace ash {
 
-DefaultAccessibilityDelegate::DefaultAccessibilityDelegate()
-    : spoken_feedback_enabled_(false),
-      high_contrast_enabled_(false),
-      screen_magnifier_enabled_(false),
-      screen_magnifier_type_(ui::kDefaultMagnifierType),
-      large_cursor_enabled_(false),
-      autoclick_enabled_(false),
-      virtual_keyboard_enabled_(false),
-      accessibility_alert_(ui::A11Y_ALERT_NONE) {
-}
+DefaultAccessibilityDelegate::DefaultAccessibilityDelegate() {}
 
 DefaultAccessibilityDelegate::~DefaultAccessibilityDelegate() {}
 
@@ -73,13 +64,62 @@ bool DefaultAccessibilityDelegate::IsVirtualKeyboardEnabled() const {
   return virtual_keyboard_enabled_;
 }
 
+void DefaultAccessibilityDelegate::SetMonoAudioEnabled(bool enabled) {
+  mono_audio_enabled_ = enabled;
+}
+
+bool DefaultAccessibilityDelegate::IsMonoAudioEnabled() const {
+  return mono_audio_enabled_;
+}
+
+void DefaultAccessibilityDelegate::SetCaretHighlightEnabled(bool enabled) {
+  caret_highlight_enabled_ = enabled;
+}
+
+bool DefaultAccessibilityDelegate::IsCaretHighlightEnabled() const {
+  return caret_highlight_enabled_;
+}
+
+void DefaultAccessibilityDelegate::SetCursorHighlightEnabled(bool enabled) {
+  cursor_highlight_enabled_ = enabled;
+}
+
+bool DefaultAccessibilityDelegate::IsCursorHighlightEnabled() const {
+  return cursor_highlight_enabled_;
+}
+
+void DefaultAccessibilityDelegate::SetFocusHighlightEnabled(bool enabled) {
+  focus_highligh_enabled_ = enabled;
+}
+
+bool DefaultAccessibilityDelegate::IsFocusHighlightEnabled() const {
+  return focus_highligh_enabled_;
+}
+
+void DefaultAccessibilityDelegate::SetSelectToSpeakEnabled(bool enabled) {
+  select_to_speak_enabled_ = enabled;
+}
+
+bool DefaultAccessibilityDelegate::IsSelectToSpeakEnabled() const {
+  return select_to_speak_enabled_;
+}
+
+void DefaultAccessibilityDelegate::SetSwitchAccessEnabled(bool enabled) {
+  switch_access_enabled_ = enabled;
+}
+
+bool DefaultAccessibilityDelegate::IsSwitchAccessEnabled() const {
+  return switch_access_enabled_;
+}
+
 bool DefaultAccessibilityDelegate::ShouldShowAccessibilityMenu() const {
   return spoken_feedback_enabled_ ||
          high_contrast_enabled_ ||
          screen_magnifier_enabled_ ||
          large_cursor_enabled_ ||
          autoclick_enabled_ ||
-         virtual_keyboard_enabled_;
+         virtual_keyboard_enabled_ ||
+         mono_audio_enabled_;
 }
 
 bool DefaultAccessibilityDelegate::IsBrailleDisplayConnected() const {

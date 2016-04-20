@@ -6,6 +6,7 @@
 
 #include <cmath>
 
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/animation/animation_curve.h"
@@ -20,42 +21,31 @@ static const char* const s_runStateNames[] = {"WAITING_FOR_TARGET_AVAILABILITY",
                                               "RUNNING",
                                               "PAUSED",
                                               "FINISHED",
-                                              "ABORTED"};
+                                              "ABORTED",
+                                              "ABORTED_BUT_NEEDS_COMPLETION"};
 
 static_assert(static_cast<int>(cc::Animation::LAST_RUN_STATE) + 1 ==
                   arraysize(s_runStateNames),
               "RunStateEnumSize should equal the number of elements in "
               "s_runStateNames");
 
-// This should match the TargetProperty enum.
-static const char* const s_targetPropertyNames[] = {"TRANSFORM",
-                                                    "OPACITY",
-                                                    "FILTER",
-                                                    "SCROLL_OFFSET",
-                                                    "BACKGROUND_COLOR"};
-
-static_assert(static_cast<int>(cc::Animation::LAST_TARGET_PROPERTY) + 1 ==
-                  arraysize(s_targetPropertyNames),
-              "TargetPropertyEnumSize should equal the number of elements in "
-              "s_targetPropertyNames");
-
 }  // namespace
 
 namespace cc {
 
-scoped_ptr<Animation> Animation::Create(
-    scoped_ptr<AnimationCurve> curve,
+std::unique_ptr<Animation> Animation::Create(
+    std::unique_ptr<AnimationCurve> curve,
     int animation_id,
     int group_id,
-    TargetProperty target_property) {
-  return make_scoped_ptr(
+    TargetProperty::Type target_property) {
+  return base::WrapUnique(
       new Animation(std::move(curve), animation_id, group_id, target_property));
 }
 
-Animation::Animation(scoped_ptr<AnimationCurve> curve,
+Animation::Animation(std::unique_ptr<AnimationCurve> curve,
                      int animation_id,
                      int group_id,
-                     TargetProperty target_property)
+                     TargetProperty::Type target_property)
     : curve_(std::move(curve)),
       id_(animation_id),
       group_(group_id),
@@ -85,11 +75,8 @@ void Animation::SetRunState(RunState run_state,
     return;
 
   char name_buffer[256];
-  base::snprintf(name_buffer,
-                 sizeof(name_buffer),
-                 "%s-%d",
-                 s_targetPropertyNames[target_property_],
-                 group_);
+  base::snprintf(name_buffer, sizeof(name_buffer), "%s-%d",
+                 TargetProperty::GetName(target_property_), group_);
 
   bool is_waiting_to_start =
       run_state_ == WAITING_FOR_TARGET_AVAILABILITY || run_state_ == STARTING;
@@ -253,9 +240,9 @@ base::TimeDelta Animation::TrimTimeToCurrentIteration(
   return iteration_time;
 }
 
-scoped_ptr<Animation> Animation::CloneAndInitialize(
+std::unique_ptr<Animation> Animation::CloneAndInitialize(
     RunState initial_run_state) const {
-  scoped_ptr<Animation> to_return(
+  std::unique_ptr<Animation> to_return(
       new Animation(curve_->Clone(), id_, group_, target_property_));
   to_return->run_state_ = initial_run_state;
   to_return->iterations_ = iterations_;

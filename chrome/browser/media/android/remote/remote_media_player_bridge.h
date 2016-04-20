@@ -24,11 +24,10 @@ class RemoteMediaPlayerManager;
 
 class RemoteMediaPlayerBridge : public media::MediaPlayerAndroid {
  public:
-  RemoteMediaPlayerBridge(
-      MediaPlayerAndroid* local_player,
-      const std::string& user_agent,
-      bool hide_url_log,
-      RemoteMediaPlayerManager* manager);
+  RemoteMediaPlayerBridge(int player_id,
+                          const std::string& user_agent,
+                          bool hide_url_log,
+                          RemoteMediaPlayerManager* manager);
   ~RemoteMediaPlayerBridge() override;
 
   static bool RegisterRemoteMediaPlayerBridge(JNIEnv* env);
@@ -42,7 +41,6 @@ class RemoteMediaPlayerBridge : public media::MediaPlayerAndroid {
   void Pause(bool is_media_related_action) override;
   void SeekTo(base::TimeDelta timestamp) override;
   void Release() override;
-  void SetVolume(double volume) override;
   bool HasVideo() const override;
   bool HasAudio() const override;
   int GetVideoWidth() override;
@@ -58,9 +56,6 @@ class RemoteMediaPlayerBridge : public media::MediaPlayerAndroid {
   GURL GetFirstPartyForCookies() override;
 
   // JNI functions
-  base::android::ScopedJavaLocalRef<jstring> GetFrameUrl(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj);
   void OnPlaying(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
   void OnPaused(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
   void OnRouteUnselected(JNIEnv* env,
@@ -85,6 +80,11 @@ class RemoteMediaPlayerBridge : public media::MediaPlayerAndroid {
                       const base::android::JavaParamRef<jobject>& obj);
   void OnSeekCompleted(JNIEnv* env,
                        const base::android::JavaParamRef<jobject>& obj);
+  void OnError(JNIEnv *env,
+               const base::android::JavaParamRef<jobject>& obj);
+  void OnCancelledRemotePlaybackRequest(
+      JNIEnv *env,
+      const base::android::JavaParamRef<jobject>& obj);
 
   // Wrappers for calls to Java used by the remote media player manager
   void RequestRemotePlayback();
@@ -106,6 +106,9 @@ class RemoteMediaPlayerBridge : public media::MediaPlayerAndroid {
   void OnMediaInterrupted() override;
 
  private:
+  // MediaPlayerAndroid implementation
+  void UpdateEffectiveVolumeInternal(double effective_volume) override;
+
   // Functions that implements media player control.
   void StartInternal();
   void PauseInternal();
@@ -117,7 +120,8 @@ class RemoteMediaPlayerBridge : public media::MediaPlayerAndroid {
   // are retrieved.
   void OnCookiesRetrieved(const std::string& cookies);
 
-  MediaPlayerAndroid* local_player_;
+  media::MediaPlayerAndroid* GetLocalPlayer();
+
   int width_;
   int height_;
   base::RepeatingTimer time_update_timer_;
@@ -125,9 +129,6 @@ class RemoteMediaPlayerBridge : public media::MediaPlayerAndroid {
 
   // Hide url log from media player.
   bool hide_url_log_;
-
-  // Volume of playback.
-  double volume_;
 
   // Url for playback.
   GURL url_;
@@ -142,7 +143,7 @@ class RemoteMediaPlayerBridge : public media::MediaPlayerAndroid {
   const std::string user_agent_;
 
   base::android::ScopedJavaGlobalRef<jobject> java_bridge_;
-  scoped_ptr<std::string> casting_message_;
+  std::unique_ptr<std::string> casting_message_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<RemoteMediaPlayerBridge> weak_factory_;

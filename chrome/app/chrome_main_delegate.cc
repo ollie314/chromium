@@ -40,7 +40,7 @@
 #include "chrome/common/switch_utils.h"
 #include "chrome/common/trace_event_args_whitelist.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/plugin/chrome_content_plugin_client.h"
+#include "chrome/gpu/chrome_content_gpu_client.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/utility/chrome_content_utility_client.h"
 #include "components/component_updater/component_updater_paths.h"
@@ -51,6 +51,7 @@
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "extensions/common/constants.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
 
@@ -141,12 +142,12 @@
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER)
 #include "chrome/child/pdf_child_init.h"
 
+base::LazyInstance<ChromeContentGpuClient> g_chrome_content_gpu_client =
+    LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<ChromeContentRendererClient>
     g_chrome_content_renderer_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<ChromeContentUtilityClient>
     g_chrome_content_utility_client = LAZY_INSTANCE_INITIALIZER;
-base::LazyInstance<ChromeContentPluginClient>
-    g_chrome_content_plugin_client = LAZY_INSTANCE_INITIALIZER;
 #endif
 
 #if !defined(CHROME_MULTIPLE_DLL_CHILD)
@@ -233,8 +234,7 @@ static void AdjustLinuxOOMScore(const std::string& process_type) {
   DCHECK(kMiscScore > 0);
   DCHECK(kPluginScore > 0);
 
-  if (process_type == switches::kPluginProcess ||
-      process_type == switches::kPpapiPluginProcess) {
+  if (process_type == switches::kPpapiPluginProcess) {
     score = kPluginScore;
   } else if (process_type == switches::kPpapiBrokerProcess) {
     // The broker should be killed before the PPAPI plugin.
@@ -272,11 +272,6 @@ static void AdjustLinuxOOMScore(const std::string& process_type) {
 // and resources loaded.
 bool SubprocessNeedsResourceBundle(const std::string& process_type) {
   return
-#if defined(OS_WIN) || defined(OS_MACOSX)
-      // Windows needs resources for the default/null plugin.
-      // Mac needs them for the plugin process name.
-      process_type == switches::kPluginProcess ||
-#endif
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
       // The zygote process opens the resources for the renderers.
       process_type == switches::kZygoteProcess ||
@@ -369,7 +364,7 @@ void InitializeUserDataDir() {
   // support the virtual desktop use-case.
   if (user_data_dir.empty()) {
     std::string user_data_dir_string;
-    scoped_ptr<base::Environment> environment(base::Environment::Create());
+    std::unique_ptr<base::Environment> environment(base::Environment::Create());
     if (environment->GetVar("CHROME_USER_DATA_DIR", &user_data_dir_string) &&
         base::IsStringUTF8(user_data_dir_string)) {
       user_data_dir = base::FilePath::FromUTF8Unsafe(user_data_dir_string);
@@ -792,6 +787,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
     base::i18n::SetICUDefaultLocale(locale);
     const std::string loaded_locale = locale;
 #else
+    ui::MaterialDesignController::Initialize();
     const std::string loaded_locale =
         ui::ResourceBundle::InitSharedInstanceWithLocale(
             locale, NULL, ui::ResourceBundle::LOAD_COMMON_RESOURCES);
@@ -984,11 +980,11 @@ ChromeMainDelegate::CreateContentBrowserClient() {
 #endif
 }
 
-content::ContentPluginClient* ChromeMainDelegate::CreateContentPluginClient() {
+content::ContentGpuClient* ChromeMainDelegate::CreateContentGpuClient() {
 #if defined(CHROME_MULTIPLE_DLL_BROWSER)
-  return NULL;
+  return nullptr;
 #else
-  return g_chrome_content_plugin_client.Pointer();
+  return g_chrome_content_gpu_client.Pointer();
 #endif
 }
 

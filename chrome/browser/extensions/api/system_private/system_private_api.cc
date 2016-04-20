@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -15,6 +14,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/system_private.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "google_apis/google_api_keys.h"
 
 #if defined(OS_CHROMEOS)
@@ -54,7 +54,7 @@ const char kUpdatingState[] = "Updating";
 void DispatchEvent(extensions::events::HistogramValue histogram_value,
                    const std::string& event_name,
                    base::Value* argument) {
-  scoped_ptr<base::ListValue> list_args(new base::ListValue());
+  std::unique_ptr<base::ListValue> list_args(new base::ListValue());
   if (argument) {
     list_args->Append(argument);
   }

@@ -13,8 +13,6 @@ mojom("test_interfaces") {
     "rect.mojom",
     "regression_tests.mojom",
     "sample_factory.mojom",
-    "sample_import.mojom",
-    "sample_import2.mojom",
     "sample_interfaces.mojom",
     "sample_service.mojom",
     "scoping.mojom",
@@ -22,10 +20,52 @@ mojom("test_interfaces") {
     "test_constants.mojom",
     "test_native_types.mojom",
     "test_structs.mojom",
+    "test_sync_methods.mojom",
     "validation_test_interfaces.mojom",
   ]
+  public_deps = [
+    ":test_mojom_import",
+    ":test_mojom_import2",
+  ]
+}
 
-  with_environment = false
+mojom("test_mojom_import") {
+  testonly = true
+  sources = [
+    "sample_import.mojom",
+  ]
+}
+
+mojom("test_mojom_import_wrapper") {
+  testonly = true
+  public_deps = [
+    ":test_mojom_import",
+  ]
+}
+
+mojom("test_mojom_import_wrapper_wrapper") {
+  testonly = true
+  public_deps = [
+    ":test_mojom_import_wrapper",
+  ]
+}
+
+mojom("test_mojom_import2") {
+  testonly = true
+  sources = [
+    "sample_import2.mojom",
+  ]
+  public_deps = [
+    ":test_mojom_import",
+    ":test_mojom_import_wrapper_wrapper",
+  ]
+}
+
+mojom("test_struct_traits_interfaces") {
+  testonly = true
+  sources = [
+    "struct_with_traits.mojom",
+  ]
 }
 
 mojom("test_interfaces_experimental") {
@@ -33,8 +73,6 @@ mojom("test_interfaces_experimental") {
   sources = [
     "test_unions.mojom",
   ]
-
-  with_environment = false
 }
 
 mojom("test_associated_interfaces") {
@@ -45,58 +83,32 @@ mojom("test_associated_interfaces") {
     "test_associated_interfaces.mojom",
     "validation_test_associated_interfaces.mojom",
   ]
-
-  with_environment = false
 }
 
 mojom("versioning_test_service_interfaces") {
-  # FIXME: Dart packaged applications cannot depend on testonly mojoms.
-  # testonly = true
+  testonly = true
   sources = [
     "versioning_test_service.mojom",
   ]
-
-  with_environment = false
 }
 
 mojom("versioning_test_client_interfaces") {
-  # FIXME: Dart packaged applications cannot depend on testonly mojoms.
-  # testonly = true
+  testonly = true
   sources = [
     "versioning_test_client.mojom",
   ]
-
-  with_environment = false
 }
 
-mojom("test_interfaces_chromium") {
+mojom("test_wtf_types") {
   testonly = true
 
   sources = [
-    "test_native_types.mojom",
-  ]
-
-  variant = "chromium"
-  typemaps = [ "chromium_test.typemap" ]
-
-  with_environment = false
-
-  public_deps = [
-    ":test_interfaces",
+    "test_wtf_types.mojom",
   ]
 }
 
-mojom("test_interfaces_blink") {
+mojom("test_no_sources") {
   testonly = true
-
-  sources = [
-    "test_native_types.mojom",
-  ]
-
-  variant = "blink"
-  typemaps = [ "blink_test.typemap" ]
-
-  with_environment = false
 
   public_deps = [
     ":test_interfaces",

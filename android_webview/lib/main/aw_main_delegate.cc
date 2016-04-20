@@ -4,6 +4,8 @@
 
 #include "android_webview/lib/main/aw_main_delegate.h"
 
+#include <memory>
+
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/browser/scoped_allow_wait_for_legacy_web_view_api.h"
@@ -24,7 +26,6 @@
 #include "base/i18n/icu_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_restrictions.h"
 #include "cc/base/switches.h"
 #include "components/external_video_surface/browser/android/external_video_surface_container_impl.h"
@@ -34,6 +35,7 @@
 #include "content/public/common/content_descriptors.h"
 #include "content/public/common/content_switches.h"
 #include "gin/public/isolate_holder.h"
+#include "gin/v8_initializer.h"
 #include "gpu/command_buffer/client/gl_in_process_context.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "media/base/media_switches.h"
@@ -46,9 +48,8 @@ namespace {
 
 // TODO(boliu): Remove this global Allow once the underlying issues are
 // resolved - http://crbug.com/240453. See AwMainDelegate::RunProcess below.
-base::LazyInstance<scoped_ptr<ScopedAllowWaitForLegacyWebViewApi> >
+base::LazyInstance<std::unique_ptr<ScopedAllowWaitForLegacyWebViewApi>>
     g_allow_wait_in_ui_thread = LAZY_INSTANCE_INITIALIZER;
-
 }
 
 AwMainDelegate::AwMainDelegate() {
@@ -71,6 +72,7 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
       ->set_fling_touchscreen_tap_suppression_enabled(false);
 
   base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
+  cl->AppendSwitch(switches::kIPCSyncCompositing);
   cl->AppendSwitch(cc::switches::kEnableBeginFrameScheduling);
 
   // WebView uses the Android system's scrollbars and overscroll glow.
@@ -92,7 +94,6 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
 #if defined(ENABLE_WEBRTC)
   cl->AppendSwitch(switches::kDisableWebRtcHWDecoding);
 #endif
-  cl->AppendSwitch(switches::kDisableAcceleratedVideoDecode);
 
   // This is needed for sharing textures across the different GL threads.
   cl->AppendSwitch(switches::kEnableThreadedTextureMailboxes);
@@ -118,24 +119,19 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   if (cl->GetSwitchValueASCII(switches::kProcessType).empty()) {
     // Browser process (no type specified).
 
-    // This code is needed to be able to mmap the V8 snapshot directly from
-    // the WebView .apk using architecture-specific names.
-    // This needs to be here so that it gets to run before the code in
-    // content_main_runner that reads these values tries to do so.
-#ifdef __LP64__
-    const char kNativesFileName[] = "assets/natives_blob_64.bin";
-    const char kSnapshotFileName[] = "assets/snapshot_blob_64.bin";
-#else
-    const char kNativesFileName[] = "assets/natives_blob_32.bin";
-    const char kSnapshotFileName[] = "assets/snapshot_blob_32.bin";
-#endif // __LP64__
-    // TODO(gsennton) we should use
-    // gin::IsolateHolder::kNativesFileName/kSnapshotFileName
-    // here when those files have arch specific names http://crbug.com/455699
-    CHECK(base::android::RegisterApkAssetWithGlobalDescriptors(
-        kV8NativesDataDescriptor, kNativesFileName));
-    CHECK(base::android::RegisterApkAssetWithGlobalDescriptors(
-        kV8SnapshotDataDescriptor, kSnapshotFileName));
+    base::android::RegisterApkAssetWithGlobalDescriptors(
+        kV8NativesDataDescriptor32,
+        gin::V8Initializer::GetNativesFilePath(true).AsUTF8Unsafe());
+    base::android::RegisterApkAssetWithGlobalDescriptors(
+        kV8SnapshotDataDescriptor32,
+        gin::V8Initializer::GetSnapshotFilePath(true).AsUTF8Unsafe());
+
+    base::android::RegisterApkAssetWithGlobalDescriptors(
+        kV8NativesDataDescriptor64,
+        gin::V8Initializer::GetNativesFilePath(false).AsUTF8Unsafe());
+    base::android::RegisterApkAssetWithGlobalDescriptors(
+        kV8SnapshotDataDescriptor64,
+        gin::V8Initializer::GetSnapshotFilePath(false).AsUTF8Unsafe());
   }
 
   if (cl->HasSwitch(switches::kWebViewSandboxedRenderer)) {
@@ -143,6 +139,10 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
     cl->AppendSwitchASCII(switches::kRendererProcessLimit, "1");
     cl->AppendSwitch(switches::kDisableRendererBackgrounding);
   }
+
+  // TODO(liberato, watk): Reenable after resolving fullscreen test failures.
+  // See http://crbug.com/597495
+  cl->AppendSwitch(switches::kDisableUnifiedMediaPipeline);
 
   return false;
 }

@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.document;
 
 import android.annotation.TargetApi;
 import android.content.Intent;
-import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.os.Build;
 import android.text.TextUtils;
@@ -25,36 +24,39 @@ import org.chromium.base.SysUtils;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ActivityTabTaskDescriptionHelper;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.KeyboardShortcuts;
 import org.chromium.chrome.browser.TabState;
 import org.chromium.chrome.browser.UrlConstants;
+import org.chromium.chrome.browser.bookmarks.BookmarkUtils;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManagerDocument;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManagerDocumentTabSwitcher;
 import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
 import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior.OverviewModeObserver;
-import org.chromium.chrome.browser.enhancedbookmarks.EnhancedBookmarkUtils;
 import org.chromium.chrome.browser.firstrun.FirstRunSignInProcessor;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 import org.chromium.chrome.browser.metrics.StartupMetrics;
 import org.chromium.chrome.browser.metrics.UmaUtils;
+import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
-import org.chromium.chrome.browser.preferences.datareduction.DataReductionPreferences;
 import org.chromium.chrome.browser.preferences.datareduction.DataReductionPromoScreen;
 import org.chromium.chrome.browser.signin.SigninPromoScreen;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabUma.TabCreationState;
+import org.chromium.chrome.browser.tabmodel.AsyncTabParams;
+import org.chromium.chrome.browser.tabmodel.AsyncTabParamsManager;
 import org.chromium.chrome.browser.tabmodel.SingleTabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
+import org.chromium.chrome.browser.tabmodel.TabReparentingParams;
 import org.chromium.chrome.browser.tabmodel.document.ActivityDelegate;
 import org.chromium.chrome.browser.tabmodel.document.AsyncTabCreationParams;
-import org.chromium.chrome.browser.tabmodel.document.AsyncTabCreationParamsManager;
 import org.chromium.chrome.browser.tabmodel.document.DocumentTabModel;
 import org.chromium.chrome.browser.tabmodel.document.DocumentTabModel.InitializationObserver;
 import org.chromium.chrome.browser.tabmodel.document.DocumentTabModelImpl;
@@ -63,9 +65,7 @@ import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
 import org.chromium.chrome.browser.toolbar.ToolbarControlContainer;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.IntentUtils;
-import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.chrome.browser.widget.findinpage.FindToolbarManager;
-import org.chromium.components.security_state.ConnectionSecurityLevel;
 import org.chromium.components.service_tab_launcher.ServiceTabLauncher;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationEntry;
@@ -108,70 +108,15 @@ public class DocumentActivity extends ChromeActivity {
         }
 
         @Override
-        public void onWebContentsSwapped(Tab tab, boolean didStartLoad, boolean didFinishLoad) {
-            if (!didStartLoad) return;
-            resetIcon();
-        }
-
-        @Override
-        public void onFaviconUpdated(Tab tab, Bitmap icon) {
-            if (icon == null) return;
-            if (mLargestFavicon == null || icon.getWidth() > mLargestFavicon.getWidth()
-                    || icon.getHeight() > mLargestFavicon.getHeight()) {
-                mLargestFavicon = icon;
-                updateTaskDescription();
-            }
-        }
-
-        @Override
         public void onUrlUpdated(Tab tab) {
             assert mTab == tab;
-
-            updateTaskDescription();
             mTabModel.updateEntry(getIntent(), mTab);
-        }
-
-        @Override
-        public void onTitleUpdated(Tab tab) {
-            super.onTitleUpdated(tab);
-            updateTaskDescription();
-        }
-
-        @Override
-        public void onSSLStateUpdated(Tab tab) {
-            if (hasSecurityWarningOrError(tab)) resetIcon();
-        }
-
-        @Override
-        public void onDidNavigateMainFrame(Tab tab, String url, String baseUrl,
-                boolean isNavigationToDifferentPage, boolean isFragmentNavigation,
-                int statusCode) {
-            if (!isNavigationToDifferentPage) return;
-            mLargestFavicon = null;
-            updateTaskDescription();
         }
 
         @Override
         public void onLoadStopped(Tab tab, boolean toDifferentDocument) {
             assert mTab == tab;
-
-            updateTaskDescription();
             mTabModel.updateEntry(getIntent(), mTab);
-        }
-
-        @Override
-        public void onDidChangeThemeColor(Tab tab, int color) {
-            updateTaskDescription();
-        }
-
-        @Override
-        public void onDidAttachInterstitialPage(Tab tab) {
-            resetIcon();
-        }
-
-        @Override
-        public void onDidDetachInterstitialPage(Tab tab) {
-            resetIcon();
         }
 
         @Override
@@ -192,28 +137,11 @@ public class DocumentActivity extends ChromeActivity {
             // eventually destroy the Activities, anyway (crbug.com/450292).
             if (!isIncognito()) finish();
         }
-
-        private boolean hasSecurityWarningOrError(Tab tab) {
-            int securityLevel = tab.getSecurityLevel();
-            return securityLevel == ConnectionSecurityLevel.SECURITY_ERROR
-                    || securityLevel == ConnectionSecurityLevel.SECURITY_WARNING
-                    || securityLevel == ConnectionSecurityLevel.SECURITY_POLICY_WARNING;
-        }
     }
     private DocumentTabModel mTabModel;
     private InitializationObserver mTabInitializationObserver;
 
-    /**
-     * Generates the icon to use in the recent task list.
-     */
-    private DocumentActivityIcon mIcon;
-
-    /**
-     * The tab's largest favicon.
-     */
-    private Bitmap mLargestFavicon;
-
-    private int mDefaultThemeColor;
+    private ActivityTabTaskDescriptionHelper mTaskDescriptionHelper;
 
     private Tab mTab;
     private FindToolbarManager mFindToolbarManager;
@@ -228,8 +156,30 @@ public class DocumentActivity extends ChromeActivity {
 
     @Override
     protected boolean isStartedUpCorrectly(Intent intent) {
-        int tabId = ActivityDelegate.getTabIdFromIntent(getIntent());
         boolean isDocumentMode = FeatureUtilities.isDocumentMode(this);
+        int tabId = ActivityDelegate.getTabIdFromIntent(getIntent());
+
+        if (!isDocumentMode) {
+            // Fire a MAIN Intent to send the user back through ChromeLauncherActivity.
+            Log.e(TAG, "User is not in document mode.  Sending back to ChromeLauncherActivity.");
+
+            // Try to bring this tab forward after migration.
+            Intent tabbedIntent = null;
+            if (tabId != Tab.INVALID_TAB_ID) tabbedIntent = Tab.createBringTabToFrontIntent(tabId);
+
+            if (tabbedIntent == null) {
+                tabbedIntent = new Intent(Intent.ACTION_MAIN);
+                tabbedIntent.setPackage(getPackageName());
+            }
+
+            // Launch the other Activity in its own task so it stays when this one finishes.
+            tabbedIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            tabbedIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
+
+            startActivity(tabbedIntent);
+            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+        }
+
         boolean isStartedUpCorrectly = tabId != Tab.INVALID_TAB_ID && isDocumentMode;
         if (!isStartedUpCorrectly) {
             Log.e(TAG, "Discarding Intent: Tab = " + tabId + ", Document mode = " + isDocumentMode);
@@ -429,13 +379,19 @@ public class DocumentActivity extends ChromeActivity {
     public void onStartWithNative() {
         super.onStartWithNative();
         handleDocumentUma();
-        ChromeLauncherActivity.sendExceptionCount();
     }
 
     @Override
     public void onStopWithNative() {
         super.onStopWithNative();
         StartupMetrics.getInstance().recordHistogram(true);
+    }
+
+    @Override
+    protected void onDestroyInternal() {
+        super.onDestroyInternal();
+
+        if (mTaskDescriptionHelper != null) mTaskDescriptionHelper.destroy();
     }
 
     private void handleDocumentUma() {
@@ -460,7 +416,8 @@ public class DocumentActivity extends ChromeActivity {
         // will get called.
         super.onPause();
         if (isFinishing() && mTab != null && mTab.getWebContents() != null) {
-            mTab.getWebContents().releaseMediaPlayers();
+            mTab.getWebContents().suspendAllMediaPlayers();
+            mTab.getWebContents().setAudioMuted(true);
         }
     }
 
@@ -485,7 +442,7 @@ public class DocumentActivity extends ChromeActivity {
         super.onResumeWithNative();
 
         if (mTab != null) {
-            AsyncTabCreationParams asyncParams = AsyncTabCreationParamsManager.remove(
+            AsyncTabParams asyncParams = AsyncTabParamsManager.remove(
                     ActivityDelegate.getTabIdFromIntent(getIntent()));
             if (asyncParams != null && asyncParams.getLoadUrlParams().getUrl() != null) {
                 loadLastKnownUrl(asyncParams);
@@ -499,7 +456,7 @@ public class DocumentActivity extends ChromeActivity {
         return (SingleTabModelSelector) super.getTabModelSelector();
     }
 
-    private void loadLastKnownUrl(AsyncTabCreationParams asyncParams) {
+    private void loadLastKnownUrl(AsyncTabParams asyncParams) {
         Intent intent = getIntent();
         if (asyncParams != null && asyncParams.getOriginalIntent() != null) {
             intent = asyncParams.getOriginalIntent();
@@ -563,17 +520,36 @@ public class DocumentActivity extends ChromeActivity {
     }
 
     private void initializeUI() {
-        mIcon = new DocumentActivityIcon(this);
-        mDefaultThemeColor = isIncognito()
+        int defaultThemeColor = isIncognito()
                 ? ApiCompatibilityUtils.getColor(getResources(), R.color.incognito_primary_color)
                 : ApiCompatibilityUtils.getColor(getResources(), R.color.default_primary_color);
-        AsyncTabCreationParams asyncParams = AsyncTabCreationParamsManager.remove(
+        mTaskDescriptionHelper = new ActivityTabTaskDescriptionHelper(this, defaultThemeColor);
+
+        AsyncTabParams params = AsyncTabParamsManager.remove(
                 ActivityDelegate.getTabIdFromIntent(getIntent()));
+
+        AsyncTabCreationParams asyncParams = params instanceof AsyncTabCreationParams
+                ? (AsyncTabCreationParams) params : null;
         boolean isAffiliated = asyncParams != null ? asyncParams.isAffiliated() : false;
         boolean isCreatedWithWebContents = asyncParams != null
                 && asyncParams.getWebContents() != null;
 
-        mTab = createActivityTab(asyncParams);
+        // URL modification must happen before the Tab is created.
+        if (!isIncognito() && asyncParams != null) {
+            LoadUrlParams loadUrlParams = asyncParams.getLoadUrlParams();
+            if (loadUrlParams != null && loadUrlParams.getUrl() != null) {
+                loadUrlParams.setUrl(DataReductionProxySettings.getInstance()
+                        .maybeRewriteWebliteUrl(loadUrlParams.getUrl()));
+            }
+        }
+
+        if (params != null && params.getTabToReparent() != null) {
+            mTab = params.getTabToReparent();
+            mTab.attachAndFinishReparenting(this, new DocumentTabDelegateFactory(),
+                    (TabReparentingParams) params);
+        } else {
+            mTab = createActivityTab(asyncParams);
+        }
 
         if (asyncParams != null && asyncParams.getWebContents() != null) {
             Intent parentIntent = IntentUtils.safeGetParcelableExtra(getIntent(),
@@ -601,11 +577,11 @@ public class DocumentActivity extends ChromeActivity {
                         loadUrlParams.setUrl(determineLastKnownUrl());
                     }
 
-                    AsyncTabCreationParamsManager.add(
+                    AsyncTabParamsManager.add(
                             ActivityDelegate.getTabIdFromIntent(getIntent()), asyncParams);
 
                     // Use the URL as the document title until tab is loaded.
-                    updateTaskDescription(loadUrlParams.getUrl(), null);
+                    mTaskDescriptionHelper.updateTaskDescription(loadUrlParams.getUrl(), null);
                 } else {
                     loadLastKnownUrl(asyncParams);
                 }
@@ -677,9 +653,8 @@ public class DocumentActivity extends ChromeActivity {
         initializeCompositorContent(layoutDriver, findViewById(R.id.url_bar),
                 (ViewGroup) findViewById(android.R.id.content), controlContainer);
 
-        mFindToolbarManager = new FindToolbarManager(this, getTabModelSelector(),
-                getToolbarManager().getActionModeController()
-                        .getActionModeCallback());
+        mFindToolbarManager = new FindToolbarManager(this,
+                getToolbarManager().getActionModeController().getActionModeCallback());
 
         if (getContextualSearchManager() != null) {
             getContextualSearchManager().setFindToolbarManager(mFindToolbarManager);
@@ -694,16 +669,6 @@ public class DocumentActivity extends ChromeActivity {
         mTab.addObserver(new DocumentTabObserver());
 
         removeWindowBackground();
-
-        if (mTab != null) {
-            DataReductionPreferences.launchDataReductionSSLInfoBar(
-                    DocumentActivity.this, mTab.getWebContents());
-        }
-    }
-
-    private void resetIcon() {
-        mLargestFavicon = null;
-        updateTaskDescription();
     }
 
     private void updateLastTabId() {
@@ -778,7 +743,7 @@ public class DocumentActivity extends ChromeActivity {
         if (hasTabState) return TabLaunchType.FROM_RESTORE;
         if (isAffiliated) return TabLaunchType.FROM_LONGPRESS_BACKGROUND;
         if (!TextUtils.isEmpty(url) && url.equals(UrlConstants.NTP_URL)) {
-            return TabLaunchType.FROM_MENU_OR_OVERVIEW;
+            return TabLaunchType.FROM_CHROME_UI;
         }
         return TabLaunchType.FROM_EXTERNAL_APP;
     }
@@ -789,7 +754,7 @@ public class DocumentActivity extends ChromeActivity {
                 new AsyncTabCreationParams(new LoadUrlParams(searchUrl, PageTransition.LINK));
         asyncParams.setDocumentStartedBy(DocumentMetricIds.STARTED_BY_CONTEXTUAL_SEARCH);
         getTabCreator(false).createNewTab(
-                asyncParams, TabLaunchType.FROM_MENU_OR_OVERVIEW, getActivityTab().getId());
+                asyncParams, TabLaunchType.FROM_CHROME_UI, getActivityTab().getId());
     }
 
     @Override
@@ -816,7 +781,7 @@ public class DocumentActivity extends ChromeActivity {
             }, MENU_EXIT_ANIMATION_WAIT_MS);
         } else if (id == R.id.all_bookmarks_menu_id) {
             StartupMetrics.getInstance().recordOpenedBookmarks();
-            EnhancedBookmarkUtils.showBookmarkManager(this);
+            BookmarkUtils.showBookmarkManager(this);
             RecordUserAction.record("MobileMenuAllBookmarks");
         } else if (id == R.id.recent_tabs_menu_id) {
             NewTabPage.launchRecentTabsDialog(this, mTab);
@@ -868,44 +833,6 @@ public class DocumentActivity extends ChromeActivity {
     protected void showAppMenuForKeyboardEvent() {
         if (!getToolbarManager().isInitialized()) return;
         super.showAppMenuForKeyboardEvent();
-    }
-
-    private void updateTaskDescription() {
-        if (mTab == null) {
-            updateTaskDescription(null, null);
-            return;
-        }
-
-        if (isNewTabPage() && !isIncognito()) {
-            // NTP needs a new color in recents, but uses the default application title and icon;
-            updateTaskDescription(null, null);
-            return;
-        }
-
-        String label = mTab.getTitle();
-        String domain = UrlUtilities.getDomainAndRegistry(mTab.getUrl(), false);
-        if (TextUtils.isEmpty(label)) {
-            label = domain;
-        }
-        if (mLargestFavicon == null && TextUtils.isEmpty(label)) {
-            updateTaskDescription(null, null);
-            return;
-        }
-
-        Bitmap bitmap = null;
-        if (!isIncognito()) {
-            bitmap = mIcon.getBitmap(mTab.getUrl(), mLargestFavicon);
-        }
-
-        updateTaskDescription(label, bitmap);
-    }
-
-    private void updateTaskDescription(String label, Bitmap icon) {
-        int color = mDefaultThemeColor;
-        if (getActivityTab() != null && !getActivityTab().isDefaultThemeColor()) {
-            color = getActivityTab().getThemeColor();
-        }
-        ApiCompatibilityUtils.setTaskDescription(this, label, icon, color);
     }
 
     /**

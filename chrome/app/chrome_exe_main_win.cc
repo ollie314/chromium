@@ -16,9 +16,12 @@
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/macros.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/path_service.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/time/time.h"
+#include "base/win/registry.h"
 #include "base/win/windows_version.h"
 #include "chrome/app/chrome_crash_reporter_client.h"
 #include "chrome/app/main_dll_loader_win.h"
@@ -26,14 +29,16 @@
 #include "chrome/browser/policy/policy_path_parser.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/installer/util/browser_distribution.h"
 #include "chrome_elf/chrome_elf_main.h"
 #include "components/crash/content/app/crash_reporter_client.h"
+#include "components/crash/content/app/crash_switches.h"
 #include "components/crash/content/app/crashpad.h"
+#include "components/crash/content/app/run_as_crashpad_handler_win.h"
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
+#include "components/startup_metric_utils/common/pre_read_field_trial_utils_win.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
-#include "third_party/crashpad/crashpad/handler/handler_main.h"
-#include "ui/gfx/win/dpi.h"
 
 namespace {
 
@@ -127,38 +132,66 @@ void EnableHighDPISupport() {
   }
 }
 
-void SwitchToLFHeap() {
-  // Only needed on XP but harmless on other Windows flavors.
-  auto crt_heap = _get_heap_handle();
-  ULONG enable_LFH = 2;
-  if (HeapSetInformation(reinterpret_cast<HANDLE>(crt_heap),
-                         HeapCompatibilityInformation,
-                         &enable_LFH, sizeof(enable_LFH))) {
-    VLOG(1) << "Low fragmentation heap enabled.";
+// Returns true if |command_line| contains a /prefetch:# argument where # is in
+// [1, 8].
+bool HasValidWindowsPrefetchArgument(const base::CommandLine& command_line) {
+  const base::char16 kPrefetchArgumentPrefix[] = L"/prefetch:";
+
+  for (const auto& arg : command_line.argv()) {
+    if (arg.size() == arraysize(kPrefetchArgumentPrefix) &&
+        base::StartsWith(arg, kPrefetchArgumentPrefix,
+                         base::CompareCase::SENSITIVE)) {
+      return arg[arraysize(kPrefetchArgumentPrefix) - 1] >= L'1' &&
+             arg[arraysize(kPrefetchArgumentPrefix) - 1] <= L'8';
+    }
   }
+  return false;
 }
 
-int RunAsCrashpadHandler(const base::CommandLine& command_line) {
-  std::vector<base::string16> argv = command_line.argv();
-  base::string16 process_type =
-      L"--" + base::UTF8ToUTF16(switches::kProcessType) + L"=";
-  argv.erase(std::remove_if(argv.begin(), argv.end(),
-                            [&process_type](const base::string16& str) {
-                              return str.compare(0, process_type.size(),
-                                                 process_type) == 0;
-                            }),
-             argv.end());
+// Some users are getting stuck in compatibility mode. Try to help them escape.
+// See http://crbug.com/581499. Returns true if a compatibility mode entry was
+// removed.
+bool RemoveAppCompatFlagsEntry() {
+  base::FilePath current_exe;
+  if (!PathService::Get(base::FILE_EXE, &current_exe))
+    return false;
+  if (!current_exe.IsAbsolute())
+    return false;
+  base::win::RegKey key;
+  if (key.Open(HKEY_CURRENT_USER,
+               L"Software\\Microsoft\\Windows "
+               L"NT\\CurrentVersion\\AppCompatFlags\\Layers",
+               KEY_READ | KEY_WRITE) == ERROR_SUCCESS) {
+    std::wstring layers;
+    if (key.ReadValue(current_exe.value().c_str(), &layers) == ERROR_SUCCESS) {
+      std::vector<base::string16> tokens = base::SplitString(
+          layers, L" ", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+      size_t initial_size = tokens.size();
+      static const wchar_t* const kCompatModeTokens[] = {
+          L"WIN95",       L"WIN98",       L"WIN4SP5",  L"WIN2000",  L"WINXPSP2",
+          L"WINXPSP3",    L"VISTARTM",    L"VISTASP1", L"VISTASP2", L"WIN7RTM",
+          L"WINSRV03SP1", L"WINSRV08SP1", L"WIN8RTM",
+      };
+      for (const wchar_t* compat_mode_token : kCompatModeTokens) {
+        tokens.erase(
+            std::remove(tokens.begin(), tokens.end(), compat_mode_token),
+            tokens.end());
+      }
+      LONG result;
+      if (tokens.empty()) {
+        result = key.DeleteValue(current_exe.value().c_str());
+      } else {
+        base::string16 without_compat_mode_tokens =
+            base::JoinString(tokens, L" ");
+        result = key.WriteValue(current_exe.value().c_str(),
+                                without_compat_mode_tokens.c_str());
+      }
 
-  scoped_ptr<char* []> argv_as_utf8(new char*[argv.size() + 1]);
-  std::vector<std::string> storage;
-  storage.reserve(argv.size());
-  for (size_t i = 0; i < argv.size(); ++i) {
-    storage.push_back(base::UTF16ToUTF8(argv[i]));
-    argv_as_utf8[i] = &storage[i][0];
+      // Return if we changed anything so that we can restart.
+      return tokens.size() != initial_size && result == ERROR_SUCCESS;
+    }
   }
-  argv_as_utf8[argv.size()] = nullptr;
-  return crashpad::HandlerMain(static_cast<int>(argv.size()),
-                               argv_as_utf8.get());
+  return false;
 }
 
 }  // namespace
@@ -183,18 +216,31 @@ int main() {
 #endif
   // Initialize the CommandLine singleton from the environment.
   base::CommandLine::Init(0, nullptr);
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
 
-  std::string process_type =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kProcessType);
+  const std::string process_type =
+      command_line->GetSwitchValueASCII(switches::kProcessType);
 
-  if (process_type == switches::kCrashpadHandler)
-    return RunAsCrashpadHandler(*base::CommandLine::ForCurrentProcess());
+  startup_metric_utils::InitializePreReadOptions(
+      BrowserDistribution::GetDistribution()->GetRegistryPath());
+
+  // Confirm that an explicit prefetch profile is used for all process types
+  // except for the browser process. Any new process type will have to assign
+  // itself a prefetch id. See kPrefetchArgument* constants in
+  // content_switches.cc for details.
+  DCHECK(!startup_metric_utils::GetPreReadOptions().use_prefetch_argument ||
+         process_type.empty() ||
+         HasValidWindowsPrefetchArgument(*command_line));
+
+  if (process_type == crash_reporter::switches::kCrashpadHandler) {
+    return crash_reporter::RunAsCrashpadHandler(
+        *base::CommandLine::ForCurrentProcess());
+  }
 
   crash_reporter::SetCrashReporterClient(g_chrome_crash_client.Pointer());
-  crash_reporter::InitializeCrashpad(process_type.empty(), process_type);
-
-  SwitchToLFHeap();
+  crash_reporter::InitializeCrashpadWithEmbeddedHandler(process_type.empty(),
+                                                        process_type);
 
   startup_metric_utils::RecordExeMainEntryPointTime(base::Time::Now());
 
@@ -210,8 +256,10 @@ int main() {
   if (base::win::GetVersion() >= base::win::VERSION_WIN7)
     EnableHighDPISupport();
 
-  if (AttemptFastNotify(*base::CommandLine::ForCurrentProcess()))
+  if (AttemptFastNotify(*command_line))
     return 0;
+
+  RemoveAppCompatFlagsEntry();
 
   // Load and launch the chrome dll. *Everything* happens inside.
   VLOG(1) << "About to load main DLL.";

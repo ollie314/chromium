@@ -31,7 +31,7 @@
 #ifndef MonthInputType_h
 #define MonthInputType_h
 
-#include "core/html/forms/BaseChooserOnlyDateAndTimeInputType.h"
+#include "core/html/forms/BaseDateAndTimeInputType.h"
 #include "core/html/forms/BaseMultipleFieldsDateAndTimeInputType.h"
 
 namespace blink {
@@ -39,12 +39,12 @@ namespace blink {
 #if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 using BaseMonthInputType = BaseMultipleFieldsDateAndTimeInputType;
 #else
-using BaseMonthInputType = BaseChooserOnlyDateAndTimeInputType;
+using BaseMonthInputType = BaseDateAndTimeInputType;
 #endif
 
 class MonthInputType final : public BaseMonthInputType {
 public:
-    static PassRefPtrWillBeRawPtr<InputType> create(HTMLInputElement&);
+    static InputType* create(HTMLInputElement&);
 
 private:
     explicit MonthInputType(HTMLInputElement& element) : BaseMonthInputType(element) { }
@@ -59,6 +59,7 @@ private:
     bool parseToDateComponentsInternal(const String&, DateComponents*) const override;
     bool setMillisecondToDateComponents(double, DateComponents*) const override;
     bool canSetSuggestedValue() override;
+    void warnIfValueIsInvalid(const String&) const override;
 
 #if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
     // BaseMultipleFieldsDateAndTimeInputType functions

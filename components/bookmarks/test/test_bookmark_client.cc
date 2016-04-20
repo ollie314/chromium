@@ -20,10 +20,17 @@ TestBookmarkClient::TestBookmarkClient() {}
 
 TestBookmarkClient::~TestBookmarkClient() {}
 
+// static
 scoped_ptr<BookmarkModel> TestBookmarkClient::CreateModel() {
-  scoped_ptr<BookmarkModel> bookmark_model(new BookmarkModel(this));
-  scoped_ptr<BookmarkLoadDetails> details =
-      bookmark_model->CreateLoadDetails(std::string());
+  return CreateModelWithClient(make_scoped_ptr(new TestBookmarkClient));
+}
+
+// static
+scoped_ptr<BookmarkModel> TestBookmarkClient::CreateModelWithClient(
+    scoped_ptr<BookmarkClient> client) {
+  scoped_ptr<BookmarkModel> bookmark_model(
+      new BookmarkModel(std::move(client)));
+  scoped_ptr<BookmarkLoadDetails> details = bookmark_model->CreateLoadDetails();
   details->LoadExtraNodes();
   bookmark_model->DoneLoading(std::move(details));
   return bookmark_model;

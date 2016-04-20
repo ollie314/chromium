@@ -10,15 +10,17 @@
 #include "content/public/renderer/document_state.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
+#include "third_party/WebKit/public/platform/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebElementCollection.h"
+#include "third_party/WebKit/public/web/WebFrameWidget.h"
 #include "third_party/WebKit/public/web/WebHitTestResult.h"
+#include "third_party/WebKit/public/web/WebImageCache.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebMeaningfulLayout.h"
 #include "third_party/WebKit/public/web/WebNode.h"
-#include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "url/url_canon.h"
 #include "url/url_constants.h"
@@ -142,8 +144,23 @@ void AwRenderFrameExt::DidCommitProvisionalLoad(bool is_new_navigation,
   content::DocumentState* document_state =
       content::DocumentState::FromDataSource(frame->dataSource());
   if (document_state->can_load_local_resources()) {
-    blink::WebSecurityOrigin origin = frame->document().securityOrigin();
+    blink::WebSecurityOrigin origin = frame->document().getSecurityOrigin();
     origin.grantLoadLocalResources();
+  }
+
+  // Clear the cache when we cross site boundaries in the main frame.
+  //
+  // We're trying to approximate what happens with a multi-process Chromium,
+  // where navigation across origins would cause a new render process to spin
+  // up, and thus start with a clear cache. Wiring up a signal from browser to
+  // renderer code to say "this navigation would have switched processes" would
+  // be disruptive, so this clearing of the cache is the compromise.
+  if (!frame->parent()) {
+    url::Origin new_origin(frame->document().url());
+    if (!new_origin.IsSameOriginWith(last_origin_)) {
+      last_origin_ = new_origin;
+      blink::WebImageCache::clear();
+    }
   }
 }
 
@@ -253,21 +270,21 @@ void AwRenderFrameExt::OnSetInitialPageScale(double page_scale_factor) {
 }
 
 void AwRenderFrameExt::OnSetBackgroundColor(SkColor c) {
-  blink::WebView* webview = GetWebView();
-  if (!webview)
+  blink::WebFrameWidget* web_frame_widget = GetWebFrameWidget();
+  if (!web_frame_widget)
     return;
 
-  webview->setBaseBackgroundColor(c);
+  web_frame_widget->setBaseBackgroundColor(c);
 }
 
 void AwRenderFrameExt::OnSmoothScroll(int target_x,
                                       int target_y,
-                                      long duration_ms) {
+                                      int duration_ms) {
   blink::WebView* webview = GetWebView();
   if (!webview)
     return;
 
-  webview->smoothScroll(target_x, target_y, duration_ms);
+  webview->smoothScroll(target_x, target_y, static_cast<long>(duration_ms));
 }
 
 blink::WebView* AwRenderFrameExt::GetWebView() {
@@ -276,6 +293,13 @@ blink::WebView* AwRenderFrameExt::GetWebView() {
     return nullptr;
 
   return render_frame()->GetRenderView()->GetWebView();
+}
+
+blink::WebFrameWidget* AwRenderFrameExt::GetWebFrameWidget() {
+  if (!render_frame() || !render_frame()->GetRenderView())
+    return nullptr;
+
+  return render_frame()->GetRenderView()->GetWebFrameWidget();
 }
 
 }  // namespace android_webview

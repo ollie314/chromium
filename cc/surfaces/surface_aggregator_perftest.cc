@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/ptr_util.h"
 #include "cc/debug/lap_timer.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/delegated_frame_data.h"
@@ -24,21 +25,14 @@ namespace {
 class EmptySurfaceFactoryClient : public SurfaceFactoryClient {
  public:
   void ReturnResources(const ReturnedResourceArray& resources) override {}
-  void SetBeginFrameSource(SurfaceId surface_id,
-                           BeginFrameSource* begin_frame_source) override {}
-};
-
-class EmptySurfaceAggregatorClient : public SurfaceAggregatorClient {
- public:
-  void AddSurface(Surface* surface) override {}
-  void RemoveSurface(Surface* surface) override {}
+  void SetBeginFrameSource(BeginFrameSource* begin_frame_source) override {}
 };
 
 class SurfaceAggregatorPerfTest : public testing::Test {
  public:
   SurfaceAggregatorPerfTest() : factory_(&manager_, &empty_client_) {
     output_surface_ = FakeOutputSurface::CreateSoftware(
-        make_scoped_ptr(new SoftwareOutputDevice));
+        base::WrapUnique(new SoftwareOutputDevice));
     output_surface_->BindToClient(&output_surface_client_);
     shared_bitmap_manager_.reset(new TestSharedBitmapManager);
 
@@ -52,13 +46,12 @@ class SurfaceAggregatorPerfTest : public testing::Test {
                bool optimize_damage,
                bool full_damage,
                const std::string& name) {
-    aggregator_.reset(new SurfaceAggregator(&surface_aggregator_client_,
-                                            &manager_, resource_provider_.get(),
+    aggregator_.reset(new SurfaceAggregator(&manager_, resource_provider_.get(),
                                             optimize_damage));
     for (int i = 1; i <= num_surfaces; i++) {
       factory_.Create(SurfaceId(i));
-      scoped_ptr<RenderPass> pass(RenderPass::Create());
-      scoped_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
+      std::unique_ptr<RenderPass> pass(RenderPass::Create());
+      std::unique_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
 
       SharedQuadState* sqs = pass->CreateAndAppendSharedQuadState();
       for (int j = 0; j < num_textures; j++) {
@@ -97,7 +90,7 @@ class SurfaceAggregatorPerfTest : public testing::Test {
       }
 
       frame_data->render_pass_list.push_back(std::move(pass));
-      scoped_ptr<CompositorFrame> frame(new CompositorFrame);
+      std::unique_ptr<CompositorFrame> frame(new CompositorFrame);
       frame->delegated_frame_data = std::move(frame_data);
       factory_.SubmitCompositorFrame(SurfaceId(i), std::move(frame),
                                      SurfaceFactory::DrawCallback());
@@ -106,8 +99,8 @@ class SurfaceAggregatorPerfTest : public testing::Test {
     factory_.Create(SurfaceId(num_surfaces + 1));
     timer_.Reset();
     do {
-      scoped_ptr<RenderPass> pass(RenderPass::Create());
-      scoped_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
+      std::unique_ptr<RenderPass> pass(RenderPass::Create());
+      std::unique_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
 
       SharedQuadState* sqs = pass->CreateAndAppendSharedQuadState();
       SurfaceDrawQuad* surface_quad =
@@ -121,13 +114,13 @@ class SurfaceAggregatorPerfTest : public testing::Test {
         pass->damage_rect = gfx::Rect(0, 0, 1, 1);
 
       frame_data->render_pass_list.push_back(std::move(pass));
-      scoped_ptr<CompositorFrame> frame(new CompositorFrame);
+      std::unique_ptr<CompositorFrame> frame(new CompositorFrame);
       frame->delegated_frame_data = std::move(frame_data);
       factory_.SubmitCompositorFrame(SurfaceId(num_surfaces + 1),
                                      std::move(frame),
                                      SurfaceFactory::DrawCallback());
 
-      scoped_ptr<CompositorFrame> aggregated =
+      std::unique_ptr<CompositorFrame> aggregated =
           aggregator_->Aggregate(SurfaceId(num_surfaces + 1));
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
@@ -145,11 +138,10 @@ class SurfaceAggregatorPerfTest : public testing::Test {
   EmptySurfaceFactoryClient empty_client_;
   SurfaceFactory factory_;
   FakeOutputSurfaceClient output_surface_client_;
-  scoped_ptr<OutputSurface> output_surface_;
-  scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
-  scoped_ptr<ResourceProvider> resource_provider_;
-  scoped_ptr<SurfaceAggregator> aggregator_;
-  EmptySurfaceAggregatorClient surface_aggregator_client_;
+  std::unique_ptr<OutputSurface> output_surface_;
+  std::unique_ptr<SharedBitmapManager> shared_bitmap_manager_;
+  std::unique_ptr<ResourceProvider> resource_provider_;
+  std::unique_ptr<SurfaceAggregator> aggregator_;
   LapTimer timer_;
 };
 

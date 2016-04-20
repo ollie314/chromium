@@ -6,11 +6,12 @@
 
 #include <stddef.h>
 
+#include <limits>
+#include <memory>
 #include <vector>
 
 #include "base/base64.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
@@ -70,10 +71,10 @@ void PictureDebugUtil::SerializeAsBase64(const SkPicture* picture,
   picture->serialize(&stream, &serializer);
 
   size_t serialized_size = stream.bytesWritten();
-  scoped_ptr<char[]> serialized_picture(new char[serialized_size]);
+  std::unique_ptr<char[]> serialized_picture(new char[serialized_size]);
   stream.copyTo(serialized_picture.get());
-  base::Base64Encode(std::string(serialized_picture.get(), serialized_size),
-                     output);
+  base::Base64Encode(
+      base::StringPiece(serialized_picture.get(), serialized_size), output);
 }
 
 }  // namespace cc

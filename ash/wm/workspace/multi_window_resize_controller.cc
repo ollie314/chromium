@@ -8,6 +8,7 @@
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/window_animations.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/workspace/workspace_event_handler.h"
 #include "ash/wm/workspace/workspace_window_resizer.h"
 #include "grit/ash_resources.h"
@@ -148,6 +149,9 @@ MultiWindowResizeController::ResizeWindows::ResizeWindows()
       direction(TOP_BOTTOM){
 }
 
+MultiWindowResizeController::ResizeWindows::ResizeWindows(
+    const ResizeWindows& other) = default;
+
 MultiWindowResizeController::ResizeWindows::~ResizeWindows() {
 }
 
@@ -236,8 +240,7 @@ void MultiWindowResizeController::OnWindowDestroying(
 MultiWindowResizeController::ResizeWindows
 MultiWindowResizeController::DetermineWindowsFromScreenPoint(
     aura::Window* window) const {
-  gfx::Point mouse_location(
-      gfx::Screen::GetScreenFor(window)->GetCursorScreenPoint());
+  gfx::Point mouse_location(gfx::Screen::GetScreen()->GetCursorScreenPoint());
   ::wm::ConvertPointFromScreen(window, &mouse_location);
   const int component =
       window->delegate()->GetNonClientComponent(mouse_location);
@@ -441,9 +444,7 @@ void MultiWindowResizeController::StartResize(
   }
   int component = windows_.direction == LEFT_RIGHT ? HTRIGHT : HTBOTTOM;
   wm::WindowState* window_state = wm::GetWindowState(windows_.window1);
-  window_state->CreateDragDetails(windows_.window1,
-                                  location_in_parent,
-                                  component,
+  window_state->CreateDragDetails(location_in_parent, component,
                                   aura::client::WINDOW_MOVE_SOURCE_MOUSE);
   window_resizer_.reset(WorkspaceWindowResizer::Create(window_state, windows));
 
@@ -474,7 +475,7 @@ void MultiWindowResizeController::CompleteResize() {
   window_resizer_.reset();
 
   // Mouse may still be over resizer, if not hide.
-  gfx::Point screen_loc = Shell::GetScreen()->GetCursorScreenPoint();
+  gfx::Point screen_loc = gfx::Screen::GetScreen()->GetCursorScreenPoint();
   if (!resize_widget_->GetWindowBoundsInScreen().Contains(screen_loc)) {
     Hide();
   } else {

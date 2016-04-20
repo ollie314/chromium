@@ -32,12 +32,18 @@ namespace blink {
 
 class MockImageDecoderClient {
 public:
+    MockImageDecoderClient()
+        : m_firstFrameForcedToBeEmpty(false)
+    {
+    }
+
     virtual void decoderBeingDestroyed() = 0;
     virtual void decodeRequested() = 0;
     virtual ImageFrame::Status status() = 0;
     virtual size_t frameCount() = 0;
     virtual int repetitionCount() const = 0;
     virtual float frameDuration() const = 0;
+    virtual void clearCacheExceptFrameRequested(size_t) {};
 
     // Clients can control the behavior of MockImageDecoder::decodedSize() by
     // overriding this method. The default implementation causes
@@ -45,6 +51,16 @@ public:
     // MockImageDecoder::size(). See the precise implementation of
     // MockImageDecoder::decodedSize() below.
     virtual IntSize decodedSize() const { return IntSize(); }
+
+    void forceFirstFrameToBeEmpty()
+    {
+        m_firstFrameForcedToBeEmpty = true;
+    };
+
+    bool firstFrameForcedToBeEmpty() const { return m_firstFrameForcedToBeEmpty; }
+
+private:
+    bool m_firstFrameForcedToBeEmpty;
 };
 
 class MockImageDecoder : public ImageDecoder {
@@ -86,7 +102,18 @@ public:
         return m_client->frameDuration();
     }
 
-    size_t clearCacheExceptFrame(size_t) override { return 0; }
+    size_t clearCacheExceptFrame(size_t clearExceptFrame) override
+    {
+        m_client->clearCacheExceptFrameRequested(clearExceptFrame);
+        return 0;
+    }
+
+    size_t frameBytesAtIndex(size_t index) const override
+    {
+        if (m_client->firstFrameForcedToBeEmpty() && index == 0)
+            return 0;
+        return ImageDecoder::frameBytesAtIndex(index);
+    }
 
 private:
     void decodeSize() override { }

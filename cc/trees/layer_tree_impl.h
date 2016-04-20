@@ -8,14 +8,17 @@
 #include <map>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
-#include "base/containers/hash_tables.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "cc/base/synced_property.h"
+#include "cc/input/event_listener_properties.h"
 #include "cc/input/layer_selection_bound.h"
 #include "cc/layers/layer_impl.h"
+#include "cc/layers/layer_list_iterator.h"
 #include "cc/output/begin_frame_args.h"
 #include "cc/output/renderer.h"
 #include "cc/output/swap_promise.h"
@@ -35,6 +38,7 @@ class ContextProvider;
 class DebugRectHistory;
 class FrameRateCounter;
 class HeadsUpDisplayLayerImpl;
+class ImageDecodeController;
 class LayerExternalScrollOffsetListener;
 class LayerScrollOffsetDelegate;
 class LayerTreeDebugState;
@@ -61,12 +65,12 @@ class CC_EXPORT LayerTreeImpl {
   // This is the number of times a fixed point has to be hit contiuously by a
   // layer to consider it as jittering.
   const int kFixedPointHitsThreshold = 3;
-  static scoped_ptr<LayerTreeImpl> create(
+  static std::unique_ptr<LayerTreeImpl> create(
       LayerTreeHostImpl* layer_tree_host_impl,
       scoped_refptr<SyncedProperty<ScaleGroup>> page_scale_factor,
       scoped_refptr<SyncedTopControls> top_controls_shown_ratio,
       scoped_refptr<SyncedElasticOverscroll> elastic_overscroll) {
-    return make_scoped_ptr(
+    return base::WrapUnique(
         new LayerTreeImpl(layer_tree_host_impl, page_scale_factor,
                           top_controls_shown_ratio, elastic_overscroll));
   }
@@ -85,6 +89,7 @@ class CC_EXPORT LayerTreeImpl {
   OutputSurface* output_surface() const;
   ResourceProvider* resource_provider() const;
   TileManager* tile_manager() const;
+  ImageDecodeController* image_decode_controller() const;
   FrameRateCounter* frame_rate_counter() const;
   MemoryHistory* memory_history() const;
   gfx::Size device_viewport_size() const;
@@ -101,16 +106,18 @@ class CC_EXPORT LayerTreeImpl {
   gfx::Rect DeviceViewport() const;
   gfx::Size DrawViewportSize() const;
   const gfx::Rect ViewportRectForTilePriority() const;
-  scoped_ptr<ScrollbarAnimationController> CreateScrollbarAnimationController(
-      int scroll_layer_id);
+  std::unique_ptr<ScrollbarAnimationController>
+  CreateScrollbarAnimationController(int scroll_layer_id);
   void DidAnimateScrollOffset();
-  void InputScrollAnimationFinished();
   bool use_gpu_rasterization() const;
   GpuRasterizationStatus GetGpuRasterizationStatus() const;
   bool create_low_res_tiling() const;
   bool RequiresHighResToDraw() const;
   bool SmoothnessTakesPriority() const;
   VideoFrameControllerClient* GetVideoFrameControllerClient() const;
+  AnimationHost* animation_host() const {
+    return layer_tree_host_impl_->animation_host();
+  }
 
   // Tree specific methods exposed to layer-impl tree.
   // ---------------------------------------------------------------------------
@@ -124,19 +131,33 @@ class CC_EXPORT LayerTreeImpl {
 
   // Other public methods
   // ---------------------------------------------------------------------------
-  LayerImpl* root_layer() const { return root_layer_.get(); }
-  void SetRootLayer(scoped_ptr<LayerImpl>);
-  scoped_ptr<LayerImpl> DetachLayerTree();
+  LayerImpl* root_layer() const { return root_layer_; }
+  void SetRootLayer(std::unique_ptr<LayerImpl>);
+  bool IsRootLayer(const LayerImpl* layer) const;
+  std::unique_ptr<OwnedLayerImplList> DetachLayers();
+  void ClearLayers();
 
-  void SetPropertyTrees(const PropertyTrees& property_trees) {
+  void SetPropertyTrees(const PropertyTrees property_trees) {
     property_trees_ = property_trees;
+    property_trees_.is_main_thread = false;
+    property_trees_.is_active = IsActiveTree();
     property_trees_.transform_tree.set_source_to_parent_updates_allowed(false);
+    // The value of some effect node properties (like is_drawn) depends on
+    // whether we are on the active tree or not. So, we need to update the
+    // effect tree.
+    if (IsActiveTree())
+      property_trees_.effect_tree.set_needs_update(true);
   }
   PropertyTrees* property_trees() { return &property_trees_; }
 
   void UpdatePropertyTreesForBoundsDelta();
 
   void PushPropertiesTo(LayerTreeImpl* tree_impl);
+
+  LayerListIterator<LayerImpl> begin();
+  LayerListIterator<LayerImpl> end();
+  LayerListReverseIterator<LayerImpl> rbegin();
+  LayerListReverseIterator<LayerImpl> rend();
 
   // TODO(thakis): Consider marking this CC_EXPORT once we understand
   // http://crbug.com/575700 better.
@@ -204,6 +225,10 @@ class CC_EXPORT LayerTreeImpl {
   }
 
   void UpdatePropertyTreeScrollingAndAnimationFromMainThread();
+  void UpdatePropertyTreeScrollOffset(PropertyTrees* property_trees) {
+    property_trees_.scroll_tree.UpdateScrollOffsetMap(
+        &property_trees->scroll_tree.scroll_offset_map(), this);
+  }
   void SetPageScaleOnActiveTree(float active_page_scale);
   void PushPageScaleFromMainThread(float page_scale_factor,
                                    float min_page_scale_factor,
@@ -281,13 +306,20 @@ class CC_EXPORT LayerTreeImpl {
 
   LayerImpl* LayerById(int id) const;
 
+  void AddLayerShouldPushProperties(LayerImpl* layer);
+  void RemoveLayerShouldPushProperties(LayerImpl* layer);
+  std::unordered_set<LayerImpl*>& LayersThatShouldPushProperties();
+  bool LayerNeedsPushPropertiesForTesting(LayerImpl* layer);
+
   // These should be called by LayerImpl's ctor/dtor.
   void RegisterLayer(LayerImpl* layer);
   void UnregisterLayer(LayerImpl* layer);
 
-  size_t NumLayers();
+  // These manage ownership of the LayerImpl.
+  void AddLayer(std::unique_ptr<LayerImpl> layer);
+  std::unique_ptr<LayerImpl> RemoveLayer(int id);
 
-  AnimationRegistrar* GetAnimationRegistrar() const;
+  size_t NumLayers();
 
   void DidBecomeActive();
 
@@ -304,8 +336,8 @@ class CC_EXPORT LayerTreeImpl {
   // The outer viewport scroll layer scrolls first.
   bool DistributeRootScrollOffset(const gfx::ScrollOffset& root_offset);
 
-  void ApplyScroll(LayerImpl* layer, ScrollState* scroll_state) {
-    layer_tree_host_impl_->ApplyScroll(layer, scroll_state);
+  void ApplyScroll(ScrollNode* scroll_node, ScrollState* scroll_state) {
+    layer_tree_host_impl_->ApplyScroll(scroll_node, scroll_state);
   }
 
   // Call this function when you expect there to be a swap buffer.
@@ -317,7 +349,7 @@ class CC_EXPORT LayerTreeImpl {
   // active tree along with the layer information. Similarly, when a
   // new activation overwrites layer information on the active tree,
   // queued swap promises are broken.
-  void QueueSwapPromise(scoped_ptr<SwapPromise> swap_promise);
+  void QueueSwapPromise(std::unique_ptr<SwapPromise> swap_promise);
 
   // Queue a swap promise, pinned to this tree. Pinned swap promises
   // may only be queued on the active tree.
@@ -328,10 +360,11 @@ class CC_EXPORT LayerTreeImpl {
   //
   // Pinned active tree swap promises will not be broken prematurely
   // on the active tree if a new tree is activated.
-  void QueuePinnedSwapPromise(scoped_ptr<SwapPromise> swap_promise);
+  void QueuePinnedSwapPromise(std::unique_ptr<SwapPromise> swap_promise);
 
   // Take the |new_swap_promise| and append it to |swap_promise_list_|.
-  void PassSwapPromises(std::vector<scoped_ptr<SwapPromise>>* new_swap_promise);
+  void PassSwapPromises(
+      std::vector<std::unique_ptr<SwapPromise>>* new_swap_promise);
   void FinishSwapPromises(CompositorFrameMetadata* metadata);
   void BreakSwapPromises(SwapPromise::DidNotSwapReason reason);
 
@@ -341,6 +374,8 @@ class CC_EXPORT LayerTreeImpl {
   void ProcessUIResourceRequestQueue();
 
   bool IsUIResourceOpaque(UIResourceId uid) const;
+
+  bool OutputIsSecure() const;
 
   void RegisterPictureLayerImpl(PictureLayerImpl* layer);
   void UnregisterPictureLayerImpl(PictureLayerImpl* layer);
@@ -369,13 +404,10 @@ class CC_EXPORT LayerTreeImpl {
     return render_surface_layer_list_id_;
   }
 
-  LayerImpl* FindFirstScrollingLayerThatIsHitByPoint(
+  LayerImpl* FindFirstScrollingLayerOrScrollbarLayerThatIsHitByPoint(
       const gfx::PointF& screen_space_point);
 
   LayerImpl* FindLayerThatIsHitByPoint(const gfx::PointF& screen_space_point);
-
-  LayerImpl* FindLayerWithWheelHandlerThatIsHitByPoint(
-      const gfx::PointF& screen_space_point);
 
   LayerImpl* FindLayerThatIsHitByPointInTouchHandlerRegion(
       const gfx::PointF& screen_space_point);
@@ -399,11 +431,10 @@ class CC_EXPORT LayerTreeImpl {
   void PushTopControlsFromMainThread(float top_controls_shown_ratio);
 
   void SetPendingPageScaleAnimation(
-      scoped_ptr<PendingPageScaleAnimation> pending_animation);
-  scoped_ptr<PendingPageScaleAnimation> TakePendingPageScaleAnimation();
+      std::unique_ptr<PendingPageScaleAnimation> pending_animation);
+  std::unique_ptr<PendingPageScaleAnimation> TakePendingPageScaleAnimation();
 
-  void GatherFrameTimingRequestIds(std::vector<int64_t>* request_ids);
-
+  void DidUpdateScrollOffset(int layer_id, int transform_id);
   void DidUpdateScrollState(int layer_id);
 
   bool IsAnimatingFilterProperty(const LayerImpl* layer) const;
@@ -414,12 +445,12 @@ class CC_EXPORT LayerTreeImpl {
   bool HasPotentiallyRunningOpacityAnimation(const LayerImpl* layer) const;
   bool HasPotentiallyRunningTransformAnimation(const LayerImpl* layer) const;
 
-  bool HasAnyAnimationTargetingProperty(
-      const LayerImpl* layer,
-      Animation::TargetProperty property) const;
+  bool HasAnyAnimationTargetingProperty(const LayerImpl* layer,
+                                        TargetProperty::Type property) const;
 
   bool FilterIsAnimatingOnImplOnly(const LayerImpl* layer) const;
   bool OpacityIsAnimatingOnImplOnly(const LayerImpl* layer) const;
+  bool ScrollOffsetIsAnimatingOnImplOnly(const LayerImpl* layer) const;
   bool TransformIsAnimatingOnImplOnly(const LayerImpl* layer) const;
 
   bool AnimationsPreserveAxisAlignment(const LayerImpl* layer) const;
@@ -438,6 +469,26 @@ class CC_EXPORT LayerTreeImpl {
   bool TransformAnimationBoundsForBox(const LayerImpl* layer,
                                       const gfx::BoxF& box,
                                       gfx::BoxF* bounds) const;
+  void ScrollAnimationAbort(bool needs_completion);
+
+  bool have_scroll_event_handlers() const {
+    return have_scroll_event_handlers_;
+  }
+  void set_have_scroll_event_handlers(bool have_event_handlers) {
+    have_scroll_event_handlers_ = have_event_handlers;
+  }
+
+  EventListenerProperties event_listener_properties(
+      EventListenerClass event_class) const {
+    return event_listener_properties_[static_cast<size_t>(event_class)];
+  }
+  void set_event_listener_properties(EventListenerClass event_class,
+                                     EventListenerProperties event_properties) {
+    event_listener_properties_[static_cast<size_t>(event_class)] =
+        event_properties;
+  }
+
+  void ResetAllChangeTracking(PropertyTrees::ResetFlags flag);
 
  protected:
   explicit LayerTreeImpl(
@@ -458,13 +509,12 @@ class CC_EXPORT LayerTreeImpl {
   LayerTreeHostImpl* layer_tree_host_impl_;
   int source_frame_number_;
   int is_first_frame_after_commit_tracker_;
-  scoped_ptr<LayerImpl> root_layer_;
+  LayerImpl* root_layer_;
   HeadsUpDisplayLayerImpl* hud_layer_;
   PropertyTrees property_trees_;
   SkColor background_color_;
   bool has_transparent_background_;
 
-  int currently_scrolling_layer_id_;
   int last_scrolled_layer_id_;
   int overscroll_elasticity_layer_id_;
   int page_scale_layer_id_;
@@ -482,15 +532,17 @@ class CC_EXPORT LayerTreeImpl {
 
   scoped_refptr<SyncedElasticOverscroll> elastic_overscroll_;
 
-  typedef base::hash_map<int, LayerImpl*> LayerIdMap;
-  LayerIdMap layer_id_map_;
+  std::unique_ptr<OwnedLayerImplList> layers_;
+  LayerImplMap layer_id_map_;
+  // Set of layers that need to push properties.
+  std::unordered_set<LayerImpl*> layers_that_should_push_properties_;
 
-  base::hash_map<uint64_t, ElementLayers> element_layers_map_;
+  std::unordered_map<uint64_t, ElementLayers> element_layers_map_;
 
   // Maps from clip layer ids to scroll layer ids.  Note that this only includes
   // the subset of clip layers that act as scrolling containers.  (This is
   // derived from LayerImpl::scroll_clip_layer_ and exists to avoid O(n) walks.)
-  base::hash_map<int, int> clip_scroll_map_;
+  std::unordered_map<int, int> clip_scroll_map_;
 
   // Maps scroll layer ids to scrollbar layer ids.  For each scroll layer, there
   // may be 1 or 2 scrollbar layers (for vertical and horizontal).  (This is
@@ -519,24 +571,27 @@ class CC_EXPORT LayerTreeImpl {
 
   bool has_ever_been_drawn_;
 
-  std::vector<scoped_ptr<SwapPromise>> swap_promise_list_;
-  std::vector<scoped_ptr<SwapPromise>> pinned_swap_promise_list_;
+  std::vector<std::unique_ptr<SwapPromise>> swap_promise_list_;
+  std::vector<std::unique_ptr<SwapPromise>> pinned_swap_promise_list_;
 
   UIResourceRequestQueue ui_resource_request_queue_;
 
   int render_surface_layer_list_id_;
 
+  bool have_scroll_event_handlers_;
+  EventListenerProperties event_listener_properties_[static_cast<size_t>(
+      EventListenerClass::kNumClasses)];
+
   // Whether or not Blink's viewport size was shrunk by the height of the top
   // controls at the time of the last layout.
   bool top_controls_shrink_blink_size_;
-
   float top_controls_height_;
 
   // The amount that the top controls are shown from 0 (hidden) to 1 (fully
   // shown).
   scoped_refptr<SyncedTopControls> top_controls_shown_ratio_;
 
-  scoped_ptr<PendingPageScaleAnimation> pending_page_scale_animation_;
+  std::unique_ptr<PendingPageScaleAnimation> pending_page_scale_animation_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(LayerTreeImpl);

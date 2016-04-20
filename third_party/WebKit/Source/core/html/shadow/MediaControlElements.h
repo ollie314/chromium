@@ -38,7 +38,7 @@ namespace blink {
 
 class MediaControlPanelElement final : public MediaControlDivElement {
 public:
-    static PassRefPtrWillBeRawPtr<MediaControlPanelElement> create(MediaControls&);
+    static MediaControlPanelElement* create(MediaControls&);
 
     void setIsDisplayed(bool);
 
@@ -66,7 +66,7 @@ private:
 
 class MediaControlPanelEnclosureElement final : public MediaControlDivElement {
 public:
-    static PassRefPtrWillBeRawPtr<MediaControlPanelEnclosureElement> create(MediaControls&);
+    static MediaControlPanelEnclosureElement* create(MediaControls&);
 
 private:
     explicit MediaControlPanelEnclosureElement(MediaControls&);
@@ -76,18 +76,18 @@ private:
 
 class MediaControlOverlayEnclosureElement final : public MediaControlDivElement {
 public:
-    static PassRefPtrWillBeRawPtr<MediaControlOverlayEnclosureElement> create(MediaControls&);
+    static MediaControlOverlayEnclosureElement* create(MediaControls&);
 
 private:
     explicit MediaControlOverlayEnclosureElement(MediaControls&);
-    void* preDispatchEventHandler(Event*) override;
+    EventDispatchHandlingState* preDispatchEventHandler(Event*) override;
 };
 
 // ----------------------------
 
 class MediaControlMuteButtonElement final : public MediaControlInputElement {
 public:
-    static PassRefPtrWillBeRawPtr<MediaControlMuteButtonElement> create(MediaControls&);
+    static MediaControlMuteButtonElement* create(MediaControls&);
 
     bool willRespondToMouseClickEvents() override { return true; }
     void updateDisplayType() override;
@@ -102,7 +102,7 @@ private:
 
 class MediaControlPlayButtonElement final : public MediaControlInputElement {
 public:
-    static PassRefPtrWillBeRawPtr<MediaControlPlayButtonElement> create(MediaControls&);
+    static MediaControlPlayButtonElement* create(MediaControls&);
 
     bool willRespondToMouseClickEvents() override { return true; }
     void updateDisplayType() override;
@@ -117,7 +117,7 @@ private:
 
 class MediaControlOverlayPlayButtonElement final : public MediaControlInputElement {
 public:
-    static PassRefPtrWillBeRawPtr<MediaControlOverlayPlayButtonElement> create(MediaControls&);
+    static MediaControlOverlayPlayButtonElement* create(MediaControls&);
 
     void updateDisplayType() override;
 
@@ -132,7 +132,7 @@ private:
 
 class MediaControlToggleClosedCaptionsButtonElement final : public MediaControlInputElement {
 public:
-    static PassRefPtrWillBeRawPtr<MediaControlToggleClosedCaptionsButtonElement> create(MediaControls&);
+    static MediaControlToggleClosedCaptionsButtonElement* create(MediaControls&);
 
     bool willRespondToMouseClickEvents() override { return true; }
 
@@ -148,7 +148,7 @@ private:
 
 class MediaControlTimelineElement final : public MediaControlInputElement {
 public:
-    static PassRefPtrWillBeRawPtr<MediaControlTimelineElement> create(MediaControls&);
+    static MediaControlTimelineElement* create(MediaControls&);
 
     bool willRespondToMouseClickEvents() override;
 
@@ -168,7 +168,7 @@ private:
 
 class MediaControlFullscreenButtonElement final : public MediaControlInputElement {
 public:
-    static PassRefPtrWillBeRawPtr<MediaControlFullscreenButtonElement> create(MediaControls&);
+    static MediaControlFullscreenButtonElement* create(MediaControls&);
 
     bool willRespondToMouseClickEvents() override { return true; }
 
@@ -184,7 +184,7 @@ private:
 
 class MediaControlCastButtonElement final : public MediaControlInputElement {
 public:
-    static PassRefPtrWillBeRawPtr<MediaControlCastButtonElement> create(MediaControls&, bool isOverlayButton);
+    static MediaControlCastButtonElement* create(MediaControls&, bool isOverlayButton);
 
     bool willRespondToMouseClickEvents() override { return true; }
 
@@ -223,7 +223,7 @@ private:
 
 class MediaControlVolumeSliderElement final : public MediaControlInputElement {
 public:
-    static PassRefPtrWillBeRawPtr<MediaControlVolumeSliderElement> create(MediaControls&);
+    static MediaControlVolumeSliderElement* create(MediaControls&);
 
     bool willRespondToMouseMoveEvents() override;
     bool willRespondToMouseClickEvents() override;
@@ -240,7 +240,7 @@ private:
 
 class MediaControlTimeRemainingDisplayElement final : public MediaControlTimeDisplayElement {
 public:
-    static PassRefPtrWillBeRawPtr<MediaControlTimeRemainingDisplayElement> create(MediaControls&);
+    static MediaControlTimeRemainingDisplayElement* create(MediaControls&);
 
 private:
     explicit MediaControlTimeRemainingDisplayElement(MediaControls&);
@@ -250,7 +250,7 @@ private:
 
 class MediaControlCurrentTimeDisplayElement final : public MediaControlTimeDisplayElement {
 public:
-    static PassRefPtrWillBeRawPtr<MediaControlCurrentTimeDisplayElement> create(MediaControls&);
+    static MediaControlCurrentTimeDisplayElement* create(MediaControls&);
 
 private:
     explicit MediaControlCurrentTimeDisplayElement(MediaControls&);

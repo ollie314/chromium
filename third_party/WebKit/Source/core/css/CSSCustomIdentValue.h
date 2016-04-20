@@ -7,22 +7,20 @@
 
 #include "core/CSSPropertyNames.h"
 #include "core/css/CSSValue.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
 class CSSCustomIdentValue : public CSSValue {
 public:
-    static PassRefPtrWillBeRawPtr<CSSCustomIdentValue> create(const String& str)
+    static CSSCustomIdentValue* create(const String& str)
     {
-        return adoptRefWillBeNoop(new CSSCustomIdentValue(str));
+        return new CSSCustomIdentValue(str);
     }
 
     // TODO(sashab, timloh): Remove this and lazily parse the CSSPropertyID in isKnownPropertyID().
-    static PassRefPtrWillBeRawPtr<CSSCustomIdentValue> create(CSSPropertyID id)
+    static CSSCustomIdentValue* create(CSSPropertyID id)
     {
-        return adoptRefWillBeNoop(new CSSCustomIdentValue(id));
+        return new CSSCustomIdentValue(id);
     }
 
     String value() const { ASSERT(!isKnownPropertyID()); return m_string; }

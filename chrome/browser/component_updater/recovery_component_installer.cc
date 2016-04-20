@@ -5,21 +5,19 @@
 #include "chrome/browser/component_updater/recovery_component_installer.h"
 
 #include <stdint.h>
+
+#include <memory>
 #include <string>
 
 #include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
 #include "base/process/kill.h"
 #include "base/process/launch.h"
 #include "base/process/process.h"
@@ -30,6 +28,8 @@
 #include "components/component_updater/component_updater_paths.h"
 #include "components/component_updater/component_updater_service.h"
 #include "components/component_updater/pref_names.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
 #include "components/update_client/update_client.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -116,7 +116,8 @@ base::CommandLine GetRecoveryInstallCommandLine(
 }
 
 #if defined(OS_WIN)
-scoped_ptr<base::DictionaryValue> ReadManifest(const base::FilePath& manifest) {
+std::unique_ptr<base::DictionaryValue> ReadManifest(
+    const base::FilePath& manifest) {
   JSONFileValueDeserializer deserializer(manifest);
   std::string error;
   return base::DictionaryValue::From(deserializer.Deserialize(NULL, &error));
@@ -143,7 +144,7 @@ void DoElevatedInstallRecoveryComponent(const base::FilePath& path) {
   if (!base::PathExists(main_file) || !base::PathExists(manifest_file))
     return;
 
-  scoped_ptr<base::DictionaryValue> manifest(ReadManifest(manifest_file));
+  std::unique_ptr<base::DictionaryValue> manifest(ReadManifest(manifest_file));
   std::string name;
   manifest->GetStringASCII("name", &name);
   if (name != kRecoveryManifestName)

@@ -55,7 +55,7 @@ class TestObserver : public AppBannerDataFetcher::Observer {
  private:
   AppBannerDataFetcher* fetcher_;
   base::Closure quit_closure_;
-  scoped_ptr<bool> will_show_;
+  std::unique_ptr<bool> will_show_;
 };
 
 class AppBannerDataFetcherBrowserTest : public InProcessBrowserTest,
@@ -73,7 +73,8 @@ class AppBannerDataFetcherBrowserTest : public InProcessBrowserTest,
 
   bool HandleNonWebApp(const std::string& platform,
                        const GURL& url,
-                       const std::string& id) override {
+                       const std::string& id,
+                       bool is_debug_mode) override {
     base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, quit_closure_);
     non_web_platform_ = platform;
     return false;
@@ -95,15 +96,14 @@ class AppBannerDataFetcherBrowserTest : public InProcessBrowserTest,
     content::WebContents* web_contents =
         browser()->tab_strip_model()->GetActiveWebContents();
     scoped_refptr<AppBannerDataFetcherDesktop> fetcher(
-        new AppBannerDataFetcherDesktop(web_contents,
-                                        weak_factory_.GetWeakPtr(),
-                                        128, 128));
+        new AppBannerDataFetcherDesktop(
+            web_contents, weak_factory_.GetWeakPtr(), 128, 128, false));
 
     base::HistogramTester histograms;
     base::RunLoop run_loop;
     quit_closure_ = run_loop.QuitClosure();
-    scoped_ptr<TestObserver> observer(new TestObserver(fetcher.get(),
-                                                       run_loop.QuitClosure()));
+    std::unique_ptr<TestObserver> observer(
+        new TestObserver(fetcher.get(), run_loop.QuitClosure()));
     fetcher->Start(url, transition);
     run_loop.Run();
 

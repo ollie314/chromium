@@ -51,11 +51,8 @@ Tests that InspectorBackendDispatcher is catching incorrect messages.
 {
     error : {
         code : -32602
-        data : [
-            "'params' object must contain required parameter 'frameId' with type 'String'."
-            "'params' object must contain required parameter 'url' with type 'String'."
-        ]
-        message : "Some arguments of method 'Page.getResourceContent' can't be processed"
+        data : "frameId: string value expected; url: string value expected"
+        message : "Invalid request"
     }
     id : 4
 }
@@ -63,11 +60,8 @@ Tests that InspectorBackendDispatcher is catching incorrect messages.
 {
     error : {
         code : -32602
-        data : [
-            "'params' object must contain required parameter 'frameId' with type 'String'."
-            "'params' object must contain required parameter 'url' with type 'String'."
-        ]
-        message : "Some arguments of method 'Page.getResourceContent' can't be processed"
+        data : "frameId: string value expected; url: string value expected"
+        message : "Invalid request"
     }
     id : 5
 }
@@ -75,11 +69,8 @@ Tests that InspectorBackendDispatcher is catching incorrect messages.
 {
     error : {
         code : -32602
-        data : [
-            "Parameter 'frameId' with type 'String' was not found."
-            "Parameter 'url' with type 'String' was not found."
-        ]
-        message : "Some arguments of method 'Page.getResourceContent' can't be processed"
+        data : "frameId: string value expected; url: string value expected"
+        message : "Invalid request"
     }
     id : 6
 }
@@ -87,10 +78,8 @@ Tests that InspectorBackendDispatcher is catching incorrect messages.
 {
     error : {
         code : -32602
-        data : [
-            "Parameter 'url' with type 'String' was not found."
-        ]
-        message : "Some arguments of method 'Page.getResourceContent' can't be processed"
+        data : "url: string value expected"
+        message : "Invalid request"
     }
     id : 7
 }

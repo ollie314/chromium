@@ -5,6 +5,7 @@
 #include "remoting/test/fake_port_allocator.h"
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "remoting/protocol/transport_context.h"
 #include "remoting/test/fake_network_dispatcher.h"
 #include "remoting/test/fake_network_manager.h"
@@ -46,8 +47,10 @@ FakePortAllocatorSession::~FakePortAllocatorSession() {}
 
 FakePortAllocator::FakePortAllocator(
     rtc::NetworkManager* network_manager,
-    rtc::PacketSocketFactory* socket_factory)
-    : BasicPortAllocator(network_manager, socket_factory) {
+    rtc::PacketSocketFactory* socket_factory,
+    scoped_refptr<protocol::TransportContext> transport_context)
+    : BasicPortAllocator(network_manager, socket_factory),
+      transport_context_(transport_context) {
   set_flags(cricket::PORTALLOCATOR_DISABLE_TCP |
             cricket::PORTALLOCATOR_ENABLE_SHARED_UFRAG |
             cricket::PORTALLOCATOR_ENABLE_IPV6 |
@@ -75,11 +78,11 @@ FakePortAllocatorFactory::FakePortAllocatorFactory(
 
 FakePortAllocatorFactory::~FakePortAllocatorFactory() {}
 
-scoped_ptr<cricket::PortAllocator>
+std::unique_ptr<cricket::PortAllocator>
 FakePortAllocatorFactory::CreatePortAllocator(
     scoped_refptr<protocol::TransportContext> transport_context) {
-  return make_scoped_ptr(
-      new FakePortAllocator(network_manager_.get(), socket_factory_.get()));
+  return base::WrapUnique(new FakePortAllocator(
+      network_manager_.get(), socket_factory_.get(), transport_context));
 }
 
 }  // namespace remoting

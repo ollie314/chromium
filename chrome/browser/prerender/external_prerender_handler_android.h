@@ -7,9 +7,10 @@
 
 #include <jni.h>
 
+#include <memory>
+
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 
 class GURL;
 class Profile;
@@ -35,7 +36,8 @@ class ExternalPrerenderHandlerAndroid {
                     const base::android::JavaParamRef<jstring>& url,
                     const base::android::JavaParamRef<jstring>& referrer,
                     jint width,
-                    jint height);
+                    jint height,
+                    jboolean prerender_on_cellular);
 
   // Cancel the prerender associated with the prerender_handle_
   void CancelCurrentPrerender(
@@ -48,11 +50,18 @@ class ExternalPrerenderHandlerAndroid {
                                 GURL url,
                                 content::WebContents* web_contents);
 
+  // Whether the PrerenderManager associated with the given profile has any
+  // prerenders for the url, and the prerender has finished loading.
+  static bool HasPrerenderedAndFinishedLoadingUrl(
+      Profile* profile,
+      GURL url,
+      content::WebContents* web_contents);
+
   static bool RegisterExternalPrerenderHandlerAndroid(JNIEnv* env);
 
  private:
   virtual ~ExternalPrerenderHandlerAndroid();
-  scoped_ptr<prerender::PrerenderHandle> prerender_handle_;
+  std::unique_ptr<prerender::PrerenderHandle> prerender_handle_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalPrerenderHandlerAndroid);
 };

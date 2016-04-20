@@ -10,7 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/logging.h"
-#include "base/prefs/pref_service.h"
+#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -28,6 +28,7 @@
 #include "components/policy/core/common/cloud/cloud_policy_core.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
 #include "components/policy/core/common/cloud/system_policy_request_context.h"
+#include "components/prefs/pref_service.h"
 #include "net/url_request/url_request_context_getter.h"
 
 namespace policy {
@@ -209,7 +210,8 @@ void DeviceCloudPolicyInitializer::OnStoreError(CloudPolicyStore* store) {
 void DeviceCloudPolicyInitializer::EnrollmentCompleted(
     const EnrollmentCallback& enrollment_callback,
     EnrollmentStatus status) {
-  scoped_ptr<CloudPolicyClient> client = enrollment_handler_->ReleaseClient();
+  std::unique_ptr<CloudPolicyClient> client =
+      enrollment_handler_->ReleaseClient();
   enrollment_handler_.reset();
 
   if (status.status() == EnrollmentStatus::STATUS_SUCCESS) {
@@ -224,18 +226,16 @@ void DeviceCloudPolicyInitializer::EnrollmentCompleted(
     enrollment_callback.Run(status);
 }
 
-scoped_ptr<CloudPolicyClient> DeviceCloudPolicyInitializer::CreateClient(
+std::unique_ptr<CloudPolicyClient> DeviceCloudPolicyInitializer::CreateClient(
     DeviceManagementService* device_management_service) {
   scoped_refptr<net::URLRequestContextGetter> request_context =
       new SystemPolicyRequestContext(
           g_browser_process->system_request_context(), GetUserAgent());
 
-  return make_scoped_ptr(
-      new CloudPolicyClient(DeviceCloudPolicyManagerChromeOS::GetMachineID(),
-                            DeviceCloudPolicyManagerChromeOS::GetMachineModel(),
-                            kPolicyVerificationKeyHash,
-                            device_management_service,
-                            request_context));
+  return base::WrapUnique(new CloudPolicyClient(
+      DeviceCloudPolicyManagerChromeOS::GetMachineID(),
+      DeviceCloudPolicyManagerChromeOS::GetMachineModel(),
+      kPolicyVerificationKeyHash, device_management_service, request_context));
 }
 
 void DeviceCloudPolicyInitializer::TryToCreateClient() {
@@ -260,7 +260,7 @@ void DeviceCloudPolicyInitializer::TryToCreateClient() {
 }
 
 void DeviceCloudPolicyInitializer::StartConnection(
-    scoped_ptr<CloudPolicyClient> client) {
+    std::unique_ptr<CloudPolicyClient> client) {
   if (!manager_->core()->service())
     manager_->StartConnection(std::move(client), install_attributes_);
 }

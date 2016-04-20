@@ -9,9 +9,11 @@
 #include <X11/Xutil.h>
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/shape.h>
+
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
@@ -30,7 +32,6 @@
 #include "ui/events/devices/x11/device_list_cache_x11.h"
 #include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event_utils.h"
-#include "ui/events/null_event_targeter.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/gfx/display.h"
@@ -110,7 +111,7 @@ const char* kAtomsToCache[] = {
   "_NET_WM_WINDOW_TYPE_NOTIFICATION",
   "_NET_WM_WINDOW_TYPE_TOOLTIP",
   "XdndActionAsk",
-  "XdndActionCopy"
+  "XdndActionCopy",
   "XdndActionLink",
   "XdndActionList",
   "XdndActionMove",
@@ -176,7 +177,6 @@ DesktopWindowTreeHostX11::DesktopWindowTreeHostX11(
       custom_window_shape_(false),
       urgency_hint_set_(false),
       activatable_(true),
-      modal_dialog_xid_(0),
       close_widget_factory_(this) {
 }
 
@@ -252,7 +252,7 @@ void DesktopWindowTreeHostX11::RemoveObserver(
 }
 
 void DesktopWindowTreeHostX11::SwapNonClientEventHandler(
-    scoped_ptr<ui::EventHandler> handler) {
+    std::unique_ptr<ui::EventHandler> handler) {
   wm::CompoundEventFilter* compound_event_filter =
       desktop_native_widget_aura_->root_window_event_filter();
   if (x11_non_client_event_filter_)
@@ -309,7 +309,7 @@ void DesktopWindowTreeHostX11::OnNativeWidgetCreated(
 
   // TODO(erg): Unify this code once the other consumer goes away.
   SwapNonClientEventHandler(
-      scoped_ptr<ui::EventHandler>(new X11WindowEventFilter(this)));
+      std::unique_ptr<ui::EventHandler>(new X11WindowEventFilter(this)));
   SetUseNativeFrame(params.type == Widget::InitParams::TYPE_WINDOW &&
                     !params.remove_standard_frame);
 
@@ -321,17 +321,17 @@ void DesktopWindowTreeHostX11::OnNativeWidgetCreated(
   native_widget_delegate_->OnNativeWidgetCreated(true);
 }
 
-scoped_ptr<corewm::Tooltip> DesktopWindowTreeHostX11::CreateTooltip() {
-  return make_scoped_ptr(new corewm::TooltipAura);
+std::unique_ptr<corewm::Tooltip> DesktopWindowTreeHostX11::CreateTooltip() {
+  return base::WrapUnique(new corewm::TooltipAura);
 }
 
-scoped_ptr<aura::client::DragDropClient>
+std::unique_ptr<aura::client::DragDropClient>
 DesktopWindowTreeHostX11::CreateDragDropClient(
     DesktopNativeCursorManager* cursor_manager) {
   drag_drop_client_ = new DesktopDragDropClientAuraX11(
       window(), cursor_manager, xdisplay_, xwindow_);
   drag_drop_client_->Init();
-  return make_scoped_ptr(drag_drop_client_);
+  return base::WrapUnique(drag_drop_client_);
 }
 
 void DesktopWindowTreeHostX11::Close() {
@@ -822,7 +822,7 @@ void DesktopWindowTreeHostX11::SetFullscreen(bool fullscreen) {
   if (fullscreen) {
     restored_bounds_in_pixels_ = bounds_in_pixels_;
     const gfx::Display display =
-        gfx::Screen::GetScreenFor(NULL)->GetDisplayNearestWindow(window());
+        gfx::Screen::GetScreen()->GetDisplayNearestWindow(window());
     bounds_in_pixels_ = ToPixelRect(display.bounds());
   } else {
     bounds_in_pixels_ = restored_bounds_in_pixels_;
@@ -940,10 +940,10 @@ void DesktopWindowTreeHostX11::SizeConstraintsChanged() {
 // DesktopWindowTreeHostX11, aura::WindowTreeHost implementation:
 
 gfx::Transform DesktopWindowTreeHostX11::GetRootTransform() const {
-  gfx::Display display = gfx::Screen::GetNativeScreen()->GetPrimaryDisplay();
+  gfx::Display display = gfx::Screen::GetScreen()->GetPrimaryDisplay();
   if (window_mapped_) {
     aura::Window* win = const_cast<aura::Window*>(window());
-    display = gfx::Screen::GetNativeScreen()->GetDisplayNearestWindow(win);
+    display = gfx::Screen::GetScreen()->GetDisplayNearestWindow(win);
   }
 
   float scale = display.device_scale_factor();
@@ -1289,7 +1289,7 @@ void DesktopWindowTreeHostX11::InitX11Window(
 gfx::Size DesktopWindowTreeHostX11::AdjustSize(
     const gfx::Size& requested_size_in_pixels) {
   std::vector<gfx::Display> displays =
-      gfx::Screen::GetScreenByType(gfx::SCREEN_TYPE_NATIVE)->GetAllDisplays();
+      gfx::Screen::GetScreen()->GetAllDisplays();
   // Compare against all monitor sizes. The window manager can move the window
   // to whichever monitor it wants.
   for (size_t i = 0; i < displays.size(); ++i) {
@@ -1527,8 +1527,7 @@ void DesktopWindowTreeHostX11::DispatchTouchEvent(ui::TouchEvent* event) {
 }
 
 void DesktopWindowTreeHostX11::DispatchKeyEvent(ui::KeyEvent* event) {
-  if (native_widget_delegate_->AsWidget()->IsActive())
-    GetInputMethod()->DispatchKeyEvent(event);
+  GetInputMethod()->DispatchKeyEvent(event);
 }
 
 void DesktopWindowTreeHostX11::ConvertEventToDifferentHost(
@@ -1536,9 +1535,9 @@ void DesktopWindowTreeHostX11::ConvertEventToDifferentHost(
     DesktopWindowTreeHostX11* host) {
   DCHECK_NE(this, host);
   const gfx::Display display_src =
-      gfx::Screen::GetNativeScreen()->GetDisplayNearestWindow(window());
+      gfx::Screen::GetScreen()->GetDisplayNearestWindow(window());
   const gfx::Display display_dest =
-      gfx::Screen::GetNativeScreen()->GetDisplayNearestWindow(host->window());
+      gfx::Screen::GetScreen()->GetDisplayNearestWindow(host->window());
   DCHECK_EQ(display_src.device_scale_factor(),
             display_dest.device_scale_factor());
   gfx::Vector2d offset = GetLocationOnNativeScreen() -
@@ -1661,16 +1660,6 @@ void DesktopWindowTreeHostX11::MapWindow(ui::WindowShowState show_state) {
   // asynchronous.
   if (ui::X11EventSource::GetInstance())
     ui::X11EventSource::GetInstance()->BlockUntilWindowMapped(xwindow_);
-  window_mapped_ = true;
-
-  UpdateMinAndMaxSize();
-
-  // Some WMs only respect maximize hints after the window has been mapped.
-  // Check whether we need to re-do a maximization.
-  if (should_maximize_after_map_) {
-    Maximize();
-    should_maximize_after_map_ = false;
-  }
 }
 
 void DesktopWindowTreeHostX11::SetWindowTransparency() {
@@ -1884,9 +1873,21 @@ uint32_t DesktopWindowTreeHostX11::DispatchEvent(
       break;
     }
     case MapNotify: {
+      window_mapped_ = true;
+
       FOR_EACH_OBSERVER(DesktopWindowTreeHostObserverX11,
                         observer_list_,
                         OnWindowMapped(xwindow_));
+
+      UpdateMinAndMaxSize();
+
+      // Some WMs only respect maximize hints after the window has been mapped.
+      // Check whether we need to re-do a maximization.
+      if (should_maximize_after_map_) {
+        Maximize();
+        should_maximize_after_map_ = false;
+      }
+
       break;
     }
     case UnmapNotify: {
@@ -2019,26 +2020,6 @@ gfx::Rect DesktopWindowTreeHostX11::ToPixelRect(
   gfx::RectF rect_in_pixels = gfx::RectF(rect_in_dip);
   GetRootTransform().TransformRect(&rect_in_pixels);
   return gfx::ToEnclosingRect(rect_in_pixels);
-}
-
-XID DesktopWindowTreeHostX11::GetModalDialog() {
-  return modal_dialog_xid_;
-}
-
-void DesktopWindowTreeHostX11::DisableEventListening(XID dialog) {
-  DCHECK(dialog);
-  DCHECK(!modal_dialog_xid_);
-  modal_dialog_xid_ = dialog;
-  // ScopedWindowTargeter is used to temporarily replace the event-targeter
-  // with NullEventTargeter to make |dialog| modal.
-  targeter_for_modal_.reset(new aura::ScopedWindowTargeter(window(),
-      scoped_ptr<ui::EventTargeter>(new ui::NullEventTargeter)));
-}
-
-void DesktopWindowTreeHostX11::EnableEventListening() {
-  DCHECK(modal_dialog_xid_);
-  modal_dialog_xid_ = 0;
-  targeter_for_modal_.reset();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -13,6 +13,7 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread.h"
@@ -143,7 +144,7 @@ class OptionsUIHTMLSource : public content::URLDataSource {
   ~OptionsUIHTMLSource() override;
 
   // Localized strings collection.
-  scoped_ptr<base::DictionaryValue> localized_strings_;
+  std::unique_ptr<base::DictionaryValue> localized_strings_;
 
   DISALLOW_COPY_AND_ASSIGN(OptionsUIHTMLSource);
 };
@@ -390,7 +391,7 @@ OptionsUI::~OptionsUI() {
     handlers_[i]->Uninitialize();
 }
 
-scoped_ptr<OptionsUI::OnFinishedLoadingCallbackList::Subscription>
+std::unique_ptr<OptionsUI::OnFinishedLoadingCallbackList::Subscription>
 OptionsUI::RegisterOnFinishedLoadingCallback(const base::Closure& callback) {
   return on_finished_loading_callbacks_.Add(callback);
 }
@@ -430,12 +431,24 @@ void OptionsUI::DidStartProvisionalLoadForFrame(
     const GURL& validated_url,
     bool is_error_page,
     bool is_iframe_srcdoc) {
+  load_start_time_ = base::Time::Now();
   if (render_frame_host->GetRenderViewHost() ==
           web_ui()->GetWebContents()->GetRenderViewHost() &&
       validated_url.host() == chrome::kChromeUISettingsFrameHost) {
     for (size_t i = 0; i < handlers_.size(); ++i)
       handlers_[i]->PageLoadStarted();
   }
+}
+
+void OptionsUI::DocumentLoadedInFrame(
+    content::RenderFrameHost *render_frame_host) {
+  UMA_HISTOGRAM_TIMES("Settings.LoadDocumentTime",
+                      base::Time::Now() - load_start_time_);
+}
+
+void OptionsUI::DocumentOnLoadCompletedInMainFrame() {
+  UMA_HISTOGRAM_TIMES("Settings.LoadCompletedTime",
+                      base::Time::Now() - load_start_time_);
 }
 
 void OptionsUI::InitializeHandlers() {
@@ -474,7 +487,7 @@ void OptionsUI::OnFinishedLoading() {
 void OptionsUI::AddOptionsPageUIHandler(
     base::DictionaryValue* localized_strings,
     OptionsPageUIHandler* handler_raw) {
-  scoped_ptr<OptionsPageUIHandler> handler(handler_raw);
+  std::unique_ptr<OptionsPageUIHandler> handler(handler_raw);
   DCHECK(handler.get());
   // Add only if handler's service is enabled.
   if (handler->IsEnabled()) {

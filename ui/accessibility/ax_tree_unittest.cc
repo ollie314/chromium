@@ -2,15 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ui/accessibility/ax_tree.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "base/strings/string_number_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/accessibility/ax_node.h"
 #include "ui/accessibility/ax_serializable_tree.h"
-#include "ui/accessibility/ax_tree.h"
 #include "ui/accessibility/ax_tree_serializer.h"
 
 namespace ui {
@@ -23,6 +25,9 @@ class FakeAXTreeDelegate : public AXTreeDelegate {
       : tree_data_changed_(false),
         root_changed_(false) {}
 
+  void OnNodeDataWillChange(AXTree* tree,
+                            const AXNodeData& old_node_data,
+                            const AXNodeData& new_node_data) override {}
   void OnTreeDataChanged(AXTree* tree) override {
     tree_data_changed_ = true;
   }
@@ -99,7 +104,7 @@ TEST(AXTreeTest, SerializeSimpleAXTree) {
   AXNodeData root;
   root.id = 1;
   root.role = AX_ROLE_ROOT_WEB_AREA;
-  root.state = (1 << AX_STATE_FOCUSABLE) | (1 << AX_STATE_FOCUSED);
+  root.state = 1 << AX_STATE_FOCUSABLE;
   root.location = gfx::Rect(0, 0, 800, 600);
   root.child_ids.push_back(2);
   root.child_ids.push_back(3);
@@ -124,8 +129,8 @@ TEST(AXTreeTest, SerializeSimpleAXTree) {
   initial_state.tree_data.title = "Title";
   AXSerializableTree src_tree(initial_state);
 
-  scoped_ptr<AXTreeSource<const AXNode*, AXNodeData, AXTreeData> > tree_source(
-      src_tree.CreateTreeSource());
+  std::unique_ptr<AXTreeSource<const AXNode*, AXNodeData, AXTreeData>>
+      tree_source(src_tree.CreateTreeSource());
   AXTreeSerializer<const AXNode*, AXNodeData, AXTreeData> serializer(
       tree_source.get());
   AXTreeUpdate update;
@@ -151,7 +156,7 @@ TEST(AXTreeTest, SerializeSimpleAXTree) {
 
   EXPECT_EQ(
       "AXTree title=Title\n"
-      "id=1 rootWebArea FOCUSABLE FOCUSED (0, 0)-(800, 600) child_ids=2,3\n"
+      "id=1 rootWebArea FOCUSABLE (0, 0)-(800, 600) child_ids=2,3\n"
       "  id=2 button (20, 20)-(200, 30)\n"
       "  id=3 checkBox (20, 50)-(200, 30)\n",
       dst_tree.ToString());

@@ -122,6 +122,9 @@
             '<(DEPTH)/chrome/chrome_resources.gyp:chrome_strings',
             '<(DEPTH)/chrome/common_constants.gyp:common_constants',
             '<(DEPTH)/components/components.gyp:metrics',
+            # TODO(fdoray): Remove this once the PreRead field trial has
+            # expired. crbug.com/577698
+            '<(DEPTH)/components/components.gyp:startup_metric_utils_common',
             '<(DEPTH)/components/components.gyp:variations',
             '<(DEPTH)/courgette/courgette.gyp:courgette_lib',
             '<(DEPTH)/crypto/crypto.gyp:crypto',
@@ -176,6 +179,26 @@
           ],
           # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
           'msvs_disabled_warnings': [ 4267, ],
+          'all_dependent_settings': {
+            'msvs_settings': {
+              'VCLinkerTool': {
+                'AdditionalDependencies': [
+                  'urlmon.lib',
+                  'wbemuuid.lib',
+                  'wtsapi32.lib',
+                ],
+              },
+            },
+          },
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'AdditionalDependencies': [
+                'urlmon.lib',
+                'wbemuuid.lib',
+                'wtsapi32.lib',
+              ],
+            },
+          },
         },
       ],
     }],
@@ -205,6 +228,22 @@
           'configurations': {
             'Common_Base': {
               'msvs_target_platform': 'x64',
+            },
+          },
+          'all_dependent_settings': {
+            'msvs_settings': {
+              'VCLinkerTool': {
+                'AdditionalDependencies': [
+                  'wbemuuid.lib',
+                ],
+              },
+            },
+          },
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'AdditionalDependencies': [
+                'wbemuuid.lib',
+              ],
             },
           },
         },

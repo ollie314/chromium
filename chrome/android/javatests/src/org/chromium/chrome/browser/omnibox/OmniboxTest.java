@@ -6,9 +6,9 @@ package org.chromium.chrome.browser.omnibox;
 
 import static org.chromium.chrome.test.util.OmniboxTestUtils.buildSuggestionMap;
 
+import android.os.Environment;
 import android.os.SystemClock;
 import android.support.v4.view.ViewCompat;
-import android.test.FlakyTest;
 import android.test.suitebuilder.annotation.MediumTest;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.text.Selection;
@@ -23,6 +23,7 @@ import android.widget.TextView;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.EnormousTest;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.FlakyTest;
 import org.chromium.base.test.util.ScalableTimeout;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
@@ -35,11 +36,11 @@ import org.chromium.chrome.test.util.OmniboxTestUtils.SuggestionsResult;
 import org.chromium.chrome.test.util.OmniboxTestUtils.SuggestionsResultBuilder;
 import org.chromium.chrome.test.util.OmniboxTestUtils.TestAutocompleteController;
 import org.chromium.chrome.test.util.OmniboxTestUtils.TestSuggestionResultsBuilder;
-import org.chromium.chrome.test.util.TestHttpServerClient;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.KeyUtils;
 import org.chromium.content.browser.test.util.UiUtils;
+import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.ui.base.DeviceFormFactor;
 
 import java.util.HashMap;
@@ -102,22 +103,22 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
         final UrlBar urlBar = (UrlBar) getActivity().findViewById(R.id.url_bar);
 
         OmniboxTestUtils.toggleUrlBarFocus(urlBar, true);
-        CriteriaHelper.pollForCriteria(new Criteria("Soft input mode failed to switch on focus") {
-            @Override
-            public boolean isSatisfied() {
-                return getActivity().getWindow().getAttributes().softInputMode
-                        == WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN;
-            }
-        });
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN, new Callable<Integer>() {
+                    @Override
+                    public Integer call() {
+                        return getActivity().getWindow().getAttributes().softInputMode;
+                    }
+                }));
 
         OmniboxTestUtils.toggleUrlBarFocus(urlBar, false);
-        CriteriaHelper.pollForCriteria(new Criteria("Soft input mode failed to switch on unfocus") {
-            @Override
-            public boolean isSatisfied() {
-                return getActivity().getWindow().getAttributes().softInputMode
-                        == WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
-            }
-        });
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE, new Callable<Integer>() {
+                    @Override
+                    public Integer call() {
+                        return getActivity().getWindow().getAttributes().softInputMode;
+                    }
+                }));
     }
 
     /**
@@ -144,13 +145,12 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
         OmniboxTestUtils.toggleUrlBarFocus(urlBar, true);
 
-        CriteriaHelper.pollForCriteria(new Criteria(
-                "Should have requested zero suggest on focusing") {
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(1, new Callable<Integer>() {
             @Override
-            public boolean isSatisfied() {
-                return controller.numZeroSuggestRequests() == 1;
+            public Integer call() {
+                return controller.numZeroSuggestRequests();
             }
-        });
+        }));
     }
 
     /**
@@ -186,12 +186,13 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
             }
         });
 
-        CriteriaHelper.pollForCriteria(new Criteria("Should have drawn the delete button") {
-            @Override
-            public boolean isSatisfied() {
-                return deleteButton.getWidth() > 0;
-            }
-        });
+        CriteriaHelper.pollInstrumentationThread(
+                new Criteria("Should have drawn the delete button") {
+                    @Override
+                    public boolean isSatisfied() {
+                        return deleteButton.getWidth() > 0;
+                    }
+                });
 
         // The click view below ends up clicking on the menu button underneath the delete button
         // for some time after the delete button appears. Wait for UI to settle down before
@@ -200,13 +201,12 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
         singleClickView(deleteButton);
 
-        CriteriaHelper.pollForCriteria(new Criteria(
-                "Should have requested zero suggest results on url bar empty") {
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(1, new Callable<Integer>() {
             @Override
-            public boolean isSatisfied() {
-                return controller.numZeroSuggestRequests() == 1;
+            public Integer call() {
+                return controller.numZeroSuggestRequests();
             }
-        });
+        }));
     }
 
     @MediumTest
@@ -241,13 +241,12 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
         assertEquals("No calls to zero suggest yet", 0, controller.numZeroSuggestRequests());
         KeyUtils.singleKeyEventView(getInstrumentation(), urlBar, KeyEvent.KEYCODE_DEL);
-        CriteriaHelper.pollForCriteria(new Criteria(
-                "Should have requested zero suggest results on url bar empty") {
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(1, new Callable<Integer>() {
             @Override
-            public boolean isSatisfied() {
-                return controller.numZeroSuggestRequests() == 1;
+            public Integer call() {
+                return controller.numZeroSuggestRequests();
             }
-        });
+        }));
     }
 
     // Sanity check that no text is displayed in the omnibox when on the NTP page and that the hint
@@ -512,7 +511,7 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
         for (int i = 0; i < 2; ++i) {
             boolean instantOn = (i == 1);
-            setAllowPrerender(instantOn);
+            setNetworkPredictionEnabled(instantOn);
 
             for (int j = 0; j < 10; ++j) {
                 long before = System.currentTimeMillis();
@@ -535,38 +534,42 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     }
 
     /**
-     * crbug.com/414353
      * Test to verify security-icon "lock or globe" on visiting http and secured Urls.
      * @EnormousTest
      */
-    @FlakyTest
+    @FlakyTest(message = "crbug.com/414353")
     public void testSecurityIcon() throws InterruptedException {
-        final String testUrl = TestHttpServerClient.getUrl(
-                "chrome/test/data/android/omnibox/one.html");
-        final String securedExternalUrl = "https://www.google.com";
+        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartFileServer(
+                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+        try {
+            final String testUrl = testServer.getURL("/chrome/test/data/android/omnibox/one.html");
+            final String securedExternalUrl = "https://www.google.com";
 
-        ImageView navigationButton = (ImageView)
-                getActivity().findViewById(R.id.navigation_button);
-        ImageButton securityButton = (ImageButton)
-                getActivity().findViewById(R.id.security_button);
+            ImageView navigationButton = (ImageView)
+                    getActivity().findViewById(R.id.navigation_button);
+            ImageButton securityButton = (ImageButton)
+                    getActivity().findViewById(R.id.security_button);
 
-        loadUrl(testUrl);
-        final LocationBarLayout locationBar =
-                (LocationBarLayout) getActivity().findViewById(R.id.location_bar);
-        boolean securityIcon = locationBar.isSecurityButtonShown();
-        assertFalse("Omnibox should not have a Security icon", securityIcon);
-        assertEquals("navigation_button with wrong resource-id",
-                R.id.navigation_button, navigationButton.getId());
-        assertTrue(navigationButton.isShown());
-        assertFalse(securityButton.isShown());
+            loadUrl(testUrl);
+            final LocationBarLayout locationBar =
+                    (LocationBarLayout) getActivity().findViewById(R.id.location_bar);
+            boolean securityIcon = locationBar.isSecurityButtonShown();
+            assertFalse("Omnibox should not have a Security icon", securityIcon);
+            assertEquals("navigation_button with wrong resource-id",
+                    R.id.navigation_button, navigationButton.getId());
+            assertTrue(navigationButton.isShown());
+            assertFalse(securityButton.isShown());
 
-        loadUrl(securedExternalUrl);
-        securityIcon = locationBar.isSecurityButtonShown();
-        assertTrue("Omnibox should have a Security icon", securityIcon);
-        assertEquals("security_button with wrong resource-id",
-                R.id.security_button, securityButton.getId());
-        assertTrue(securityButton.isShown());
-        assertFalse(navigationButton.isShown());
+            loadUrl(securedExternalUrl);
+            securityIcon = locationBar.isSecurityButtonShown();
+            assertTrue("Omnibox should have a Security icon", securityIcon);
+            assertEquals("security_button with wrong resource-id",
+                    R.id.security_button, securityButton.getId());
+            assertTrue(securityButton.isShown());
+            assertFalse(navigationButton.isShown());
+        } finally {
+            testServer.stopAndDestroyServer();
+        }
     }
 
     @SmallTest

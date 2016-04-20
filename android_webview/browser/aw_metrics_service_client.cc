@@ -9,7 +9,6 @@
 #include "base/files/file_util.h"
 #include "base/guid.h"
 #include "base/i18n/rtl.h"
-#include "base/prefs/pref_service.h"
 #include "components/metrics/call_stack_profile_metrics_provider.h"
 #include "components/metrics/gpu/gpu_metrics_provider.h"
 #include "components/metrics/metrics_pref_names.h"
@@ -19,6 +18,7 @@
 #include "components/metrics/profiler/profiler_metrics_provider.h"
 #include "components/metrics/ui/screen_info_metrics_provider.h"
 #include "components/metrics/url_constants.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace android_webview {
@@ -34,8 +34,8 @@ const int kUploadIntervalMinutes = 30;
 
 void StoreClientInfo(const metrics::ClientInfo& client_info) {}
 
-scoped_ptr<metrics::ClientInfo> LoadClientInfo() {
-  scoped_ptr<metrics::ClientInfo> client_info;
+std::unique_ptr<metrics::ClientInfo> LoadClientInfo() {
+  std::unique_ptr<metrics::ClientInfo> client_info;
   return client_info;
 }
 
@@ -46,7 +46,7 @@ void GetOrCreateGUID(const base::FilePath guid_file_path, std::string* guid) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::FILE);
 
   // Try to read an existing GUID.
-  if (base::ReadFileToString(guid_file_path, guid, GUID_SIZE)) {
+  if (base::ReadFileToStringWithMaxSize(guid_file_path, guid, GUID_SIZE)) {
     if (base::IsValidGUID(*guid))
       return;
     else
@@ -64,6 +64,7 @@ void GetOrCreateGUID(const base::FilePath guid_file_path, std::string* guid) {
 
 // static
 AwMetricsServiceClient* AwMetricsServiceClient::GetInstance() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   return g_lazy_instance_.Pointer();
 }
 
@@ -71,6 +72,7 @@ void AwMetricsServiceClient::Initialize(
     PrefService* pref_service,
     net::URLRequestContextGetter* request_context,
     const base::FilePath guid_file_path) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(!is_initialized_);
 
   pref_service_ = pref_service;
@@ -90,6 +92,7 @@ void AwMetricsServiceClient::Initialize(
 }
 
 void AwMetricsServiceClient::InitializeWithGUID(std::string* guid) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(!is_initialized_);
 
   pref_service_->SetString(metrics::prefs::kMetricsClientID, *guid);
@@ -103,22 +106,24 @@ void AwMetricsServiceClient::InitializeWithGUID(std::string* guid) {
       metrics_state_manager_.get(), this, pref_service_));
 
   metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(new metrics::NetworkMetricsProvider(
-          content::BrowserThread::GetBlockingPool())));
+      std::unique_ptr<metrics::MetricsProvider>(
+          new metrics::NetworkMetricsProvider(
+              content::BrowserThread::GetBlockingPool())));
 
   metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(new metrics::GPUMetricsProvider));
+      std::unique_ptr<metrics::MetricsProvider>(
+          new metrics::GPUMetricsProvider));
 
   metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(
+      std::unique_ptr<metrics::MetricsProvider>(
           new metrics::ScreenInfoMetricsProvider));
 
   metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(
+      std::unique_ptr<metrics::MetricsProvider>(
           new metrics::ProfilerMetricsProvider()));
 
   metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(
+      std::unique_ptr<metrics::MetricsProvider>(
           new metrics::CallStackProfileMetricsProvider));
 
   metrics_service_->InitializeMetricsRecordingState();
@@ -129,12 +134,9 @@ void AwMetricsServiceClient::InitializeWithGUID(std::string* guid) {
     metrics_service_->Start();
 }
 
-void AwMetricsServiceClient::Finalize() {
-  DCHECK(is_initialized_);
-  metrics_service_->Stop();
-}
-
 void AwMetricsServiceClient::SetMetricsEnabled(bool enabled) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
   // If the client is already initialized, apply the setting immediately.
   // Otherwise, it will be applied on initialization.
   if (is_initialized_ && is_enabled_ != enabled) {
@@ -199,14 +201,13 @@ void AwMetricsServiceClient::CollectFinalMetricsForLog(
   done_callback.Run();
 }
 
-scoped_ptr<metrics::MetricsLogUploader> AwMetricsServiceClient::CreateUploader(
+std::unique_ptr<metrics::MetricsLogUploader>
+AwMetricsServiceClient::CreateUploader(
     const base::Callback<void(int)>& on_upload_complete) {
-  return scoped_ptr<::metrics::MetricsLogUploader>(
+  return std::unique_ptr<::metrics::MetricsLogUploader>(
       new metrics::NetMetricsLogUploader(
-          request_context_,
-          metrics::kDefaultMetricsServerUrl,
-          metrics::kDefaultMetricsMimeType,
-          on_upload_complete));
+          request_context_, metrics::kDefaultMetricsServerUrl,
+          metrics::kDefaultMetricsMimeType, on_upload_complete));
 }
 
 base::TimeDelta AwMetricsServiceClient::GetStandardUploadInterval() {

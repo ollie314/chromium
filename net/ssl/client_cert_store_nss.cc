@@ -6,13 +6,15 @@
 
 #include <nss.h>
 #include <ssl.h>
+
+#include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 #include "base/threading/worker_pool.h"
 #include "crypto/nss_crypto_module_delegate.h"
@@ -30,7 +32,8 @@ ClientCertStoreNSS::~ClientCertStoreNSS() {}
 void ClientCertStoreNSS::GetClientCerts(const SSLCertRequestInfo& request,
                                          CertificateList* selected_certs,
                                          const base::Closure& callback) {
-  scoped_ptr<crypto::CryptoModuleBlockingPasswordDelegate> password_delegate;
+  std::unique_ptr<crypto::CryptoModuleBlockingPasswordDelegate>
+      password_delegate;
   if (!password_delegate_factory_.is_null()) {
     password_delegate.reset(
         password_delegate_factory_.Run(request.host_and_port));
@@ -55,7 +58,6 @@ void ClientCertStoreNSS::GetClientCerts(const SSLCertRequestInfo& request,
 void ClientCertStoreNSS::FilterCertsOnWorkerThread(
     const CertificateList& certs,
     const SSLCertRequestInfo& request,
-    bool query_nssdb,
     CertificateList* filtered_certs) {
   DCHECK(filtered_certs);
 
@@ -95,16 +97,15 @@ void ClientCertStoreNSS::FilterCertsOnWorkerThread(
     }
 
     // Check if the certificate issuer is allowed by the server.
-    if (request.cert_authorities.empty() ||
-        (!query_nssdb && cert->IsIssuedByEncoded(request.cert_authorities)) ||
-        (query_nssdb &&
-         NSS_CmpCertChainWCANames(handle, &ca_names) == SECSuccess)) {
-      DVLOG(2) << "matched cert: " << base::StringPiece(handle->nickname);
-      filtered_certs->push_back(cert);
-    } else {
+    if (!request.cert_authorities.empty() &&
+        NSS_CmpCertChainWCANames(handle, &ca_names) != SECSuccess) {
       DVLOG(2) << "skipped non-matching cert: "
                << base::StringPiece(handle->nickname);
+      continue;
     }
+
+    DVLOG(2) << "matched cert: " << base::StringPiece(handle->nickname);
+    filtered_certs->push_back(cert);
   }
   DVLOG(2) << "num_raw:" << num_raw
            << " num_filtered:" << filtered_certs->size();
@@ -114,17 +115,19 @@ void ClientCertStoreNSS::FilterCertsOnWorkerThread(
 }
 
 void ClientCertStoreNSS::GetAndFilterCertsOnWorkerThread(
-    scoped_ptr<crypto::CryptoModuleBlockingPasswordDelegate> password_delegate,
+    std::unique_ptr<crypto::CryptoModuleBlockingPasswordDelegate>
+        password_delegate,
     const SSLCertRequestInfo* request,
     CertificateList* selected_certs) {
   CertificateList platform_certs;
   GetPlatformCertsOnWorkerThread(std::move(password_delegate), &platform_certs);
-  FilterCertsOnWorkerThread(platform_certs, *request, true, selected_certs);
+  FilterCertsOnWorkerThread(platform_certs, *request, selected_certs);
 }
 
 // static
 void ClientCertStoreNSS::GetPlatformCertsOnWorkerThread(
-    scoped_ptr<crypto::CryptoModuleBlockingPasswordDelegate> password_delegate,
+    std::unique_ptr<crypto::CryptoModuleBlockingPasswordDelegate>
+        password_delegate,
     net::CertificateList* certs) {
   CERTCertList* found_certs =
       CERT_FindUserCertsByUsage(CERT_GetDefaultCertDB(), certUsageSSLClient,

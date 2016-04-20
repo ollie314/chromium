@@ -14,6 +14,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.view.View;
+import android.widget.RemoteViews;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -58,12 +60,12 @@ public class CustomTabsIntent {
             "android.support.customtabs.extra.ACTION_BUTTON_BUNDLE";
 
     /**
-     * List<Bundle> used for adding items to the top and bottom action bars. The client should
+     * List<Bundle> used for adding items to the top and bottom toolbars. The client should
      * provide an ID, a description, an icon {@link Bitmap} for each item. They may also provide a
      * {@link PendingIntent} if the item is a button.
      */
-    public static final String EXTRA_ACTION_BAR_ITEMS =
-            "android.support.customtabs.extra.ACTION_BAR_ITEMS";
+    public static final String EXTRA_TOOLBAR_ITEMS =
+            "android.support.customtabs.extra.TOOLBAR_ITEMS";
 
     /**
      * Key that specifies the {@link Bitmap} to be used as the image source for the action button.
@@ -153,6 +155,50 @@ public class CustomTabsIntent {
      * The id allocated to the custom action button that is shown on the toolbar.
      */
     public static final int TOOLBAR_ACTION_BUTTON_ID = 0;
+
+    /**
+     * Extra that changes the background color for the secondary toolbar. The value should be an
+     * int that specifies a {@link Color}, not a resource id.
+     */
+    public static final String EXTRA_SECONDARY_TOOLBAR_COLOR =
+            "android.support.customtabs.extra.SECONDARY_TOOLBAR_COLOR";
+
+    /**
+     * Extra that specifies the {@link RemoteViews} showing on the secondary toolbar. If this extra
+     * is set, the other secondary toolbar configurations will be overriden. The height of the
+     * {@link RemoteViews} should not exceed 56dp.
+     */
+    public static final String EXTRA_REMOTEVIEWS =
+            "android.support.customtabs.extra.EXTRA_REMOTEVIEWS";
+
+    /**
+     * Extra that specifies an array of {@link View} ids. When these {@link View}s are clicked, a
+     * {@link PendingIntent} will be sent, carrying the current url of the custom tab.
+     * <p>
+     * Note Custom Tabs will override the default onClick behavior of the listed {@link View}s. If
+     * you do not care about the current url, you can safely ignore this extra and use
+     * {@link RemoteViews#setOnClickPendingIntent(int, PendingIntent)} instead.
+     */
+    public static final String EXTRA_REMOTEVIEWS_VIEW_IDS =
+            "android.support.customtabs.extra.EXTRA_REMOTEVIEWS_VIEW_IDS";
+
+    /**
+     * Extra that specifies the {@link PendingIntent} to be sent when the user clicks on the
+     * {@link View}s that is listed by {@link #EXTRA_REMOTEVIEWS_CLICKED_ID}.
+     * <p>
+     * Note when this {@link PendingIntent} is triggered, it will have the current url as data
+     * field, also the id of the clicked {@link View}, specified by
+     * {@link #EXTRA_REMOTEVIEWS_CLICKED_ID}.
+     */
+    public static final String EXTRA_REMOTEVIEWS_PENDINGINTENT =
+            "android.support.customtabs.extra.EXTRA_REMOTEVIEWS_PENDINGINTENT";
+
+    /**
+     * Extra that specifies which {@link View} has been clicked. This extra will be put to the
+     * {@link PendingIntent} sent from Custom Tabs when a view in the {@link RemoteViews} is clicked
+     */
+    public static final String EXTRA_REMOTEVIEWS_CLICKED_ID =
+            "android.support.customtabs.extra.EXTRA_REMOTEVIEWS_CLICKED_ID";
 
     /**
      * Convenience method to create a VIEW intent without a session for the given package.

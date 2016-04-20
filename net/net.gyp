@@ -6,8 +6,6 @@
   'variables': {
     'chromium_code': 1,
     'linux_link_kerberos%': 0,
-    # Enables BidirectionalStream; Used in cronet, disabled by default.
-    'enable_bidirectional_stream%': 0,
     'conditions': [
       ['chromeos==1 or embedded==1 or OS=="ios"', {
         # Disable Kerberos on ChromeOS and iOS, at least for now.
@@ -108,32 +106,57 @@
       # GN version: //net
       'target_name': 'net',
       'dependencies': [
-        '../base/base.gyp:base_i18n',
-        '../third_party/brotli/brotli.gyp:brotli',
-        '../third_party/icu/icu.gyp:icui18n',
-        '../third_party/icu/icu.gyp:icuuc',
-        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         '../url/url.gyp:url_lib',
-        'net_features',
-        'net_quic_proto',
-      ],
-      'sources': [
-        'base/filename_util_icu.cc',
-        'base/net_string_util_icu.cc',
-        'filter/brotli_filter.cc',
       ],
       'includes': [ 'net_common.gypi' ],
-    },
-    {
-      # GN version: //net:features
-      'target_name': 'net_features',
-      'includes': [ '../build/buildflag_header.gypi' ],
-      'variables': {
-        'buildflag_header_path': 'net/net_features.h',
-        'buildflag_flags': [
-          'ENABLE_BIDIRECTIONAL_STREAM=<(enable_bidirectional_stream)',
-        ],
-      },
+
+      'conditions': [
+        # ICU Alternatives
+        ['use_platform_icu_alternatives == 1', {
+          'conditions': [
+            ['OS == "android"', {
+              'sources': [
+                'base/net_string_util_icu_alternatives_android.cc',
+                'base/net_string_util_icu_alternatives_android.h',
+              ],
+            }],
+            ['OS == "ios"', {
+              'sources': [
+                'base/net_string_util_icu_alternatives_ios.mm',
+              ],
+            }],
+          ],
+        },
+        # 'use_platform_icu_alternatives != 1'
+        {
+          'sources': [
+            'base/filename_util_icu.cc',
+            'base/net_string_util_icu.cc',
+          ],
+          'dependencies': [
+            '../base/base.gyp:base_i18n',
+            '../third_party/icu/icu.gyp:icui18n',
+            '../third_party/icu/icu.gyp:icuuc',
+            '../third_party/protobuf/protobuf.gyp:protobuf_lite',
+            'net_quic_proto',
+          ],
+        }],
+        # Brotli support.
+        ['disable_brotli_filter == 1', {
+          'sources': [
+            'filter/brotli_filter_disabled.cc',
+          ],
+        },
+        # 'disable_brotli_filter != 1'
+        {
+          'sources': [
+            'filter/brotli_filter.cc',
+          ],
+          'dependencies': [
+            '../third_party/brotli/brotli.gyp:brotli',
+          ],
+        }],
+      ],
     },
     {
       # GN version: //net:net_unittests
@@ -142,16 +165,15 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
-        '../base/base.gyp:base_prefs_test_support',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../crypto/crypto.gyp:crypto',
         '../crypto/crypto.gyp:crypto_test_support',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../third_party/zlib/zlib.gyp:zlib',
+        '../url/url.gyp:url_url_features',
         '../url/url.gyp:url_lib',
         'balsa',
-        'http_server',
         'net',
         'net_quic_proto',
         'net_derived_sources',
@@ -207,7 +229,7 @@
             '../third_party/boringssl/boringssl.gyp:boringssl',
           ],
         }],
-        [ 'use_nss_certs == 1 or OS == "ios" or use_openssl == 0', {
+        [ 'use_nss_verifier == 1', {
           'conditions': [
             [ 'desktop_linux == 1 or chromeos == 1', {
               'dependencies': [
@@ -218,15 +240,6 @@
                 '../third_party/nss/nss.gyp:nspr',
                 '../third_party/nss/nss.gyp:nss',
                 'third_party/nss/ssl.gyp:libssl',
-              ],
-            }],
-          ],
-        }],
-        [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
-          'conditions': [
-            ['use_allocator!="none"', {
-              'dependencies': [
-                '../base/allocator/allocator.gyp:allocator',
               ],
             }],
           ],
@@ -245,16 +258,30 @@
             'http/mock_gssapi_library_posix.h',
           ],
         }],
-       [ 'use_kerberos==0', {
+        [ 'use_kerberos==0', {
           'sources!': [
             'http/http_auth_handler_negotiate_unittest.cc',
           ],
         }],
-        [ 'use_nss_certs == 0 and OS != "ios"', {
-          # Only include this test when using system NSS for cert verification
-          # or on iOS (which also uses NSS for certs).
+        [ 'use_nss_verifier == 0', {
+          # Only include this test when using NSS for cert verification.
           'sources!': [
             'cert_net/nss_ocsp_unittest.cc',
+          ],
+        }],
+        [ 'use_nss_verifier == 0 and OS == "ios"', {
+          # Only include these files on iOS when using NSS for cert 
+          # verification.
+          'sources!': [
+           'cert/x509_util_ios.cc',
+           'cert/x509_util_ios.h',
+          ],
+        }],
+        [ 'use_nss_verifier == 1 and OS == "ios"', {
+          'sources!': [
+            'cert/cert_verify_proc_ios.cc',
+            'cert/cert_verify_proc_ios.h',
+            'cert/x509_certificate_openssl_ios.cc',
           ],
         }],
         [ 'use_openssl==1', {
@@ -264,7 +291,6 @@
           }, {  # else !use_openssl: remove the unneeded files and pull in NSS.
             'sources!': [
               'quic/test_tools/crypto_test_utils_openssl.cc',
-              'socket/ssl_client_socket_openssl_unittest.cc',
               'ssl/ssl_client_session_cache_openssl_unittest.cc',
             ],
           },
@@ -274,12 +300,11 @@
               'ssl/openssl_client_key_store_unittest.cc',
             ],
         }],
-        [ 'enable_websockets != 1', {
-            'sources/': [
-              ['exclude', '^websockets/'],
-              ['exclude', '^server/'],
+        [ 'enable_websockets == 1', {
+            'sources': [
+              '<@(net_websockets_test_sources)',
             ],
-            'dependencies!': [
+            'dependencies': [
               'http_server',
             ],
         }],
@@ -287,6 +312,7 @@
           'sources!': [
             'base/directory_lister_unittest.cc',
             'base/directory_listing_unittest.cc',
+            'url_request/url_request_file_dir_job_unittest.cc',
             'url_request/url_request_file_job_unittest.cc',
           ],
         }],
@@ -296,12 +322,6 @@
             ],
             'sources!': [
               'url_request/url_request_ftp_job_unittest.cc',
-            ],
-          },
-        ],
-        [ 'enable_bidirectional_stream!=1', {
-            'sources!': [
-              'http/bidirectional_stream_unittest.cc',
             ],
           },
         ],
@@ -330,7 +350,7 @@
               'net_with_v8',
               'net_browser_services',
               'net_utility_services',
-              '../third_party/mojo/mojo_edk.gyp:mojo_system_impl',
+              '../mojo/mojo_edk.gyp:mojo_system_impl',
             ],
           }, {  # else
             'sources!': [
@@ -381,11 +401,15 @@
                     'data/certificate_policies_unittest/',
                     'data/name_constraints_unittest/',
                     'data/parse_certificate_unittest/',
+                    'data/parse_ocsp_unittest/',
                     'data/ssl/certificates/',
                     'data/test.html',
                     'data/url_request_unittest/',
                     'data/verify_certificate_chain_unittest/',
                     'data/verify_name_match_unittest/names/',
+                    'data/verify_signed_data_unittest/',
+                    'third_party/nist-pkits/certs/',
+                    'third_party/nist-pkits/crls/',
                   ],
                   'test_data_prefix': 'net',
                 },
@@ -434,6 +458,39 @@
           'dependencies': [
             '../gin/gin.gyp:gin',
           ]
+        }],
+        # Unit tests that are not supported by the current ICU alternatives on Android.
+        ['OS == "android" and use_platform_icu_alternatives == 1', {
+          'sources!': [
+            'base/filename_util_unittest.cc',
+            'url_request/url_request_job_unittest.cc',
+          ],
+        }],
+        # Unit tests that are not supported by the current ICU alternatives on iOS.
+        ['OS == "ios" and use_platform_icu_alternatives == 1', {
+          'sources!': [
+            'base/filename_util_unittest.cc',
+            'base/url_util_unittest.cc',
+            'cert/x509_certificate_unittest.cc',
+            'socket/ssl_client_socket_pool_unittest.cc',
+            'http/http_auth_handler_basic_unittest.cc',
+            'http/http_auth_handler_digest_unittest.cc',
+            'http/http_auth_handler_factory_unittest.cc',
+            'http/http_auth_unittest.cc',
+            'http/http_content_disposition_unittest.cc',
+            'http/http_network_transaction_unittest.cc',
+            'http/http_proxy_client_socket_pool_unittest.cc',
+            'spdy/spdy_network_transaction_unittest.cc',
+            'spdy/spdy_proxy_client_socket_unittest.cc',
+            'url_request/url_request_job_unittest.cc',
+            'url_request/url_request_unittest.cc',
+          ],
+        }],
+        # Exclude brotli test if the support for brotli is disabled.
+        ['disable_brotli_filter == 1', {
+          'sources!': [
+            'filter/brotli_filter_unittest.cc',
+          ],
         }],
       ],
       'target_conditions': [
@@ -539,6 +596,8 @@
         'base/test_data_directory.h',
         'cert/mock_cert_verifier.cc',
         'cert/mock_cert_verifier.h',
+        'cert/mock_client_cert_verifier.cc',
+        'cert/mock_client_cert_verifier.h',
         'cookies/cookie_monster_store_test.cc',
         'cookies/cookie_monster_store_test.h',
         'cookies/cookie_store_test_callbacks.cc',
@@ -633,7 +692,7 @@
             'test/spawned_test_server/spawned_test_server.h',
           ],
         }],
-        ['use_nss_certs == 1 or OS == "ios"', {
+        ['use_nss_verifier == 1', {
           'conditions': [
             [ 'desktop_linux == 1 or chromeos == 1', {
               'dependencies': [
@@ -644,15 +703,6 @@
                 '../third_party/nss/nss.gyp:nspr',
                 '../third_party/nss/nss.gyp:nss',
                 'third_party/nss/ssl.gyp:libssl',
-              ],
-            }],
-          ],
-        }],
-        ['os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
-          'conditions': [
-            ['use_allocator!="none"', {
-              'dependencies': [
-                '../base/allocator/allocator.gyp:allocator',
               ],
             }],
           ],
@@ -729,34 +779,6 @@
       ],
     },
     {
-      'target_name': 'net_docs',
-      'type': 'none',
-      'actions': [
-        {
-          'action_name': 'net_docs',
-          'variables': {
-            'net_docs_input_dir': '.',
-          },
-          'inputs': [
-            '<@(net_docs_sources)',
-          ],
-          'outputs': [
-            '<(net_docs_output_dir)',
-          ],
-          'action': [
-            'python',
-            '<(net_docs_script)',
-            '--input_path',
-            '<(net_docs_input_dir)',
-            '--output_path',
-            '<(net_docs_output_dir)',
-            '<@(net_docs_sources)',
-          ],
-          'message': 'Rendering network stack documentation',
-        }
-      ],
-    },
-    {
       'target_name': 'http_server',
       'type': 'static_library',
       'variables': { 'enable_wexit_time_destructors': 1, },
@@ -802,8 +824,6 @@
         'tools/balsa/noop_balsa_visitor.h',
         'tools/balsa/simple_buffer.cc',
         'tools/balsa/simple_buffer.h',
-        'tools/balsa/split.cc',
-        'tools/balsa/split.h',
         'tools/balsa/string_piece_utils.h',
         'tools/quic/spdy_balsa_utils.cc',
         'tools/quic/spdy_balsa_utils.h',
@@ -846,6 +866,7 @@
         'tools/quic/quic_in_memory_cache.h',
         'tools/quic/quic_per_connection_packet_writer.cc',
         'tools/quic/quic_per_connection_packet_writer.h',
+        'tools/quic/quic_process_packet_interface.h',
         'tools/quic/quic_server_session_base.cc',
         'tools/quic/quic_server_session_base.h',
         'tools/quic/quic_simple_client.cc',
@@ -926,7 +947,7 @@
             'interfaces/proxy_resolver_service.mojom',
           ],
           'includes': [
-            '../third_party/mojo/mojom_bindings_generator.gypi',
+            '../mojo/mojom_bindings_generator.gypi',
           ],
         },
         {
@@ -949,9 +970,8 @@
             'net',
             'net_interfaces',
             '../mojo/mojo_base.gyp:mojo_common_lib',
-            '../mojo/mojo_base.gyp:mojo_environment_chromium',
             '../mojo/mojo_base.gyp:mojo_url_type_converters',
-            '../third_party/mojo/mojo_public.gyp:mojo_cpp_bindings',
+            '../mojo/mojo_public.gyp:mojo_cpp_bindings',
 
             # NOTE(amistry): As long as we support in-process Mojo v8 PAC, we
             # need this dependency since in_process_mojo_proxy_resolver_factory
@@ -979,7 +999,7 @@
             'net_interfaces',
             'net_with_v8',
             '../mojo/mojo_base.gyp:mojo_url_type_converters',
-            '../third_party/mojo/mojo_public.gyp:mojo_cpp_bindings',
+            '../mojo/mojo_public.gyp:mojo_cpp_bindings',
           ],
         },
         {
@@ -995,7 +1015,7 @@
           'dependencies': [
             'net',
             'net_interfaces',
-            '../third_party/mojo/mojo_public.gyp:mojo_cpp_bindings',
+            '../mojo/mojo_public.gyp:mojo_cpp_bindings',
           ],
         },
       ],
@@ -1231,8 +1251,6 @@
             'tools/flip_server/acceptor_thread.cc',
             'tools/flip_server/acceptor_thread.h',
             'tools/flip_server/constants.h',
-            'tools/flip_server/create_listener.cc',
-            'tools/flip_server/create_listener.h',
             'tools/flip_server/flip_config.cc',
             'tools/flip_server/flip_config.h',
             'tools/flip_server/http_interface.cc',
@@ -1254,6 +1272,8 @@
             'tools/flip_server/spdy_util.h',
             'tools/flip_server/streamer_interface.cc',
             'tools/flip_server/streamer_interface.h',
+            'tools/flip_server/tcp_socket_util.cc',
+            'tools/flip_server/tcp_socket_util.h',
             'tools/flip_server/url_to_filename_encoder.cc',
             'tools/flip_server/url_to_filename_encoder.h',
             'tools/flip_server/url_utilities.cc',
@@ -1359,30 +1379,6 @@
     }],
     ['OS=="android"', {
       'targets': [
-        { # The same target as 'net', but with smaller binary size due to
-          # exclusion of ICU, FTP, FILE and WebSockets support.
-          'target_name': 'net_small',
-          'variables': {
-            'disable_ftp_support': 1,
-            'disable_file_support': 1,
-            'enable_websockets': 0,
-          },
-          'dependencies': [
-            '../url/url.gyp:url_lib_use_icu_alternatives_on_android',
-            'net_features',
-          ],
-          'defines': [
-            'USE_ICU_ALTERNATIVES_ON_ANDROID=1',
-            'DISABLE_FILE_SUPPORT=1',
-            'DISABLE_FTP_SUPPORT=1',
-          ],
-          'sources': [
-            'filter/brotli_filter_disabled.cc',
-            'base/net_string_util_icu_alternatives_android.cc',
-            'base/net_string_util_icu_alternatives_android.h',
-          ],
-          'includes': [ 'net_common.gypi' ],
-        },
         {
           'target_name': 'net_jni_headers',
           'type': 'none',
@@ -1489,6 +1485,7 @@
             'java_in_dir': 'test/android/javatests',
             'java_in_dir_suffix': '/src_dummy',
             'native_lib_target': 'libnet_java_test_support',
+            'never_lint': 1,
           },
           'includes': [
             '../build/java_apk.gypi',
@@ -1634,6 +1631,7 @@
             'isolate_file': 'net_unittests.isolate',
             'android_manifest_path': 'android/unittest_support/AndroidManifest.xml',
             'resource_dir': 'android/unittest_support/res',
+            'shard_timeout': 300,
             'conditions': [
               ['v8_use_external_startup_data==1', {
                 'asset_location': '<(PRODUCT_DIR)/net_unittests_apk/assets',
@@ -1664,8 +1662,11 @@
             'src_paths': [
               'android/junit/',
             ],
+            'test_type': 'junit',
+            'wrapper_script_name': 'helper/<(_target_name)',
           },
           'includes': [
+            '../build/android/test_runner.gypi',
             '../build/host_jar.gypi',
           ],
         },
@@ -1705,6 +1706,35 @@
             'tools/disk_cache_memory_test/disk_cache_memory_test.cc',
           ],
         },
+      ],
+    }],
+    ['OS == "linux"', {
+      'targets': [
+        {
+          'target_name': 'cachetool',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            'net',
+            'net_test_support',
+          ],
+          'sources': [
+            'tools/cachetool/cachetool.cc',
+          ],
+        },
+        {
+          'target_name': 'content_decoder_tool',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../url/url.gyp:url_lib',
+            'net',
+          ],
+          'sources': [
+            'filter/mock_filter_context.cc',
+            'tools/content_decoder_tool/content_decoder_tool.cc',
+          ],
+        }
       ],
     }],
     ['test_isolation_mode != "noop"', {

@@ -12,6 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <queue>
 #include <vector>
 
@@ -19,10 +20,10 @@
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "content/common/content_export.h"
+#include "content/common/gpu/media/gpu_video_decode_accelerator_helpers.h"
 #include "content/common/gpu/media/v4l2_device.h"
 #include "media/base/limits.h"
 #include "media/base/video_decoder_config.h"
@@ -78,11 +79,9 @@ class CONTENT_EXPORT V4L2VideoDecodeAccelerator
  public:
   V4L2VideoDecodeAccelerator(
       EGLDisplay egl_display,
-      EGLContext egl_context,
-      const base::WeakPtr<Client>& io_client_,
-      const base::Callback<bool(void)>& make_context_current,
-      const scoped_refptr<V4L2Device>& device,
-      const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner);
+      const GetGLContextCallback& get_gl_context_cb,
+      const MakeGLContextCurrentCallback& make_context_current_cb,
+      const scoped_refptr<V4L2Device>& device);
   ~V4L2VideoDecodeAccelerator() override;
 
   // media::VideoDecodeAccelerator implementation.
@@ -95,7 +94,11 @@ class CONTENT_EXPORT V4L2VideoDecodeAccelerator
   void Flush() override;
   void Reset() override;
   void Destroy() override;
-  bool CanDecodeOnIOThread() override;
+  bool TryToSetupDecodeOnSeparateThread(
+      const base::WeakPtr<Client>& decode_client,
+      const scoped_refptr<base::SingleThreadTaskRunner>& decode_task_runner)
+      override;
+  media::VideoPixelFormat GetOutputFormat() const override;
 
   static media::VideoDecodeAccelerator::SupportedProfiles
       GetSupportedProfiles();
@@ -215,7 +218,7 @@ class CONTENT_EXPORT V4L2VideoDecodeAccelerator
   // object on the main (GPU process) thread; we will record this object so we
   // can wait on it before reusing the buffer.
   void ReusePictureBufferTask(int32_t picture_buffer_id,
-                              scoped_ptr<EGLSyncKHRRef> egl_sync_ref);
+                              std::unique_ptr<EGLSyncKHRRef> egl_sync_ref);
 
   // Flush() task.  Child thread should not submit any more buffers until it
   // receives the NotifyFlushDone callback.  This task will schedule an empty
@@ -316,8 +319,8 @@ class CONTENT_EXPORT V4L2VideoDecodeAccelerator
   // Our original calling task runner for the child thread.
   scoped_refptr<base::SingleThreadTaskRunner> child_task_runner_;
 
-  // Task runner of the IO thread.
-  scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
+  // Task runner Decode() and PictureReady() run on.
+  scoped_refptr<base::SingleThreadTaskRunner> decode_task_runner_;
 
   // WeakPtr<> pointing to |this| for use in posting tasks from the decoder or
   // device worker threads back to the child thread.  Because the worker threads
@@ -330,10 +333,10 @@ class CONTENT_EXPORT V4L2VideoDecodeAccelerator
   // To expose client callbacks from VideoDecodeAccelerator.
   // NOTE: all calls to these objects *MUST* be executed on
   // child_task_runner_.
-  scoped_ptr<base::WeakPtrFactory<Client> > client_ptr_factory_;
+  std::unique_ptr<base::WeakPtrFactory<Client>> client_ptr_factory_;
   base::WeakPtr<Client> client_;
-  // Callbacks to |io_client_| must be executed on |io_task_runner_|.
-  base::WeakPtr<Client> io_client_;
+  // Callbacks to |decode_client_| must be executed on |decode_task_runner_|.
+  base::WeakPtr<Client> decode_client_;
 
   //
   // Decoder state, owned and operated by decoder_thread_.
@@ -348,7 +351,7 @@ class CONTENT_EXPORT V4L2VideoDecodeAccelerator
   // Decoder state machine state.
   State decoder_state_;
   // BitstreamBuffer we're presently reading.
-  scoped_ptr<BitstreamBufferRef> decoder_current_bitstream_buffer_;
+  std::unique_ptr<BitstreamBufferRef> decoder_current_bitstream_buffer_;
   // The V4L2Device this class is operating upon.
   scoped_refptr<V4L2Device> device_;
   // FlushTask() and ResetTask() should not affect buffers that have been
@@ -371,7 +374,7 @@ class CONTENT_EXPORT V4L2VideoDecodeAccelerator
   std::queue<linked_ptr<BitstreamBufferRef> > decoder_input_queue_;
   // For H264 decode, hardware requires that we send it frame-sized chunks.
   // We'll need to parse the stream.
-  scoped_ptr<media::H264Parser> decoder_h264_parser_;
+  std::unique_ptr<media::H264Parser> decoder_h264_parser_;
   // Set if the decoder has a pending incomplete frame in an input buffer.
   bool decoder_partial_frame_pending_;
 
@@ -438,12 +441,13 @@ class CONTENT_EXPORT V4L2VideoDecodeAccelerator
   // Other state, held by the child (main) thread.
   //
 
-  // Make our context current before running any EGL entry points.
-  base::Callback<bool(void)> make_context_current_;
-
   // EGL state
   EGLDisplay egl_display_;
-  EGLContext egl_context_;
+
+  // Callback to get current GLContext.
+  GetGLContextCallback get_gl_context_cb_;
+  // Callback to set the correct gl context.
+  MakeGLContextCurrentCallback make_context_current_cb_;
 
   // The codec we'll be decoding for.
   media::VideoCodecProfile video_profile_;

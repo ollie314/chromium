@@ -11,7 +11,6 @@
 #include "content/common/p2p_messages.h"
 #include "net/base/address_list.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/socket/stream_socket.h"
 
 namespace {
@@ -134,7 +133,7 @@ P2PSocketHost* P2PSocketHostTcpServer::AcceptIncomingTcpConnection(
   net::StreamSocket* socket = it->second;
   accepted_sockets_.erase(it);
 
-  scoped_ptr<P2PSocketHostTcpBase> result;
+  std::unique_ptr<P2PSocketHostTcpBase> result;
   if (client_type_ == P2P_SOCKET_TCP_CLIENT) {
     result.reset(new P2PSocketHostTcp(message_sender_, id, client_type_, NULL));
   } else {

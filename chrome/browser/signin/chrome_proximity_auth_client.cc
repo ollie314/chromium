@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 #include "base/logging.h"
-#include "base/prefs/pref_service.h"
+#include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
 #include "base/version.h"
 #include "build/build_config.h"
@@ -17,6 +17,7 @@
 #include "chrome/browser/signin/easy_unlock_service_regular.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "components/prefs/pref_service.h"
 #include "components/proximity_auth/cryptauth/cryptauth_client_impl.h"
 #include "components/proximity_auth/cryptauth/cryptauth_device_manager.h"
 #include "components/proximity_auth/cryptauth/cryptauth_enrollment_manager.h"
@@ -93,18 +94,18 @@ PrefService* ChromeProximityAuthClient::GetPrefService() {
   return profile_->GetPrefs();
 }
 
-scoped_ptr<proximity_auth::SecureMessageDelegate>
+std::unique_ptr<proximity_auth::SecureMessageDelegate>
 ChromeProximityAuthClient::CreateSecureMessageDelegate() {
 #if defined(OS_CHROMEOS)
-  return make_scoped_ptr(new chromeos::SecureMessageDelegateChromeOS());
+  return base::WrapUnique(new chromeos::SecureMessageDelegateChromeOS());
 #else
   return nullptr;
 #endif
 }
 
-scoped_ptr<proximity_auth::CryptAuthClientFactory>
+std::unique_ptr<proximity_auth::CryptAuthClientFactory>
 ChromeProximityAuthClient::CreateCryptAuthClientFactory() {
-  return make_scoped_ptr(new proximity_auth::CryptAuthClientFactoryImpl(
+  return base::WrapUnique(new proximity_auth::CryptAuthClientFactoryImpl(
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile_), GetAccountId(),
       profile_->GetRequestContext(), GetDeviceClassifier()));
 }

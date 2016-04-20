@@ -49,13 +49,6 @@ CSSGroupingRule::CSSGroupingRule(StyleRuleGroup* groupRule, CSSStyleSheet* paren
 
 CSSGroupingRule::~CSSGroupingRule()
 {
-#if !ENABLE(OILPAN)
-    ASSERT(m_childRuleCSSOMWrappers.size() == m_groupRule->childRules().size());
-    for (unsigned i = 0; i < m_childRuleCSSOMWrappers.size(); ++i) {
-        if (m_childRuleCSSOMWrappers[i])
-            m_childRuleCSSOMWrappers[i]->setParentRule(0);
-    }
-#endif
 }
 
 unsigned CSSGroupingRule::insertRule(const String& ruleString, unsigned index, ExceptionState& exceptionState)
@@ -69,7 +62,7 @@ unsigned CSSGroupingRule::insertRule(const String& ruleString, unsigned index, E
 
     CSSStyleSheet* styleSheet = parentStyleSheet();
     CSSParserContext context(parserContext(), UseCounter::getFrom(styleSheet));
-    RefPtrWillBeRawPtr<StyleRuleBase> newRule = CSSParser::parseRule(context, styleSheet ? styleSheet->contents() : nullptr, ruleString);
+    StyleRuleBase* newRule = CSSParser::parseRule(context, styleSheet ? styleSheet->contents() : nullptr, ruleString);
     if (!newRule) {
         exceptionState.throwDOMException(SyntaxError, "the rule '" + ruleString + "' is invalid and cannot be parsed.");
         return 0;
@@ -90,7 +83,7 @@ unsigned CSSGroupingRule::insertRule(const String& ruleString, unsigned index, E
 
     m_groupRule->wrapperInsertRule(index, newRule);
 
-    m_childRuleCSSOMWrappers.insert(index, RefPtrWillBeMember<CSSRule>(nullptr));
+    m_childRuleCSSOMWrappers.insert(index, Member<CSSRule>(nullptr));
     return index;
 }
 
@@ -132,7 +125,7 @@ CSSRule* CSSGroupingRule::item(unsigned index) const
     if (index >= length())
         return nullptr;
     ASSERT(m_childRuleCSSOMWrappers.size() == m_groupRule->childRules().size());
-    RefPtrWillBeMember<CSSRule>& rule = m_childRuleCSSOMWrappers[index];
+    Member<CSSRule>& rule = m_childRuleCSSOMWrappers[index];
     if (!rule)
         rule = m_groupRule->childRules()[index]->createCSSOMWrapper(const_cast<CSSGroupingRule*>(this));
     return rule.get();
@@ -158,9 +151,7 @@ void CSSGroupingRule::reattach(StyleRuleBase* rule)
 DEFINE_TRACE(CSSGroupingRule)
 {
     CSSRule::trace(visitor);
-#if ENABLE(OILPAN)
     visitor->trace(m_childRuleCSSOMWrappers);
-#endif
     visitor->trace(m_groupRule);
     visitor->trace(m_ruleListCSSOMWrapper);
 }

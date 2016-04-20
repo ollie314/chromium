@@ -5,19 +5,18 @@
 #ifndef UI_VIEWS_CONTROLS_MENU_MENU_CONTROLLER_H_
 #define UI_VIEWS_CONTROLS_MENU_MENU_CONTROLLER_H_
 
-#include "build/build_config.h"
-
 #include <stddef.h>
 
 #include <list>
+#include <memory>
 #include <set>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/timer/timer.h"
+#include "build/build_config.h"
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
@@ -26,9 +25,6 @@
 #include "ui/views/controls/menu/menu_delegate.h"
 #include "ui/views/widget/widget_observer.h"
 
-namespace base {
-class MessagePumpDispatcher;
-}
 namespace gfx {
 class Screen;
 }
@@ -46,15 +42,18 @@ class MouseEvent;
 class SubmenuView;
 class View;
 
+#if defined(USE_AURA)
+class MenuKeyEventHandler;
+#endif
+
 namespace internal {
 class MenuControllerDelegate;
-class MenuEventDispatcher;
-class MenuMessagePumpDispatcher;
 class MenuRunnerImpl;
 }
 
 namespace test {
 class MenuControllerTest;
+class MenuControllerTestApi;
 }
 
 // MenuController -------------------------------------------------------------
@@ -199,10 +198,9 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
   static void TurnOffMenuSelectionHoldForTest();
 
  private:
-  friend class internal::MenuEventDispatcher;
-  friend class internal::MenuMessagePumpDispatcher;
   friend class internal::MenuRunnerImpl;
   friend class test::MenuControllerTest;
+  friend class test::MenuControllerTestApi;
   friend class MenuKeyEventHandler;
   friend class MenuHostRootView;
   friend class MenuItemView;
@@ -240,10 +238,15 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
   // Tracks selection information.
   struct State {
     State();
+    State(const State& other);
     ~State();
 
     // The selected menu item.
     MenuItemView* item;
+
+    // Used to capture a hot tracked child button when a nested menu is opened
+    // and to restore the hot tracked state when exiting a nested menu.
+    CustomButton* hot_button;
 
     // If item has a submenu this indicates if the submenu is showing.
     bool submenu_open;
@@ -497,13 +500,12 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
   // the title.
   void SelectByChar(base::char16 key);
 
-  // For Windows and Aura we repost an event for some events that dismiss
-  // the context menu. The event is then reprocessed to cause its result
-  // if the context menu had not been present.
-  // On non-aura Windows, a new mouse event is generated and posted to
-  // the window (if there is one) at the location of the event. On
-  // aura, the event is reposted on the RootWindow.
-  void RepostEvent(SubmenuView* source, const ui::LocatedEvent* event);
+  // For Windows and Aura we repost an event which dismisses the |source| menu.
+  // The menu may also be canceled depending on the target of the event. |event|
+  // is then processed without the menu present. On non-aura Windows, a new
+  // mouse event is generated and posted to the window (if there is one) at the
+  // location of the event. On aura, the event is reposted on the RootWindow.
+  void RepostEventAndCancel(SubmenuView* source, const ui::LocatedEvent* event);
 
   // Sets the drop target to new_item.
   void SetDropMenuItem(MenuItemView* new_item,
@@ -557,8 +559,12 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
   void HandleMouseLocation(SubmenuView* source,
                            const gfx::Point& mouse_location);
 
-  // Retrieve an appropriate Screen.
-  gfx::Screen* GetScreen();
+  // Sets hot-tracked state to the first focusable descendant view of |item|.
+  void SetInitialHotTrackedView(MenuItemView* item,
+                                SelectionIncrementDirectionType direction);
+
+  // Updates the current |hot_button_| and its hot tracked state.
+  void SetHotTrackedButton(CustomButton* hot_button);
 
   // The active instance.
   static MenuController* active_instance_;
@@ -649,14 +655,17 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
 
   // Task for scrolling the menu. If non-null indicates a scroll is currently
   // underway.
-  scoped_ptr<MenuScrollTask> scroll_task_;
+  std::unique_ptr<MenuScrollTask> scroll_task_;
 
   // The lock to keep the menu button pressed while a menu is visible.
-  scoped_ptr<MenuButton::PressedLock> pressed_lock_;
+  std::unique_ptr<MenuButton::PressedLock> pressed_lock_;
 
   // ViewStorage id used to store the view mouse drag events are forwarded to.
   // See UpdateActiveMouseView() for details.
   const int active_mouse_view_id_;
+
+  // Current hot tracked child button if any.
+  CustomButton* hot_button_;
 
   internal::MenuControllerDelegate* delegate_;
 
@@ -674,7 +683,7 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
   // screen coordinates). Otherwise this will be (0, 0).
   gfx::Point menu_start_mouse_press_loc_;
 
-  // Controls behviour differences between an asynchronous run, and other types
+  // Controls behaviour differences between an asynchronous run, and other types
   // of run (blocking, drag and drop).
   bool async_run_;
 
@@ -694,7 +703,11 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
   // A mask of the EventFlags for the mouse buttons currently pressed.
   int current_mouse_pressed_state_;
 
-  scoped_ptr<MenuMessageLoop> message_loop_;
+  std::unique_ptr<MenuMessageLoop> message_loop_;
+
+#if defined(USE_AURA)
+  std::unique_ptr<MenuKeyEventHandler> key_event_handler_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(MenuController);
 };

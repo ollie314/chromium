@@ -7,8 +7,7 @@
 #if defined(ENABLE_MOJO_MEDIA_IN_GPU_PROCESS)
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "media/mojo/services/mojo_media_application.h"
-#include "mojo/shell/static_application_loader.h"
+#include "media/mojo/services/mojo_media_application_factory.h"
 #endif
 
 namespace content {
@@ -17,13 +16,11 @@ GpuProcessControlImpl::GpuProcessControlImpl() {}
 
 GpuProcessControlImpl::~GpuProcessControlImpl() {}
 
-void GpuProcessControlImpl::RegisterApplicationLoaders(
-    URLToLoaderMap* url_to_loader_map) {
+void GpuProcessControlImpl::RegisterApplicationFactories(
+    ApplicationFactoryMap* factories) {
 #if defined(ENABLE_MOJO_MEDIA_IN_GPU_PROCESS)
-  (*url_to_loader_map)[GURL("mojo:media")] =
-      new mojo::shell::StaticApplicationLoader(
-          base::Bind(&media::MojoMediaApplication::CreateApp),
-          base::Bind(&base::DoNothing));
+  factories->insert(std::make_pair(
+      "mojo:media", base::Bind(&media::CreateMojoMediaApplication)));
 #endif
 }
 

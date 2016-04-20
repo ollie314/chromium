@@ -15,12 +15,11 @@ class StubClientNativePixmapFactory : public ClientNativePixmapFactory {
   ~StubClientNativePixmapFactory() override {}
 
   // ClientNativePixmapFactory:
-  void Initialize(base::ScopedFD device_fd) override {}
   bool IsConfigurationSupported(gfx::BufferFormat format,
                                 gfx::BufferUsage usage) const override {
     return false;
   }
-  scoped_ptr<ClientNativePixmap> ImportFromHandle(
+  std::unique_ptr<ClientNativePixmap> ImportFromHandle(
       const gfx::NativePixmapHandle& handle,
       const gfx::Size& size,
       gfx::BufferUsage usage) override {

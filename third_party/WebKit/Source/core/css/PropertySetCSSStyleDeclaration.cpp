@@ -23,6 +23,7 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/HTMLNames.h"
+#include "core/StylePropertyShorthand.h"
 #include "core/css/CSSCustomPropertyDeclaration.h"
 #include "core/css/CSSKeyframesRule.h"
 #include "core/css/CSSStyleSheet.h"
@@ -31,6 +32,7 @@
 #include "core/dom/Element.h"
 #include "core/dom/MutationObserverInterestGroup.h"
 #include "core/dom/MutationRecord.h"
+#include "core/dom/StyleChangeReason.h"
 #include "core/dom/StyleEngine.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -113,8 +115,8 @@ private:
     static bool s_shouldNotifyInspector;
     static bool s_shouldDeliver;
 
-    OwnPtrWillBeMember<MutationObserverInterestGroup> m_mutationRecipients;
-    RefPtrWillBeMember<MutationRecord> m_mutation;
+    Member<MutationObserverInterestGroup> m_mutationRecipients;
+    Member<MutationRecord> m_mutation;
 };
 
 unsigned StyleAttributeMutationScope::s_scopeCount = 0;
@@ -123,18 +125,6 @@ bool StyleAttributeMutationScope::s_shouldNotifyInspector = false;
 bool StyleAttributeMutationScope::s_shouldDeliver = false;
 
 } // namespace
-
-#if !ENABLE(OILPAN)
-void PropertySetCSSStyleDeclaration::ref()
-{
-    m_propertySet->ref();
-}
-
-void PropertySetCSSStyleDeclaration::deref()
-{
-    m_propertySet->deref();
-}
-#endif
 
 DEFINE_TRACE(PropertySetCSSStyleDeclaration)
 {
@@ -154,6 +144,8 @@ String AbstractPropertySetCSSStyleDeclaration::item(unsigned i) const
     StylePropertySet::PropertyReference property = propertySet().propertyAt(i);
     if (RuntimeEnabledFeatures::cssVariablesEnabled() && property.id() == CSSPropertyVariable)
         return toCSSCustomPropertyDeclaration(property.value())->name();
+    if (property.id() == CSSPropertyApplyAtRule)
+        return "@apply";
     return getPropertyName(property.id());
 }
 
@@ -205,6 +197,8 @@ String AbstractPropertySetCSSStyleDeclaration::getPropertyShorthand(const String
 
     // Custom properties don't have shorthands, so we can ignore them here.
     if (!propertyID)
+        return String();
+    if (isShorthandProperty(propertyID))
         return String();
     CSSPropertyID shorthandID = propertySet().getPropertyShorthand(propertyID);
     if (!shorthandID)
@@ -264,7 +258,7 @@ String AbstractPropertySetCSSStyleDeclaration::removeProperty(const String& prop
     return result;
 }
 
-PassRefPtrWillBeRawPtr<CSSValue> AbstractPropertySetCSSStyleDeclaration::getPropertyCSSValueInternal(CSSPropertyID propertyID)
+CSSValue* AbstractPropertySetCSSStyleDeclaration::getPropertyCSSValueInternal(CSSPropertyID propertyID)
 {
     return propertySet().getPropertyCSSValue(propertyID);
 }
@@ -314,36 +308,13 @@ DEFINE_TRACE(AbstractPropertySetCSSStyleDeclaration)
 
 StyleRuleCSSStyleDeclaration::StyleRuleCSSStyleDeclaration(MutableStylePropertySet& propertySetArg, CSSRule* parentRule)
     : PropertySetCSSStyleDeclaration(propertySetArg)
-#if !ENABLE(OILPAN)
-    , m_refCount(1)
-#endif
     , m_parentRule(parentRule)
 {
-#if !ENABLE(OILPAN)
-    m_propertySet->ref();
-#endif
 }
 
 StyleRuleCSSStyleDeclaration::~StyleRuleCSSStyleDeclaration()
 {
-#if !ENABLE(OILPAN)
-    m_propertySet->deref();
-#endif
 }
-
-#if !ENABLE(OILPAN)
-void StyleRuleCSSStyleDeclaration::ref()
-{
-    ++m_refCount;
-}
-
-void StyleRuleCSSStyleDeclaration::deref()
-{
-    ASSERT(m_refCount);
-    if (!--m_refCount)
-        delete this;
-}
-#endif
 
 void StyleRuleCSSStyleDeclaration::willMutate()
 {
@@ -365,13 +336,7 @@ CSSStyleSheet* StyleRuleCSSStyleDeclaration::parentStyleSheet() const
 
 void StyleRuleCSSStyleDeclaration::reattach(MutableStylePropertySet& propertySet)
 {
-#if !ENABLE(OILPAN)
-    m_propertySet->deref();
-#endif
     m_propertySet = &propertySet;
-#if !ENABLE(OILPAN)
-    m_propertySet->ref();
-#endif
 }
 
 DEFINE_TRACE(StyleRuleCSSStyleDeclaration)
@@ -403,18 +368,6 @@ CSSStyleSheet* InlineCSSStyleDeclaration::parentStyleSheet() const
 {
     return m_parentElement ? &m_parentElement->document().elementSheet() : nullptr;
 }
-
-#if !ENABLE(OILPAN)
-void InlineCSSStyleDeclaration::ref()
-{
-    m_parentElement->ref();
-}
-
-void InlineCSSStyleDeclaration::deref()
-{
-    m_parentElement->deref();
-}
-#endif
 
 DEFINE_TRACE(InlineCSSStyleDeclaration)
 {

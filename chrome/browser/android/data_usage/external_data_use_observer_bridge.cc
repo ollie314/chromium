@@ -4,11 +4,11 @@
 
 #include "chrome/browser/android/data_usage/external_data_use_observer_bridge.h"
 
+#include <memory>
 #include <vector>
 
 #include "base/android/context_utils.h"
 #include "base/android/jni_string.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
@@ -81,7 +81,6 @@ void ExternalDataUseObserverBridge::Init(
   Java_ExternalDataUseObserver_setControlAppPackageName(
       env, j_external_data_use_observer_.obj(),
       ConvertUTF8ToJavaString(env, GetControlAppPackageName()).obj());
-  FetchMatchingRules();
 }
 
 void ExternalDataUseObserverBridge::FetchMatchingRules() const {
@@ -168,10 +167,24 @@ void ExternalDataUseObserverBridge::OnReportDataUseDone(
                             external_data_use_observer_, success));
 }
 
-void ExternalDataUseObserverBridge::OnControlAppInstalled(JNIEnv* env,
-                                                          jobject obj) const {
+void ExternalDataUseObserverBridge::OnControlAppInstallStateChange(
+    JNIEnv* env,
+    jobject obj,
+    bool is_control_app_installed) const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  data_use_tab_model_->OnControlAppInstalled();
+  if (data_use_tab_model_) {
+    data_use_tab_model_->OnControlAppInstallStateChange(
+        is_control_app_installed);
+  }
+}
+
+void ExternalDataUseObserverBridge::ShouldRegisterAsDataUseObserver(
+    bool should_register) const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  io_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&ExternalDataUseObserver::ShouldRegisterAsDataUseObserver,
+                 external_data_use_observer_, should_register));
 }
 
 bool RegisterExternalDataUseObserver(JNIEnv* env) {

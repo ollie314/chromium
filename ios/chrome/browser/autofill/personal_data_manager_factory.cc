@@ -14,10 +14,10 @@
 #include "components/signin/core/browser/signin_manager.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/browser_state_otr_helper.h"
+#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/signin/account_tracker_service_factory.h"
 #include "ios/chrome/browser/signin/signin_manager_factory.h"
 #include "ios/chrome/browser/web_data_service_factory.h"
-#include "ios/public/provider/chrome/browser/browser_state/chrome_browser_state.h"
 
 // static
 autofill::PersonalDataManager* PersonalDataManagerFactory::GetForBrowserState(
@@ -42,11 +42,12 @@ PersonalDataManagerFactory::PersonalDataManagerFactory()
 
 PersonalDataManagerFactory::~PersonalDataManagerFactory() {}
 
-scoped_ptr<KeyedService> PersonalDataManagerFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+PersonalDataManagerFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
   ios::ChromeBrowserState* chrome_browser_state =
       ios::ChromeBrowserState::FromBrowserState(context);
-  scoped_ptr<autofill::PersonalDataManager> service(
+  std::unique_ptr<autofill::PersonalDataManager> service(
       new autofill::PersonalDataManager(
           GetApplicationContext()->GetApplicationLocale()));
   service->Init(

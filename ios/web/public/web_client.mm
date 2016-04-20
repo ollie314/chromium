@@ -44,10 +44,6 @@ bool WebClient::AllowWebViewAllocInit() const {
   return false;
 }
 
-bool WebClient::WebViewsNeedActiveStateManager() const {
-  return false;
-}
-
 base::string16 WebClient::GetPluginNotSupportedText() const {
   return base::string16();
 }
@@ -75,7 +71,18 @@ base::RefCountedStaticMemory* WebClient::GetDataResourceBytes(
   return nullptr;
 }
 
-NSString* WebClient::GetEarlyPageScript(WebViewType web_view_type) const {
+NSString* WebClient::GetEarlyPageScript() const {
   return @"";
 }
+
+void WebClient::AllowCertificateError(
+    WebState* web_state,
+    int cert_error,
+    const net::SSLInfo& ssl_info,
+    const GURL& request_url,
+    bool overridable,
+    const base::Callback<void(bool)>& callback) {
+  callback.Run(false);
+}
+
 }  // namespace web

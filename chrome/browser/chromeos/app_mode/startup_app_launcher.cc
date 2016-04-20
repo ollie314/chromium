@@ -125,9 +125,9 @@ void StartupAppLauncher::LoadOAuthFileOnBlockingPool(
   base::FilePath user_data_dir;
   CHECK(PathService::Get(chrome::DIR_USER_DATA, &user_data_dir));
   base::FilePath auth_file = user_data_dir.Append(kOAuthFileName);
-  scoped_ptr<JSONFileValueDeserializer> deserializer(
+  std::unique_ptr<JSONFileValueDeserializer> deserializer(
       new JSONFileValueDeserializer(user_data_dir.Append(kOAuthFileName)));
-  scoped_ptr<base::Value> value =
+  std::unique_ptr<base::Value> value =
       deserializer->Deserialize(&error_code, &error_msg);
   base::DictionaryValue* dict = NULL;
   if (error_code != JSONFileValueDeserializer::JSON_NO_ERROR ||
@@ -269,7 +269,8 @@ void StartupAppLauncher::MaybeCheckExtensionUpdate() {
       extensions::ExtensionSystem::Get(profile_)
           ->extension_service()
           ->updater();
-  if (!delegate_->IsNetworkReady() || !updater) {
+  if (!delegate_->IsNetworkReady() || !updater ||
+      PrimaryAppHasPendingUpdate()) {
     MaybeLaunchApp();
     return;
   }
@@ -405,6 +406,12 @@ bool StartupAppLauncher::HasSecondaryApps() const {
   return extensions::KioskModeInfo::HasSecondaryApps(extension);
 }
 
+bool StartupAppLauncher::PrimaryAppHasPendingUpdate() const {
+  return !!extensions::ExtensionSystem::Get(profile_)
+               ->extension_service()
+               ->GetPendingExtensionUpdate(app_id_);
+}
+
 bool StartupAppLauncher::DidPrimaryOrSecondaryAppFailedToInstall(
     bool success,
     const std::string& id) const {
@@ -536,11 +543,16 @@ void StartupAppLauncher::MaybeInstallSecondaryApps() {
 
 void StartupAppLauncher::OnReadyToLaunch() {
   ready_to_launch_ = true;
-  UpdateAppData();
+  MaybeUpdateAppData();
   delegate_->OnReadyToLaunch();
 }
 
-void StartupAppLauncher::UpdateAppData() {
+void StartupAppLauncher::MaybeUpdateAppData() {
+  // Skip copying meta data from the current installed primary app when
+  // there is a pending update.
+  if (PrimaryAppHasPendingUpdate())
+    return;
+
   KioskAppManager::Get()->ClearAppData(app_id_);
   KioskAppManager::Get()->UpdateAppDataFromProfile(app_id_, profile_, NULL);
 }

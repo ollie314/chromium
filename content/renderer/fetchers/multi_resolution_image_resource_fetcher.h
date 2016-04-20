@@ -5,12 +5,12 @@
 #ifndef CONTENT_RENDERER_FETCHERS_MULTI_RESOLUTION_IMAGE_RESOURCE_FETCHER_H_
 #define CONTENT_RENDERER_FETCHERS_MULTI_RESOLUTION_IMAGE_RESOURCE_FETCHER_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "url/gurl.h"
 
@@ -19,6 +19,7 @@ class SkBitmap;
 namespace blink {
 class WebFrame;
 class WebURLResponse;
+enum class WebCachePolicy;
 }
 
 namespace content {
@@ -37,7 +38,7 @@ class MultiResolutionImageResourceFetcher {
       blink::WebFrame* frame,
       int id,
       blink::WebURLRequest::RequestContext request_context,
-      blink::WebURLRequest::CachePolicy cache_policy,
+      blink::WebCachePolicy cache_policy,
       const Callback& callback);
 
   virtual ~MultiResolutionImageResourceFetcher();
@@ -68,7 +69,7 @@ class MultiResolutionImageResourceFetcher {
   const GURL image_url_;
 
   // Does the actual download.
-  scoped_ptr<ResourceFetcher> fetcher_;
+  std::unique_ptr<ResourceFetcher> fetcher_;
 
   DISALLOW_COPY_AND_ASSIGN(MultiResolutionImageResourceFetcher);
 };

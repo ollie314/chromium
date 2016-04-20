@@ -31,7 +31,7 @@
 #include "core/editing/FrameSelection.h"
 #include "core/events/MutationEvent.h"
 #include "core/inspector/InspectorInstrumentation.h"
-#include "wtf/CheckedArithmetic.h"
+#include "wtf/CheckedNumeric.h"
 
 namespace blink {
 
@@ -45,8 +45,6 @@ void CharacterData::setData(const String& data)
     const String& nonNullData = !data.isNull() ? data : emptyString();
     if (m_data == nonNullData)
         return;
-
-    RefPtrWillBeRawPtr<CharacterData> protect(this);
 
     unsigned oldLength = length();
 
@@ -102,10 +100,10 @@ static bool validateOffsetCount(unsigned offset, unsigned count, unsigned length
         return false;
     }
 
-    Checked<unsigned, RecordOverflow> offsetCount = offset;
+    CheckedNumeric<unsigned> offsetCount = offset;
     offsetCount += count;
 
-    if (offsetCount.hasOverflowed() || offset + count > length)
+    if (!offsetCount.IsValid() || offset + count > length)
         realCount = length - offset;
     else
         realCount = count;
@@ -164,12 +162,12 @@ void CharacterData::setDataAndUpdate(const String& newData, unsigned offsetOfRep
     String oldData = m_data;
     m_data = newData;
 
-    ASSERT(!layoutObject() || isTextNode());
+    DCHECK(!layoutObject() || isTextNode());
     if (isTextNode())
         toText(this)->updateTextLayoutObject(offsetOfReplacedData, oldLength, recalcStyleBehavior);
 
     if (source != UpdateFromParser) {
-        if (nodeType() == PROCESSING_INSTRUCTION_NODE)
+        if (getNodeType() == PROCESSING_INSTRUCTION_NODE)
             toProcessingInstruction(this)->didAttributeChanged();
 
         if (document().frame())
@@ -182,7 +180,7 @@ void CharacterData::setDataAndUpdate(const String& newData, unsigned offsetOfRep
 
 void CharacterData::didModifyData(const String& oldData, UpdateSource source)
 {
-    if (OwnPtrWillBeRawPtr<MutationObserverInterestGroup> mutationRecipients = MutationObserverInterestGroup::createForCharacterDataMutation(*this))
+    if (MutationObserverInterestGroup* mutationRecipients = MutationObserverInterestGroup::createForCharacterDataMutation(*this))
         mutationRecipients->enqueueMutationRecord(MutationRecord::createCharacterData(this, oldData));
 
     if (parentNode()) {

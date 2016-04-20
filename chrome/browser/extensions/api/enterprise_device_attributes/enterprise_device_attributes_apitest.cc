@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/policy/affiliation_test_helper.h"
@@ -15,6 +14,7 @@
 #include "chromeos/dbus/fake_session_manager_client.h"
 #include "chromeos/login/user_names.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
@@ -75,7 +75,7 @@ class EnterpriseDeviceAttributesTest :
     chromeos::FakeSessionManagerClient* fake_session_manager_client =
         new chromeos::FakeSessionManagerClient;
     chromeos::DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
-        scoped_ptr<chromeos::SessionManagerClient>(
+        std::unique_ptr<chromeos::SessionManagerClient>(
             fake_session_manager_client));
 
     std::set<std::string> device_affiliation_ids;
@@ -95,7 +95,7 @@ class EnterpriseDeviceAttributesTest :
         affiliated_account_id_.GetUserEmail(), user_affiliation_ids);
 
     // Set up fake install attributes.
-    scoped_ptr<policy::StubEnterpriseInstallAttributes> attributes(
+    std::unique_ptr<policy::StubEnterpriseInstallAttributes> attributes(
         new policy::StubEnterpriseInstallAttributes());
 
     attributes->SetRegistrationUser(affiliated_account_id_.GetUserEmail());
@@ -140,7 +140,7 @@ class EnterpriseDeviceAttributesTest :
     GURL update_manifest_url(net::URLRequestMockHTTPJob::GetMockUrl(
         update_manifest_path.MaybeAsASCII()));
 
-    scoped_ptr<base::ListValue> forcelist(new base::ListValue);
+    std::unique_ptr<base::ListValue> forcelist(new base::ListValue);
     forcelist->AppendString(base::StringPrintf(
         "%s;%s", kTestExtensionID, update_manifest_url.spec().c_str()));
 
@@ -200,7 +200,7 @@ IN_PROC_BROWSER_TEST_P(EnterpriseDeviceAttributesTest, Success) {
   SetPolicy();
 
   EXPECT_EQ(GetParam().affiliated_, user_manager::UserManager::Get()->
-      FindUser(affiliated_account_id_)->is_affiliated());
+      FindUser(affiliated_account_id_)->IsAffiliated());
 
   // Device ID is available only for affiliated user.
   std::string device_id = GetParam().affiliated_ ? kDeviceId : "";

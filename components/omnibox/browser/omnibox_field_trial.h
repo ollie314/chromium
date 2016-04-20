@@ -33,6 +33,7 @@ struct HUPScoringParams {
     typedef std::pair<double, int> CountMaxRelevance;
 
     ScoreBuckets();
+    ScoreBuckets(const ScoreBuckets& other);
     ~ScoreBuckets();
 
     // Computes a half-life time decay given the |elapsed_time|.
@@ -110,14 +111,6 @@ class OmniboxFieldTrial {
     EMPHASIZE_WHEN_ONLY_TITLE_MATCHES = 2,
     EMPHASIZE_NEVER = 3
   };
-
-  // Activates all dynamic field trials.  The main difference between
-  // the autocomplete dynamic and static field trials is that the former
-  // don't require any code changes on the Chrome side as they are controlled
-  // on the server side.  Chrome binary simply propagates all necessary
-  // information through the X-Client-Data header.
-  // This method may be called multiple times.
-  static void ActivateDynamicTrials();
 
   // ---------------------------------------------------------
   // For any experiment that's part of the bundled omnibox field trial.
@@ -312,7 +305,7 @@ class OmniboxFieldTrial {
 
   // Returns the number of title words that are allowed to contribute
   // to the topicality score.  Words later in the title are ignored.
-  // Returns 10 as a default if the experiment isn't active.
+  // Returns 20 as a default if the experiment isn't active.
   static size_t HQPNumTitleWordsToAllow();
 
   // ---------------------------------------------------------

@@ -84,6 +84,13 @@ public class TabModelImpl extends TabModelJniBridge {
     }
 
     @Override
+    public void removeTab(Tab tab) {
+        removeTabAndSelectNext(tab, TabSelectionType.FROM_USER, true, true);
+
+        for (TabModelObserver obs : mObservers) obs.tabRemoved(tab);
+    }
+
+    @Override
     public void destroy() {
         for (Tab tab : mTabs) {
             if (tab.isInitialized()) tab.destroy();
@@ -122,7 +129,9 @@ public class TabModelImpl extends TabModelJniBridge {
             index = mOrderController.determineInsertionIndex(type, index, tab);
             assert index <= mTabs.size();
 
-            assert tab.isIncognito() == isIncognito();
+            if (tab.isIncognito() != isIncognito()) {
+                throw new IllegalStateException("Attempting to open tab in wrong model");
+            }
 
             // TODO(dtrainor): Update the list of undoable tabs instead of committing it.
             commitAllTabClosures();
@@ -276,6 +285,9 @@ public class TabModelImpl extends TabModelJniBridge {
         int insertIndex = prevIndex + 1;
         if (mIndex >= insertIndex) mIndex++;
         mTabs.add(insertIndex, tab);
+
+        WebContents webContents = tab.getWebContents();
+        if (webContents != null) webContents.setAudioMuted(false);
 
         boolean activeModel = mModelDelegate.getCurrentModel() == this;
 
@@ -505,24 +517,39 @@ public class TabModelImpl extends TabModelJniBridge {
      *                called to actually delete and clean up {@code tab}.
      */
     private void startTabClosure(Tab tab, boolean animate, boolean uponExit, boolean canUndo) {
-        final int closingTabId = tab.getId();
-        final int closingTabIndex = indexOf(tab);
-
         tab.setClosing(true);
 
         for (TabModelObserver obs : mObservers) obs.willCloseTab(tab, animate);
+
+        TabSelectionType selectionType =
+                uponExit ? TabSelectionType.FROM_EXIT : TabSelectionType.FROM_CLOSE;
+        boolean pauseMedia = canUndo;
+        boolean updateRewoundList = !canUndo;
+        removeTabAndSelectNext(tab, selectionType, pauseMedia, updateRewoundList);
+    }
+
+    /**
+     * Removes the given tab from the tab model and selects a new tab.
+     */
+    private void removeTabAndSelectNext(Tab tab, TabSelectionType selectionType, boolean pauseMedia,
+            boolean updateRewoundList) {
+        final int closingTabId = tab.getId();
+        final int closingTabIndex = indexOf(tab);
 
         Tab currentTab = TabModelUtils.getCurrentTab(this);
         Tab adjacentTab = getTabAt(closingTabIndex == 0 ? 1 : closingTabIndex - 1);
         Tab nextTab = getNextTabIfClosed(closingTabId);
 
         // TODO(dtrainor): Update the list of undoable tabs instead of committing it.
-        if (!canUndo) commitAllTabClosures();
+        if (updateRewoundList) commitAllTabClosures();
 
-        // Cancel any media currently playing.
-        if (canUndo) {
+        // Cancel or mute any media currently playing.
+        if (pauseMedia) {
             WebContents webContents = tab.getWebContents();
-            if (webContents != null) webContents.releaseMediaPlayers();
+            if (webContents != null) {
+                webContents.suspendAllMediaPlayers();
+                webContents.setAudioMuted(true);
+            }
         }
 
         mTabs.remove(tab);
@@ -536,13 +563,12 @@ public class TabModelImpl extends TabModelJniBridge {
             if (nextIsIncognito != isIncognito()) mIndex = indexOf(adjacentTab);
 
             TabModel nextModel = mModelDelegate.getModel(nextIsIncognito);
-            nextModel.setIndex(nextTabIndex,
-                    uponExit ? TabSelectionType.FROM_EXIT : TabSelectionType.FROM_CLOSE);
+            nextModel.setIndex(nextTabIndex, selectionType);
         } else {
             mIndex = nextTabIndex;
         }
 
-        if (!canUndo) mRewoundList.resetRewoundState();
+        if (updateRewoundList) mRewoundList.resetRewoundState();
     }
 
     /**
@@ -550,14 +576,14 @@ public class TabModelImpl extends TabModelJniBridge {
      * @param tab The {@link Tab} to close.
      */
     private void finalizeTabClosure(Tab tab) {
-        for (TabModelObserver obs : mObservers) obs.didCloseTab(tab);
-
         if (mTabContentManager != null) mTabContentManager.removeTabThumbnail(tab.getId());
         mTabSaver.removeTabFromQueues(tab);
 
         if (!isIncognito()) tab.createHistoricalTab();
 
         tab.destroy();
+
+        for (TabModelObserver obs : mObservers) obs.didCloseTab(tab.getId(), tab.isIncognito());
     }
 
     private class RewoundList implements TabList {
@@ -692,10 +718,10 @@ public class TabModelImpl extends TabModelJniBridge {
     }
 
     @Override
-    protected boolean createTabWithWebContents(
-            boolean incognito, WebContents webContents, int parentId) {
-        return getTabCreator(incognito).createTabWithWebContents(
-                webContents, parentId, TabLaunchType.FROM_LONGPRESS_BACKGROUND);
+    protected boolean createTabWithWebContents(Tab parent, boolean incognito,
+            WebContents webContents, int parentId) {
+        return getTabCreator(incognito).createTabWithWebContents(parent, webContents, parentId,
+                TabLaunchType.FROM_LONGPRESS_BACKGROUND);
     }
 
     @Override

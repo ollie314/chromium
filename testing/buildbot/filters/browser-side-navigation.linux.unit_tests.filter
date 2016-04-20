@@ -1,10 +1,12 @@
 -BookmarkTest.DetachedBookmarkBarOnNTP
 -BrowserBookmarkBarTest.StateOnActiveTabChanged
+-BrowserCommandsTest.ViewSource
 -BrowserInstantControllerTest.DefaultSearchProviderChanged
 -BrowserInstantControllerTest.GoogleBaseURLUpdated
 -BrowserViewTest.BrowserViewLayout
 -ExtensionContextMenuModelTest.TestPageAccessSubmenu
 -InstantSearchPrerendererTest.PrerenderingAllowed
+-InstantNTPURLRewriteTest.UberURLHandler_InstantExtendedNewTabPage
 -PopupToolbarModelTest.ShouldDisplayURL
 -SearchIPCRouterPolicyTest.ProcessChromeIdentityCheck
 -SearchIPCRouterPolicyTest.ProcessDeleteMostVisitedItem
@@ -46,6 +48,7 @@
 -SearchTest.ProcessIsolation
 -SearchTest.ProcessIsolation_RendererInitiated
 -SessionsSyncManagerTest.AssociateWindowsDontReloadTabs
+-TabsApiUnitTest.QueryWithHostPermission
 -TabsApiUnitTest.QueryWithoutTabsPermission
 -ToolbarModelTest.GoogleBaseURL
 -ToolbarModelTest.ShouldDisplayURL_QueryExtraction

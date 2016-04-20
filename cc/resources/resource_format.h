@@ -27,16 +27,20 @@ enum ResourceFormat {
   RGB_565,
   ETC1,
   RED_8,
-  RESOURCE_FORMAT_MAX = RED_8,
+  LUMINANCE_F16,
+  RESOURCE_FORMAT_MAX = LUMINANCE_F16,
 };
 
-SkColorType ResourceFormatToSkColorType(ResourceFormat format);
+SkColorType ResourceFormatToClosestSkColorType(ResourceFormat format);
 
 CC_EXPORT int BitsPerPixel(ResourceFormat format);
 CC_EXPORT GLenum GLDataType(ResourceFormat format);
 CC_EXPORT GLenum GLDataFormat(ResourceFormat format);
 CC_EXPORT GLenum GLInternalFormat(ResourceFormat format);
 CC_EXPORT gfx::BufferFormat BufferFormat(ResourceFormat format);
+
+bool IsResourceFormatCompressed(ResourceFormat format);
+bool DoesResourceFormatSupportAlpha(ResourceFormat format);
 
 }  // namespace cc
 

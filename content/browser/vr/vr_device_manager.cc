@@ -27,13 +27,13 @@ VRDeviceManager::VRDeviceManager()
       base::Bind(&VRDeviceManager::OnConnectionError, base::Unretained(this)));
 // Register VRDeviceProviders for the current platform
 #if defined(OS_ANDROID)
-  scoped_ptr<VRDeviceProvider> cardboard_provider(
+  std::unique_ptr<VRDeviceProvider> cardboard_provider(
       new CardboardVRDeviceProvider());
   RegisterProvider(std::move(cardboard_provider));
 #endif
 }
 
-VRDeviceManager::VRDeviceManager(scoped_ptr<VRDeviceProvider> provider)
+VRDeviceManager::VRDeviceManager(std::unique_ptr<VRDeviceProvider> provider)
     : vr_initialized_(false), keep_alive_(true) {
   thread_checker_.DetachFromThread();
   RegisterProvider(std::move(provider));
@@ -45,7 +45,8 @@ VRDeviceManager::~VRDeviceManager() {
   g_vr_device_manager = nullptr;
 }
 
-void VRDeviceManager::BindRequest(mojo::InterfaceRequest<VRService> request) {
+void VRDeviceManager::BindRequest(
+    mojo::InterfaceRequest<mojom::VRService> request) {
   VRDeviceManager* device_manager = GetInstance();
   device_manager->bindings_.AddBinding(device_manager, std::move(request));
 }
@@ -77,7 +78,7 @@ bool VRDeviceManager::HasInstance() {
   return !!g_vr_device_manager;
 }
 
-mojo::Array<VRDeviceInfoPtr> VRDeviceManager::GetVRDevices() {
+mojo::Array<mojom::VRDeviceInfoPtr> VRDeviceManager::GetVRDevices() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   InitializeProviders();
@@ -86,7 +87,7 @@ mojo::Array<VRDeviceInfoPtr> VRDeviceManager::GetVRDevices() {
   for (const auto& provider : providers_)
     provider->GetDevices(&devices);
 
-  mojo::Array<VRDeviceInfoPtr> out_devices(0);
+  mojo::Array<mojom::VRDeviceInfoPtr> out_devices;
   for (const auto& device : devices) {
     if (device->id() == VR_DEVICE_LAST_ID)
       continue;
@@ -94,7 +95,7 @@ mojo::Array<VRDeviceInfoPtr> VRDeviceManager::GetVRDevices() {
     if (devices_.find(device->id()) == devices_.end())
       devices_[device->id()] = device;
 
-    VRDeviceInfoPtr vr_device_info = device->GetVRDevice();
+    mojom::VRDeviceInfoPtr vr_device_info = device->GetVRDevice();
     if (vr_device_info.is_null())
       continue;
 
@@ -126,7 +127,8 @@ void VRDeviceManager::InitializeProviders() {
   vr_initialized_ = true;
 }
 
-void VRDeviceManager::RegisterProvider(scoped_ptr<VRDeviceProvider> provider) {
+void VRDeviceManager::RegisterProvider(
+    std::unique_ptr<VRDeviceProvider> provider) {
   providers_.push_back(make_linked_ptr(provider.release()));
 }
 

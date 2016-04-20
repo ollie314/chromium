@@ -48,6 +48,8 @@ class PushMessagingNotificationManager {
 
  private:
   FRIEND_TEST_ALL_PREFIXES(PushMessagingNotificationManagerTest, IsTabVisible);
+  FRIEND_TEST_ALL_PREFIXES(PushMessagingNotificationManagerTest,
+                           IsTabVisibleViewSource);
 
   static void DidGetNotificationsFromDatabaseIOProxy(
       const base::WeakPtr<PushMessagingNotificationManager>& ui_weak_ptr,
@@ -71,15 +73,12 @@ class PushMessagingNotificationManager {
                     content::WebContents* active_web_contents,
                     const GURL& origin);
 
-  void DidGetNotificationsShownAndNeeded(
-      const GURL& origin,
-      int64_t service_worker_registration_id,
-      bool notification_shown,
-      bool notification_needed,
-      const base::Closure& message_handled_closure,
-      const std::string& data,
-      bool success,
-      bool not_found);
+  void DidGetBudget(const GURL& origin,
+                    int64_t service_worker_registration_id,
+                    bool notification_shown,
+                    bool notification_needed,
+                    const base::Closure& message_handled_closure,
+                    const std::string& data);
 
   static void DidWriteNotificationDataIOProxy(
       const base::WeakPtr<PushMessagingNotificationManager>& ui_weak_ptr,

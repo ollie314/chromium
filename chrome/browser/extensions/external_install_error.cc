@@ -26,6 +26,7 @@
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/grit/generated_resources.h"
+#include "content/public/browser/storage_partition.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/uninstall_reason.h"
@@ -197,7 +198,10 @@ base::string16 ExternalInstallBubbleAlert::MenuItemLabel() {
 }
 
 void ExternalInstallBubbleAlert::ExecuteMenuItem(Browser* browser) {
-  ShowBubbleView(browser);
+  // |browser| is nullptr in unit test.
+  if (browser)
+    ShowBubbleView(browser);
+  error_->DidOpenBubbleView();
 }
 
 gfx::Image ExternalInstallBubbleAlert::GetBubbleViewIcon() {
@@ -264,6 +268,7 @@ base::string16 ExternalInstallBubbleAlert::GetBubbleViewCancelButtonLabel() {
 }
 
 void ExternalInstallBubbleAlert::OnBubbleViewDidClose(Browser* browser) {
+  error_->DidCloseBubbleView();
 }
 
 void ExternalInstallBubbleAlert::BubbleViewAcceptButtonPressed(
@@ -297,7 +302,10 @@ ExternalInstallError::ExternalInstallError(
       ExtensionInstallPrompt::EXTERNAL_INSTALL_PROMPT));
 
   webstore_data_fetcher_.reset(new WebstoreDataFetcher(
-      this, browser_context_->GetRequestContext(), GURL(), extension_id_));
+      this,
+      content::BrowserContext::GetDefaultStoragePartition(browser_context_)->
+          GetURLRequestContext(),
+      GURL(), extension_id_));
   webstore_data_fetcher_->Start();
 }
 
@@ -339,9 +347,18 @@ void ExternalInstallError::OnInstallPromptDone(
       }
       break;
     case ExtensionInstallPrompt::Result::ABORTED:
+      manager_->DidChangeInstallAlertVisibility(this, false);
       break;
   }
   // NOTE: We may be deleted here!
+}
+
+void ExternalInstallError::DidOpenBubbleView() {
+  manager_->DidChangeInstallAlertVisibility(this, true);
+}
+
+void ExternalInstallError::DidCloseBubbleView() {
+  manager_->DidChangeInstallAlertVisibility(this, false);
 }
 
 void ExternalInstallError::ShowDialog(Browser* browser) {
@@ -352,6 +369,7 @@ void ExternalInstallError::ShowDialog(Browser* browser) {
   web_contents = browser->tab_strip_model()->GetActiveWebContents();
   install_ui_show_params_.reset(
       new ExtensionInstallPromptShowParams(web_contents));
+  manager_->DidChangeInstallAlertVisibility(this, true);
   ExtensionInstallPrompt::GetDefaultShowDialogCallback().Run(
       install_ui_show_params_.get(),
       base::Bind(&ExternalInstallError::OnInstallPromptDone,
@@ -369,7 +387,7 @@ void ExternalInstallError::OnWebstoreRequestFailure() {
 }
 
 void ExternalInstallError::OnWebstoreResponseParseSuccess(
-    scoped_ptr<base::DictionaryValue> webstore_data) {
+    std::unique_ptr<base::DictionaryValue> webstore_data) {
   std::string localized_user_count;
   double average_rating = 0;
   int rating_count = 0;
@@ -415,19 +433,23 @@ void ExternalInstallError::OnFetchComplete() {
 void ExternalInstallError::OnDialogReady(
     ExtensionInstallPromptShowParams* show_params,
     const ExtensionInstallPrompt::DoneCallback& callback,
-    scoped_ptr<ExtensionInstallPrompt::Prompt> prompt) {
+    std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt) {
   prompt_ = std::move(prompt);
 
   if (alert_type_ == BUBBLE_ALERT) {
     global_error_.reset(new ExternalInstallBubbleAlert(this, prompt_.get()));
     error_service_->AddGlobalError(global_error_.get());
 
-    Browser* browser =
-        chrome::FindTabbedBrowser(Profile::FromBrowserContext(browser_context_),
-                                  true,
-                                  chrome::GetActiveDesktop());
-    if (browser)
-      global_error_->ShowBubbleView(browser);
+    if (!manager_->has_currently_visible_install_alert()) {
+      // |browser| is nullptr during unit tests, so call
+      // DidChangeInstallAlertVisibility() regardless because we depend on this
+      // in unit tests.
+      manager_->DidChangeInstallAlertVisibility(this, true);
+      Browser* browser = chrome::FindTabbedBrowser(
+          Profile::FromBrowserContext(browser_context_), true);
+      if (browser)
+        global_error_->ShowBubbleView(browser);
+    }
   } else {
     DCHECK(alert_type_ == MENU_ALERT);
     global_error_.reset(new ExternalInstallMenuAlert(this));

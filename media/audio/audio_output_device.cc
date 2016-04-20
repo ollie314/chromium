@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include <cmath>
 #include <utility>
 
 #include "base/callback_helpers.h"
@@ -14,6 +16,7 @@
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "media/audio/audio_manager_base.h"
 #include "media/audio/audio_output_controller.h"
 #include "media/base/limits.h"
 
@@ -136,27 +139,14 @@ bool AudioOutputDevice::SetVolume(double volume) {
   return true;
 }
 
-OutputDevice* AudioOutputDevice::GetOutputDevice() {
-  return this;
-}
-
-void AudioOutputDevice::SwitchOutputDevice(
-    const std::string& device_id,
-    const url::Origin& security_origin,
-    const SwitchOutputDeviceCB& callback) {
-  NOTREACHED();
-}
-
-AudioParameters AudioOutputDevice::GetOutputParameters() {
+OutputDeviceInfo AudioOutputDevice::GetOutputDeviceInfo() {
   CHECK(!task_runner()->BelongsToCurrentThread());
   did_receive_auth_.Wait();
-  return output_params_;
-}
-
-OutputDeviceStatus AudioOutputDevice::GetDeviceStatus() {
-  CHECK(!task_runner()->BelongsToCurrentThread());
-  did_receive_auth_.Wait();
-  return device_status_;
+  return OutputDeviceInfo(
+      AudioManagerBase::UseSessionIdToSelectDevice(session_id_, device_id_)
+          ? matched_device_id_
+          : device_id_,
+      device_status_, output_params_);
 }
 
 void AudioOutputDevice::RequestDeviceAuthorizationOnIOThread() {
@@ -291,7 +281,8 @@ void AudioOutputDevice::OnStateChanged(AudioOutputIPCDelegateState state) {
 
 void AudioOutputDevice::OnDeviceAuthorized(
     OutputDeviceStatus device_status,
-    const media::AudioParameters& output_params) {
+    const media::AudioParameters& output_params,
+    const std::string& matched_device_id) {
   DCHECK(task_runner()->BelongsToCurrentThread());
   DCHECK_EQ(state_, AUTHORIZING);
 
@@ -310,6 +301,19 @@ void AudioOutputDevice::OnDeviceAuthorized(
     state_ = AUTHORIZED;
     if (!did_receive_auth_.IsSignaled()) {
       output_params_ = output_params;
+
+      // It's possible to not have a matched device obtained via session id. It
+      // means matching output device through |session_id_| failed and the
+      // default device is used.
+      DCHECK(AudioManagerBase::UseSessionIdToSelectDevice(session_id_,
+                                                          device_id_) ||
+             matched_device_id_.empty());
+      matched_device_id_ = matched_device_id;
+
+      DVLOG(1) << "AudioOutputDevice authorized, session_id: " << session_id_
+               << ", device_id: " << device_id_
+               << ", matched_device_id: " << matched_device_id_;
+
       did_receive_auth_.Signal();
     }
     if (start_on_authorized_)
@@ -413,8 +417,8 @@ void AudioOutputDevice::AudioThreadCallback::MapSharedMemory() {
 
 // Called whenever we receive notifications about pending data.
 void AudioOutputDevice::AudioThreadCallback::Process(uint32_t pending_data) {
-  // Convert the number of pending bytes in the render buffer into milliseconds.
-  uint32_t audio_delay_milliseconds = pending_data / bytes_per_ms_;
+  // Convert the number of pending bytes in the render buffer into frames.
+  double frames_delayed = static_cast<double>(pending_data) / bytes_per_frame_;
 
   callback_num_++;
   TRACE_EVENT1("audio", "AudioOutputDevice::FireRenderCallback",
@@ -433,11 +437,15 @@ void AudioOutputDevice::AudioThreadCallback::Process(uint32_t pending_data) {
   uint32_t frames_skipped = buffer->params.frames_skipped;
   buffer->params.frames_skipped = 0;
 
+  DVLOG(4) << __FUNCTION__ << " pending_data:" << pending_data
+           << " frames_delayed(pre-round):" << frames_delayed
+           << " frames_skipped:" << frames_skipped;
+
   // Update the audio-delay measurement, inform about the number of skipped
   // frames, and ask client to render audio.  Since |output_bus_| is wrapping
   // the shared memory the Render() call is writing directly into the shared
   // memory.
-  render_callback_->Render(output_bus_.get(), audio_delay_milliseconds,
+  render_callback_->Render(output_bus_.get(), std::round(frames_delayed),
                            frames_skipped);
 }
 

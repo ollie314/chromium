@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/memory/ptr_util.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/log_manager.h"
 #include "components/sync_driver/sync_service.h"
@@ -14,7 +15,7 @@ namespace password_manager_util {
 
 password_manager::PasswordSyncState GetPasswordSyncState(
     const sync_driver::SyncService* sync_service) {
-  if (sync_service && sync_service->HasSyncSetupCompleted() &&
+  if (sync_service && sync_service->IsFirstSetupComplete() &&
       sync_service->IsSyncActive() &&
       sync_service->GetActiveDataTypes().Has(syncer::PASSWORDS)) {
     return sync_service->IsUsingSecondaryPassphrase()
@@ -64,7 +65,7 @@ void TrimUsernameOnlyCredentials(
   ScopedVector<autofill::PasswordForm> result;
   for (auto& form : *android_credentials) {
     if (form->scheme == autofill::PasswordForm::SCHEME_USERNAME_ONLY) {
-      if (form->federation_url.is_empty())
+      if (form->federation_origin.unique())
         continue;
       else
         form->skip_zero_click = true;
@@ -75,12 +76,12 @@ void TrimUsernameOnlyCredentials(
   android_credentials->swap(result);
 }
 
-std::vector<scoped_ptr<autofill::PasswordForm>> ConvertScopedVector(
+std::vector<std::unique_ptr<autofill::PasswordForm>> ConvertScopedVector(
     ScopedVector<autofill::PasswordForm> old_vector) {
-  std::vector<scoped_ptr<autofill::PasswordForm>> new_vector;
+  std::vector<std::unique_ptr<autofill::PasswordForm>> new_vector;
   new_vector.reserve(old_vector.size());
   for (auto* form : old_vector) {
-    new_vector.push_back(make_scoped_ptr(form));
+    new_vector.push_back(base::WrapUnique(form));
   }
   old_vector.weak_clear();  // All owned by |new_vector| by now.
   return new_vector;

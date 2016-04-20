@@ -5,7 +5,8 @@
 #ifndef CC_TILES_TILE_DRAW_INFO_H_
 #define CC_TILES_TILE_DRAW_INFO_H_
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/raster/tile_task_runner.h"
 #include "cc/resources/platform_color.h"
@@ -72,6 +73,10 @@ class CC_EXPORT TileDrawInfo {
   }
 
   inline bool has_resource() const { return !!resource_; }
+
+  inline bool has_compressed_resource() const {
+    return resource_ ? IsResourceFormatCompressed(resource_->format()) : false;
+  }
 
   void SetSolidColorForTesting(SkColor color) { set_solid_color(color); }
 

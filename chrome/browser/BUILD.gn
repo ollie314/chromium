@@ -8,6 +8,7 @@ import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//chrome/common/features.gni")
 import("//media/media_options.gni")
+import("//third_party/kasko/kasko.gni")
 import("//third_party/protobuf/proto_library.gni")
 
 # //build/config/android/rules.gni imports //tools/grit/grit_rule.gni, which
@@ -42,8 +43,11 @@ if (is_win) {
   config("browser_win_linker_flags") {
     libs = [
       "credui.lib",
+      "cryptui.lib",
+      "dwmapi.lib",
       "netapi32.lib",
       "ndfapi.lib",  # Used by browser/net/net_error_diagnostics_dialog_win.h
+      "pdh.lib",
     ]
     ldflags = [ "/DELAYLOAD:ndfapi.dll" ]
   }
@@ -82,6 +86,8 @@ source_set("browser") {
   libs = []
   ldflags = []
 
+  allow_circular_includes_from = [ "//chrome/browser/ui" ]
+
   # iOS/non-iOS shared deps. New dependencies should generally be added in the
   # non-iOS deps below.
   public_deps = [
@@ -119,7 +125,6 @@ source_set("browser") {
     "//components/data_use_measurement/core",
     "//components/device_event_log",
     "//components/domain_reliability",
-    "//components/enhanced_bookmarks",
     "//components/favicon/core",
     "//components/favicon_base",
     "//components/flags_ui",
@@ -149,7 +154,9 @@ source_set("browser") {
     "//components/packed_ct_ev_whitelist",
     "//components/password_manager/core/browser",
     "//components/password_manager/core/common",
+    "//components/policy",
     "//components/policy:policy_component",
+    "//components/policy/proto",
     "//components/proxy_config",
     "//components/query_parser",
     "//components/rappor",
@@ -163,8 +170,13 @@ source_set("browser") {
     "//components/ssl_errors",
     "//components/startup_metric_utils/browser:lib",
     "//components/startup_metric_utils/browser:message_filter_lib",
+
+    # TODO(fdoray): Remove this once the PreRead field trial has expired.
+    # crbug.com/577698
+    "//components/startup_metric_utils/common",
     "//components/strings",
     "//components/suggestions",
+    "//components/supervised_user_error_page",
     "//components/sync_bookmarks",
     "//components/sync_driver",
     "//components/sync_sessions",
@@ -185,6 +197,8 @@ source_set("browser") {
     "//components/webdata_services",
     "//content/public/browser",
     "//content/public/common",
+    "//content/public/common:feature_h264_with_openh264_ffmpeg",
+    "//content/public/common:features",
     "//courgette:courgette_lib",
     "//crypto",
     "//google_apis",
@@ -202,6 +216,7 @@ source_set("browser") {
     "//third_party/zlib:minizip",
     "//third_party/zlib:zip",
     "//ui/base",
+    "//ui/base:ui_data_pack",
     "//ui/events:events_base",
     "//ui/gfx",
     "//ui/gfx/geometry",
@@ -307,7 +322,6 @@ source_set("browser") {
     }
 
     deps += [
-      "//apps",
       "//cc",
       "//chrome/app/theme:theme_resources",
       "//chrome/browser/devtools",
@@ -349,23 +363,21 @@ source_set("browser") {
       "//components/visitedlink/browser",
       "//components/visitedlink/common",
       "//components/web_cache/browser",
-      "//components/web_modal",
       "//components/webusb",
       "//content/app/resources",
       "//device/core",
-      "//device/devices_app/public/cpp",
-      "//device/devices_app/public/cpp:factory",
-      "//device/devices_app/usb/public/interfaces",
-      "//device/usb",
+      "//device/usb/mojo",
+      "//device/usb/public/interfaces",
       "//media",
       "//media/midi",
       "//mojo/common",
-      "//mojo/environment:chromium",
+      "//mojo/edk/system",
       "//mojo/public/cpp/bindings",
       "//mojo/public/js",
-      "//mojo/shell/public/cpp",
       "//net:extras",
       "//net:net_with_v8",
+      "//services/shell/public/cpp",
+      "//skia/public",
       "//storage/browser",
       "//storage/common",
       "//third_party/WebKit/public:image_resources",
@@ -374,7 +386,6 @@ source_set("browser") {
       "//third_party/leveldatabase",
       "//third_party/libaddressinput",
       "//third_party/libyuv",
-      "//third_party/mojo/src/mojo/edk/system",
       "//third_party/re2",
       "//third_party/smhasher:cityhash",
       "//third_party/webrtc/modules/desktop_capture",
@@ -414,16 +425,10 @@ source_set("browser") {
   if (!is_win && !is_mac && !is_ios) {
     sources += [ "net/net_error_diagnostics_dialog_generic.cc" ]
   }
-  if (!is_android && !is_ios && !is_chromeos && enable_configuration_policy) {
+  if (!is_android && !is_ios && !is_chromeos) {
     sources += [
       "net/disk_cache_dir_policy_handler.cc",
       "net/disk_cache_dir_policy_handler.h",
-    ]
-  }
-  if (!is_android && !is_ios && enable_configuration_policy) {
-    sources += [
-      "download/download_dir_policy_handler.cc",
-      "download/download_dir_policy_handler.h",
     ]
   }
   if (is_mac) {
@@ -489,48 +494,6 @@ source_set("browser") {
     deps += [ "//components/nacl/browser" ]
   }
 
-  if (enable_configuration_policy) {
-    sources +=
-        rebase_path(gypi_values.chrome_browser_policy_shared_with_ios_sources,
-                    ".",
-                    "//chrome")
-    deps += [
-      "//components/policy",
-      "//components/policy/proto",
-    ]
-    if (!is_ios) {
-      sources += rebase_path(gypi_values.chrome_browser_policy_non_ios_sources,
-                             ".",
-                             "//chrome")
-    }
-    if (!is_chromeos) {
-      sources += rebase_path(
-              gypi_values.chrome_browser_policy_shared_with_ios_not_chromeos_sources,
-              ".",
-              "//chrome")
-    }
-    if (is_win || is_mac || is_desktop_linux) {
-      sources += rebase_path(gypi_values.chrome_browser_policy_desktop_sources,
-                             ".",
-                             "//chrome")
-    }
-    if (is_android || is_ios) {
-      sources += rebase_path(gypi_values.chrome_browser_policy_mobile_sources,
-                             ".",
-                             "//chrome")
-    } else {
-      deps += [
-        "//chrome/browser/policy:path_parser",
-        "//net:net_browser_services",
-      ]
-    }
-  } else {
-    # Configuration policy disabled.
-    sources += rebase_path(gypi_values.chrome_browser_policy_disabled_sources,
-                           ".",
-                           "//chrome")
-  }
-
   if (enable_plugins) {
     sources +=
         rebase_path(gypi_values.chrome_browser_plugins_sources, ".", "//chrome")
@@ -547,8 +510,8 @@ source_set("browser") {
                     "//chrome")
     deps += [
       "//chrome/browser/safe_browsing:chunk_proto",
-      "//chrome/browser/safe_browsing:metadata_proto",
       "//chrome/common/safe_browsing:proto",
+      "//components/safe_browsing_db:metadata_proto",
     ]
     if (safe_browsing_mode == 1) {
       sources +=
@@ -564,6 +527,7 @@ source_set("browser") {
           rebase_path(gypi_values.chrome_browser_safe_browsing_mobile_sources,
                       ".",
                       "//chrome")
+      deps += [ "//components/safe_browsing_db:safe_browsing_db_mobile" ]
     }
   }
 
@@ -588,6 +552,10 @@ source_set("browser") {
                            ".",
                            "//chrome")
     deps += [ "//chrome/browser/chromeos" ]
+  } else {  # Non-ChromeOS.
+    sources += rebase_path(gypi_values.chrome_browser_non_chromeos_sources,
+                           ".",
+                           "//chrome")
   }
 
   if (is_chromeos || is_ios) {
@@ -595,6 +563,14 @@ source_set("browser") {
       "signin/chrome_signin_status_metrics_provider_delegate.cc",
       "signin/chrome_signin_status_metrics_provider_delegate.h",
     ]
+  }
+
+  if (is_chromeos) {
+    sources += [
+      "metrics/leak_detector_controller.cc",
+      "metrics/leak_detector_controller.h",
+    ]
+    deps += [ "//components/metrics:leak_detector" ]
   }
 
   if (use_cups) {
@@ -619,6 +595,8 @@ source_set("browser") {
     # These files are only built in a GN build because they bring in
     # dependencies that don't build with GYP.
     sources += [
+      "ui/ash/launcher/chrome_mash_shelf_controller.cc",
+      "ui/ash/launcher/chrome_mash_shelf_controller.h",
       "ui/views/frame/browser_frame_mus.cc",
       "ui/views/frame/browser_frame_mus.h",
       "ui/views/frame/browser_non_client_frame_view_mus.cc",
@@ -626,8 +604,11 @@ source_set("browser") {
     ]
     deps += [
       "//components/mus/public/cpp",
+      "//components/prefs",
       "//content/public/common",
-      "//mojo/runner/child:lib",
+      "//mash/shelf/public/interfaces",
+      "//services/shell/runner/common",
+      "//skia/public",
       "//ui/aura",
       "//ui/compositor",
       "//ui/keyboard",
@@ -662,6 +643,13 @@ source_set("browser") {
       "//components/crash/content/browser",
       "//components/version_info:generate_version_info",
     ]
+  }
+  if (is_win && enable_kasko_failed_rdv_reports) {
+    sources += [
+      "//chrome/app/chrome_crash_reporter_client.cc",
+      "//chrome/app/chrome_crash_reporter_client.h",
+    ]
+    deps += [ "//components/crash/content/app:lib" ]
   }
   if (use_nss_certs) {
     sources +=
@@ -741,13 +729,17 @@ source_set("browser") {
         rebase_path(gypi_values.chrome_browser_mobile_sources, ".", "//chrome")
   } else {
     # Non-mobile.
+    deps += [
+      "//apps",
+      "//chrome/browser/policy:path_parser",
+      "//chrome/browser/profile_resetter:profile_reset_report_proto",
+      "//components/feedback",
+      "//components/web_modal",
+      "//net:net_browser_services",
+    ]
     sources += rebase_path(gypi_values.chrome_browser_non_mobile_sources,
                            ".",
                            "//chrome")
-    deps += [
-      "//chrome/browser/profile_resetter:profile_reset_report_proto",
-      "//components/feedback",
-    ]
   }
 
   if (!is_chrome_branded) {
@@ -774,7 +766,6 @@ source_set("browser") {
       ":delta_file_proto",
       ":jni_headers",
       "//components/data_usage/android",
-      "//components/enhanced_bookmarks",
       "//components/precache/content",
       "//components/precache/core",
       "//components/resources:components_resources",
@@ -782,8 +773,6 @@ source_set("browser") {
       "//components/toolbar",
       "//components/web_contents_delegate_android",
     ]
-
-    defines += [ "ENABLE_DATA_REDUCTION_PROXY_DEBUGGING" ]
   }
 
   if (is_android) {
@@ -797,7 +786,6 @@ source_set("browser") {
 
     deps -= [
       "//components/storage_monitor",
-      "//components/web_modal",
       "//third_party/libaddressinput",
     ]
 
@@ -845,7 +833,10 @@ source_set("browser") {
     ]
     deps += [
       ":chrome_process_finder",
+      "//chrome:file_pre_reader",
       "//chrome/chrome_watcher:client",
+      "//chrome/chrome_watcher:kasko_util",
+      "//chrome/common:metrics_constants_util_win",
       "//chrome/common:version_header",
       "//chrome/installer/util:strings",
       "//chrome_elf",
@@ -853,11 +844,11 @@ source_set("browser") {
       "//chrome_elf:dll_hash",
       "//components/browser_watcher",
       "//components/browser_watcher:browser_watcher_client",
+      "//components/startup_metric_utils/common",
       "//google_update",
       "//third_party/iaccessible2",
       "//third_party/isimpledom",
       "//third_party/wtl",
-      "//ui/metro_viewer",
     ]
 
     all_dependent_configs = [ ":browser_win_linker_flags" ]
@@ -895,6 +886,12 @@ source_set("browser") {
       configs += [ "//build/config/linux:x11" ]
       deps += [ "//ui/gfx/x" ]
     }
+  }
+
+  if (is_linux || is_win) {
+    sources += rebase_path(gypi_values.chrome_browser_non_mac_desktop_sources,
+                           ".",
+                           "//chrome")
   }
 
   if (is_desktop_linux) {
@@ -951,12 +948,16 @@ source_set("browser") {
     deps += [ "//chrome/browser/media/router" ]
   }
 
-  if (enable_mojo_media != "none") {
-    configs += [ "//media/mojo/services:enable_mojo_media_config" ]
-  }
-
-  if (enable_mojo_media == "utility") {
-    deps += [ "//media/mojo/services:application" ]
+  if (enable_mojo_media) {
+    configs += [ "//media/mojo/services:mojo_media_config" ]
+    sources += [
+      "media/output_protection_impl.cc",
+      "media/output_protection_impl.h",
+    ]
+    deps += [ "//media/mojo/interfaces" ]
+    if (mojo_media_host == "browser") {
+      deps += [ "//media/mojo/services:application_factory" ]
+    }
   }
 
   if (enable_wayland_server) {
@@ -1031,11 +1032,13 @@ grit("resources") {
 
   deps = [
     ":chrome_internal_resources_gen",
+    "//chrome/browser/resources/safe_browsing:make_file_types_protobuf",
 
     # Depend only on the generated mojo bindings since we read the .mojom.js
     # file, rather than the whole mojo target which will link the C++ bindings.
     "//chrome/browser/ui/webui/engagement:mojo_bindings__generator",
     "//chrome/browser/ui/webui/omnibox:mojo_bindings__generator",
+    "//chrome/browser/ui/webui/plugins:mojo_bindings__generator",
   ]
 }
 
@@ -1092,8 +1095,6 @@ source_set("test_support") {
     "download/download_test_file_activity_observer.h",
     "download/test_download_shelf.cc",
     "download/test_download_shelf.h",
-    "invalidation/fake_invalidation_service.cc",
-    "invalidation/fake_invalidation_service.h",
     "media/fake_desktop_media_list.cc",
     "media/fake_desktop_media_list.h",
     "net/dns_probe_test_util.cc",
@@ -1133,7 +1134,6 @@ source_set("test_support") {
     "//chrome/browser/ui:test_support",
   ]
   deps = [
-    "//base:prefs_test_support",
     "//chrome/app/theme:theme_resources",
     "//chrome/browser",
     "//chrome/common",
@@ -1142,9 +1142,11 @@ source_set("test_support") {
     "//components/invalidation/impl",
     "//components/invalidation/impl:test_support",
     "//components/password_manager/core/browser:test_support",
+    "//components/prefs:test_support",
     "//components/search_engines:test_support",
     "//components/syncable_prefs:test_support",
     "//components/user_prefs/tracked:user_prefs_tracked_test_support",
+    "//content/test:browsertest_base",
     "//content/test:test_support",
     "//net:test_support",
     "//skia",
@@ -1310,6 +1312,8 @@ source_set("test_support_ui") {
   sources = [
     "password_manager/password_manager_test_base.cc",
     "password_manager/password_manager_test_base.h",
+    "signin/token_revoker_test_utils.cc",
+    "signin/token_revoker_test_utils.h",
     "ui/webui/signin/login_ui_test_utils.cc",
     "ui/webui/signin/login_ui_test_utils.h",
   ]
@@ -1318,6 +1322,7 @@ source_set("test_support_ui") {
 
   deps = [
     "//components/metrics:test_support",
+    "//components/password_manager/content/public/interfaces",
     "//components/password_manager/core/browser:test_support",
     "//skia",
     "//testing/gtest",

@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_util.h"
-#include "base/prefs/pref_service.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -20,6 +19,7 @@
 #include "chrome/browser/renderer_host/pepper/device_id_fetcher.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/pepper_flash_settings_helper.h"
@@ -187,7 +187,7 @@ class PepperFlashSettingsManager::Core
 
   // The channel is NULL until we have opened a connection to the broker
   // process. Used only on the I/O thread.
-  scoped_ptr<IPC::Channel> channel_;
+  std::unique_ptr<IPC::Channel> channel_;
 
   // Used only on the I/O thread.
   State state_;

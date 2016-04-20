@@ -6,6 +6,7 @@
 #define DEVICE_HID_HID_SERVICE_H_
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -46,7 +47,7 @@ class HidService {
 
   // This function should be called on a thread with a MessageLoopForUI and be
   // passed the task runner for a thread with a MessageLoopForIO.
-  static scoped_ptr<HidService> Create(
+  static std::unique_ptr<HidService> Create(
       scoped_refptr<base::SingleThreadTaskRunner> file_task_runner);
 
   virtual ~HidService();

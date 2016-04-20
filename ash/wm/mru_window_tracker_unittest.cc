@@ -8,6 +8,7 @@
 #include "ash/test/test_shelf_delegate.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
 #include "base/compiler_specific.h"
 #include "ui/aura/test/test_window_delegate.h"
@@ -36,9 +37,9 @@ class MruWindowTrackerTest : public test::AshTestBase {
 
 // Basic test that the activation order is tracked.
 TEST_F(MruWindowTrackerTest, Basic) {
-  scoped_ptr<aura::Window> w1(CreateWindow());
-  scoped_ptr<aura::Window> w2(CreateWindow());
-  scoped_ptr<aura::Window> w3(CreateWindow());
+  std::unique_ptr<aura::Window> w1(CreateWindow());
+  std::unique_ptr<aura::Window> w2(CreateWindow());
+  std::unique_ptr<aura::Window> w3(CreateWindow());
   wm::ActivateWindow(w3.get());
   wm::ActivateWindow(w2.get());
   wm::ActivateWindow(w1.get());
@@ -53,12 +54,12 @@ TEST_F(MruWindowTrackerTest, Basic) {
 // Test that minimized windows are considered least recently used (but kept in
 // correct relative order).
 TEST_F(MruWindowTrackerTest, MinimizedWindowsAreLru) {
-  scoped_ptr<aura::Window> w1(CreateWindow());
-  scoped_ptr<aura::Window> w2(CreateWindow());
-  scoped_ptr<aura::Window> w3(CreateWindow());
-  scoped_ptr<aura::Window> w4(CreateWindow());
-  scoped_ptr<aura::Window> w5(CreateWindow());
-  scoped_ptr<aura::Window> w6(CreateWindow());
+  std::unique_ptr<aura::Window> w1(CreateWindow());
+  std::unique_ptr<aura::Window> w2(CreateWindow());
+  std::unique_ptr<aura::Window> w3(CreateWindow());
+  std::unique_ptr<aura::Window> w4(CreateWindow());
+  std::unique_ptr<aura::Window> w5(CreateWindow());
+  std::unique_ptr<aura::Window> w6(CreateWindow());
   wm::ActivateWindow(w6.get());
   wm::ActivateWindow(w5.get());
   wm::ActivateWindow(w4.get());
@@ -84,12 +85,12 @@ TEST_F(MruWindowTrackerTest, MinimizedWindowsAreLru) {
 
 // Tests that windows being dragged are only in the WindowList once.
 TEST_F(MruWindowTrackerTest, DraggedWindowsInListOnlyOnce) {
-  scoped_ptr<aura::Window> w1(CreateWindow());
+  std::unique_ptr<aura::Window> w1(CreateWindow());
   wm::ActivateWindow(w1.get());
 
   // Start dragging the window.
   wm::GetWindowState(w1.get())->CreateDragDetails(
-      w1.get(), gfx::Point(), HTRIGHT, aura::client::WINDOW_MOVE_SOURCE_TOUCH);
+      gfx::Point(), HTRIGHT, aura::client::WINDOW_MOVE_SOURCE_TOUCH);
 
   // During a drag the window is reparented by the Docked container.
   aura::Window* drag_container = Shell::GetContainer(

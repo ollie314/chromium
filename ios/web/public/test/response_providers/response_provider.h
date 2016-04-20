@@ -14,11 +14,7 @@
 #include "net/http/http_status_code.h"
 #include "url/gurl.h"
 
-#ifdef __OBJC__
 @class GCDWebServerResponse;
-#else
-class GCDWebServerResponse;
-#endif
 
 namespace web {
 
@@ -33,6 +29,7 @@ class ResponseProvider {
             const std::string& method,
             const std::string& body,
             const net::HttpRequestHeaders& headers);
+    Request(const Request& other);
     virtual ~Request();
 
     // The URL for the request.

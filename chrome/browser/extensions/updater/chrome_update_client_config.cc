@@ -6,18 +6,23 @@
 #include "base/version.h"
 #include "chrome/browser/component_updater/component_patcher_operation_out_of_process.h"
 #include "chrome/browser/extensions/updater/chrome_update_client_config.h"
+#include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/update_client/chrome_update_query_params_delegate.h"
 #include "chrome/common/channel_info.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition.h"
 
 namespace extensions {
 
+// For privacy reasons, requires encryption of the component updater
+// communication with the update backend.
 ChromeUpdateClientConfig::ChromeUpdateClientConfig(
     content::BrowserContext* context)
     : impl_(base::CommandLine::ForCurrentProcess(),
-            context->GetRequestContext()) {
-  impl_.set_enable_alt_source_url(false);
-}
+            content::BrowserContext::GetDefaultStoragePartition(context)->
+                GetURLRequestContext(),
+            true) {}
 
 int ChromeUpdateClientConfig::InitialDelay() const {
   return impl_.InitialDelay();
@@ -55,6 +60,12 @@ std::string ChromeUpdateClientConfig::GetChannel() const {
   return chrome::GetChannelString();
 }
 
+std::string ChromeUpdateClientConfig::GetBrand() const {
+  std::string brand;
+  google_brand::GetBrand(&brand);
+  return brand;
+}
+
 std::string ChromeUpdateClientConfig::GetLang() const {
   return ChromeUpdateQueryParamsDelegate::GetLang();
 }
@@ -65,6 +76,10 @@ std::string ChromeUpdateClientConfig::GetOSLongName() const {
 
 std::string ChromeUpdateClientConfig::ExtraRequestParams() const {
   return impl_.ExtraRequestParams();
+}
+
+std::string ChromeUpdateClientConfig::GetDownloadPreference() const {
+  return std::string();
 }
 
 net::URLRequestContextGetter* ChromeUpdateClientConfig::RequestContext() const {
@@ -82,6 +97,14 @@ bool ChromeUpdateClientConfig::DeltasEnabled() const {
 
 bool ChromeUpdateClientConfig::UseBackgroundDownloader() const {
   return impl_.UseBackgroundDownloader();
+}
+
+bool ChromeUpdateClientConfig::UseCupSigning() const {
+  return impl_.UseCupSigning();
+}
+
+PrefService* ChromeUpdateClientConfig::GetPrefService() const {
+  return nullptr;
 }
 
 ChromeUpdateClientConfig::~ChromeUpdateClientConfig() {}

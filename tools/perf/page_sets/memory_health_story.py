@@ -9,8 +9,8 @@ from telemetry.page import page as page_module
 from telemetry.page import shared_page_state
 from telemetry import story
 
-from pylib.constants import keyevent # pylint: disable=import-error
-from pylib.device import intent # pylint: disable=import-error
+from devil.android.sdk import intent # pylint: disable=import-error
+from devil.android.sdk import keyevent # pylint: disable=import-error
 
 
 DUMP_WAIT_TIME = 3
@@ -36,7 +36,6 @@ class ForegroundPage(page_module.Page):
     super(ForegroundPage, self).__init__(
         url=url, page_set=story_set, name=name,
         shared_page_state_class=shared_page_state.SharedMobilePageState)
-    self.archive_data_file = story_set.archive_data_file
 
   def _TakeMemoryMeasurement(self, action_runner, phase):
     action_runner.Wait(1)  # See crbug.com/540022#c17.

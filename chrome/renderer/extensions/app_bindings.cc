@@ -4,6 +4,8 @@
 
 #include "chrome/renderer/extensions/app_bindings.h"
 
+#include <memory>
+
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
@@ -73,7 +75,7 @@ void AppBindings::GetDetails(
 
 v8::Local<v8::Value> AppBindings::GetDetailsImpl(blink::WebLocalFrame* frame) {
   v8::Isolate* isolate = frame->mainWorldScriptContext()->GetIsolate();
-  if (frame->document().securityOrigin().isUnique())
+  if (frame->document().getSecurityOrigin().isUnique())
     return v8::Null(isolate);
 
   const Extension* extension =
@@ -83,10 +85,10 @@ v8::Local<v8::Value> AppBindings::GetDetailsImpl(blink::WebLocalFrame* frame) {
   if (!extension)
     return v8::Null(isolate);
 
-  scoped_ptr<base::DictionaryValue> manifest_copy(
+  std::unique_ptr<base::DictionaryValue> manifest_copy(
       extension->manifest()->value()->DeepCopy());
   manifest_copy->SetString("id", extension->id());
-  scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+  std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
   return converter->ToV8Value(manifest_copy.get(),
                               frame->mainWorldScriptContext());
 }
@@ -117,7 +119,7 @@ void AppBindings::GetRunningState(
   // To distinguish between ready_to_run and cannot_run states, we need the app
   // from the top frame.
   blink::WebSecurityOrigin top_frame_security_origin =
-      context()->web_frame()->top()->securityOrigin();
+      context()->web_frame()->top()->getSecurityOrigin();
   const RendererExtensionRegistry* extensions =
       RendererExtensionRegistry::Get();
 

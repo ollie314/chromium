@@ -4,18 +4,19 @@
 
 #include "chrome/browser/chromeos/login/users/multi_profile_user_controller.h"
 
+#include <memory>
+
 #include "base/bind.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_change_registrar.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/chromeos/login/users/multi_profile_user_controller_delegate.h"
 #include "chrome/browser/chromeos/policy/policy_cert_service.h"
 #include "chrome/browser/chromeos/policy/policy_cert_service_factory.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_change_registrar.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
@@ -161,7 +162,7 @@ void MultiProfileUserController::StartObserving(Profile* user_profile) {
   if (user_profile->GetProfileUserName().empty())
     return;
 
-  scoped_ptr<PrefChangeRegistrar> registrar(new PrefChangeRegistrar);
+  std::unique_ptr<PrefChangeRegistrar> registrar(new PrefChangeRegistrar);
   registrar->Init(user_profile->GetPrefs());
   registrar->Add(
       prefs::kMultiProfileUserBehavior,

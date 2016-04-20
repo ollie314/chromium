@@ -35,12 +35,12 @@ public:
 protected:
     static unsigned long long beaconSize(const String&);
     static unsigned long long beaconSize(Blob*);
-    static unsigned long long beaconSize(PassRefPtr<DOMArrayBufferView>);
+    static unsigned long long beaconSize(DOMArrayBufferView*);
     static unsigned long long beaconSize(FormData*);
 
     static bool serialize(const String&, ResourceRequest&, int, int&);
     static bool serialize(Blob*, ResourceRequest&, int, int&);
-    static bool serialize(PassRefPtr<DOMArrayBufferView>, ResourceRequest&, int, int&);
+    static bool serialize(DOMArrayBufferView*, ResourceRequest&, int, int&);
     static bool serialize(FormData*, ResourceRequest&, int, int&);
 };
 
@@ -97,20 +97,20 @@ public:
         FetchInitiatorInfo initiatorInfo;
         initiatorInfo.name = FetchInitiatorTypeNames::beacon;
 
-        // Leak the loader, since it will kill itself as soon as it receives a response.
-        RefPtrWillBeRawPtr<BeaconLoader> loader = adoptRefWillBeNoop(new BeaconLoader(frame, request, initiatorInfo, AllowStoredCredentials));
-        loader->ref();
+        // The loader keeps itself alive until it receives a response and disposes itself.
+        BeaconLoader* loader = new BeaconLoader(frame, request, initiatorInfo, AllowStoredCredentials);
+        ASSERT_UNUSED(loader, loader);
         return true;
     }
 };
 
 bool BeaconLoader::sendBeacon(LocalFrame* frame, int allowance, const KURL& beaconURL, const String& data, int& payloadLength)
 {
-    BeaconData<decltype(data)> beacon(data);
+    BeaconData<String> beacon(data);
     return Sender::send(frame, allowance, beaconURL, beacon, payloadLength);
 }
 
-bool BeaconLoader::sendBeacon(LocalFrame* frame, int allowance, const KURL& beaconURL, PassRefPtr<DOMArrayBufferView> data, int& payloadLength)
+bool BeaconLoader::sendBeacon(LocalFrame* frame, int allowance, const KURL& beaconURL, DOMArrayBufferView* data, int& payloadLength)
 {
     BeaconData<decltype(data)> beacon(data);
     return Sender::send(frame, allowance, beaconURL, beacon, payloadLength);
@@ -130,7 +130,7 @@ bool BeaconLoader::sendBeacon(LocalFrame* frame, int allowance, const KURL& beac
 
 BeaconLoader::BeaconLoader(LocalFrame* frame, ResourceRequest& request, const FetchInitiatorInfo& initiatorInfo, StoredCredentials credentialsAllowed)
     : PingLoader(frame, request, initiatorInfo, credentialsAllowed)
-    , m_beaconOrigin(frame->document()->securityOrigin())
+    , m_beaconOrigin(frame->document()->getSecurityOrigin())
 {
 }
 
@@ -197,12 +197,12 @@ bool Beacon::serialize(Blob* data, ResourceRequest& request, int, int&)
     return true;
 }
 
-unsigned long long Beacon::beaconSize(PassRefPtr<DOMArrayBufferView> data)
+unsigned long long Beacon::beaconSize(DOMArrayBufferView* data)
 {
     return data->byteLength();
 }
 
-bool Beacon::serialize(PassRefPtr<DOMArrayBufferView> data, ResourceRequest& request, int, int&)
+bool Beacon::serialize(DOMArrayBufferView* data, ResourceRequest& request, int, int&)
 {
     ASSERT(data);
     RefPtr<EncodedFormData> entityBody = EncodedFormData::create(data->baseAddress(), data->byteLength());
@@ -229,7 +229,7 @@ bool Beacon::serialize(FormData* data, ResourceRequest& request, int allowance, 
     if (allowance > 0 && static_cast<unsigned long long>(allowance) < entitySize)
         return false;
 
-    AtomicString contentType = AtomicString("multipart/form-data; boundary=", AtomicString::ConstructFromLiteral) + entityBody->boundary().data();
+    AtomicString contentType = AtomicString("multipart/form-data; boundary=") + entityBody->boundary().data();
     request.setHTTPBody(entityBody.release());
     request.setHTTPContentType(contentType);
 

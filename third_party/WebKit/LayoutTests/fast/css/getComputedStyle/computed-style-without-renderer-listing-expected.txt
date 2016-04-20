@@ -6,7 +6,6 @@ On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE
 -webkit-app-region: no-drag
 -webkit-appearance: none
 -webkit-background-clip: border-box
--webkit-background-composite: source-over
 -webkit-background-origin: padding-box
 -webkit-border-horizontal-spacing: 0px
 -webkit-border-image: none
@@ -22,16 +21,6 @@ On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE
 -webkit-box-pack: start
 -webkit-box-reflect: none
 -webkit-clip-path: none
--webkit-column-break-after: auto
--webkit-column-break-before: auto
--webkit-column-break-inside: auto
--webkit-column-count: auto
--webkit-column-gap: normal
--webkit-column-rule-color: rgb(0, 0, 0)
--webkit-column-rule-style: none
--webkit-column-rule-width: 0px
--webkit-column-span: none
--webkit-column-width: auto
 -webkit-filter: none
 -webkit-font-smoothing: auto
 -webkit-highlight: none
@@ -72,7 +61,7 @@ On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE
 -webkit-user-modify: read-only
 -webkit-user-select: text
 -webkit-writing-mode: horizontal-tb
-align-content: start
+align-content: normal
 align-items: start
 align-self: start
 alignment-baseline: auto
@@ -124,6 +113,9 @@ border-top-width: 0px
 bottom: auto
 box-shadow: none
 box-sizing: content-box
+break-after: auto
+break-before: auto
+break-inside: auto
 buffered-rendering: auto
 caption-side: top
 clear: none
@@ -134,11 +126,18 @@ color: rgb(0, 0, 0)
 color-interpolation: sRGB
 color-interpolation-filters: linearRGB
 color-rendering: auto
-content: 
+column-count: auto
+column-gap: normal
+column-rule-color: rgb(0, 0, 0)
+column-rule-style: none
+column-rule-width: 0px
+column-span: none
+column-width: auto
+content: normal
 cursor: auto
 cx: 0px
 cy: 0px
-d: path('')
+d: none
 direction: ltr
 display: none
 dominant-baseline: auto
@@ -161,6 +160,7 @@ font-size-adjust: none
 font-stretch: normal
 font-style: normal
 font-variant: normal
+font-variant-caps: normal
 font-variant-ligatures: normal
 font-weight: normal
 grid-auto-columns: auto
@@ -179,7 +179,7 @@ height: auto
 image-orientation: 0deg
 image-rendering: auto
 isolation: auto
-justify-content: start
+justify-content: normal
 justify-items: start
 justify-self: start
 left: auto
@@ -224,9 +224,6 @@ padding-bottom: 0px
 padding-left: 0px
 padding-right: 0px
 padding-top: 0px
-page-break-after: auto
-page-break-before: auto
-page-break-inside: auto
 paint-order: fill stroke markers
 perspective: none
 perspective-origin: 50% 50%
@@ -249,6 +246,7 @@ shape-image-threshold: 0
 shape-margin: 0px
 shape-outside: none
 shape-rendering: auto
+snap-height: 0px
 speak: normal
 stop-color: rgb(0, 0, 0)
 stop-opacity: 1

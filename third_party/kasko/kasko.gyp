@@ -10,6 +10,7 @@
         'buildflag_flags': [
           'ENABLE_KASKO=<(kasko)',
           'ENABLE_KASKO_HANG_REPORTS=<(kasko_hang_reports)',
+          'ENABLE_KASKO_FAILED_RDV_REPORTS=<(kasko_failed_rdv_reports)',
         ],
       },
     },
@@ -61,6 +62,9 @@
               '../../third_party/kasko/binaries/include',
             ],
           },
+          'export_dependent_settings': [
+            'kasko_features',
+          ]
         },
       ],
     }, {  # 'kasko==0'

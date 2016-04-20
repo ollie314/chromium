@@ -4,10 +4,11 @@
 
 #include "chrome/browser/ui/search/search_tab_helper.h"
 
+#include <memory>
 #include <set>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -38,6 +39,7 @@
 #include "components/omnibox/browser/omnibox_view.h"
 #include "components/search/search.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -147,9 +149,10 @@ SearchTabHelper::SearchTabHelper(content::WebContents* web_contents)
     : WebContentsObserver(web_contents),
       is_search_enabled_(search::IsInstantExtendedAPIEnabled()),
       web_contents_(web_contents),
-      ipc_router_(web_contents,
-                  this,
-                  make_scoped_ptr(new SearchIPCRouterPolicyImpl(web_contents))),
+      ipc_router_(
+          web_contents,
+          this,
+          base::WrapUnique(new SearchIPCRouterPolicyImpl(web_contents))),
       instant_service_(NULL),
       delegate_(NULL),
       omnibox_has_focus_fn_(&OmniboxHasFocus) {
@@ -448,12 +451,11 @@ void SearchTabHelper::FocusOmnibox(OmniboxFocusState state) {
 }
 
 void SearchTabHelper::NavigateToURL(const GURL& url,
-                                    WindowOpenDisposition disposition,
-                                    bool is_most_visited_item_url) {
-  if (is_most_visited_item_url) {
-    content::RecordAction(
-        base::UserMetricsAction("InstantExtended.MostVisitedClicked"));
-  }
+                                    WindowOpenDisposition disposition) {
+  // Make sure the specified URL is actually on the most visited or suggested
+  // items list.
+  if (!instant_service_ || !instant_service_->IsValidURLForNavigation(url))
+    return;
 
   if (delegate_)
     delegate_->NavigateOnThumbnailClick(url, disposition, web_contents_);

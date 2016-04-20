@@ -4,12 +4,11 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager_impl.h"
@@ -23,6 +22,7 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/prefs/pref_service.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/common/content_switches.h"
@@ -147,9 +147,9 @@ class UserManagerTest : public testing::Test {
   content::TestBrowserThreadBundle thread_bundle_;
 
   ScopedCrosSettingsTestHelper settings_helper_;
-  scoped_ptr<ScopedTestingLocalState> local_state_;
+  std::unique_ptr<ScopedTestingLocalState> local_state_;
 
-  scoped_ptr<ScopedUserManagerEnabler> user_manager_enabler_;
+  std::unique_ptr<ScopedUserManagerEnabler> user_manager_enabler_;
   base::ScopedTempDir temp_dir_;
 };
 

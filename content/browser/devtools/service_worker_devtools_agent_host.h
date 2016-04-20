@@ -40,13 +40,14 @@ class ServiceWorkerDevToolsAgentHost : public WorkerDevToolsAgentHost {
   void OnAttachedStateChanged(bool attached) override;
 
   int64_t service_worker_version_id() const;
+  GURL scope() const;
 
   bool Matches(const ServiceWorkerIdentifier& other);
 
  private:
   ~ServiceWorkerDevToolsAgentHost() override;
-  scoped_ptr<ServiceWorkerIdentifier> service_worker_;
-  scoped_ptr<devtools::network::NetworkHandler> network_handler_;
+  std::unique_ptr<ServiceWorkerIdentifier> service_worker_;
+  std::unique_ptr<devtools::network::NetworkHandler> network_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerDevToolsAgentHost);
 };

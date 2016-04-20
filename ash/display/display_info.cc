@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ash/display/display_info.h"
+
 #include <stdio.h>
+
+#include <algorithm>
 #include <string>
 #include <vector>
 
-#include "ash/display/display_info.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -18,7 +21,7 @@
 
 #if defined(OS_WIN)
 #include "ui/aura/window_tree_host.h"
-#include "ui/gfx/win/dpi.h"
+#include "ui/display/win/dpi.h"
 #endif
 
 namespace ash {
@@ -168,7 +171,7 @@ DisplayInfo DisplayInfo::CreateFromSpecWithID(const std::string& spec,
   float device_scale_factor = 1.0f;
   if (!GetDisplayBounds(main_spec, &bounds_in_native, &device_scale_factor)) {
 #if defined(OS_WIN)
-    device_scale_factor = gfx::GetDPIScale();
+    device_scale_factor = display::win::GetDPIScale();
 #endif
   }
 
@@ -237,6 +240,7 @@ void DisplayInfo::SetUse125DSFForUIScalingForTest(bool enable) {
 DisplayInfo::DisplayInfo()
     : id_(gfx::Display::kInvalidDisplayID),
       has_overscan_(false),
+      active_rotation_source_(gfx::Display::ROTATION_SOURCE_UNKNOWN),
       touch_support_(gfx::Display::TOUCH_SUPPORT_UNKNOWN),
       device_scale_factor_(1.0f),
       device_dpi_(kDpi96),
@@ -251,6 +255,7 @@ DisplayInfo::DisplayInfo(int64_t id, const std::string& name, bool has_overscan)
     : id_(id),
       name_(name),
       has_overscan_(has_overscan),
+      active_rotation_source_(gfx::Display::ROTATION_SOURCE_UNKNOWN),
       touch_support_(gfx::Display::TOUCH_SUPPORT_UNKNOWN),
       device_scale_factor_(1.0f),
       device_dpi_(kDpi96),
@@ -261,6 +266,8 @@ DisplayInfo::DisplayInfo(int64_t id, const std::string& name, bool has_overscan)
       clear_overscan_insets_(false),
       color_profile_(ui::COLOR_PROFILE_STANDARD) {}
 
+DisplayInfo::DisplayInfo(const DisplayInfo& other) = default;
+
 DisplayInfo::~DisplayInfo() {
 }
 
@@ -268,6 +275,7 @@ void DisplayInfo::SetRotation(gfx::Display::Rotation rotation,
                               gfx::Display::RotationSource source) {
   rotations_[source] = rotation;
   rotations_[gfx::Display::ROTATION_SOURCE_ACTIVE] = rotation;
+  active_rotation_source_ = source;
 }
 
 gfx::Display::Rotation DisplayInfo::GetActiveRotation() const {
@@ -286,6 +294,7 @@ void DisplayInfo::Copy(const DisplayInfo& native_info) {
   name_ = native_info.name_;
   has_overscan_ = native_info.has_overscan_;
 
+  active_rotation_source_ = native_info.active_rotation_source_;
   touch_support_ = native_info.touch_support_;
   input_devices_ = native_info.input_devices_;
   device_scale_factor_ = native_info.device_scale_factor_;
@@ -296,6 +305,7 @@ void DisplayInfo::Copy(const DisplayInfo& native_info) {
   is_aspect_preserving_scaling_ = native_info.is_aspect_preserving_scaling_;
   display_modes_ = native_info.display_modes_;
   available_color_profiles_ = native_info.available_color_profiles_;
+  maximum_cursor_size_ = native_info.maximum_cursor_size_;
 
   // Rotation, ui_scale, color_profile and overscan are given by preference,
   // or unit tests. Don't copy if this native_info came from

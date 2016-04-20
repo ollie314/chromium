@@ -12,7 +12,6 @@
 #include "content/public/common/content_switches.h"
 
 #if defined(OS_WIN)
-#include "base/strings/string_tokenizer.h"
 #include "base/win/windows_version.h"
 #include "ui/gfx/win/direct_write.h"
 #endif
@@ -21,9 +20,9 @@ namespace content {
 
 namespace {
 
-#if defined(OS_WIN)
-static bool g_win32k_renderer_lockdown_disabled = false;
-#endif
+bool IsUseZoomForDSFEnabledByDefault() {
+  return false;
+}
 
 }  // namespace
 
@@ -31,29 +30,13 @@ bool IsPinchToZoomEnabled() {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
 
-  // --disable-pinch should always disable pinch
-  if (command_line.HasSwitch(switches::kDisablePinch))
-    return false;
-
-#if defined(OS_WIN)
-  return base::win::GetVersion() >= base::win::VERSION_WIN8;
-#elif defined(OS_CHROMEOS)
-  return true;
-#else
-  return command_line.HasSwitch(switches::kEnableViewport) ||
-      command_line.HasSwitch(switches::kEnablePinch);
-#endif
+  // Enable pinch everywhere unless it's been explicitly disabled.
+  return !command_line.HasSwitch(switches::kDisablePinch);
 }
 
 #if defined(OS_WIN)
-
-void DisableWin32kRendererLockdown() {
-  g_win32k_renderer_lockdown_disabled = true;
-}
 
 bool IsWin32kRendererLockdownEnabled() {
-  if (g_win32k_renderer_lockdown_disabled)
-    return false;
   if (base::win::GetVersion() < base::win::VERSION_WIN8)
     return false;
   if (!gfx::win::ShouldUseDirectWrite())
@@ -64,32 +47,6 @@ bool IsWin32kRendererLockdownEnabled() {
   return true;
 }
 
-bool IsWin32kLockdownEnabledForMimeType(const std::string& mime_type) {
-  // Consider PPAPI lockdown a superset of renderer lockdown.
-  if (!IsWin32kRendererLockdownEnabled())
-    return false;
-  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
-
-  std::string mime_types =
-      base::FieldTrialList::FindFullName("EnableWin32kLockDownMimeTypes");
-  if (cmd_line->HasSwitch(switches::kEnableWin32kLockDownMimeTypes)) {
-    mime_types =
-        cmd_line->GetSwitchValueASCII(switches::kEnableWin32kLockDownMimeTypes);
-  }
-
-  // Consider the value * to enable all mime types for lockdown.
-  if (mime_types == "*")
-    return true;
-
-  base::StringTokenizer tokenizer(mime_types, ",");
-  tokenizer.set_quote_chars("\"");
-  while (tokenizer.GetNext()) {
-    if (tokenizer.token() == mime_type)
-      return true;
-  }
-
-  return false;
-}
 #endif
 
 V8CacheOptions GetV8CacheOptions() {
@@ -111,8 +68,15 @@ V8CacheOptions GetV8CacheOptions() {
 }
 
 bool IsUseZoomForDSFEnabled() {
-  static bool enabled = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableUseZoomForDSF);
+  static bool use_zoom_for_dsf_enabled_by_default =
+      IsUseZoomForDSFEnabledByDefault();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  bool enabled =
+      (command_line->HasSwitch(switches::kEnableUseZoomForDSF) ||
+       use_zoom_for_dsf_enabled_by_default) &&
+      command_line->GetSwitchValueASCII(
+          switches::kEnableUseZoomForDSF) != "false";
+
   return enabled;
 }
 

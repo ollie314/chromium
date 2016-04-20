@@ -4,8 +4,8 @@
 
 #include "mash/example/views_examples/views_examples_application_delegate.h"
 
-#include "mojo/shell/public/cpp/application_connection.h"
-#include "mojo/shell/public/cpp/application_impl.h"
+#include "services/shell/public/cpp/connection.h"
+#include "services/shell/public/cpp/connector.h"
 #include "ui/views/examples/example_base.h"
 #include "ui/views/examples/examples_window.h"
 #include "ui/views/mus/aura_init.h"
@@ -16,17 +16,29 @@ ViewsExamplesApplicationDelegate::ViewsExamplesApplicationDelegate() {}
 ViewsExamplesApplicationDelegate::~ViewsExamplesApplicationDelegate() {
 }
 
-void ViewsExamplesApplicationDelegate::Initialize(mojo::ApplicationImpl* app) {
-  tracing_.Initialize(app);
-  aura_init_.reset(new views::AuraInit(app, "views_mus_resources.pak"));
+void ViewsExamplesApplicationDelegate::Initialize(
+    shell::Connector* connector,
+    const shell::Identity& identity,
+    uint32_t id) {
+  tracing_.Initialize(connector, identity.name());
+  aura_init_.reset(new views::AuraInit(connector, "views_mus_resources.pak"));
+  views::WindowManagerConnection::Create(connector);
+}
 
-  views::WindowManagerConnection::Create(app);
+bool ViewsExamplesApplicationDelegate::AcceptConnection(
+    shell::Connection* connection) {
+  connection->AddInterface<mash::mojom::Launchable>(this);
+  return true;
+}
 
-  views::examples::ShowExamplesWindow(views::examples::DO_NOTHING_ON_CLOSE,
+void ViewsExamplesApplicationDelegate::Launch(uint32_t what,
+                                              mash::mojom::LaunchMode how) {
+  views::examples::ShowExamplesWindow(views::examples::QUIT_ON_CLOSE,
                                       nullptr, nullptr);
 }
 
-bool ViewsExamplesApplicationDelegate::ConfigureIncomingConnection(
-    mojo::ApplicationConnection* connection) {
-  return false;
+void ViewsExamplesApplicationDelegate::Create(
+    shell::Connection* connection,
+    mash::mojom::LaunchableRequest request) {
+  bindings_.AddBinding(this, std::move(request));
 }

@@ -39,12 +39,12 @@ class WebRTCDTMFSenderHandler;
 class WebRTCPeerConnectionHandler;
 
 class RTCDTMFSender final
-    : public RefCountedGarbageCollectedEventTargetWithInlineData<RTCDTMFSender>
+    : public EventTargetWithInlineData
     , public WebRTCDTMFSenderHandlerClient
     , public ActiveDOMObject {
-    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(RTCDTMFSender);
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(RTCDTMFSender);
+    USING_GARBAGE_COLLECTED_MIXIN(RTCDTMFSender);
     DEFINE_WRAPPERTYPEINFO();
+    USING_PRE_FINALIZER(RTCDTMFSender, dispose);
 public:
     static RTCDTMFSender* create(ExecutionContext*, WebRTCPeerConnectionHandler*, MediaStreamTrack*, ExceptionState&);
     ~RTCDTMFSender() override;
@@ -63,19 +63,18 @@ public:
 
     // EventTarget
     const AtomicString& interfaceName() const override;
-    ExecutionContext* executionContext() const override;
+    ExecutionContext* getExecutionContext() const override;
 
     // ActiveDOMObject
     void stop() override;
 
-    // Oilpan: need to eagerly finalize m_handler
-    EAGERLY_FINALIZE();
     DECLARE_VIRTUAL_TRACE();
 
 private:
     RTCDTMFSender(ExecutionContext*, MediaStreamTrack*, PassOwnPtr<WebRTCDTMFSenderHandler>);
+    void dispose();
 
-    void scheduleDispatchEvent(PassRefPtrWillBeRawPtr<Event>);
+    void scheduleDispatchEvent(Event*);
     void scheduledEventTimerFired(Timer<RTCDTMFSender>*);
 
     // WebRTCDTMFSenderHandlerClient
@@ -90,7 +89,7 @@ private:
     bool m_stopped;
 
     Timer<RTCDTMFSender> m_scheduledEventTimer;
-    WillBeHeapVector<RefPtrWillBeMember<Event>> m_scheduledEvents;
+    HeapVector<Member<Event>> m_scheduledEvents;
 };
 
 } // namespace blink

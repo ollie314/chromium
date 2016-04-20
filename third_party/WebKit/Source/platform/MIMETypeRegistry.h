@@ -69,6 +69,15 @@ public:
 
     // Check to see if a mime type is a valid Java applet mime type
     static bool isJavaAppletMIMEType(const String& mimeType);
+
+    // Check to see if a mime type is suitable for being loaded as a stylesheet.
+    static bool isSupportedStyleSheetMIMEType(const String& mimeType);
+
+    // Check to see if a mime type is suitable for being loaded as a font.
+    static bool isSupportedFontMIMEType(const String& mimeType);
+
+    // Check to see if a mime type is suitable for being loaded as a text track.
+    static bool isSupportedTextTrackMIMEType(const String& mimeType);
 };
 
 } // namespace blink

@@ -4,7 +4,6 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/compiler_specific.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -13,7 +12,9 @@
 #include "base/run_loop.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/version.h"
+#include "components/prefs/testing_pref_service.h"
 #include "components/update_client/crx_update_item.h"
+#include "components/update_client/persisted_data.h"
 #include "components/update_client/test_configurator.h"
 #include "components/update_client/update_checker.h"
 #include "components/update_client/url_request_post_interceptor.h"
@@ -48,10 +49,9 @@ class UpdateCheckerTest : public testing::Test {
   void SetUp() override;
   void TearDown() override;
 
-  void UpdateCheckComplete(const GURL& original_url,
-                           int error,
-                           const std::string& error_message,
-                           const UpdateResponse::Results& results);
+  void UpdateCheckComplete(int error,
+                           const UpdateResponse::Results& results,
+                           int retry_after_sec);
 
  protected:
   void Quit();
@@ -61,15 +61,15 @@ class UpdateCheckerTest : public testing::Test {
   CrxUpdateItem BuildCrxUpdateItem();
 
   scoped_refptr<TestConfigurator> config_;
+  std::unique_ptr<TestingPrefServiceSimple> pref_;
+  std::unique_ptr<PersistedData> metadata_;
 
   scoped_ptr<UpdateChecker> update_checker_;
 
   scoped_ptr<InterceptorFactory> interceptor_factory_;
   URLRequestPostInterceptor* post_interceptor_;  // Owned by the factory.
 
-  GURL original_url_;
   int error_;
-  std::string error_message_;
   UpdateResponse::Results results_;
 
  private:
@@ -88,6 +88,9 @@ UpdateCheckerTest::~UpdateCheckerTest() {
 void UpdateCheckerTest::SetUp() {
   config_ = new TestConfigurator(base::ThreadTaskRunnerHandle::Get(),
                                  base::ThreadTaskRunnerHandle::Get());
+  pref_.reset(new TestingPrefServiceSimple());
+  PersistedData::RegisterPrefs(pref_->registry());
+  metadata_.reset(new PersistedData(pref_.get()));
   interceptor_factory_.reset(
       new InterceptorFactory(base::ThreadTaskRunnerHandle::Get()));
   post_interceptor_ = interceptor_factory_->CreateInterceptor();
@@ -96,7 +99,6 @@ void UpdateCheckerTest::SetUp() {
   update_checker_.reset();
 
   error_ = 0;
-  error_message_.clear();
   results_ = UpdateResponse::Results();
 }
 
@@ -135,13 +137,10 @@ void UpdateCheckerTest::Quit() {
 }
 
 void UpdateCheckerTest::UpdateCheckComplete(
-    const GURL& original_url,
     int error,
-    const std::string& error_message,
-    const UpdateResponse::Results& results) {
-  original_url_ = original_url;
+    const UpdateResponse::Results& results,
+    int retry_after_sec) {
   error_ = error;
-  error_message_ = error_message;
   results_ = results;
   Quit();
 }
@@ -166,9 +165,10 @@ TEST_F(UpdateCheckerTest, UpdateCheckSuccess) {
   EXPECT_TRUE(post_interceptor_->ExpectRequest(
       new PartialMatch("updatecheck"), test_file("updatecheck_reply_1.xml")));
 
-  update_checker_ = UpdateChecker::Create(config_);
+  update_checker_ = UpdateChecker::Create(config_, metadata_.get());
 
   CrxUpdateItem item(BuildCrxUpdateItem());
+  item.component.ap = "some_ap";
   std::vector<CrxUpdateItem*> items_to_check;
   items_to_check.push_back(&item);
 
@@ -187,24 +187,82 @@ TEST_F(UpdateCheckerTest, UpdateCheckSuccess) {
   // Sanity check the request.
   EXPECT_NE(string::npos, post_interceptor_->GetRequests()[0].find(
                               "request protocol=\"3.0\" extra=\"params\""));
+  // The request must not contain any "dlpref" in the default case.
+  EXPECT_EQ(string::npos,
+            post_interceptor_->GetRequests()[0].find(" dlpref=\""));
   EXPECT_NE(
       string::npos,
       post_interceptor_->GetRequests()[0].find(
-          "app appid=\"jebgalgnebhfojomionfpkfelancnnkf\" version=\"0.9\">"
-          "<updatecheck /><packages><package fp=\"fp1\"/></packages></app>"));
+          "<app appid=\"jebgalgnebhfojomionfpkfelancnnkf\" version=\"0.9\" "
+          "brand=\"TEST\" ap=\"some_ap\"><updatecheck /><ping rd=\"-2\" "));
+  EXPECT_NE(string::npos,
+            post_interceptor_->GetRequests()[0].find(
+                "<packages><package fp=\"fp1\"/></packages></app>"));
 
   EXPECT_NE(string::npos,
             post_interceptor_->GetRequests()[0].find("<hw physmemory="));
 
   // Sanity check the arguments of the callback after parsing.
-  ASSERT_FALSE(config_->UpdateUrl().empty());
-  EXPECT_EQ(config_->UpdateUrl().front(), original_url_);
   EXPECT_EQ(0, error_);
-  EXPECT_TRUE(error_message_.empty());
   EXPECT_EQ(1ul, results_.list.size());
   EXPECT_STREQ("jebgalgnebhfojomionfpkfelancnnkf",
                results_.list[0].extension_id.c_str());
   EXPECT_STREQ("1.0", results_.list[0].manifest.version.c_str());
+}
+
+// Tests that an invalid "ap" is not serialized.
+TEST_F(UpdateCheckerTest, UpdateCheckInvalidAp) {
+  EXPECT_TRUE(post_interceptor_->ExpectRequest(
+      new PartialMatch("updatecheck"), test_file("updatecheck_reply_1.xml")));
+
+  update_checker_ = UpdateChecker::Create(config_, metadata_.get());
+
+  CrxUpdateItem item(BuildCrxUpdateItem());
+  item.component.ap = std::string(257, 'a');  // Too long.
+  std::vector<CrxUpdateItem*> items_to_check;
+  items_to_check.push_back(&item);
+
+  update_checker_->CheckForUpdates(
+      items_to_check, "", base::Bind(&UpdateCheckerTest::UpdateCheckComplete,
+                                     base::Unretained(this)));
+
+  RunThreads();
+
+  EXPECT_NE(
+      string::npos,
+      post_interceptor_->GetRequests()[0].find(
+          "app appid=\"jebgalgnebhfojomionfpkfelancnnkf\" version=\"0.9\" "
+          "brand=\"TEST\"><updatecheck /><ping rd=\"-2\" "));
+  EXPECT_NE(string::npos,
+            post_interceptor_->GetRequests()[0].find(
+                "<packages><package fp=\"fp1\"/></packages></app>"));
+}
+
+TEST_F(UpdateCheckerTest, UpdateCheckSuccessNoBrand) {
+  EXPECT_TRUE(post_interceptor_->ExpectRequest(
+      new PartialMatch("updatecheck"), test_file("updatecheck_reply_1.xml")));
+
+  config_->SetBrand("TOOLONG");   // Sets an invalid brand code.
+  update_checker_ = UpdateChecker::Create(config_, metadata_.get());
+
+  CrxUpdateItem item(BuildCrxUpdateItem());
+  std::vector<CrxUpdateItem*> items_to_check;
+  items_to_check.push_back(&item);
+
+  update_checker_->CheckForUpdates(
+      items_to_check, "", base::Bind(&UpdateCheckerTest::UpdateCheckComplete,
+                                     base::Unretained(this)));
+
+  RunThreads();
+
+  EXPECT_NE(
+      string::npos,
+      post_interceptor_->GetRequests()[0].find(
+          "<app appid=\"jebgalgnebhfojomionfpkfelancnnkf\" version=\"0.9\">"
+          "<updatecheck /><ping rd=\"-2\" "));
+  EXPECT_NE(string::npos,
+            post_interceptor_->GetRequests()[0].find(
+                "<packages><package fp=\"fp1\"/></packages></app>"));
 }
 
 // Simulates a 403 server response error.
@@ -212,7 +270,59 @@ TEST_F(UpdateCheckerTest, UpdateCheckError) {
   EXPECT_TRUE(
       post_interceptor_->ExpectRequest(new PartialMatch("updatecheck"), 403));
 
-  update_checker_ = UpdateChecker::Create(config_);
+  update_checker_ = UpdateChecker::Create(config_, metadata_.get());
+
+  CrxUpdateItem item(BuildCrxUpdateItem());
+  std::vector<CrxUpdateItem*> items_to_check;
+  items_to_check.push_back(&item);
+
+  update_checker_->CheckForUpdates(
+      items_to_check, "", base::Bind(&UpdateCheckerTest::UpdateCheckComplete,
+                                     base::Unretained(this)));
+  RunThreads();
+
+  EXPECT_EQ(1, post_interceptor_->GetHitCount())
+      << post_interceptor_->GetRequestsAsString();
+  EXPECT_EQ(1, post_interceptor_->GetCount())
+      << post_interceptor_->GetRequestsAsString();
+
+  EXPECT_EQ(403, error_);
+  EXPECT_EQ(0ul, results_.list.size());
+}
+
+TEST_F(UpdateCheckerTest, UpdateCheckDownloadPreference) {
+  EXPECT_TRUE(post_interceptor_->ExpectRequest(
+      new PartialMatch("updatecheck"), test_file("updatecheck_reply_1.xml")));
+
+  config_->SetDownloadPreference(string("cacheable"));
+
+  update_checker_ = UpdateChecker::Create(config_, metadata_.get());
+
+  CrxUpdateItem item(BuildCrxUpdateItem());
+  std::vector<CrxUpdateItem*> items_to_check;
+  items_to_check.push_back(&item);
+
+  update_checker_->CheckForUpdates(
+      items_to_check, "extra=\"params\"",
+      base::Bind(&UpdateCheckerTest::UpdateCheckComplete,
+                 base::Unretained(this)));
+
+  RunThreads();
+
+  // The request must contain dlpref="cacheable".
+  EXPECT_NE(string::npos,
+            post_interceptor_->GetRequests()[0].find(" dlpref=\"cacheable\""));
+}
+
+// This test is checking that an update check signed with CUP fails, since there
+// is currently no entity that can respond with a valid signed response.
+// A proper CUP test requires network mocks, which are not available now.
+TEST_F(UpdateCheckerTest, UpdateCheckCupError) {
+  EXPECT_TRUE(post_interceptor_->ExpectRequest(
+      new PartialMatch("updatecheck"), test_file("updatecheck_reply_1.xml")));
+
+  config_->SetUseCupSigning(true);
+  update_checker_ = UpdateChecker::Create(config_, metadata_.get());
 
   CrxUpdateItem item(BuildCrxUpdateItem());
   std::vector<CrxUpdateItem*> items_to_check;
@@ -226,14 +336,80 @@ TEST_F(UpdateCheckerTest, UpdateCheckError) {
 
   EXPECT_EQ(1, post_interceptor_->GetHitCount())
       << post_interceptor_->GetRequestsAsString();
-  EXPECT_EQ(1, post_interceptor_->GetCount())
+  ASSERT_EQ(1, post_interceptor_->GetCount())
       << post_interceptor_->GetRequestsAsString();
 
-  ASSERT_FALSE(config_->UpdateUrl().empty());
-  EXPECT_EQ(config_->UpdateUrl().front(), original_url_);
-  EXPECT_EQ(403, error_);
-  EXPECT_STREQ("network error", error_message_.c_str());
+  // Sanity check the request.
+  EXPECT_NE(
+      string::npos,
+      post_interceptor_->GetRequests()[0].find(
+          "<app appid=\"jebgalgnebhfojomionfpkfelancnnkf\" version=\"0.9\" "
+          "brand=\"TEST\"><updatecheck /><ping rd=\"-2\" "));
+  EXPECT_NE(string::npos,
+            post_interceptor_->GetRequests()[0].find(
+                "<packages><package fp=\"fp1\"/></packages></app>"));
+
+  // Expect an error since the response is not trusted.
+  EXPECT_EQ(-10000, error_);
   EXPECT_EQ(0ul, results_.list.size());
+}
+
+// Tests that the UpdateCheckers will not make an update check for a
+// component that requires encryption when the update check URL is unsecure.
+TEST_F(UpdateCheckerTest, UpdateCheckRequiresEncryptionError) {
+  config_->SetUpdateCheckUrl(GURL("http:\\foo\bar"));
+
+  update_checker_ = UpdateChecker::Create(config_, metadata_.get());
+
+  CrxUpdateItem item(BuildCrxUpdateItem());
+  item.component.requires_network_encryption = true;
+  std::vector<CrxUpdateItem*> items_to_check;
+  items_to_check.push_back(&item);
+
+  update_checker_->CheckForUpdates(
+      items_to_check, "", base::Bind(&UpdateCheckerTest::UpdateCheckComplete,
+                                     base::Unretained(this)));
+  RunThreads();
+
+  EXPECT_EQ(-1, error_);
+  EXPECT_EQ(0u, results_.list.size());
+}
+
+// Tests that the PersistedData will get correctly update and reserialize
+// the elapsed_days value.
+TEST_F(UpdateCheckerTest, UpdateCheckDateLastRollCall) {
+  EXPECT_TRUE(post_interceptor_->ExpectRequest(
+      new PartialMatch("updatecheck"), test_file("updatecheck_reply_4.xml")));
+  EXPECT_TRUE(post_interceptor_->ExpectRequest(
+      new PartialMatch("updatecheck"), test_file("updatecheck_reply_4.xml")));
+
+  update_checker_ = UpdateChecker::Create(config_, metadata_.get());
+
+  CrxUpdateItem item(BuildCrxUpdateItem());
+  std::vector<CrxUpdateItem*> items_to_check;
+  items_to_check.push_back(&item);
+
+  // Do two update-checks.
+  update_checker_->CheckForUpdates(
+      items_to_check, "extra=\"params\"",
+      base::Bind(&UpdateCheckerTest::UpdateCheckComplete,
+                 base::Unretained(this)));
+  RunThreads();
+  update_checker_ = UpdateChecker::Create(config_, metadata_.get());
+  update_checker_->CheckForUpdates(
+      items_to_check, "extra=\"params\"",
+      base::Bind(&UpdateCheckerTest::UpdateCheckComplete,
+                 base::Unretained(this)));
+  RunThreads();
+
+  EXPECT_EQ(2, post_interceptor_->GetHitCount())
+      << post_interceptor_->GetRequestsAsString();
+  ASSERT_EQ(2, post_interceptor_->GetCount())
+      << post_interceptor_->GetRequestsAsString();
+  EXPECT_NE(string::npos, post_interceptor_->GetRequests()[0].find(
+                              "<ping rd=\"-2\" ping_freshness="));
+  EXPECT_NE(string::npos, post_interceptor_->GetRequests()[1].find(
+                              "<ping rd=\"3383\" ping_freshness="));
 }
 
 }  // namespace update_client

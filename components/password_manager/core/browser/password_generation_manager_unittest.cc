@@ -8,9 +8,6 @@
 #include <vector>
 
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/testing_pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
@@ -24,6 +21,9 @@
 #include "components/password_manager/core/browser/stub_password_manager_driver.h"
 #include "components/password_manager/core/browser/test_password_store.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/testing_pref_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -77,7 +77,7 @@ class MockPasswordManagerClient : public StubPasswordManagerClient {
   MOCK_CONST_METHOD0(IsSavingAndFillingEnabledForCurrentPage, bool());
   MOCK_CONST_METHOD0(IsOffTheRecord, bool());
 
-  explicit MockPasswordManagerClient(scoped_ptr<PrefService> prefs)
+  explicit MockPasswordManagerClient(std::unique_ptr<PrefService> prefs)
       : prefs_(std::move(prefs)),
         store_(new TestPasswordStore),
         driver_(this) {}
@@ -90,7 +90,7 @@ class MockPasswordManagerClient : public StubPasswordManagerClient {
   TestPasswordManagerDriver* test_driver() { return &driver_; }
 
  private:
-  scoped_ptr<PrefService> prefs_;
+  std::unique_ptr<PrefService> prefs_;
   scoped_refptr<TestPasswordStore> store_;
   TestPasswordManagerDriver driver_;
 };
@@ -103,7 +103,8 @@ class PasswordGenerationManagerTest : public testing::Test {
     // Construct a PrefService and register all necessary prefs before handing
     // it off to |client_|, as the initialization flow of |client_| will
     // indirectly cause those prefs to be immediately accessed.
-    scoped_ptr<TestingPrefServiceSimple> prefs(new TestingPrefServiceSimple());
+    std::unique_ptr<TestingPrefServiceSimple> prefs(
+        new TestingPrefServiceSimple());
     prefs->registry()->RegisterBooleanPref(prefs::kPasswordManagerSavingEnabled,
                                            true);
     client_.reset(new MockPasswordManagerClient(std::move(prefs)));
@@ -127,7 +128,7 @@ class PasswordGenerationManagerTest : public testing::Test {
   }
 
   base::MessageLoop message_loop_;
-  scoped_ptr<MockPasswordManagerClient> client_;
+  std::unique_ptr<MockPasswordManagerClient> client_;
 };
 
 TEST_F(PasswordGenerationManagerTest, IsGenerationEnabled) {
@@ -212,17 +213,18 @@ TEST_F(PasswordGenerationManagerTest, DetectFormsEligibleForGeneration) {
   // PASSWORD = 75
   // ACCOUNT_CREATION_PASSWORD = 76
   // NEW_PASSWORD = 88
-  const char* const kServerResponse =
-      "<autofillqueryresponse>"
-      "<field autofilltype=\"9\" />"
-      "<field autofilltype=\"75\" />"
-      "<field autofilltype=\"9\" />"
-      "<field autofilltype=\"76\" />"
-      "<field autofilltype=\"75\" />"
-      "<field autofilltype=\"88\" />"
-      "<field autofilltype=\"88\" />"
-      "</autofillqueryresponse>";
-  autofill::FormStructure::ParseQueryResponse(kServerResponse, forms, NULL);
+  autofill::AutofillQueryResponseContents response;
+  response.add_field()->set_autofill_type(9);
+  response.add_field()->set_autofill_type(75);
+  response.add_field()->set_autofill_type(9);
+  response.add_field()->set_autofill_type(76);
+  response.add_field()->set_autofill_type(75);
+  response.add_field()->set_autofill_type(88);
+  response.add_field()->set_autofill_type(88);
+
+  std::string response_string;
+  ASSERT_TRUE(response.SerializeToString(&response_string));
+  autofill::FormStructure::ParseQueryResponse(response_string, forms, NULL);
 
   DetectFormsEligibleForGeneration(forms);
   EXPECT_EQ(2u, GetTestDriver()->GetFoundEligibleForGenerationForms().size());

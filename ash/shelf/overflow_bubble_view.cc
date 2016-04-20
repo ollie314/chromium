@@ -7,8 +7,8 @@
 #include <algorithm>
 
 #include "ash/root_window_controller.h"
+#include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_constants.h"
-#include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shelf/shelf_view.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
@@ -32,17 +32,14 @@ const int kShelfViewLeadingInset = 8;
 
 }  // namespace
 
-OverflowBubbleView::OverflowBubbleView()
-    : shelf_view_(NULL) {
-}
+OverflowBubbleView::OverflowBubbleView() : shelf_view_(NULL) {}
 
-OverflowBubbleView::~OverflowBubbleView() {
-}
+OverflowBubbleView::~OverflowBubbleView() {}
 
 void OverflowBubbleView::InitOverflowBubble(views::View* anchor,
                                             ShelfView* shelf_view) {
-  // set_anchor_view needs to be called before GetShelfLayoutManager() can be
-  // called.
+  shelf_view_ = shelf_view;
+
   SetAnchorView(anchor);
   set_arrow(GetBubbleArrow());
   set_background(NULL);
@@ -54,22 +51,18 @@ void OverflowBubbleView::InitOverflowBubble(views::View* anchor,
 
   // Makes bubble view has a layer and clip its children layers.
   SetPaintToLayer(true);
-  SetFillsBoundsOpaquely(false);
+  layer()->SetFillsBoundsOpaquely(false);
   layer()->SetMasksToBounds(true);
-
-  shelf_view_ = shelf_view;
-  AddChildView(shelf_view_);
 
   set_parent_window(Shell::GetContainer(
       anchor->GetWidget()->GetNativeWindow()->GetRootWindow(),
       kShellWindowId_ShelfBubbleContainer));
   views::BubbleDelegateView::CreateBubble(this);
+  AddChildView(shelf_view_);
 }
 
 bool OverflowBubbleView::IsHorizontalAlignment() const {
-  ShelfLayoutManager* shelf_layout_manager = GetShelfLayoutManager();
-  return shelf_layout_manager ? shelf_layout_manager->IsHorizontalAlignment()
-                              : false;
+  return shelf_view_ ? shelf_view_->shelf()->IsHorizontalAlignment() : false;
 }
 
 const gfx::Size OverflowBubbleView::GetContentsSize() const {
@@ -78,14 +71,11 @@ const gfx::Size OverflowBubbleView::GetContentsSize() const {
 
 // Gets arrow location based on shelf alignment.
 views::BubbleBorder::Arrow OverflowBubbleView::GetBubbleArrow() const {
-  ShelfLayoutManager* shelf_layout_manager = GetShelfLayoutManager();
-  return shelf_layout_manager ?
-      shelf_layout_manager->SelectValueForShelfAlignment(
-          views::BubbleBorder::BOTTOM_LEFT,
-          views::BubbleBorder::LEFT_TOP,
-          views::BubbleBorder::RIGHT_TOP,
-          views::BubbleBorder::TOP_LEFT) :
-      views::BubbleBorder::NONE;
+  if (!shelf_view_)
+    return views::BubbleBorder::NONE;
+  return shelf_view_->shelf()->SelectValueForShelfAlignment(
+      views::BubbleBorder::BOTTOM_LEFT, views::BubbleBorder::LEFT_TOP,
+      views::BubbleBorder::RIGHT_TOP);
 }
 
 void OverflowBubbleView::ScrollByXOffset(int x_offset) {
@@ -111,8 +101,10 @@ void OverflowBubbleView::ScrollByYOffset(int y_offset) {
 gfx::Size OverflowBubbleView::GetPreferredSize() const {
   gfx::Size preferred_size = GetContentsSize();
 
-  const gfx::Rect monitor_rect = Shell::GetScreen()->GetDisplayNearestPoint(
-      GetAnchorRect().CenterPoint()).work_area();
+  const gfx::Rect monitor_rect =
+      gfx::Screen::GetScreen()
+          ->GetDisplayNearestPoint(GetAnchorRect().CenterPoint())
+          .work_area();
   if (!monitor_rect.IsEmpty()) {
     if (IsHorizontalAlignment()) {
       preferred_size.set_width(std::min(
@@ -162,12 +154,6 @@ bool OverflowBubbleView::OnMouseWheel(const ui::MouseWheelEvent& event) {
   return true;
 }
 
-ShelfLayoutManager* OverflowBubbleView::GetShelfLayoutManager() const {
-  return GetAnchorView() ? ShelfLayoutManager::ForShelf(
-                               GetAnchorView()->GetWidget()->GetNativeView())
-                         : NULL;
-}
-
 void OverflowBubbleView::OnScrollEvent(ui::ScrollEvent* event) {
   ScrollByXOffset(-event->x_offset());
   ScrollByYOffset(-event->y_offset());
@@ -194,8 +180,10 @@ gfx::Rect OverflowBubbleView::GetBubbleBounds() {
       content_size,
       false);
 
-  gfx::Rect monitor_rect = Shell::GetScreen()->GetDisplayNearestPoint(
-      anchor_rect.CenterPoint()).work_area();
+  gfx::Rect monitor_rect =
+      gfx::Screen::GetScreen()
+          ->GetDisplayNearestPoint(anchor_rect.CenterPoint())
+          .work_area();
 
   int offset = 0;
   if (views::BubbleBorder::is_arrow_on_horizontal(arrow())) {

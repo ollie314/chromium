@@ -7,10 +7,10 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 #include "net/base/net_export.h"
 #include "net/quic/crypto/key_exchange.h"
@@ -42,7 +42,7 @@ class NET_EXPORT_PRIVATE P256KeyExchange : public KeyExchange {
 
   // KeyExchange interface.
   KeyExchange* NewKeyPair(QuicRandom* rand) const override;
-  bool CalculateSharedKey(const base::StringPiece& peer_public_value,
+  bool CalculateSharedKey(base::StringPiece peer_public_value,
                           std::string* shared_key) const override;
   base::StringPiece public_value() const override;
   QuicTag tag() const override;
@@ -70,7 +70,7 @@ class NET_EXPORT_PRIVATE P256KeyExchange : public KeyExchange {
   // |public_key| consists of |kUncompressedP256PointBytes| bytes.
   P256KeyExchange(crypto::ECPrivateKey* key_pair, const uint8_t* public_key);
 
-  scoped_ptr<crypto::ECPrivateKey> key_pair_;
+  std::unique_ptr<crypto::ECPrivateKey> key_pair_;
 #endif
   // The public key stored as an uncompressed P-256 point.
   uint8_t public_key_[kUncompressedP256PointBytes];

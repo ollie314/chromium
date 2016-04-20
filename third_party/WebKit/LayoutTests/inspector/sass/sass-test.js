@@ -2,10 +2,49 @@ var initialize_SassTest = function() {
 
 InspectorTest.preloadModule("sass");
 
-InspectorTest.loadSourceMap = function(header, callback)
+var cssParserService = null;
+
+InspectorTest.cssParserService = function()
+{
+    if (!cssParserService)
+        cssParserService = new WebInspector.CSSParserService();
+    return cssParserService;
+}
+
+var sassSourceMapFactory = null;
+InspectorTest.sassSourceMapFactory = function()
+{
+    if (!sassSourceMapFactory)
+        sassSourceMapFactory = new WebInspector.SASSSourceMapFactory();
+    return sassSourceMapFactory;
+}
+
+InspectorTest.parseCSS = function(url, text)
+{
+    return WebInspector.SASSSupport.parseCSS(InspectorTest.cssParserService(), url, text);
+}
+
+InspectorTest.parseSCSS = function(url, text)
+{
+    return self.runtime.instancePromise(WebInspector.TokenizerFactory)
+        .then(onTokenizer);
+
+    function onTokenizer(tokenizer)
+    {
+        return WebInspector.SASSSupport.parseSCSS(tokenizer, url, text);
+    }
+}
+
+InspectorTest.loadASTMapping = function(header, callback)
 {
     var completeSourceMapURL = WebInspector.ParsedURL.completeURL(header.sourceURL, header.sourceMapURL);
-    WebInspector.SourceMap.load(completeSourceMapURL, header.sourceURL, callback);
+    WebInspector.TextSourceMap.load(completeSourceMapURL, header.sourceURL).then(onSourceMapLoaded);
+
+    function onSourceMapLoaded(sourceMap)
+    {
+        InspectorTest.sassSourceMapFactory().editableSourceMap(header.cssModel().target(), sourceMap)
+            .then(map => callback(map));
+    }
 }
 
 InspectorTest.dumpAST = function(ast)
@@ -135,23 +174,23 @@ InspectorTest.validateASTRanges = function(ast)
 
     function validate(textNode)
     {
-        if (textNode.range.extract(textNode.document.text) !== textNode.text)
+        if (textNode.document.text.extract(textNode.range) !== textNode.text)
             invalidNodes.push(textNode);
     }
 }
 
-InspectorTest.validateMapping = function(mapping, cssAST, sassModels)
+InspectorTest.validateMapping = function(mapping)
 {
-    InspectorTest.addResult("Mapped CSS: " + mapping._cssToSass.size);
-    InspectorTest.addResult("Mapped SCSS: " + mapping._sassToCss.size);
-    var cssNodes = mapping._cssToSass.keysArray();
+    InspectorTest.addResult("Mapped CSS: " + mapping._compiledToSource.size);
+    InspectorTest.addResult("Mapped SCSS: " + mapping._sourceToCompiled.size);
+    var cssNodes = mapping._compiledToSource.keysArray();
     var staleCSS = 0;
     var staleSASS = 0;
     for (var i = 0; i < cssNodes.length; ++i) {
         var cssNode = cssNodes[i];
-        staleCSS += cssNode.document !== cssAST.document ? 1 : 0;
-        var sassNode = mapping.toSASSNode(cssNode);
-        var sassAST = sassModels.get(sassNode.document.url);
+        staleCSS += cssNode.document !== mapping.compiledModel().document ? 1 : 0;
+        var sassNode = mapping.toSourceNode(cssNode);
+        var sassAST = mapping.sourceModels().get(sassNode.document.url);
         staleSASS += sassNode.document !== sassAST.document ? 1 : 0;
     }
     if (staleCSS || staleSASS) {
@@ -163,24 +202,117 @@ InspectorTest.validateMapping = function(mapping, cssAST, sassModels)
     }
 }
 
-InspectorTest.parseSCSS = function(url, text)
+InspectorTest.updateCSSText = function(url, newText)
 {
-    return self.runtime.instancePromise(WebInspector.TokenizerFactory)
-        .then(onTokenizer);
+    var styleSheetIds = InspectorTest.cssModel.styleSheetIdsForURL(url)
+    var promises = styleSheetIds.map(id => InspectorTest.cssModel.setStyleSheetText(id, newText, true));
+    return Promise.all(promises);
+}
 
-    function onTokenizer(tokenizer)
+InspectorTest.updateSASSText = function(url, newText)
+{
+    var uiSourceCode = WebInspector.workspace.uiSourceCodeForURL(url);
+    uiSourceCode.addRevision(newText);
+}
+
+InspectorTest.runCSSEditTests = function(header, tests)
+{
+    var astSourceMap;
+    InspectorTest.loadASTMapping(header, onMapping);
+
+    function onMapping(map)
     {
-        return WebInspector.SASSSupport.parseSCSS(url, text, tokenizer);
+        astSourceMap = map;
+        InspectorTest.addResult("INITIAL MODELS");
+        logASTText(map.compiledModel(), true);
+        for (var ast of map.sourceModels().values())
+            logASTText(ast, true);
+        runTests();
+    }
+
+    function runTests()
+    {
+        if (!tests.length) {
+            InspectorTest.completeTest();
+            return;
+        }
+        var test = tests.shift();
+        logTestName(test.name);
+        var text = astSourceMap.compiledModel().document.text.value();
+        var edits = test(text);
+        logSourceEdits(text, edits);
+        var ranges = edits.map(edit => edit.oldRange);
+        var texts = edits.map(edit => edit.newText);
+        astSourceMap.editCompiled(ranges, texts)
+            .then(onEditsDone);
+    }
+
+    function onEditsDone(result)
+    {
+        if (!result.map) {
+            InspectorTest.addResult("SASSProcessor failed to process edits.");
+            runTests();
+            return;
+        }
+        logASTText(result.map.compiledModel());
+        for (var sassURL of result.newSources.keys()) {
+            var ast = result.map.sourceModels().get(sassURL);
+            logASTText(ast);
+        }
+        runTests();
+    }
+
+    function logASTText(ast, avoidIndent, customTitle)
+    {
+        customTitle = customTitle || ast.document.url.split("/").pop();
+        InspectorTest.addResult("===== " + customTitle + " =====");
+        var text = ast.document.text.value().replace(/ /g, ".");
+        var lines = text.split("\n");
+        if (!avoidIndent)
+            lines = indent(lines);
+        InspectorTest.addResult(lines.join("\n"));
+    }
+
+    function logTestName(testName)
+    {
+        var titleText = " TEST: " + testName + " ";
+        var totalLength = 80;
+        var prefixLength = ((totalLength - titleText.length) / 2)|0;
+        var suffixLength = totalLength - titleText.length - prefixLength;
+        var prefix = new Array(prefixLength).join("-");
+        var suffix = new Array(suffixLength).join("-");
+        InspectorTest.addResult("\n" + prefix + titleText + suffix + "\n");
+    }
+
+    function logSourceEdits(text, edits)
+    {
+        var lines = [];
+        for (var i = 0; i < edits.length; ++i) {
+            var edit = edits[i];
+            var range = edit.oldRange;
+            var line = String.sprintf("{%d, %d, %d, %d}", range.startLine, range.startColumn, range.endLine, range.endColumn);
+            line += String.sprintf(" '%s' => '%s'", (new WebInspector.Text(text)).extract(range), edit.newText);
+            lines.push(line);
+        }
+        lines = indent(lines);
+        lines.unshift("Edits:");
+        InspectorTest.addResult(lines.join("\n"));
     }
 }
 
-var cssParser = null;
-
-InspectorTest.parseCSS = function(url, text)
+InspectorTest.createEdit = function(source, pattern, newText, matchNumber)
 {
-    if (!cssParser)
-        cssParser = new WebInspector.CSSParser();
-    return WebInspector.SASSSupport.parseCSS(cssParser, url, text);
+    matchNumber = matchNumber || 0;
+    var re = new RegExp(pattern.escapeForRegExp(), "g");
+    var match;
+    while ((match = re.exec(source)) !== null && matchNumber) {
+        --matchNumber;
+    }
+    if (!match)
+        return null;
+    var sourceRange = new WebInspector.SourceRange(match.index, match[0].length);
+    var textRange = sourceRange.toTextRange(new WebInspector.Text(source));
+    return new WebInspector.SourceEdit("", textRange, newText);
 }
 
 }

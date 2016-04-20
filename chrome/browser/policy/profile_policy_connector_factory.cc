@@ -10,24 +10,22 @@
 #include "base/memory/singleton.h"
 #include "build/build_config.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
+#include "chrome/browser/policy/schema_registry_service.h"
+#include "chrome/browser/policy/schema_registry_service_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/policy/core/common/policy_service.h"
-
-#if defined(ENABLE_CONFIGURATION_POLICY)
-#include "chrome/browser/policy/schema_registry_service.h"
-#include "chrome/browser/policy/schema_registry_service_factory.h"
 #include "components/policy/core/common/policy_service_impl.h"
+
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_factory_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "components/user_manager/user.h"
-#else
+#else  // Non-ChromeOS.
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
 #include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
-#endif
 #endif
 
 namespace policy {
@@ -44,7 +42,7 @@ ProfilePolicyConnector* ProfilePolicyConnectorFactory::GetForBrowserContext(
 }
 
 // static
-scoped_ptr<ProfilePolicyConnector>
+std::unique_ptr<ProfilePolicyConnector>
 ProfilePolicyConnectorFactory::CreateForBrowserContext(
     content::BrowserContext* context,
     bool force_immediate_load) {
@@ -60,24 +58,20 @@ void ProfilePolicyConnectorFactory::SetServiceForTesting(
   map_entry = connector;
 }
 
-#if defined(ENABLE_CONFIGURATION_POLICY)
 void ProfilePolicyConnectorFactory::PushProviderForTesting(
     ConfigurationPolicyProvider* provider) {
   test_providers_.push_back(provider);
 }
-#endif
 
 ProfilePolicyConnectorFactory::ProfilePolicyConnectorFactory()
     : BrowserContextKeyedBaseFactory(
         "ProfilePolicyConnector",
         BrowserContextDependencyManager::GetInstance()) {
-#if defined(ENABLE_CONFIGURATION_POLICY)
   DependsOn(SchemaRegistryServiceFactory::GetInstance());
 #if defined(OS_CHROMEOS)
   DependsOn(UserCloudPolicyManagerFactoryChromeOS::GetInstance());
 #else
   DependsOn(UserCloudPolicyManagerFactory::GetInstance());
-#endif
 #endif
 }
 
@@ -97,13 +91,12 @@ ProfilePolicyConnectorFactory::GetForBrowserContextInternal(
   return it->second;
 }
 
-scoped_ptr<ProfilePolicyConnector>
+std::unique_ptr<ProfilePolicyConnector>
 ProfilePolicyConnectorFactory::CreateForBrowserContextInternal(
     content::BrowserContext* context,
     bool force_immediate_load) {
   DCHECK(connectors_.find(context) == connectors_.end());
 
-#if defined(ENABLE_CONFIGURATION_POLICY)
   SchemaRegistry* schema_registry = nullptr;
   CloudPolicyManager* user_cloud_policy_manager = nullptr;
 
@@ -123,11 +116,10 @@ ProfilePolicyConnectorFactory::CreateForBrowserContextInternal(
   user_cloud_policy_manager =
       UserCloudPolicyManagerFactory::GetForBrowserContext(context);
 #endif  // defined(OS_CHROMEOS)
-#endif  // defined(ENABLE_CONFIGURATION_POLICY)
 
-  scoped_ptr<ProfilePolicyConnector> connector(new ProfilePolicyConnector());
+  std::unique_ptr<ProfilePolicyConnector> connector(
+      new ProfilePolicyConnector());
 
-#if defined(ENABLE_CONFIGURATION_POLICY)
   if (test_providers_.empty()) {
     connector->Init(
 #if defined(OS_CHROMEOS)
@@ -138,12 +130,9 @@ ProfilePolicyConnectorFactory::CreateForBrowserContextInternal(
     PolicyServiceImpl::Providers providers;
     providers.push_back(test_providers_.front());
     test_providers_.pop_front();
-    scoped_ptr<PolicyService> service(new PolicyServiceImpl(providers));
+    std::unique_ptr<PolicyService> service(new PolicyServiceImpl(providers));
     connector->InitForTesting(std::move(service));
   }
-#else
-  connector->Init(nullptr, nullptr);
-#endif
 
   connectors_[context] = connector.get();
   return connector;

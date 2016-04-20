@@ -34,7 +34,10 @@
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
-#include "modules/mediastream/MediaTrackConstraintSet.h"
+#include "core/dom/ExecutionContext.h"
+#include "core/frame/UseCounter.h"
+#include "core/inspector/ConsoleMessage.h"
+#include "modules/mediastream/MediaTrackConstraints.h"
 #include "platform/Logging.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "wtf/HashMap.h"
@@ -43,7 +46,26 @@
 
 namespace blink {
 
+
 namespace MediaConstraintsImpl {
+
+// Old type/value form of constraint. Used in parsing old-style constraints.
+struct WebMediaConstraint {
+    WebMediaConstraint()
+    {
+    }
+
+    WebMediaConstraint(WebString name, WebString value)
+        : m_name(name)
+        , m_value(value)
+    {
+    }
+
+    WebString m_name;
+    WebString m_value;
+};
+
+
 
 // Legal constraint names.
 // Temporary Note: Comments about source are where they are copied from.
@@ -91,7 +113,6 @@ const char kDAEchoCancellation[] = "googDAEchoCancellation";
 // const char kHighpassFilter[] = "googHighpassFilter"; // duplicate k-name
 // const char kTypingNoiseDetection[] = "googTypingNoiseDetection"; // duplicate k-name
 // const char kAudioMirroring[] = "googAudioMirroring"; // duplicate k-name
-const char kAecDump[] = "audioDebugRecording";
 
 // Google-specific constraint keys for a local video source (getUserMedia).
 const char kNoiseReduction[] = "googNoiseReduction";
@@ -121,8 +142,16 @@ const char kCpuOveruseEncodeRsdThreshold[] = "googCpuOveruseEncodeRsdThreshold";
 const char kCpuOveruseEncodeUsage[] = "googCpuOveruseEncodeUsage";
 const char kHighStartBitrate[] = "googHighStartBitrate";
 const char kPayloadPadding[] = "googPayloadPadding";
-// End of names from libjingle
+// From webrtc_audio_capturer
+const char kAudioLatency[] = "latencyMs";
+// From media_stream_video_capturer_source
 
+// End of names from libjingle
+// Names that have been used in the past, but should now be ignored.
+// Kept around for backwards compatibility.
+// https://crbug.com/579729
+const char kGoogLeakyBucket[] = "googLeakyBucket";
+const char kPowerLineFrequency[] = "googPowerLineFrequency";
 // Names used for testing.
 const char kTestConstraint1[] = "valid_and_supported_1";
 const char kTestConstraint2[] = "valid_and_supported_2";
@@ -214,7 +243,7 @@ static bool parse(const Dictionary& constraintsDictionary, WebVector<WebMediaCon
     return true;
 }
 
-static bool parse(const MediaTrackConstraintSet& constraintsIn, WebVector<WebMediaConstraint>& optional, WebVector<WebMediaConstraint>& mandatory)
+static bool parse(const MediaTrackConstraints& constraintsIn, WebVector<WebMediaConstraint>& optional, WebVector<WebMediaConstraint>& mandatory)
 {
     Vector<WebMediaConstraint> mandatoryConstraintsVector;
     if (constraintsIn.hasMandatory()) {
@@ -246,7 +275,7 @@ static bool toBoolean(const WebString& asWebString)
     // https://crbug.com/576582
 }
 
-static void parseOldStyleNames(const WebVector<WebMediaConstraint>& oldNames, WebMediaTrackConstraintSet& result, MediaErrorState& errorState)
+static void parseOldStyleNames(ExecutionContext* context, const WebVector<WebMediaConstraint>& oldNames, bool reportUnknownNames, WebMediaTrackConstraintSet& result, MediaErrorState& errorState)
 {
     for (const WebMediaConstraint& constraint : oldNames) {
         if (constraint.m_name.equals(kMinAspectRatio)) {
@@ -306,14 +335,26 @@ static void parseOldStyleNames(const WebVector<WebMediaConstraint>& oldNames, We
             result.googAudioMirroring.setExact(toBoolean(constraint.m_value));
         } else if (constraint.m_name.equals(kDAEchoCancellation)) {
             result.googDAEchoCancellation.setExact(toBoolean(constraint.m_value));
-        } else if (constraint.m_name.equals(kAecDump)) {
-            result.googAecDump.setExact(toBoolean(constraint.m_value));
         } else if (constraint.m_name.equals(kNoiseReduction)) {
             result.googNoiseReduction.setExact(toBoolean(constraint.m_value));
         } else if (constraint.m_name.equals(kOfferToReceiveAudio)) {
-            result.offerToReceiveAudio.setExact(constraint.m_value);
+            // This constraint has formerly been defined both as a boolean
+            // and as an integer. Allow both forms.
+            if (constraint.m_value.equals("true"))
+                result.offerToReceiveAudio.setExact(1);
+            else if (constraint.m_value.equals("false"))
+                result.offerToReceiveAudio.setExact(0);
+            else
+                result.offerToReceiveAudio.setExact(atoi(constraint.m_value.utf8().c_str()));
         } else if (constraint.m_name.equals(kOfferToReceiveVideo)) {
-            result.offerToReceiveVideo.setExact(constraint.m_value);
+            // This constraint has formerly been defined both as a boolean
+            // and as an integer. Allow both forms.
+            if (constraint.m_value.equals("true"))
+                result.offerToReceiveVideo.setExact(1);
+            else if (constraint.m_value.equals("false"))
+                result.offerToReceiveVideo.setExact(0);
+            else
+                result.offerToReceiveVideo.setExact(atoi(constraint.m_value.utf8().c_str()));
         } else if (constraint.m_name.equals(kVoiceActivityDetection)) {
             result.voiceActivityDetection.setExact(toBoolean(constraint.m_value));
         } else if (constraint.m_name.equals(kIceRestart)) {
@@ -352,37 +393,61 @@ static void parseOldStyleNames(const WebVector<WebMediaConstraint>& oldNames, We
             result.googHighStartBitrate.setExact(atoi(constraint.m_value.utf8().c_str()));
         } else if (constraint.m_name.equals(kPayloadPadding)) {
             result.googPayloadPadding.setExact(toBoolean(constraint.m_value));
+        } else if (constraint.m_name.equals(kAudioLatency)) {
+            result.googLatencyMs.setExact(atoi(constraint.m_value.utf8().c_str()));
+        } else if (constraint.m_name.equals(kPowerLineFrequency)) {
+            result.googPowerLineFrequency.setExact(atoi(constraint.m_value.utf8().c_str()));
+        } else if (constraint.m_name.equals(kGoogLeakyBucket)) {
+            context->addConsoleMessage(ConsoleMessage::create(DeprecationMessageSource, WarningMessageLevel,
+                "Obsolete constraint named " + String(constraint.m_name)
+                + " is ignored. Please stop using it."));
         } else if (constraint.m_name.equals(kTestConstraint1)
             || constraint.m_name.equals(kTestConstraint2)) {
-            // These constraints are only for testing parsing. Ignore them.
+            // These constraints are only for testing parsing.
+            // Values 0 and 1 are legal, all others are a ConstraintError.
+            if (!constraint.m_value.equals("0") && !constraint.m_value.equals("1")) {
+                errorState.throwConstraintError("Illegal value for constraint", constraint.m_name);
+            }
         } else {
-            // TODO(hta): UMA stats for unknown constraints passed.
-            // https://crbug.com/576613
-            WTF_LOG(Media, "Unknown constraint name detected");
-            errorState.throwConstraintError("Unknown name of constraint detected", constraint.m_name);
+            if (reportUnknownNames) {
+                // TODO(hta): UMA stats for unknown constraints passed.
+                // https://crbug.com/576613
+                context->addConsoleMessage(
+                    ConsoleMessage::create(
+                        DeprecationMessageSource,
+                        WarningMessageLevel,
+                        "Unknown constraint named "
+                        + String(constraint.m_name) + " rejected"));
+                errorState.throwConstraintError("Unknown name of constraint detected", constraint.m_name);
+            }
         }
     }
 }
 
-static WebMediaConstraints createFromNamedConstraints(WebVector<WebMediaConstraint>& mandatory, const WebVector<WebMediaConstraint>& optional, MediaErrorState& errorState)
+static WebMediaConstraints createFromNamedConstraints(ExecutionContext* context, WebVector<WebMediaConstraint>& mandatory, const WebVector<WebMediaConstraint>& optional, MediaErrorState& errorState)
 {
     WebMediaTrackConstraintSet basic;
     WebMediaTrackConstraintSet advanced;
     WebMediaConstraints constraints;
-    parseOldStyleNames(mandatory, basic, errorState);
+    parseOldStyleNames(context, mandatory, true, basic, errorState);
     if (errorState.hadException())
         return constraints;
-    // We ignore errors in optional constraints.
+    // We ignore unknow names and syntax errors in optional constraints.
     MediaErrorState ignoredErrorState;
-    parseOldStyleNames(optional, advanced, ignoredErrorState);
-    WebVector<WebMediaTrackConstraintSet> advancedVector(&advanced, 1);
-    // Use the 4-argument initializer until Chrome has been converted.
-    constraints.initialize(optional, mandatory, basic, advancedVector);
+    Vector<WebMediaTrackConstraintSet> advancedVector;
+    for (const auto& optionalConstraint : optional) {
+        WebMediaTrackConstraintSet advancedElement;
+        WebVector<WebMediaConstraint> elementAsList(&optionalConstraint, 1);
+        parseOldStyleNames(context, elementAsList, false, advancedElement, ignoredErrorState);
+        if (!advancedElement.isEmpty())
+            advancedVector.append(advancedElement);
+    }
+    constraints.initialize(basic, advancedVector);
     return constraints;
 }
 
 // Deprecated.
-WebMediaConstraints create(const Dictionary& constraintsDictionary, MediaErrorState& errorState)
+WebMediaConstraints create(ExecutionContext* context, const Dictionary& constraintsDictionary, MediaErrorState& errorState)
 {
     WebVector<WebMediaConstraint> optional;
     WebVector<WebMediaConstraint> mandatory;
@@ -390,10 +455,11 @@ WebMediaConstraints create(const Dictionary& constraintsDictionary, MediaErrorSt
         errorState.throwTypeError("Malformed constraints object.");
         return WebMediaConstraints();
     }
-    return createFromNamedConstraints(mandatory, optional, errorState);
+    UseCounter::count(context, UseCounter::MediaStreamConstraintsFromDictionary);
+    return createFromNamedConstraints(context, mandatory, optional, errorState);
 }
 
-void copyLongConstraint(ConstrainLongRange blinkForm, LongConstraint& webForm)
+void copyLongConstraint(const ConstrainLongRange& blinkForm, LongConstraint& webForm)
 {
     if (blinkForm.hasMin()) {
         webForm.setMin(blinkForm.min());
@@ -409,7 +475,7 @@ void copyLongConstraint(ConstrainLongRange blinkForm, LongConstraint& webForm)
     }
 }
 
-void copyDoubleConstraint(ConstrainDoubleRange blinkForm, DoubleConstraint& webForm)
+void copyDoubleConstraint(const ConstrainDoubleRange& blinkForm, DoubleConstraint& webForm)
 {
     if (blinkForm.hasMin()) {
         webForm.setMin(blinkForm.min());
@@ -425,20 +491,17 @@ void copyDoubleConstraint(ConstrainDoubleRange blinkForm, DoubleConstraint& webF
     }
 }
 
-void copyStringConstraint(ConstrainDOMStringParameters blinkForm, StringConstraint& webForm)
+void copyStringConstraint(const ConstrainDOMStringParameters& blinkForm, StringConstraint& webForm)
 {
-    WebVector<WebString> ideal;
-    WebVector<WebString> exact;
     if (blinkForm.hasIdeal()) {
-        ideal = WebVector<WebString>(blinkForm.ideal());
+        webForm.setIdeal(WebVector<WebString>(blinkForm.ideal()));
     }
     if (blinkForm.hasExact()) {
-        exact = WebVector<WebString>(blinkForm.exact());
+        webForm.setExact(WebVector<WebString>(blinkForm.exact()));
     }
-    webForm = StringConstraint(ideal, exact);
 }
 
-void copyBooleanConstraint(ConstrainBooleanParameters blinkForm, BooleanConstraint& webForm)
+void copyBooleanConstraint(const ConstrainBooleanParameters& blinkForm, BooleanConstraint& webForm)
 {
     if (blinkForm.hasIdeal()) {
         webForm.setIdeal(blinkForm.ideal());
@@ -491,17 +554,24 @@ void copyConstraints(const MediaTrackConstraintSet& constraintsIn, WebMediaTrack
     }
 }
 
-WebMediaConstraints create(const MediaTrackConstraintSet& constraintsIn, MediaErrorState& errorState)
+WebMediaConstraints create(ExecutionContext* context, const MediaTrackConstraints& constraintsIn, MediaErrorState& errorState)
 {
     WebMediaConstraints constraints;
     WebMediaTrackConstraintSet constraintBuffer;
-    WebVector<WebMediaTrackConstraintSet> advancedBuffer;
+    Vector<WebMediaTrackConstraintSet> advancedBuffer;
     copyConstraints(constraintsIn, constraintBuffer);
+    if (constraintsIn.hasAdvanced()) {
+        for (const auto& element : constraintsIn.advanced()) {
+            WebMediaTrackConstraintSet advancedElement;
+            copyConstraints(element, advancedElement);
+            advancedBuffer.append(advancedElement);
+        }
+    }
     // TODO(hta): Add initialization of advanced constraints once present.
     // https://crbug.com/253412
     if (constraintsIn.hasOptional() || constraintsIn.hasMandatory()) {
-        if (!constraintBuffer.isEmpty()) {
-            errorState.throwTypeError("Malformed constraint: Cannot use both optional/mandatory and specific constraints.");
+        if (!constraintBuffer.isEmpty() || constraintsIn.hasAdvanced()) {
+            errorState.throwTypeError("Malformed constraint: Cannot use both optional/mandatory and specific or advanced constraints.");
             return WebMediaConstraints();
         }
         WebVector<WebMediaConstraint> optional;
@@ -510,8 +580,10 @@ WebMediaConstraints create(const MediaTrackConstraintSet& constraintsIn, MediaEr
             errorState.throwTypeError("Malformed constraints object.");
             return WebMediaConstraints();
         }
-        return createFromNamedConstraints(mandatory, optional, errorState);
+        UseCounter::count(context, UseCounter::MediaStreamConstraintsNameValue);
+        return createFromNamedConstraints(context, mandatory, optional, errorState);
     }
+    UseCounter::count(context, UseCounter::MediaStreamConstraintsConformant);
     constraints.initialize(constraintBuffer, advancedBuffer);
     return constraints;
 }

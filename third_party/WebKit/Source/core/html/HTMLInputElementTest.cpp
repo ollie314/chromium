@@ -6,6 +6,7 @@
 
 #include "core/dom/Document.h"
 #include "core/html/HTMLBodyElement.h"
+#include "core/html/HTMLFormElement.h"
 #include "core/html/HTMLHtmlElement.h"
 #include "core/testing/DummyPageHolder.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -14,8 +15,8 @@ namespace blink {
 
 TEST(HTMLInputElementTest, create)
 {
-    const RefPtrWillBeRawPtr<Document> document = Document::create();
-    RefPtrWillBeRawPtr<HTMLInputElement> input = HTMLInputElement::create(*document, nullptr, /* createdByParser */ false);
+    Document* document = Document::create();
+    HTMLInputElement* input = HTMLInputElement::create(*document, nullptr, /* createdByParser */ false);
     EXPECT_NE(nullptr, input->userAgentShadowRoot());
 
     input = HTMLInputElement::create(*document, nullptr, /* createdByParser */ true);
@@ -26,14 +27,14 @@ TEST(HTMLInputElementTest, create)
 
 TEST(HTMLInputElementTest, NoAssertWhenMovedInNewDocument)
 {
-    const RefPtrWillBeRawPtr<Document> documentWithoutFrame = Document::create();
+    Document* documentWithoutFrame = Document::create();
     EXPECT_EQ(nullptr, documentWithoutFrame->frameHost());
-    RefPtrWillBeRawPtr<HTMLHtmlElement> html = HTMLHtmlElement::create(*documentWithoutFrame);
+    HTMLHtmlElement* html = HTMLHtmlElement::create(*documentWithoutFrame);
     html->appendChild(HTMLBodyElement::create(*documentWithoutFrame));
 
     // Create an input element with type "range" inside a document without frame.
     toHTMLBodyElement(html->firstChild())->setInnerHTML("<input type='range' />", ASSERT_NO_EXCEPTION);
-    documentWithoutFrame->appendChild(html.release());
+    documentWithoutFrame->appendChild(html);
 
     OwnPtr<DummyPageHolder> pageHolder = DummyPageHolder::create();
     auto& document = pageHolder->document();
@@ -49,14 +50,37 @@ TEST(HTMLInputElementTest, NoAssertWhenMovedInNewDocument)
 
 TEST(HTMLInputElementTest, DefaultToolTip)
 {
-    RefPtrWillBeRawPtr<Document> document = Document::create();
-    RefPtrWillBeRawPtr<HTMLHtmlElement> html = HTMLHtmlElement::create(*document);
+    Document* document = Document::create();
+    HTMLHtmlElement* html = HTMLHtmlElement::create(*document);
     html->appendChild(HTMLBodyElement::create(*document));
-    RefPtrWillBeRawPtr<HTMLInputElement> input = HTMLInputElement::create(*document, nullptr, false);
-    input->setBooleanAttribute(HTMLNames::requiredAttr, true);
-    toHTMLBodyElement(html->firstChild())->appendChild(input.get());
-    document->appendChild(html.release());
-    EXPECT_EQ("<<ValidationValueMissing>>", input->defaultToolTip());
+    HTMLInputElement* inputWithoutForm = HTMLInputElement::create(*document, nullptr, false);
+    inputWithoutForm->setBooleanAttribute(HTMLNames::requiredAttr, true);
+    toHTMLBodyElement(html->firstChild())->appendChild(inputWithoutForm);
+    document->appendChild(html);
+    EXPECT_EQ("<<ValidationValueMissing>>", inputWithoutForm->defaultToolTip());
+
+    HTMLFormElement* form = HTMLFormElement::create(*document);
+    document->body()->appendChild(form);
+    HTMLInputElement* inputWithForm = HTMLInputElement::create(*document, nullptr, false);
+    inputWithForm->setBooleanAttribute(HTMLNames::requiredAttr, true);
+    form->appendChild(inputWithForm);
+    EXPECT_EQ("<<ValidationValueMissing>>", inputWithForm->defaultToolTip());
+
+    form->setBooleanAttribute(HTMLNames::novalidateAttr, true);
+    EXPECT_EQ(String(), inputWithForm->defaultToolTip());
+}
+
+// crbug.com/589838
+TEST(HTMLInputElementTest, ImageTypeCrash)
+{
+    Document* document = Document::create();
+    HTMLInputElement* input = HTMLInputElement::create(*document, nullptr, false);
+    input->setAttribute(HTMLNames::typeAttr, "image");
+    input->ensureFallbackContent();
+    // Make sure ensurePrimaryContent() recreates UA shadow tree, and updating
+    // |value| doesn't crash.
+    input->ensurePrimaryContent();
+    input->setAttribute(HTMLNames::valueAttr, "aaa");
 }
 
 } // namespace blink

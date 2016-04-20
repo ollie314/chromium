@@ -7,39 +7,53 @@
 #include "components/mus/public/cpp/property_type_converters.h"
 #include "components/mus/public/cpp/window.h"
 #include "components/mus/public/cpp/window_property.h"
+#include "components/mus/public/cpp/window_tree_connection.h"
+#include "mash/wm/property_util.h"
 #include "mash/wm/public/interfaces/container.mojom.h"
-#include "mash/wm/window_manager_application.h"
+#include "mash/wm/root_window_controller.h"
 #include "mojo/common/common_type_converters.h"
+#include "ui/resources/grit/ui_resources.h"
+
+MUS_DECLARE_WINDOW_PROPERTY_TYPE(uint32_t);
 
 namespace mash {
 namespace wm {
+
+// Key used for storing identifier sent to clients for windows.
+MUS_DEFINE_LOCAL_WINDOW_PROPERTY_KEY(uint32_t, kUserWindowIdKey, 0u);
+
 namespace {
 
-mojo::String GetWindowTitle(mus::Window* window) {
-  if (window->HasSharedProperty(
-          mus::mojom::WindowManager::kWindowTitle_Property)) {
-    return mojo::String::From(window->GetSharedProperty<base::string16>(
-               mus::mojom::WindowManager::kWindowTitle_Property));
-  }
-  return mojo::String(std::string());
+// Returns |window|, or an ancestor thereof, parented to |container|, or null.
+mus::Window* GetTopLevelWindow(mus::Window* window, mus::Window* container) {
+  while (window && window->parent() != container)
+    window = window->parent();
+  return window;
 }
 
+// Get a UserWindow struct from a mus::Window.
 mojom::UserWindowPtr GetUserWindow(mus::Window* window) {
   mojom::UserWindowPtr user_window(mojom::UserWindow::New());
-  user_window->window_id = window->id();
-  user_window->window_title = GetWindowTitle(window);
+  DCHECK_NE(0u, window->GetLocalProperty(kUserWindowIdKey));
+  user_window->window_id = window->GetLocalProperty(kUserWindowIdKey);
+  user_window->window_title = mojo::String::From(GetWindowTitle(window));
+  user_window->window_app_icon = GetWindowAppIcon(window);
+  mus::Window* focused = window->connection()->GetFocusedWindow();
+  focused = GetTopLevelWindow(focused, window->parent());
+  user_window->window_has_focus = focused == window;
   return user_window;
 }
 
 }  // namespace
 
-// Observes title changes on user windows. UserWindowControllerImpl uses this
-// separate observer to avoid observing duplicate tree change notifications.
-class WindowTitleObserver : public mus::WindowObserver {
+// Observes property changes on user windows. UserWindowControllerImpl uses
+// this separate observer to avoid observing duplicate tree change
+// notifications.
+class WindowPropertyObserver : public mus::WindowObserver {
  public:
-  explicit WindowTitleObserver(UserWindowControllerImpl* controller)
+  explicit WindowPropertyObserver(UserWindowControllerImpl* controller)
       : controller_(controller) {}
-  ~WindowTitleObserver() override {}
+  ~WindowPropertyObserver() override {}
 
  private:
   // mus::WindowObserver:
@@ -48,52 +62,108 @@ class WindowTitleObserver : public mus::WindowObserver {
       const std::string& name,
       const std::vector<uint8_t>* old_data,
       const std::vector<uint8_t>* new_data) override {
-    if (controller_->user_window_observer() &&
-        name == mus::mojom::WindowManager::kWindowTitle_Property) {
+    if (!controller_->user_window_observer())
+      return;
+    if (name == mus::mojom::WindowManager::kWindowTitle_Property) {
       controller_->user_window_observer()->OnUserWindowTitleChanged(
-          window->id(), GetWindowTitle(window));
+          window->GetLocalProperty(kUserWindowIdKey),
+          mojo::String::From(GetWindowTitle(window)));
+    } else if (name == mus::mojom::WindowManager::kWindowAppIcon_Property) {
+      controller_->user_window_observer()->OnUserWindowAppIconChanged(
+          window->GetLocalProperty(kUserWindowIdKey),
+          new_data ? mojo::Array<uint8_t>::From(*new_data)
+                   : mojo::Array<uint8_t>());
     }
   }
 
   UserWindowControllerImpl* controller_;
-  DISALLOW_COPY_AND_ASSIGN(WindowTitleObserver);
+  DISALLOW_COPY_AND_ASSIGN(WindowPropertyObserver);
 };
 
-UserWindowControllerImpl::UserWindowControllerImpl() : state_(nullptr) {}
+UserWindowControllerImpl::UserWindowControllerImpl()
+    : root_controller_(nullptr) {}
 
 UserWindowControllerImpl::~UserWindowControllerImpl() {
-  if (state_) {
-    GetUserWindowContainer()->RemoveObserver(this);
-    for (auto iter : GetUserWindowContainer()->children())
-      iter->RemoveObserver(window_title_observer_.get());
+  if (!root_controller_)
+    return;
+
+  // TODO(msw): should really listen for user window container being destroyed
+  // and cleanup there.
+  mus::Window* user_container = GetUserWindowContainer();
+  if (!user_container)
+    return;
+
+  user_container->RemoveObserver(this);
+  for (auto iter : user_container->children())
+    iter->RemoveObserver(window_property_observer_.get());
+}
+
+void UserWindowControllerImpl::Initialize(
+    RootWindowController* root_controller) {
+  DCHECK(root_controller);
+  DCHECK(!root_controller_);
+  root_controller_ = root_controller;
+  GetUserWindowContainer()->AddObserver(this);
+  GetUserWindowContainer()->connection()->AddObserver(this);
+  window_property_observer_.reset(new WindowPropertyObserver(this));
+  for (mus::Window* window : GetUserWindowContainer()->children()) {
+    AssignIdIfNecessary(window);
+    window->AddObserver(window_property_observer_.get());
   }
 }
 
-void UserWindowControllerImpl::Initialize(WindowManagerApplication* state) {
-  DCHECK(state);
-  DCHECK(!state_);
-  state_ = state;
-  GetUserWindowContainer()->AddObserver(this);
-  window_title_observer_.reset(new WindowTitleObserver(this));
-  for (auto iter : GetUserWindowContainer()->children())
-    iter->AddObserver(window_title_observer_.get());
+void UserWindowControllerImpl::AssignIdIfNecessary(mus::Window* window) {
+  if (window->GetLocalProperty(kUserWindowIdKey) == 0u)
+    window->SetLocalProperty(kUserWindowIdKey, next_id_++);
+}
+
+mus::Window* UserWindowControllerImpl::GetUserWindowById(uint32_t id) {
+  for (mus::Window* window : GetUserWindowContainer()->children()) {
+    if (window->GetLocalProperty(kUserWindowIdKey) == id)
+      return window;
+  }
+  return nullptr;
 }
 
 mus::Window* UserWindowControllerImpl::GetUserWindowContainer() const {
-  return state_->GetWindowForContainer(mojom::CONTAINER_USER_WINDOWS);
+  return root_controller_->GetWindowForContainer(
+      mojom::Container::USER_WINDOWS);
 }
 
 void UserWindowControllerImpl::OnTreeChanging(const TreeChangeParams& params) {
-  DCHECK(state_);
-  if (user_window_observer_) {
-    mus::Window* user_window_container = GetUserWindowContainer();
-    if (params.new_parent == user_window_container) {
-      params.target->AddObserver(window_title_observer_.get());
+  DCHECK(root_controller_);
+  if (params.new_parent == GetUserWindowContainer()) {
+    params.target->AddObserver(window_property_observer_.get());
+    AssignIdIfNecessary(params.target);
+    if (user_window_observer_)
       user_window_observer_->OnUserWindowAdded(GetUserWindow(params.target));
-    } else if (params.old_parent == user_window_container) {
-      params.target->RemoveObserver(window_title_observer_.get());
-      user_window_observer_->OnUserWindowRemoved(params.target->id());
-    }
+  } else if (params.old_parent == GetUserWindowContainer()) {
+    params.target->RemoveObserver(window_property_observer_.get());
+    if (user_window_observer_)
+      user_window_observer_->OnUserWindowRemoved(
+          params.target->GetLocalProperty(kUserWindowIdKey));
+  }
+}
+
+void UserWindowControllerImpl::OnWindowTreeFocusChanged(
+    mus::Window* gained_focus,
+    mus::Window* lost_focus) {
+  if (!user_window_observer_)
+    return;
+
+  // Treat focus in the user window hierarchy as focus of the top-level window.
+  gained_focus = GetTopLevelWindow(gained_focus, GetUserWindowContainer());
+  lost_focus = GetTopLevelWindow(lost_focus, GetUserWindowContainer());
+  if (gained_focus == lost_focus)
+    return;
+
+  if (lost_focus) {
+    user_window_observer_->OnUserWindowFocusChanged(
+        lost_focus->GetLocalProperty(kUserWindowIdKey), false);
+  }
+  if (gained_focus) {
+    user_window_observer_->OnUserWindowFocusChanged(
+        gained_focus->GetLocalProperty(kUserWindowIdKey), true);
   }
 }
 
@@ -111,7 +181,7 @@ void UserWindowControllerImpl::AddUserWindowObserver(
 }
 
 void UserWindowControllerImpl::FocusUserWindow(uint32_t window_id) {
-  mus::Window* window = GetUserWindowContainer()->GetChildById(window_id);
+  mus::Window* window = GetUserWindowById(window_id);
   if (window)
     window->SetFocus();
 }

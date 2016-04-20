@@ -5,10 +5,13 @@
 #ifndef CC_INPUT_INPUT_HANDLER_H_
 #define CC_INPUT_INPUT_HANDLER_H_
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "cc/base/cc_export.h"
+#include "cc/input/event_listener_properties.h"
+#include "cc/input/main_thread_scrolling_reason.h"
 #include "cc/input/scroll_state.h"
 #include "cc/input/scrollbar.h"
 #include "cc/trees/swap_promise_monitor.h"
@@ -82,47 +85,26 @@ class CC_EXPORT InputHandler {
     SCROLL_ON_IMPL_THREAD,
     SCROLL_IGNORED,
     SCROLL_UNKNOWN,
-    // This must be the last entry.
-    ScrollStatusCount
-  };
-
-  // Ensure this stays in sync with MainThreadScrollingReason in histograms.xml,
-  // and that this extends ScrollingCoordinator::MainThreadScrollingReason.
-  // ScrollingCoordinator::MainThreadScrollingReason contains the flags
-  // which are associated with a layer. The flags only contained in
-  // InputHandler::MainThreadScrollingReason are computed for each scroll
-  // begin.
-  enum MainThreadScrollingReason {
-    NOT_SCROLLING_ON_MAIN = 0,
-    HAS_BACKGROUND_ATTACHMENT_FIXED_OBJECTS = 1 << 0,
-    HAS_NON_LAYER_VIEWPORT_CONSTRAINED_OBJECTS = 1 << 1,
-    THREADED_SCROLLING_DISABLED = 1 << 2,
-    SCROLL_BAR_SCROLLING = 1 << 3,
-    PAGE_OVERLAY = 1 << 4,
-    MaxNonTransientScrollingReason = PAGE_OVERLAY,
-    NON_FAST_SCROLLABLE_REGION = 1 << 5,
-    EVENT_HANDLERS = 1 << 6,
-    FAILED_HIT_TEST = 1 << 7,
-    NO_SCROLLING_LAYER = 1 << 8,
-    NOT_SCROLLABLE = 1 << 9,
-    CONTINUING_MAIN_THREAD_SCROLL = 1 << 10,
-    NON_INVERTIBLE_TRANSFORM = 1 << 11,
-    MainThreadScrollingReasonCount = 13
+    LAST_SCROLL_STATUS = SCROLL_UNKNOWN
   };
 
   struct ScrollStatus {
     ScrollStatus()
         : thread(SCROLL_ON_IMPL_THREAD),
-          main_thread_scrolling_reasons(NOT_SCROLLING_ON_MAIN) {}
-    ScrollStatus(ScrollThread thread,
-                 MainThreadScrollingReason main_thread_scrolling_reasons)
+          main_thread_scrolling_reasons(
+              MainThreadScrollingReason::kNotScrollingOnMain) {}
+    ScrollStatus(ScrollThread thread, uint32_t main_thread_scrolling_reasons)
         : thread(thread),
           main_thread_scrolling_reasons(main_thread_scrolling_reasons) {}
     ScrollThread thread;
-    MainThreadScrollingReason main_thread_scrolling_reasons;
+    uint32_t main_thread_scrolling_reasons;
   };
 
-  enum ScrollInputType { GESTURE, WHEEL, ANIMATED_WHEEL, NON_BUBBLING_GESTURE };
+  enum ScrollInputType {
+    TOUCHSCREEN,
+    WHEEL,
+    NON_BUBBLING_GESTURE
+  };
 
   // Binds a client to this handler to receive notifications. Only one client
   // can be bound to an InputHandler. The client must live at least until the
@@ -141,6 +123,12 @@ class CC_EXPORT InputHandler {
   // targets at the root layer.
   virtual ScrollStatus RootScrollBegin(ScrollState* scroll_state,
                                        ScrollInputType type) = 0;
+
+  // Returns SCROLL_ON_IMPL_THREAD if a layer is actively being scrolled or
+  // a subsequent call to ScrollAnimated can begin on the impl thread.
+  virtual ScrollStatus ScrollAnimatedBegin(
+      const gfx::Point& viewport_point) = 0;
+
   virtual ScrollStatus ScrollAnimated(const gfx::Point& viewport_point,
                                       const gfx::Vector2dF& scroll_delta) = 0;
 
@@ -160,7 +148,7 @@ class CC_EXPORT InputHandler {
   virtual bool ScrollVerticallyByPage(const gfx::Point& viewport_point,
                                       ScrollDirection direction) = 0;
 
-  // Returns SCROLL_STARTED if a layer was being actively being scrolled,
+  // Returns SCROLL_STARTED if a layer was actively being scrolled,
   // SCROLL_IGNORED if not.
   virtual ScrollStatus FlingScrollBegin() = 0;
 
@@ -194,7 +182,8 @@ class CC_EXPORT InputHandler {
   virtual bool IsCurrentlyScrollingLayerAt(const gfx::Point& viewport_point,
                                            ScrollInputType type) const = 0;
 
-  virtual bool HaveWheelEventHandlersAt(const gfx::Point& viewport_point) = 0;
+  virtual EventListenerProperties GetEventListenerProperties(
+      EventListenerClass event_class) const = 0;
 
   // Whether the page should be given the opportunity to suppress scrolling by
   // consuming touch events that started at |viewport_point|.
@@ -205,8 +194,8 @@ class CC_EXPORT InputHandler {
   // LatencyInfoSwapPromiseMonitor, if SetNeedsRedraw() or SetNeedsRedrawRect()
   // is called on LayerTreeHostImpl, the original latency info will be turned
   // into a LatencyInfoSwapPromise.
-  virtual scoped_ptr<SwapPromiseMonitor> CreateLatencyInfoSwapPromiseMonitor(
-      ui::LatencyInfo* latency) = 0;
+  virtual std::unique_ptr<SwapPromiseMonitor>
+  CreateLatencyInfoSwapPromiseMonitor(ui::LatencyInfo* latency) = 0;
 
   virtual ScrollElasticityHelper* CreateScrollElasticityHelper() = 0;
 
@@ -217,13 +206,6 @@ class CC_EXPORT InputHandler {
  private:
   DISALLOW_COPY_AND_ASSIGN(InputHandler);
 };
-
-inline const InputHandler::MainThreadScrollingReason& operator|=(
-    InputHandler::MainThreadScrollingReason& a,
-    InputHandler::MainThreadScrollingReason b) {
-  return a = static_cast<InputHandler::MainThreadScrollingReason>(
-             static_cast<unsigned>(a) | static_cast<unsigned>(b));
-}
 
 }  // namespace cc
 

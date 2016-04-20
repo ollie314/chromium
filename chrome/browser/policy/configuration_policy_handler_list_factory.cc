@@ -6,16 +6,22 @@
 
 #include <limits.h>
 #include <stddef.h>
+
 #include <utility>
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/scoped_vector.h"
-#include "base/prefs/pref_value_map.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/browser/net/disk_cache_dir_policy_handler.h"
+#include "chrome/browser/policy/file_selection_dialogs_policy_handler.h"
+#include "chrome/browser/policy/javascript_policy_handler.h"
 #include "chrome/browser/policy/managed_bookmarks_policy_handler.h"
+#include "chrome/browser/policy/network_prediction_policy_handler.h"
 #include "chrome/browser/profiles/incognito_mode_policy_handler.h"
+#include "chrome/browser/sessions/restore_on_startup_policy_handler.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
@@ -33,24 +39,17 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_pref_names.h"
 #include "components/policy/core/common/schema.h"
+#include "components/prefs/pref_value_map.h"
 #include "components/search_engines/default_search_policy_handler.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "components/ssl_config/ssl_config_prefs.h"
+#include "components/sync_driver/sync_policy_handler.h"
 #include "components/translate/core/common/translate_pref_names.h"
 #include "components/variations/pref_names.h"
 #include "policy/policy_constants.h"
 
 #if BUILDFLAG(ANDROID_JAVA_UI)
 #include "chrome/browser/search/contextual_search_policy_handler_android.h"
-#endif
-
-#if !defined(OS_IOS)
-#include "chrome/browser/net/disk_cache_dir_policy_handler.h"
-#include "chrome/browser/policy/file_selection_dialogs_policy_handler.h"
-#include "chrome/browser/policy/javascript_policy_handler.h"
-#include "chrome/browser/policy/network_prediction_policy_handler.h"
-#include "chrome/browser/sessions/restore_on_startup_policy_handler.h"
-#include "components/sync_driver/sync_policy_handler.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -64,7 +63,7 @@
 #include "ui/chromeos/accessibility_types.h"
 #endif
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
 #include "chrome/browser/download/download_dir_policy_handler.h"
 #endif
 
@@ -119,9 +118,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kPasswordManagerEnabled,
     password_manager::prefs::kPasswordManagerSavingEnabled,
     base::Value::TYPE_BOOLEAN },
-  { key::kPasswordManagerAllowShowPasswords,
-    password_manager::prefs::kPasswordManagerAllowShowPasswords,
-    base::Value::TYPE_BOOLEAN },
   { key::kPrintingEnabled,
     prefs::kPrintingEnabled,
     base::Value::TYPE_BOOLEAN },
@@ -170,6 +166,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDefaultPopupsSetting,
     prefs::kManagedDefaultPopupsSetting,
     base::Value::TYPE_INTEGER },
+  { key::kDefaultKeygenSetting,
+    prefs::kManagedDefaultKeygenSetting,
+    base::Value::TYPE_INTEGER },
   { key::kAutoSelectCertificateForUrls,
     prefs::kManagedAutoSelectCertificateForUrls,
     base::Value::TYPE_LIST },
@@ -205,6 +204,12 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::TYPE_LIST },
   { key::kPopupsBlockedForUrls,
     prefs::kManagedPopupsBlockedForUrls,
+    base::Value::TYPE_LIST },
+  { key::kKeygenAllowedForUrls,
+    prefs::kManagedKeygenAllowedForUrls,
+    base::Value::TYPE_LIST },
+  { key::kKeygenBlockedForUrls,
+    prefs::kManagedKeygenBlockedForUrls,
     base::Value::TYPE_LIST },
   { key::kNotificationsAllowedForUrls,
     prefs::kManagedNotificationsAllowedForUrls,
@@ -323,6 +328,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kRestrictSigninToPattern,
     prefs::kGoogleServicesUsernamePattern,
     base::Value::TYPE_STRING },
+  { key::kDefaultWebBluetoothGuardSetting,
+    prefs::kManagedDefaultWebBluetoothGuardSetting,
+    base::Value::TYPE_INTEGER },
   { key::kDefaultMediaStreamSetting,
     prefs::kManagedDefaultMediaStreamSetting,
     base::Value::TYPE_INTEGER },
@@ -382,7 +390,7 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     ssl_config::prefs::kRC4Enabled,
     base::Value::TYPE_BOOLEAN },
 
-#if !defined(OS_MACOSX) && !defined(OS_IOS)
+#if !defined(OS_MACOSX)
   { key::kFullscreenAllowed,
     prefs::kFullscreenAllowed,
     base::Value::TYPE_BOOLEAN },
@@ -391,7 +399,7 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     extensions::pref_names::kAppFullscreenAllowed,
     base::Value::TYPE_BOOLEAN },
 #endif  // defined(ENABLE_EXTENSIONS)
-#endif  // !defined(OS_MACOSX) && !defined(OS_IOS)
+#endif  // !defined(OS_MACOSX)
 
 #if defined(OS_CHROMEOS)
   { key::kChromeOsLockOnIdleSuspend,
@@ -493,6 +501,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kUnifiedDesktopEnabledByDefault,
     prefs::kUnifiedDesktopEnabledByDefault,
     base::Value::TYPE_BOOLEAN },
+  { key::kArcEnabled,
+    prefs::kArcEnabled,
+    base::Value::TYPE_BOOLEAN },
 #endif  // defined(OS_CHROMEOS)
 
 // Metrics reporting is controlled by a platform specific policy for ChromeOS
@@ -521,7 +532,7 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::TYPE_STRING },
 #endif  // BUILDFLAG(ANDROID_JAVA_UI)
 
-#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
   { key::kNativeMessagingUserLevelHosts,
     extensions::pref_names::kNativeMessagingUserLevelHosts,
     base::Value::TYPE_BOOLEAN },
@@ -531,13 +542,29 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kBrowserAddPersonEnabled,
     prefs::kBrowserAddPersonEnabled,
     base::Value::TYPE_BOOLEAN },
-#endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+#endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
 
 #if defined(OS_WIN)
   { key::kWelcomePageOnOSUpgradeEnabled,
     prefs::kWelcomePageOnOSUpgradeEnabled,
     base::Value::TYPE_BOOLEAN },
 #endif  // OS_WIN
+
+#if !defined(OS_ANDROID)
+  { key::kSuppressUnsupportedOSWarning,
+    prefs::kSuppressUnsupportedOSWarning,
+    base::Value::TYPE_BOOLEAN },
+#endif  // !OS_ANDROID
+
+#if defined(OS_CHROMEOS)
+  { key::kSystemTimezoneAutomaticDetection,
+    prefs::kSystemTimezoneAutomaticDetectionPolicy,
+    base::Value::TYPE_INTEGER },
+#endif
+
+  { key::kTaskManagerEndProcessEnabled,
+    prefs::kTaskManagerEndProcessEnabled,
+    base::Value::TYPE_BOOLEAN },
 };
 
 class ForceSafeSearchPolicyHandler : public TypeCheckingPolicyHandler {
@@ -578,20 +605,17 @@ void GetExtensionAllowedTypesMap(
     const extensions::schema_constants::AllowedTypesMapEntry& entry =
         extensions::schema_constants::kAllowedTypesMap[index];
     result->push_back(new StringMappingListPolicyHandler::MappingEntry(
-        entry.name,
-        scoped_ptr<base::Value>(
-            new base::FundamentalValue(entry.manifest_type))));
+        entry.name, std::unique_ptr<base::Value>(
+                        new base::FundamentalValue(entry.manifest_type))));
   }
 }
 #endif
 
-#if !defined(OS_IOS)
 void GetDeprecatedFeaturesMap(
     ScopedVector<StringMappingListPolicyHandler::MappingEntry>* result) {
   // Maps feature tags as specified in policy to the corresponding switch to
   // re-enable them.
 }
-#endif  // !defined(OS_IOS)
 
 }  // namespace
 
@@ -606,85 +630,83 @@ void PopulatePolicyHandlerParameters(PolicyHandlerParameters* parameters) {
 #endif
 }
 
-scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
+std::unique_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
     const Schema& chrome_schema) {
-  scoped_ptr<ConfigurationPolicyHandlerList> handlers(
+  std::unique_ptr<ConfigurationPolicyHandlerList> handlers(
       new ConfigurationPolicyHandlerList(
           base::Bind(&PopulatePolicyHandlerParameters),
           base::Bind(&GetChromePolicyDetails)));
   for (size_t i = 0; i < arraysize(kSimplePolicyMap); ++i) {
-    handlers->AddHandler(make_scoped_ptr(new SimplePolicyHandler(
+    handlers->AddHandler(base::WrapUnique(new SimplePolicyHandler(
         kSimplePolicyMap[i].policy_name, kSimplePolicyMap[i].preference_path,
         kSimplePolicyMap[i].value_type)));
   }
 
-  handlers->AddHandler(make_scoped_ptr(new AutofillPolicyHandler()));
-  handlers->AddHandler(make_scoped_ptr(new DefaultSearchPolicyHandler()));
-  handlers->AddHandler(make_scoped_ptr(new ForceSafeSearchPolicyHandler()));
-  handlers->AddHandler(make_scoped_ptr(new IncognitoModePolicyHandler()));
+  handlers->AddHandler(base::WrapUnique(new AutofillPolicyHandler()));
+  handlers->AddHandler(base::WrapUnique(new DefaultSearchPolicyHandler()));
+  handlers->AddHandler(base::WrapUnique(new ForceSafeSearchPolicyHandler()));
+  handlers->AddHandler(base::WrapUnique(new IncognitoModePolicyHandler()));
   handlers->AddHandler(
-      make_scoped_ptr(new ManagedBookmarksPolicyHandler(chrome_schema)));
-  handlers->AddHandler(make_scoped_ptr(new ProxyPolicyHandler()));
-  handlers->AddHandler(make_scoped_ptr(new URLBlacklistPolicyHandler()));
+      base::WrapUnique(new ManagedBookmarksPolicyHandler(chrome_schema)));
+  handlers->AddHandler(base::WrapUnique(new ProxyPolicyHandler()));
+  handlers->AddHandler(base::WrapUnique(new URLBlacklistPolicyHandler()));
 
 #if BUILDFLAG(ANDROID_JAVA_UI)
   handlers->AddHandler(
-      make_scoped_ptr(new ContextualSearchPolicyHandlerAndroid()));
+      base::WrapUnique(new ContextualSearchPolicyHandlerAndroid()));
 #endif
 
-#if !defined(OS_IOS)
   handlers->AddHandler(
-      make_scoped_ptr(new FileSelectionDialogsPolicyHandler()));
-  handlers->AddHandler(make_scoped_ptr(new JavascriptPolicyHandler()));
-  handlers->AddHandler(make_scoped_ptr(new NetworkPredictionPolicyHandler()));
-  handlers->AddHandler(make_scoped_ptr(new RestoreOnStartupPolicyHandler()));
-  handlers->AddHandler(make_scoped_ptr(new sync_driver::SyncPolicyHandler()));
+      base::WrapUnique(new FileSelectionDialogsPolicyHandler()));
+  handlers->AddHandler(base::WrapUnique(new JavascriptPolicyHandler()));
+  handlers->AddHandler(base::WrapUnique(new NetworkPredictionPolicyHandler()));
+  handlers->AddHandler(base::WrapUnique(new RestoreOnStartupPolicyHandler()));
+  handlers->AddHandler(base::WrapUnique(new sync_driver::SyncPolicyHandler()));
 
-  handlers->AddHandler(make_scoped_ptr(new StringMappingListPolicyHandler(
+  handlers->AddHandler(base::WrapUnique(new StringMappingListPolicyHandler(
       key::kEnableDeprecatedWebPlatformFeatures,
       prefs::kEnableDeprecatedWebPlatformFeatures,
       base::Bind(GetDeprecatedFeaturesMap))));
-#endif  // !defined(OS_IOS)
 
 #if defined(ENABLE_EXTENSIONS)
   handlers->AddHandler(
-      make_scoped_ptr(new extensions::ExtensionListPolicyHandler(
+      base::WrapUnique(new extensions::ExtensionListPolicyHandler(
           key::kExtensionInstallWhitelist,
           extensions::pref_names::kInstallAllowList, false)));
   handlers->AddHandler(
-      make_scoped_ptr(new extensions::ExtensionListPolicyHandler(
+      base::WrapUnique(new extensions::ExtensionListPolicyHandler(
           key::kExtensionInstallBlacklist,
           extensions::pref_names::kInstallDenyList, true)));
-  handlers->AddHandler(make_scoped_ptr(
+  handlers->AddHandler(base::WrapUnique(
       new extensions::ExtensionInstallForcelistPolicyHandler()));
   handlers->AddHandler(
-      make_scoped_ptr(new extensions::ExtensionURLPatternListPolicyHandler(
+      base::WrapUnique(new extensions::ExtensionURLPatternListPolicyHandler(
           key::kExtensionInstallSources,
           extensions::pref_names::kAllowedInstallSites)));
-  handlers->AddHandler(make_scoped_ptr(new StringMappingListPolicyHandler(
+  handlers->AddHandler(base::WrapUnique(new StringMappingListPolicyHandler(
       key::kExtensionAllowedTypes, extensions::pref_names::kAllowedTypes,
       base::Bind(GetExtensionAllowedTypesMap))));
-  handlers->AddHandler(make_scoped_ptr(
+  handlers->AddHandler(base::WrapUnique(
       new extensions::ExtensionSettingsPolicyHandler(chrome_schema)));
 #endif
 
-#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
-  handlers->AddHandler(make_scoped_ptr(new DiskCacheDirPolicyHandler()));
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+  handlers->AddHandler(base::WrapUnique(new DiskCacheDirPolicyHandler()));
 
   handlers->AddHandler(
-      make_scoped_ptr(new extensions::NativeMessagingHostListPolicyHandler(
+      base::WrapUnique(new extensions::NativeMessagingHostListPolicyHandler(
           key::kNativeMessagingWhitelist,
           extensions::pref_names::kNativeMessagingWhitelist, false)));
   handlers->AddHandler(
-      make_scoped_ptr(new extensions::NativeMessagingHostListPolicyHandler(
+      base::WrapUnique(new extensions::NativeMessagingHostListPolicyHandler(
           key::kNativeMessagingBlacklist,
           extensions::pref_names::kNativeMessagingBlacklist, true)));
-#endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+#endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
-  handlers->AddHandler(make_scoped_ptr(new DownloadDirPolicyHandler));
+#if !defined(OS_ANDROID)
+  handlers->AddHandler(base::WrapUnique(new DownloadDirPolicyHandler));
 
-  handlers->AddHandler(make_scoped_ptr(new SimpleSchemaValidatingPolicyHandler(
+  handlers->AddHandler(base::WrapUnique(new SimpleSchemaValidatingPolicyHandler(
       key::kRegisteredProtocolHandlers,
       prefs::kPolicyRegisteredProtocolHandlers, chrome_schema, SCHEMA_STRICT,
       SimpleSchemaValidatingPolicyHandler::RECOMMENDED_ALLOWED,
@@ -693,16 +715,16 @@ scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
 
 #if defined(OS_CHROMEOS)
   handlers->AddHandler(
-      make_scoped_ptr(new extensions::ExtensionListPolicyHandler(
+      base::WrapUnique(new extensions::ExtensionListPolicyHandler(
           key::kAttestationExtensionWhitelist,
           prefs::kAttestationExtensionWhitelist, false)));
-  handlers->AddHandler(make_scoped_ptr(
+  handlers->AddHandler(base::WrapUnique(
       NetworkConfigurationPolicyHandler::CreateForDevicePolicy()));
-  handlers->AddHandler(make_scoped_ptr(
+  handlers->AddHandler(base::WrapUnique(
       NetworkConfigurationPolicyHandler::CreateForUserPolicy()));
-  handlers->AddHandler(make_scoped_ptr(new PinnedLauncherAppsPolicyHandler()));
-  handlers->AddHandler(make_scoped_ptr(new ScreenMagnifierPolicyHandler()));
-  handlers->AddHandler(make_scoped_ptr(
+  handlers->AddHandler(base::WrapUnique(new PinnedLauncherAppsPolicyHandler()));
+  handlers->AddHandler(base::WrapUnique(new ScreenMagnifierPolicyHandler()));
+  handlers->AddHandler(base::WrapUnique(
       new LoginScreenPowerManagementPolicyHandler(chrome_schema)));
 
   ScopedVector<ConfigurationPolicyHandler>
@@ -780,45 +802,45 @@ scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
                                 INT_MAX,
                                 true));
 
-  handlers->AddHandler(make_scoped_ptr(new IntRangePolicyHandler(
+  handlers->AddHandler(base::WrapUnique(new IntRangePolicyHandler(
       key::kSAMLOfflineSigninTimeLimit, prefs::kSAMLOfflineSigninTimeLimit, -1,
       INT_MAX, true)));
-  handlers->AddHandler(make_scoped_ptr(new IntRangePolicyHandler(
+  handlers->AddHandler(base::WrapUnique(new IntRangePolicyHandler(
       key::kLidCloseAction, prefs::kPowerLidClosedAction,
       chromeos::PowerPolicyController::ACTION_SUSPEND,
       chromeos::PowerPolicyController::ACTION_DO_NOTHING, false)));
-  handlers->AddHandler(make_scoped_ptr(new IntPercentageToDoublePolicyHandler(
+  handlers->AddHandler(base::WrapUnique(new IntPercentageToDoublePolicyHandler(
       key::kPresentationScreenDimDelayScale,
       prefs::kPowerPresentationScreenDimDelayFactor, 100, INT_MAX, true)));
-  handlers->AddHandler(make_scoped_ptr(new IntPercentageToDoublePolicyHandler(
+  handlers->AddHandler(base::WrapUnique(new IntPercentageToDoublePolicyHandler(
       key::kUserActivityScreenDimDelayScale,
       prefs::kPowerUserActivityScreenDimDelayFactor, 100, INT_MAX, true)));
-  handlers->AddHandler(make_scoped_ptr(new IntRangePolicyHandler(
+  handlers->AddHandler(base::WrapUnique(new IntRangePolicyHandler(
       key::kUptimeLimit, prefs::kUptimeLimit, 3600, INT_MAX, true)));
-  handlers->AddHandler(make_scoped_ptr(new IntRangePolicyHandler(
+  handlers->AddHandler(base::WrapUnique(new IntRangePolicyHandler(
       key::kDeviceLoginScreenDefaultScreenMagnifierType, NULL, 0,
       ui::MAGNIFIER_FULL, false)));
   // TODO(binjin): Remove LegacyPoliciesDeprecatingPolicyHandler for these two
   // policies once deprecation of legacy power management policies is done.
   // http://crbug.com/346229
   handlers->AddHandler(
-      make_scoped_ptr(new LegacyPoliciesDeprecatingPolicyHandler(
+      base::WrapUnique(new LegacyPoliciesDeprecatingPolicyHandler(
           std::move(power_management_idle_legacy_policies),
-          make_scoped_ptr(
+          base::WrapUnique(
               new PowerManagementIdleSettingsPolicyHandler(chrome_schema)))));
   handlers->AddHandler(
-      make_scoped_ptr(new LegacyPoliciesDeprecatingPolicyHandler(
+      base::WrapUnique(new LegacyPoliciesDeprecatingPolicyHandler(
           std::move(screen_lock_legacy_policies),
-          make_scoped_ptr(new ScreenLockDelayPolicyHandler(chrome_schema)))));
+          base::WrapUnique(new ScreenLockDelayPolicyHandler(chrome_schema)))));
   handlers->AddHandler(
-      make_scoped_ptr(new ExternalDataPolicyHandler(key::kUserAvatarImage)));
+      base::WrapUnique(new ExternalDataPolicyHandler(key::kUserAvatarImage)));
   handlers->AddHandler(
-      make_scoped_ptr(new ExternalDataPolicyHandler(key::kWallpaperImage)));
-  handlers->AddHandler(make_scoped_ptr(new SimpleSchemaValidatingPolicyHandler(
+      base::WrapUnique(new ExternalDataPolicyHandler(key::kWallpaperImage)));
+  handlers->AddHandler(base::WrapUnique(new SimpleSchemaValidatingPolicyHandler(
       key::kSessionLocales, NULL, chrome_schema, SCHEMA_STRICT,
       SimpleSchemaValidatingPolicyHandler::RECOMMENDED_ALLOWED,
       SimpleSchemaValidatingPolicyHandler::MANDATORY_PROHIBITED)));
-  handlers->AddHandler(make_scoped_ptr(
+  handlers->AddHandler(base::WrapUnique(
       new chromeos::KeyPermissionsPolicyHandler(chrome_schema)));
 #endif  // defined(OS_CHROMEOS)
 

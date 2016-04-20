@@ -5,10 +5,13 @@
 #ifndef ASH_TOUCH_EXPLORATION_MANAGER_CHROMEOS_H_
 #define ASH_TOUCH_EXPLORATION_MANAGER_CHROMEOS_H_
 
+#include <memory>
+
 #include "ash/ash_export.h"
 #include "ash/system/tray_accessibility.h"
 #include "base/macros.h"
 #include "ui/chromeos/touch_exploration_controller.h"
+#include "ui/wm/public/activation_change_observer.h"
 
 namespace chromeos {
 class CrasAudioHandler;
@@ -23,7 +26,8 @@ class RootWindowController;
 // the system.
 class ASH_EXPORT AshTouchExplorationManager
     : public ash::AccessibilityObserver,
-      public ui::TouchExplorationControllerDelegate {
+      public ui::TouchExplorationControllerDelegate,
+      public aura::client::ActivationChangeObserver {
  public:
   explicit AshTouchExplorationManager(
       RootWindowController* root_window_controller);
@@ -41,11 +45,17 @@ class ASH_EXPORT AshTouchExplorationManager
   void PlayExitScreenEarcon() override;
   void PlayEnterScreenEarcon() override;
 
+  // aura::client::ActivationChangeObserver overrides:
+  void OnWindowActivated(
+      aura::client::ActivationChangeObserver::ActivationReason reason,
+      aura::Window* gained_active,
+      aura::Window* lost_active) override;
+
  private:
   void UpdateTouchExplorationState();
   bool VolumeAdjustSoundEnabled();
 
-  scoped_ptr<ui::TouchExplorationController> touch_exploration_controller_;
+  std::unique_ptr<ui::TouchExplorationController> touch_exploration_controller_;
   RootWindowController* root_window_controller_;
   chromeos::CrasAudioHandler* audio_handler_;
 

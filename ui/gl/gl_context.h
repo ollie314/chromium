@@ -5,17 +5,21 @@
 #ifndef UI_GL_GL_CONTEXT_H_
 #define UI_GL_GL_CONTEXT_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/cancelable_callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/synchronization/cancellation_flag.h"
 #include "ui/gl/gl_share_group.h"
 #include "ui/gl/gl_state_restorer.h"
 #include "ui/gl/gpu_preference.h"
+
+namespace gl {
+class YUVToRGBConverter;
+}  // namespace gl
 
 namespace gpu {
 class GLContextVirtual;
@@ -28,7 +32,6 @@ class GPUTiming;
 class GPUTimingClient;
 class VirtualGLApi;
 struct GLVersionInfo;
-
 
 // Encapsulates an OpenGL context, hiding platform specific management.
 class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
@@ -127,13 +130,8 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   // Returns the GL renderer string. The context must be current.
   virtual std::string GetGLRenderer();
 
-  // Return a callback that, when called, indicates that the state the
-  // underlying context has been changed by code outside of the command buffer,
-  // and will need to be restored.
-  virtual base::Closure GetStateWasDirtiedExternallyCallback();
-
-  // Restore the context's state if it was dirtied by an external caller.
-  virtual void RestoreStateIfDirtiedExternally();
+  // Returns a helper structure to convert YUV textures to RGB textures.
+  virtual gl::YUVToRGBConverter* GetYUVToRGBConverter();
 
  protected:
   virtual ~GLContext();
@@ -164,9 +162,6 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
 
   virtual void OnSetSwapInterval(int interval) = 0;
 
-  bool GetStateWasDirtiedExternally() const;
-  void SetStateWasDirtiedExternally(bool dirtied_externally);
-
  private:
   friend class base::RefCounted<GLContext>;
 
@@ -175,15 +170,13 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   friend class gpu::GLContextVirtual;
 
   scoped_refptr<GLShareGroup> share_group_;
-  scoped_ptr<VirtualGLApi> virtual_gl_api_;
+  std::unique_ptr<VirtualGLApi> virtual_gl_api_;
   bool state_dirtied_externally_;
-  scoped_ptr<GLStateRestorer> state_restorer_;
-  scoped_ptr<GLVersionInfo> version_info_;
+  std::unique_ptr<GLStateRestorer> state_restorer_;
+  std::unique_ptr<GLVersionInfo> version_info_;
 
   int swap_interval_;
   bool force_swap_interval_zero_;
-
-  base::CancelableCallback<void()> state_dirtied_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(GLContext);
 };
@@ -199,7 +192,7 @@ class GL_EXPORT GLContextReal : public GLContext {
   void SetCurrent(GLSurface* surface) override;
 
  private:
-  scoped_ptr<gfx::GPUTiming> gpu_timing_;
+  std::unique_ptr<gfx::GPUTiming> gpu_timing_;
   DISALLOW_COPY_AND_ASSIGN(GLContextReal);
 };
 

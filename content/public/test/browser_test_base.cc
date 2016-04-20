@@ -27,9 +27,10 @@
 #include "content/public/test/test_utils.h"
 #include "content/test/content_browser_sanity_checker.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
+#include "net/base/network_interfaces.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "ui/base/test/material_design_controller_test_api.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_switches.h"
@@ -179,6 +180,10 @@ BrowserTestBase::~BrowserTestBase() {
 
 void BrowserTestBase::SetUp() {
   set_up_called_ = true;
+  // ContentTestSuiteBase might have already initialized
+  // MaterialDesignController in browser_tests suite.
+  // Uninitialize here to let the browser process do it.
+  ui::test::MaterialDesignControllerTestAPI::Uninitialize();
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
@@ -199,6 +204,11 @@ void BrowserTestBase::SetUp() {
 
   if (use_software_compositing_)
     command_line->AppendSwitch(switches::kDisableGpu);
+
+  // The layout of windows on screen is unpredictable during tests, so disable
+  // occlusion when running browser tests.
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kDisableBackgroundingOccludedWindowsForTesting);
 
 #if defined(USE_AURA)
   // Most tests do not need pixel output, so we don't produce any. The command

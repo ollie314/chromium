@@ -5,6 +5,8 @@
 #ifndef CC_OUTPUT_RENDERER_H_
 #define CC_OUTPUT_RENDERER_H_
 
+#include <memory>
+
 #include "base/macros.h"
 #include "cc/base/cc_export.h"
 #include "cc/output/renderer_capabilities.h"
@@ -20,7 +22,7 @@ class RenderPassId;
 class ScopedResource;
 class Task;
 
-typedef std::vector<scoped_ptr<RenderPass>> RenderPassList;
+typedef std::vector<std::unique_ptr<RenderPass>> RenderPassList;
 
 struct RendererCapabilitiesImpl {
   RendererCapabilitiesImpl();

@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "base/task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
@@ -149,14 +150,15 @@ void EventFactoryEvdev::Init() {
   initialized_ = true;
 }
 
-scoped_ptr<SystemInputInjector> EventFactoryEvdev::CreateSystemInputInjector() {
+std::unique_ptr<SystemInputInjector>
+EventFactoryEvdev::CreateSystemInputInjector() {
   // Use forwarding dispatcher for the injector rather than dispatching
   // directly. We cannot assume it is safe to (re-)enter ui::Event dispatch
   // synchronously from the injection point.
-  scoped_ptr<DeviceEventDispatcherEvdev> proxy_dispatcher(
+  std::unique_ptr<DeviceEventDispatcherEvdev> proxy_dispatcher(
       new ProxyDeviceEventDispatcher(base::ThreadTaskRunnerHandle::Get(),
                                      weak_ptr_factory_.GetWeakPtr()));
-  return make_scoped_ptr(
+  return base::WrapUnique(
       new InputInjectorEvdev(std::move(proxy_dispatcher), cursor_));
 }
 
@@ -276,8 +278,8 @@ void EventFactoryEvdev::DispatchTouchEvent(const TouchEventParams& params) {
 
   float x = params.location.x();
   float y = params.location.y();
-  double radius_x = params.radii.x();
-  double radius_y = params.radii.y();
+  double radius_x = params.pointer_details.radius_x;
+  double radius_y = params.pointer_details.radius_y;
 
   // Transform the event to align touches to the image based on display mode.
   DeviceDataManager::GetInstance()->ApplyTouchTransformer(params.device_id, &x,
@@ -287,16 +289,21 @@ void EventFactoryEvdev::DispatchTouchEvent(const TouchEventParams& params) {
   DeviceDataManager::GetInstance()->ApplyTouchRadiusScale(params.device_id,
                                                           &radius_y);
 
+  PointerDetails details = params.pointer_details;
+  details.radius_x = radius_x;
+  details.radius_y = radius_y;
+
   // params.slot is guaranteed to be < kNumTouchEvdevSlots.
   int touch_id = touch_id_generator_.GetGeneratedID(
       params.device_id * kNumTouchEvdevSlots + params.slot);
-  TouchEvent touch_event(params.type, gfx::Point(),
-                         modifiers_.GetModifierFlags(), touch_id,
-                         params.timestamp, radius_x, radius_y,
-                         /* angle */ 0.f, params.pressure);
+  TouchEvent touch_event(
+      params.type, gfx::Point(), modifiers_.GetModifierFlags(), touch_id,
+      params.timestamp, /* radius_x */ 0.f, /* radius_y */ 0.f,
+      /* angle */ 0.f, /* force */ 0.f);
   touch_event.set_location_f(gfx::PointF(x, y));
   touch_event.set_root_location_f(gfx::PointF(x, y));
   touch_event.set_source_device_id(params.device_id);
+  touch_event.set_pointer_details(details);
   DispatchUiEvent(&touch_event);
 
   if (params.type == ET_TOUCH_RELEASED || params.type == ET_TOUCH_CANCELLED) {
@@ -399,7 +406,7 @@ int EventFactoryEvdev::NextDeviceId() {
 
 void EventFactoryEvdev::StartThread() {
   // Set up device factory.
-  scoped_ptr<DeviceEventDispatcherEvdev> proxy_dispatcher(
+  std::unique_ptr<DeviceEventDispatcherEvdev> proxy_dispatcher(
       new ProxyDeviceEventDispatcher(base::ThreadTaskRunnerHandle::Get(),
                                      weak_ptr_factory_.GetWeakPtr()));
   thread_.Start(std::move(proxy_dispatcher), cursor_,
@@ -408,7 +415,7 @@ void EventFactoryEvdev::StartThread() {
 }
 
 void EventFactoryEvdev::OnThreadStarted(
-    scoped_ptr<InputDeviceFactoryEvdevProxy> input_device_factory) {
+    std::unique_ptr<InputDeviceFactoryEvdevProxy> input_device_factory) {
   TRACE_EVENT0("evdev", "EventFactoryEvdev::OnThreadStarted");
   input_device_factory_proxy_ = std::move(input_device_factory);
 

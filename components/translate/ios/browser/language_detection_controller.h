@@ -11,9 +11,10 @@
 #include "base/gtest_prod_util.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/pref_member.h"
 #include "base/strings/string16.h"
+#include "components/prefs/pref_member.h"
 #include "ios/web/public/web_state/web_state_observer.h"
 
 class GURL;

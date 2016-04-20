@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 [
-    GarbageCollected
 ] interface DictionaryTest {
     void set(optional InternalDictionary testingDictionary);
     InternalDictionary get();
@@ -11,4 +10,6 @@
 
     void setDerived(InternalDictionaryDerived derived);
     InternalDictionaryDerived getDerived();
+
+    [CallWith=ExecutionContext, RaisesException] DOMString stringFromIterable(Dictionary iterableDictionary);
 };

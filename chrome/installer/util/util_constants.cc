@@ -218,7 +218,6 @@ const wchar_t kChromeNewExe[] = L"new_chrome.exe";
 const wchar_t kChromeOldExe[] = L"old_chrome.exe";
 const wchar_t kCmdOnOsUpgrade[] = L"on-os-upgrade";
 const wchar_t kCmdQuickEnableCf[] = L"quick-enable-cf";
-const wchar_t kDelegateExecuteExe[] = L"delegate_execute.exe";
 const wchar_t kEULASentinelFile[] = L"EULA Accepted";
 const wchar_t kGoogleChromeInstallSubDir1[] = L"Google";
 const wchar_t kGoogleChromeInstallSubDir2[] = L"Chrome";
@@ -255,5 +254,7 @@ const size_t kMaxAppModelIdLength = 64U;
 
 const char kCourgette[] = "courgette";
 const char kBsdiff[] = "bsdiff";
+
+const char kSetupHistogramAllocatorName[] = "SetupMetrics";
 
 }  // namespace installer

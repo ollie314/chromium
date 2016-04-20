@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/synchronization/lock.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/base/simple_enclosed_region.h"
@@ -20,15 +21,12 @@
 namespace cc {
 
 scoped_refptr<TextureLayer> TextureLayer::CreateForMailbox(
-    const LayerSettings& settings,
     TextureLayerClient* client) {
-  return scoped_refptr<TextureLayer>(new TextureLayer(settings, client));
+  return scoped_refptr<TextureLayer>(new TextureLayer(client));
 }
 
-TextureLayer::TextureLayer(const LayerSettings& settings,
-                           TextureLayerClient* client)
-    : Layer(settings),
-      client_(client),
+TextureLayer::TextureLayer(TextureLayerClient* client)
+    : client_(client),
       flipped_(true),
       nearest_neighbor_(false),
       uv_top_left_(0.f, 0.f),
@@ -55,7 +53,8 @@ void TextureLayer::ClearTexture() {
   SetTextureMailbox(TextureMailbox(), nullptr);
 }
 
-scoped_ptr<LayerImpl> TextureLayer::CreateLayerImpl(LayerTreeImpl* tree_impl) {
+std::unique_ptr<LayerImpl> TextureLayer::CreateLayerImpl(
+    LayerTreeImpl* tree_impl) {
   return TextureLayerImpl::Create(tree_impl, id());
 }
 
@@ -118,7 +117,7 @@ void TextureLayer::SetBlendBackgroundColor(bool blend) {
 
 void TextureLayer::SetTextureMailboxInternal(
     const TextureMailbox& mailbox,
-    scoped_ptr<SingleReleaseCallback> release_callback,
+    std::unique_ptr<SingleReleaseCallback> release_callback,
     bool requires_commit,
     bool allow_mailbox_reuse) {
   DCHECK(!mailbox.IsValid() || !holder_ref_ ||
@@ -148,7 +147,7 @@ void TextureLayer::SetTextureMailboxInternal(
 
 void TextureLayer::SetTextureMailbox(
     const TextureMailbox& mailbox,
-    scoped_ptr<SingleReleaseCallback> release_callback) {
+    std::unique_ptr<SingleReleaseCallback> release_callback) {
   bool requires_commit = true;
   bool allow_mailbox_reuse = false;
   SetTextureMailboxInternal(mailbox, std::move(release_callback),
@@ -166,7 +165,7 @@ void TextureLayer::SetTextureMailboxWithoutReleaseCallback(
   DCHECK(!mailbox.IsValid() || !holder_ref_ ||
          !mailbox.Equals(holder_ref_->holder()->mailbox()) ||
          mailbox.sync_token() != holder_ref_->holder()->mailbox().sync_token());
-  scoped_ptr<SingleReleaseCallback> release;
+  std::unique_ptr<SingleReleaseCallback> release;
   bool requires_commit = true;
   bool allow_mailbox_reuse = true;
   if (mailbox.IsValid())
@@ -205,7 +204,7 @@ bool TextureLayer::Update() {
   bool updated = Layer::Update();
   if (client_) {
     TextureMailbox mailbox;
-    scoped_ptr<SingleReleaseCallback> release_callback;
+    std::unique_ptr<SingleReleaseCallback> release_callback;
     if (client_->PrepareTextureMailbox(
             &mailbox,
             &release_callback,
@@ -239,7 +238,7 @@ void TextureLayer::PushPropertiesTo(LayerImpl* layer) {
   texture_layer->SetBlendBackgroundColor(blend_background_color_);
   if (needs_set_mailbox_) {
     TextureMailbox texture_mailbox;
-    scoped_ptr<SingleReleaseCallbackImpl> release_callback_impl;
+    std::unique_ptr<SingleReleaseCallbackImpl> release_callback_impl;
     if (holder_ref_) {
       TextureMailboxHolder* holder = holder_ref_->holder();
       texture_mailbox = holder->mailbox();
@@ -264,7 +263,7 @@ TextureLayer::TextureMailboxHolder::MainThreadReference::
 
 TextureLayer::TextureMailboxHolder::TextureMailboxHolder(
     const TextureMailbox& mailbox,
-    scoped_ptr<SingleReleaseCallback> release_callback)
+    std::unique_ptr<SingleReleaseCallback> release_callback)
     : internal_references_(0),
       mailbox_(mailbox),
       release_callback_(std::move(release_callback)),
@@ -275,11 +274,11 @@ TextureLayer::TextureMailboxHolder::~TextureMailboxHolder() {
   DCHECK_EQ(0u, internal_references_);
 }
 
-scoped_ptr<TextureLayer::TextureMailboxHolder::MainThreadReference>
+std::unique_ptr<TextureLayer::TextureMailboxHolder::MainThreadReference>
 TextureLayer::TextureMailboxHolder::Create(
     const TextureMailbox& mailbox,
-    scoped_ptr<SingleReleaseCallback> release_callback) {
-  return make_scoped_ptr(new MainThreadReference(
+    std::unique_ptr<SingleReleaseCallback> release_callback) {
+  return base::WrapUnique(new MainThreadReference(
       new TextureMailboxHolder(mailbox, std::move(release_callback))));
 }
 
@@ -291,7 +290,7 @@ void TextureLayer::TextureMailboxHolder::Return(
   is_lost_ = is_lost;
 }
 
-scoped_ptr<SingleReleaseCallbackImpl>
+std::unique_ptr<SingleReleaseCallbackImpl>
 TextureLayer::TextureMailboxHolder::GetCallbackForImplThread() {
   // We can't call GetCallbackForImplThread if we released the main thread
   // reference.

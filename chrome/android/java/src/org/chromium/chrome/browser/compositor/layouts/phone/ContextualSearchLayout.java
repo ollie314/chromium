@@ -78,13 +78,14 @@ public class ContextualSearchLayout extends ContextualSearchSupportedLayout {
      * @param width  The new width in dp.
      * @param height The new height in dp.
      */
+    @Override
     protected void onSizeChanged(float width, float height) {
         if (mBaseTab != null) {
             OverlayPanel panel = mPanelManager.getActivePanel();
             if (panel != null) {
                 mBaseTab.setMaxContentWidth(width);
-                mBaseTab.setMaxContentHeight(panel.getMaximumHeight());
-                mBaseTab.setContentSize(width, panel.getMaximumHeight());
+                mBaseTab.setMaxContentHeight(panel.getTabHeight());
+                mBaseTab.setContentSize(width, panel.getTabHeight());
             }
         }
     }
@@ -130,13 +131,13 @@ public class ContextualSearchLayout extends ContextualSearchSupportedLayout {
     public boolean handlesTabCreating() {
         // Prevents the new Tab animation from happening when promoting to a new Tab.
         startHiding(mBaseTab.getId(), false);
-        doneHiding();
         // Updates TopControls' State so the Toolbar becomes visible.
         // TODO(pedrosimonetti): The transition when promoting to a new tab is only smooth
         // if the SearchContentView's vertical scroll position is zero. Otherwise the
         // ContentView will appear to jump in the screen. Coordinate with @dtrainor to solve
         // this problem.
         mPanelManager.getActivePanel().updateTopControlsState(TopControlsState.BOTH, false);
+        doneHiding();
         return true;
     }
 

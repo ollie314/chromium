@@ -274,10 +274,8 @@ InspectorBackendClass.Connection.prototype = {
         }
 
         var messageObject = {};
-
         var messageId = this.nextMessageId();
         messageObject.id = messageId;
-
         messageObject.method = method;
         if (params)
             messageObject.params = params;
@@ -348,7 +346,7 @@ InspectorBackendClass.Connection.prototype = {
                 console.log("time-stats: " + callback.methodName + " = " + (processingStartTime - callback.sendRequestTime) + " + " + (Date.now() - processingStartTime));
 
             if (this._scripts && !this._pendingResponsesCount)
-                this.runAfterPendingDispatches();
+                this.deprecatedRunAfterPendingDispatches();
             return;
         } else {
             var method = messageObject.method.split(".");
@@ -378,7 +376,7 @@ InspectorBackendClass.Connection.prototype = {
     /**
      * @param {function()=} script
      */
-    runAfterPendingDispatches: function(script)
+    deprecatedRunAfterPendingDispatches: function(script)
     {
         if (!this._scripts)
             this._scripts = [];
@@ -391,7 +389,7 @@ InspectorBackendClass.Connection.prototype = {
             if (!this._pendingResponsesCount)
                 this._executeAfterPendingDispatches();
             else
-                this.runAfterPendingDispatches();
+                this.deprecatedRunAfterPendingDispatches();
         }.bind(this), 0);
     },
 

@@ -39,15 +39,15 @@ FEDropShadow::FEDropShadow(Filter* filter, float stdX, float stdY, float dx, flo
 {
 }
 
-PassRefPtrWillBeRawPtr<FEDropShadow> FEDropShadow::create(Filter* filter, float stdX, float stdY, float dx, float dy, const Color& shadowColor, float shadowOpacity)
+FEDropShadow* FEDropShadow::create(Filter* filter, float stdX, float stdY, float dx, float dy, const Color& shadowColor, float shadowOpacity)
 {
-    return adoptRefWillBeNoop(new FEDropShadow(filter, stdX, stdY, dx, dy, shadowColor, shadowOpacity));
+    return new FEDropShadow(filter, stdX, stdY, dx, dy, shadowColor, shadowOpacity);
 }
 
-FloatRect FEDropShadow::mapRect(const FloatRect& rect, bool forward)
+FloatRect FEDropShadow::mapRect(const FloatRect& rect, bool forward) const
 {
     FloatRect result = rect;
-    Filter* filter = this->filter();
+    const Filter* filter = this->getFilter();
     ASSERT(filter);
 
     FloatRect offsetRect = rect;
@@ -65,16 +65,16 @@ FloatRect FEDropShadow::mapRect(const FloatRect& rect, bool forward)
     return result;
 }
 
-PassRefPtr<SkImageFilter> FEDropShadow::createImageFilter(SkiaImageFilterBuilder& builder)
+sk_sp<SkImageFilter> FEDropShadow::createImageFilter()
 {
-    RefPtr<SkImageFilter> input(builder.build(inputEffect(0), operatingColorSpace()));
-    float dx = filter()->applyHorizontalScale(m_dx);
-    float dy = filter()->applyVerticalScale(m_dy);
-    float stdX = filter()->applyHorizontalScale(m_stdX);
-    float stdY = filter()->applyVerticalScale(m_stdY);
+    sk_sp<SkImageFilter> input(SkiaImageFilterBuilder::build(inputEffect(0), operatingColorSpace()));
+    float dx = getFilter()->applyHorizontalScale(m_dx);
+    float dy = getFilter()->applyVerticalScale(m_dy);
+    float stdX = getFilter()->applyHorizontalScale(m_stdX);
+    float stdY = getFilter()->applyVerticalScale(m_stdY);
     Color color = adaptColorToOperatingColorSpace(m_shadowColor.combineWithAlpha(m_shadowOpacity));
-    SkImageFilter::CropRect cropRect = getCropRect(builder.cropOffset());
-    return adoptRef(SkDropShadowImageFilter::Create(SkFloatToScalar(dx), SkFloatToScalar(dy), SkFloatToScalar(stdX), SkFloatToScalar(stdY), color.rgb(), SkDropShadowImageFilter::kDrawShadowAndForeground_ShadowMode, input.get(), &cropRect));
+    SkImageFilter::CropRect cropRect = getCropRect();
+    return SkDropShadowImageFilter::Make(SkFloatToScalar(dx), SkFloatToScalar(dy), SkFloatToScalar(stdX), SkFloatToScalar(stdY), color.rgb(), SkDropShadowImageFilter::kDrawShadowAndForeground_ShadowMode, std::move(input), &cropRect);
 }
 
 

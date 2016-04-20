@@ -332,6 +332,9 @@ Press Ctrl+Alt+Z to disable.
       <message name="IDS_ASH_STATUS_TRAY_ACCESSIBILITY_VIRTUAL_KEYBOARD" desc="The label used in the accessibility menu of the system tray to toggle on/off the onscreen keyboard.">
         On-screen keyboard
       </message>
+      <message name="IDS_ASH_STATUS_TRAY_ACCESSIBILITY_MONO_AUDIO" desc="The label used in the accessibility menu of the system tray to toggle on/off mono audio output.">
+        Play the same audio through all speakers (mono audio)
+      </message>
       <message name="IDS_ASH_STATUS_TRAY_ACCESSIBILITY_LEARN_MORE" desc="The label used in the accessibility menu of the system tray
      to open a webpage (article on help center) containing explanation about accessibility feature.">
         Learn more...
@@ -358,6 +361,10 @@ Press Ctrl+Alt+Z to disable.
 
       <message name="IDS_ASH_STATUS_TRAY_PREVIOUS_MENU" desc="The accessible text for header entries for detailed versions of status tray items.">
         Previous menu
+      </message>
+
+      <message name="IDS_ASH_TOAST_DISMISS_BUTTON" desc="The text button shown in toasts to close the toast immediately without waiting timeout.">
+        DISMISS
       </message>
 
       <message name="IDS_ASH_NOTIFICATION_UNREAD_COUNT_NINE_PLUS" desc="The text shown in the notification icon for the unread count when the count is more than 9.">

@@ -20,6 +20,8 @@ source_set("test_support") {
   testonly = true
 
   sources = [
+    "window_server_shelltest_base.cc",
+    "window_server_shelltest_base.h",
     "window_server_test_base.cc",
     "window_server_test_base.h",
   ]
@@ -27,15 +29,19 @@ source_set("test_support") {
   deps = [
     "//base",
     "//base/test:test_config",
+    "//components/mus/common:mus_common",
     "//components/mus/public/cpp",
-    "//mojo/shell/public/cpp:sources",
-    "//mojo/shell/public/cpp:test_support",
+    "//services/shell/public/cpp:shell_test_support",
+    "//services/shell/public/cpp:sources",
+    "//services/shell/public/cpp:test_support",
     "//testing/gtest",
+    "//ui/gl",
   ]
 }
 
 test("mojo_view_manager_lib_unittests") {
   sources = [
+    "property_type_converters_unittest.cc",
     "run_all_unittests.cc",
     "test_window_tree.cc",
     "test_window_tree.h",
@@ -49,17 +55,17 @@ test("mojo_view_manager_lib_unittests") {
     ":unittest_support",
     "//base",
     "//base/test:test_support",
-    "//components/mus/common",
+    "//components/mus/common:mus_common",
     "//components/mus/public/cpp",
     "//mojo/common:common_base",
     "//mojo/converters/geometry",
     "//mojo/converters/input_events",
+    "//mojo/edk/system",
     "//mojo/gles2",
     "//mojo/platform_handle:platform_handle_impl",
     "//mojo/public/cpp/system",
-    "//mojo/shell/public/cpp",
+    "//services/shell/public/cpp",
     "//testing/gtest",
-    "//third_party/mojo/src/mojo/edk/system",
     "//ui/events",
     "//ui/gfx:test_support",
     "//ui/gfx/geometry",

@@ -11,8 +11,6 @@
 #include "base/i18n/time_formatting.h"
 #include "base/macros.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -31,6 +29,8 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/crx_file/id_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/storage_monitor/media_storage_util.h"
 #include "components/storage_monitor/storage_monitor.h"
 #include "content/public/browser/browser_thread.h"
@@ -84,7 +84,6 @@ const char kMediaGalleriesDefaultGalleryTypeMusicDefaultValue[] = "music";
 const char kMediaGalleriesDefaultGalleryTypePicturesDefaultValue[] = "pictures";
 const char kMediaGalleriesDefaultGalleryTypeVideosDefaultValue[] = "videos";
 
-const char kIPhotoGalleryName[] = "iPhoto";
 const char kITunesGalleryName[] = "iTunes";
 const char kPicasaGalleryName[] = "Picasa";
 
@@ -379,6 +378,9 @@ MediaGalleryPrefInfo::MediaGalleryPrefInfo()
       prefs_version(0) {
 }
 
+MediaGalleryPrefInfo::MediaGalleryPrefInfo(const MediaGalleryPrefInfo& other) =
+    default;
+
 MediaGalleryPrefInfo::~MediaGalleryPrefInfo() {}
 
 base::FilePath MediaGalleryPrefInfo::AbsolutePath() const {
@@ -484,7 +486,7 @@ void MediaGalleriesPreferences::EnsureInitialized(base::Closure callback) {
   // It cannot be incremented inline with each callback, as some may return
   // synchronously, decrement the counter to 0, and prematurely trigger
   // FinishInitialization.
-  pre_initialization_callbacks_waiting_ = 4;
+  pre_initialization_callbacks_waiting_ = 3;
 
   // Check whether we should be initializing -- are there any extensions that
   // are using media galleries?
@@ -507,10 +509,6 @@ void MediaGalleriesPreferences::EnsureInitialized(base::Closure callback) {
                  weak_factory_.GetWeakPtr()));
 
   picasa::FindPicasaDatabase(
-      base::Bind(&MediaGalleriesPreferences::OnFinderDeviceID,
-                 weak_factory_.GetWeakPtr()));
-
-  iapps::FindIPhotoLibrary(
       base::Bind(&MediaGalleriesPreferences::OnFinderDeviceID,
                  weak_factory_.GetWeakPtr()));
 }
@@ -612,8 +610,8 @@ bool MediaGalleriesPreferences::UpdateDeviceIDForSingletonType(
     return false;
 
   PrefService* prefs = profile_->GetPrefs();
-  scoped_ptr<ListPrefUpdate> update(new ListPrefUpdate(
-      prefs, prefs::kMediaGalleriesRememberedGalleries));
+  std::unique_ptr<ListPrefUpdate> update(
+      new ListPrefUpdate(prefs, prefs::kMediaGalleriesRememberedGalleries));
   base::ListValue* list = update->Get();
   for (base::ListValue::iterator iter = list->begin();
        iter != list->end(); ++iter) {
@@ -661,9 +659,7 @@ void MediaGalleriesPreferences::OnStorageMonitorInit(
 void MediaGalleriesPreferences::OnFinderDeviceID(const std::string& device_id) {
   if (!device_id.empty()) {
     std::string gallery_name;
-    if (StorageInfo::IsIPhotoDevice(device_id))
-      gallery_name = kIPhotoGalleryName;
-    else if (StorageInfo::IsITunesDevice(device_id))
+    if (StorageInfo::IsITunesDevice(device_id))
       gallery_name = kITunesGalleryName;
     else if (StorageInfo::IsPicasaDevice(device_id))
       gallery_name = kPicasaGalleryName;
@@ -760,8 +756,7 @@ bool MediaGalleriesPreferences::LookUpGalleryByPath(
   for (MediaGalleriesPrefInfoMap::const_iterator it =
            known_galleries_.begin(); it != known_galleries_.end(); ++it) {
     const std::string& device_id = it->second.device_id;
-    if (iapps::PathIndicatesIPhotoLibrary(device_id, path) ||
-        iapps::PathIndicatesITunesLibrary(device_id, path)) {
+    if (iapps::PathIndicatesITunesLibrary(device_id, path)) {
       *gallery_info = it->second;
       return true;
     }
@@ -835,6 +830,9 @@ base::FilePath MediaGalleriesPreferences::LookUpGalleryPathForExtension(
       known_galleries_.find(gallery_id);
   if (it == known_galleries_.end())
     return base::FilePath();
+
+  // This seems wrong: it just returns the absolute path to the device, which
+  // is not necessarily the gallery path.
   return MediaStorageUtil::FindDevicePathById(it->second.device_id);
 }
 
@@ -952,7 +950,7 @@ MediaGalleryPrefId MediaGalleriesPreferences::AddOrUpdateGalleryInternal(
       return *pref_id_it;
 
     PrefService* prefs = profile_->GetPrefs();
-    scoped_ptr<ListPrefUpdate> update(
+    std::unique_ptr<ListPrefUpdate> update(
         new ListPrefUpdate(prefs, prefs::kMediaGalleriesRememberedGalleries));
     base::ListValue* list = update->Get();
 
@@ -1046,8 +1044,8 @@ void MediaGalleriesPreferences::UpdateDefaultGalleriesPaths() {
       PathService::Get(chrome::DIR_USER_VIDEOS, &videos_path);
 
   PrefService* prefs = profile_->GetPrefs();
-  scoped_ptr<ListPrefUpdate> update(new ListPrefUpdate(
-      prefs, prefs::kMediaGalleriesRememberedGalleries));
+  std::unique_ptr<ListPrefUpdate> update(
+      new ListPrefUpdate(prefs, prefs::kMediaGalleriesRememberedGalleries));
   base::ListValue* list = update->Get();
 
   std::vector<MediaGalleryPrefId> pref_ids;
@@ -1145,8 +1143,8 @@ void MediaGalleriesPreferences::EraseOrBlacklistGalleryById(
     MediaGalleryPrefId id, bool erase) {
   DCHECK(IsInitialized());
   PrefService* prefs = profile_->GetPrefs();
-  scoped_ptr<ListPrefUpdate> update(new ListPrefUpdate(
-      prefs, prefs::kMediaGalleriesRememberedGalleries));
+  std::unique_ptr<ListPrefUpdate> update(
+      new ListPrefUpdate(prefs, prefs::kMediaGalleriesRememberedGalleries));
   base::ListValue* list = update->Get();
 
   if (!ContainsKey(known_galleries_, id))
@@ -1300,18 +1298,6 @@ const MediaGalleriesPrefInfoMap& MediaGalleriesPreferences::known_galleries()
   return known_galleries_;
 }
 
-base::Time MediaGalleriesPreferences::GetLastScanCompletionTime() const {
-  int64_t last_scan_time_internal =
-      profile_->GetPrefs()->GetInt64(prefs::kMediaGalleriesLastScanTime);
-  return base::Time::FromInternalValue(last_scan_time_internal);
-}
-
-void MediaGalleriesPreferences::SetLastScanCompletionTime(
-    const base::Time& time) {
-  profile_->GetPrefs()->SetInt64(prefs::kMediaGalleriesLastScanTime,
-                                 time.ToInternalValue());
-}
-
 void MediaGalleriesPreferences::Shutdown() {
   weak_factory_.InvalidateWeakPtrs();
   profile_ = NULL;
@@ -1330,8 +1316,6 @@ void MediaGalleriesPreferences::RegisterProfilePrefs(
   registry->RegisterListPref(prefs::kMediaGalleriesRememberedGalleries);
   registry->RegisterUint64Pref(prefs::kMediaGalleriesUniqueId,
                                kInvalidMediaGalleryPrefId + 1);
-  registry->RegisterInt64Pref(prefs::kMediaGalleriesLastScanTime,
-                              base::Time().ToInternalValue());
 }
 
 bool MediaGalleriesPreferences::SetGalleryPermissionInPrefs(

@@ -26,7 +26,7 @@
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/variations/variations_associated_data.h"
 #include "net/base/hash_value.h"
-#include "net/base/net_util.h"
+#include "net/base/url_util.h"
 #include "net/cert/x509_certificate.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request_context.h"
@@ -109,13 +109,16 @@ void MigrateOldSettings(HostContentSettingsMap* map) {
   map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS,
                              std::string(), &settings);
   for (const ContentSettingPatternSource& setting : settings) {
+    // Migrate user preference settings only.
+    if (setting.source != "preference")
+      continue;
     // Migrate old-format settings only.
     if (setting.secondary_pattern != ContentSettingsPattern::Wildcard()) {
       GURL url(setting.primary_pattern.ToString());
       // Pull out the value of the old-format setting. Only do this if the
       // patterns are as we expect them to be, otherwise the setting will just
       // be removed for safety.
-      scoped_ptr<base::Value> value;
+      std::unique_ptr<base::Value> value;
       if (setting.primary_pattern == setting.secondary_pattern &&
           url.is_valid()) {
         value = map->GetWebsiteSetting(url, url,
@@ -280,7 +283,7 @@ void ChromeSSLHostStateDelegate::AllowCert(const std::string& host,
   GURL url = GetSecureGURLForHost(host);
   HostContentSettingsMap* map =
       HostContentSettingsMapFactory::GetForProfile(profile_);
-  scoped_ptr<base::Value> value(map->GetWebsiteSetting(
+  std::unique_ptr<base::Value> value(map->GetWebsiteSetting(
       url, url, CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, std::string(), NULL));
 
   if (!value.get() || !value->IsType(base::Value::TYPE_DICTIONARY))
@@ -323,7 +326,7 @@ ChromeSSLHostStateDelegate::QueryPolicy(const std::string& host,
   HostContentSettingsMap* map =
       HostContentSettingsMapFactory::GetForProfile(profile_);
   GURL url = GetSecureGURLForHost(host);
-  scoped_ptr<base::Value> value(map->GetWebsiteSetting(
+  std::unique_ptr<base::Value> value(map->GetWebsiteSetting(
       url, url, CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, std::string(), NULL));
 
   // Set a default value in case this method is short circuited and doesn't do a
@@ -411,7 +414,7 @@ bool ChromeSSLHostStateDelegate::HasAllowException(
   HostContentSettingsMap* map =
       HostContentSettingsMapFactory::GetForProfile(profile_);
 
-  scoped_ptr<base::Value> value(map->GetWebsiteSetting(
+  std::unique_ptr<base::Value> value(map->GetWebsiteSetting(
       url, url, CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, std::string(), NULL));
 
   if (!value.get() || !value->IsType(base::Value::TYPE_DICTIONARY))
@@ -441,6 +444,6 @@ bool ChromeSSLHostStateDelegate::DidHostRunInsecureContent(
     int pid) const {
   return !!ran_insecure_content_hosts_.count(BrokenHostEntry(host, pid));
 }
-void ChromeSSLHostStateDelegate::SetClock(scoped_ptr<base::Clock> clock) {
+void ChromeSSLHostStateDelegate::SetClock(std::unique_ptr<base::Clock> clock) {
   clock_.reset(clock.release());
 }

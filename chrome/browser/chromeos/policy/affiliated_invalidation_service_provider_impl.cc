@@ -157,7 +157,7 @@ void AffiliatedInvalidationServiceProviderImpl::Observe(
   }
   const user_manager::User* user =
       chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
-  if (!user || !user->is_affiliated()) {
+  if (!user || !user->IsAffiliated()) {
     // If the Profile belongs to a user who is not affiliated on the device,
     // ignore it.
     return;
@@ -307,16 +307,17 @@ AffiliatedInvalidationServiceProviderImpl::FindConnectedInvalidationService() {
     device_invalidation_service_.reset(
         new invalidation::TiclInvalidationService(
             GetUserAgent(),
-            scoped_ptr<IdentityProvider>(new chromeos::DeviceIdentityProvider(
-                chromeos::DeviceOAuth2TokenServiceFactory::Get())),
-            scoped_ptr<invalidation::TiclSettingsProvider>(
+            std::unique_ptr<IdentityProvider>(
+                new chromeos::DeviceIdentityProvider(
+                    chromeos::DeviceOAuth2TokenServiceFactory::Get())),
+            std::unique_ptr<invalidation::TiclSettingsProvider>(
                 new TiclDeviceSettingsProvider),
             g_browser_process->gcm_driver(),
             g_browser_process->system_request_context()));
     device_invalidation_service_->Init(
-        scoped_ptr<syncer::InvalidationStateTracker>(
+        std::unique_ptr<syncer::InvalidationStateTracker>(
             new invalidation::InvalidatorStorage(
-                    g_browser_process->local_state())));
+                g_browser_process->local_state())));
     device_invalidation_service_observer_.reset(
         new InvalidationServiceObserver(
                 this,

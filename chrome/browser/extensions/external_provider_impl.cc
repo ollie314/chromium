@@ -14,7 +14,7 @@
 #include "base/logging.h"
 #include "base/memory/linked_ptr.h"
 #include "base/metrics/field_trial.h"
-#include "base/prefs/pref_service.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
@@ -37,8 +37,10 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "components/crx_file/id_util.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/external_install_info.h"
 #include "extensions/browser/external_provider_interface.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
@@ -120,10 +122,63 @@ void ExternalProviderImpl::SetPrefs(base::DictionaryValue* prefs) {
   prefs_.reset(prefs);
   ready_ = true;  // Queries for extensions are allowed from this point.
 
+  ScopedVector<ExternalInstallInfoUpdateUrl> external_update_url_extensions;
+  ScopedVector<ExternalInstallInfoFile> external_file_extensions;
+
+  RetrieveExtensionsFromPrefs(&external_update_url_extensions,
+                              &external_file_extensions);
+  for (const auto& extension : external_update_url_extensions)
+    service_->OnExternalExtensionUpdateUrlFound(*extension, true);
+
+  for (const auto& extension : external_file_extensions)
+    service_->OnExternalExtensionFileFound(*extension);
+
+  service_->OnExternalProviderReady(this);
+}
+
+void ExternalProviderImpl::UpdatePrefs(base::DictionaryValue* prefs) {
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  // We only expect updates from windows registry.
+  CHECK(crx_location_ == Manifest::EXTERNAL_REGISTRY);
+
+  // Check if the service is still alive. It is possible that it went
+  // away while |loader_| was working on the FILE thread.
+  if (!service_)
+    return;
+
+  std::set<std::string> removed_extensions;
+  // Find extensions that were removed by this ExternalProvider.
+  for (base::DictionaryValue::Iterator i(*prefs_); !i.IsAtEnd(); i.Advance()) {
+    const std::string& extension_id = i.key();
+    // Don't bother about invalid ids.
+    if (!crx_file::id_util::IdIsValid(extension_id))
+      continue;
+    if (!prefs->HasKey(extension_id))
+      removed_extensions.insert(extension_id);
+  }
+
+  prefs_.reset(prefs);
+
+  ScopedVector<ExternalInstallInfoUpdateUrl> external_update_url_extensions;
+  ScopedVector<ExternalInstallInfoFile> external_file_extensions;
+  RetrieveExtensionsFromPrefs(&external_update_url_extensions,
+                              &external_file_extensions);
+
+  // Notify ExtensionService about completion of finding incremental updates
+  // from this provider.
+  // Provide the list of added and removed extensions.
+  service_->OnExternalProviderUpdateComplete(
+      this, external_update_url_extensions, external_file_extensions,
+      removed_extensions);
+}
+
+void ExternalProviderImpl::RetrieveExtensionsFromPrefs(
+    ScopedVector<ExternalInstallInfoUpdateUrl>* external_update_url_extensions,
+    ScopedVector<ExternalInstallInfoFile>* external_file_extensions) {
   // Set of unsupported extensions that need to be deleted from prefs_.
   std::set<std::string> unsupported_extensions;
 
-  // Notify ExtensionService about all the extensions this provider has.
+  // Discover all the extensions this provider has.
   for (base::DictionaryValue::Iterator i(*prefs_); !i.IsAtEnd(); i.Advance()) {
     const std::string& extension_id = i.key();
     const base::DictionaryValue* extension = NULL;
@@ -192,8 +247,7 @@ void ExternalProviderImpl::SetPrefs(base::DictionaryValue* prefs) {
         if (supported_locales->GetString(j, &current_locale) &&
             l10n_util::IsValidLocaleSyntax(current_locale)) {
           current_locale = l10n_util::NormalizeLocale(current_locale);
-          if (std::find(browser_locales.begin(), browser_locales.end(),
-                        current_locale) != browser_locales.end()) {
+          if (ContainsValue(browser_locales, current_locale)) {
             locale_supported = true;
             break;
           }
@@ -289,17 +343,16 @@ void ExternalProviderImpl::SetPrefs(base::DictionaryValue* prefs) {
         path = base_path.Append(external_crx);
       }
 
-      Version version(external_version);
-      if (!version.IsValid()) {
+      std::unique_ptr<Version> version(new Version(external_version));
+      if (!version->IsValid()) {
         LOG(WARNING) << "Malformed extension dictionary for extension: "
                      << extension_id.c_str() << ".  Invalid version string \""
                      << external_version << "\".";
         continue;
       }
-      service_->OnExternalExtensionFileFound(extension_id, &version, path,
-                                             crx_location_, creation_flags,
-                                             auto_acknowledge_,
-                                             install_immediately_);
+      external_file_extensions->push_back(new ExternalInstallInfoFile(
+          extension_id, std::move(version), path, crx_location_, creation_flags,
+          auto_acknowledge_, install_immediately_));
     } else {  // if (has_external_update_url)
       CHECK(has_external_update_url);  // Checking of keys above ensures this.
       if (download_location_ == Manifest::INVALID_LOCATION) {
@@ -307,20 +360,18 @@ void ExternalProviderImpl::SetPrefs(base::DictionaryValue* prefs) {
                      << "extensions from update URLs.";
         continue;
       }
-      GURL update_url(external_update_url);
-      if (!update_url.is_valid()) {
+      std::unique_ptr<GURL> update_url(new GURL(external_update_url));
+      if (!update_url->is_valid()) {
         LOG(WARNING) << "Malformed extension dictionary for extension: "
                      << extension_id.c_str() << ".  Key " << kExternalUpdateUrl
                      << " has value \"" << external_update_url
                      << "\", which is not a valid URL.";
         continue;
       }
-      service_->OnExternalExtensionUpdateUrlFound(extension_id,
-                                                  install_parameter,
-                                                  update_url,
-                                                  download_location_,
-                                                  creation_flags,
-                                                  auto_acknowledge_);
+      external_update_url_extensions->push_back(
+          new ExternalInstallInfoUpdateUrl(
+              extension_id, install_parameter, std::move(update_url),
+              download_location_, creation_flags, auto_acknowledge_));
     }
   }
 
@@ -330,8 +381,6 @@ void ExternalProviderImpl::SetPrefs(base::DictionaryValue* prefs) {
     // will be uninstalled later because provider doesn't provide it anymore.
     prefs_->Remove(*it, NULL);
   }
-
-  service_->OnExternalProviderReady(this);
 }
 
 void ExternalProviderImpl::ServiceShutdown() {
@@ -351,8 +400,9 @@ bool ExternalProviderImpl::HasExtension(
 }
 
 bool ExternalProviderImpl::GetExtensionDetails(
-    const std::string& id, Manifest::Location* location,
-    scoped_ptr<Version>* version) const {
+    const std::string& id,
+    Manifest::Location* location,
+    std::unique_ptr<Version>* version) const {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   CHECK(prefs_.get());
   CHECK(ready_);
@@ -508,7 +558,7 @@ void ExternalProviderImpl::CreateExternalProviders(
       if (connector && connector->IsEnterpriseManaged())
         location = Manifest::EXTERNAL_POLICY;
 
-      scoped_ptr<ExternalProviderImpl> kiosk_app_provider(
+      std::unique_ptr<ExternalProviderImpl> kiosk_app_provider(
           new ExternalProviderImpl(
               service, kiosk_app_manager->CreateExternalLoader(), profile,
               location, Manifest::INVALID_LOCATION, Extension::NO_FLAGS));
@@ -520,7 +570,7 @@ void ExternalProviderImpl::CreateExternalProviders(
 
     // Kiosk secondary app external provider.
     if (!kiosk_app_manager->secondary_app_external_loader_created()) {
-      scoped_ptr<ExternalProviderImpl> secondary_kiosk_app_provider(
+      std::unique_ptr<ExternalProviderImpl> secondary_kiosk_app_provider(
           new ExternalProviderImpl(
               service, kiosk_app_manager->CreateSecondaryAppExternalLoader(),
               profile, Manifest::EXTERNAL_PREF,
@@ -670,17 +720,13 @@ void ExternalProviderImpl::CreateExternalProviders(
                     Extension::WAS_INSTALLED_BY_DEFAULT)));
 #endif
 
-    scoped_ptr<ExternalProviderImpl> drive_migration_provider(
+    std::unique_ptr<ExternalProviderImpl> drive_migration_provider(
         new ExternalProviderImpl(
             service,
-            new ExtensionMigrator(profile,
-                                  extension_misc::kDriveHostedAppId,
+            new ExtensionMigrator(profile, extension_misc::kDriveHostedAppId,
                                   extension_misc::kDriveExtensionId),
-            profile,
-            Manifest::EXTERNAL_PREF,
-            Manifest::EXTERNAL_PREF_DOWNLOAD,
-            Extension::FROM_WEBSTORE |
-                Extension::WAS_INSTALLED_BY_DEFAULT));
+            profile, Manifest::EXTERNAL_PREF, Manifest::EXTERNAL_PREF_DOWNLOAD,
+            Extension::FROM_WEBSTORE | Extension::WAS_INSTALLED_BY_DEFAULT));
     drive_migration_provider->set_auto_acknowledge(true);
     provider_list->push_back(linked_ptr<ExternalProviderInterface>(
         drive_migration_provider.release()));

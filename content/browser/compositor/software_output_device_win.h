@@ -5,14 +5,16 @@
 #ifndef CONTENT_BROWSER_COMPOSITOR_SOFTWARE_OUTPUT_DEVICE_WIN_H_
 #define CONTENT_BROWSER_COMPOSITOR_SOFTWARE_OUTPUT_DEVICE_WIN_H_
 
-#include <windows.h>
 #include <stddef.h>
+#include <windows.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "cc/output/software_output_device.h"
+#include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 
 namespace base {
 class SharedMemory;
@@ -39,7 +41,7 @@ class OutputDeviceBacking {
   size_t GetMaxByteSize();
 
   std::vector<SoftwareOutputDeviceWin*> devices_;
-  scoped_ptr<base::SharedMemory> backing_;
+  std::unique_ptr<base::SharedMemory> backing_;
   size_t created_byte_size_;
 
   DISALLOW_COPY_AND_ASSIGN(OutputDeviceBacking);
@@ -61,7 +63,7 @@ class SoftwareOutputDeviceWin : public cc::SoftwareOutputDevice {
 
  private:
   HWND hwnd_;
-  skia::RefPtr<SkCanvas> contents_;
+  sk_sp<SkCanvas> contents_;
   bool is_hwnd_composited_;
   OutputDeviceBacking* backing_;
   bool in_paint_;

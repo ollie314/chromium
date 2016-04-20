@@ -14,6 +14,7 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -67,8 +68,7 @@ class ScopedCursorHider {
       client::CursorClient* cursor_client = client::GetCursorClient(window_);
       if (cursor_client) {
         const gfx::Display& display =
-            gfx::Screen::GetScreenFor(window_)->GetDisplayNearestWindow(
-                window_);
+            gfx::Screen::GetScreen()->GetDisplayNearestWindow(window_);
         cursor_client->SetDisplay(display);
         cursor_client->ShowCursor();
       }
@@ -293,9 +293,9 @@ void Window::SetLayoutManager(LayoutManager* layout_manager) {
     layout_manager_->OnWindowAddedToLayout(*it);
 }
 
-scoped_ptr<ui::EventTargeter>
-Window::SetEventTargeter(scoped_ptr<ui::EventTargeter> targeter) {
-  scoped_ptr<ui::EventTargeter> old_targeter = std::move(targeter_);
+std::unique_ptr<ui::EventTargeter> Window::SetEventTargeter(
+    std::unique_ptr<ui::EventTargeter> targeter) {
+  std::unique_ptr<ui::EventTargeter> old_targeter = std::move(targeter_);
   targeter_ = std::move(targeter);
   return old_targeter;
 }
@@ -1088,8 +1088,8 @@ ui::EventTarget* Window::GetParentTarget() {
   return parent_;
 }
 
-scoped_ptr<ui::EventTargetIterator> Window::GetChildIterator() const {
-  return make_scoped_ptr(new ui::EventTargetIteratorImpl<Window>(children()));
+std::unique_ptr<ui::EventTargetIterator> Window::GetChildIterator() const {
+  return base::WrapUnique(new ui::EventTargetIteratorImpl<Window>(children()));
 }
 
 ui::EventTargeter* Window::GetEventTargeter() {

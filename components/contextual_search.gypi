@@ -31,6 +31,7 @@
       'dependencies': [
         'contextual_search_mojo_bindings',
         '../base/base.gyp:base',
+        '../content/content.gyp:content_common',
       ],
       'sources': [
         'contextual_search/renderer/contextual_search_wrapper.cc',
@@ -50,7 +51,7 @@
         'contextual_search/common/overlay_page_notifier_service.mojom',
       ],
       'includes': [
-        '../third_party/mojo/mojom_bindings_generator.gypi',
+        '../mojo/mojom_bindings_generator.gypi',
       ],
     },
   ],

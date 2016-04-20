@@ -42,6 +42,7 @@
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/fill_layout.h"
+#include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
@@ -261,10 +262,10 @@ void AppListView::InitAsFramelessWindow(gfx::NativeView parent,
   params.delegate = this;
   widget->Init(params);
   widget->SetBounds(bounds);
-  // This needs to be set *after* Widget::Init() because BubbleDelegateView sets
-  // its own background at OnNativeThemeChanged(), which is called in
-  // View::AddChildView() which is called at Widget::SetContentsView() to build
-  // the views hierarchy in the widget.
+  // This needs to be set *after* Widget::Init() because
+  // BubbleDialogDelegateView sets its own background at OnNativeThemeChanged(),
+  // which is called in View::AddChildView() which is called at
+  // Widget::SetContentsView() to build the views hierarchy in the widget.
   set_background(new AppListBackground(0));
 
   InitChildWidgets();
@@ -289,7 +290,7 @@ void AppListView::ShowWhenReady() {
   app_list_main_view_->ShowAppListWhenReady();
 }
 
-void AppListView::Close() {
+void AppListView::CloseAppList() {
   app_list_main_view_->Close();
   delegate_->Dismiss();
 }
@@ -346,7 +347,7 @@ gfx::Size AppListView::GetPreferredSize() const {
 }
 
 void AppListView::OnPaint(gfx::Canvas* canvas) {
-  views::BubbleDelegateView::OnPaint(canvas);
+  views::BubbleDialogDelegateView::OnPaint(canvas);
   if (!next_paint_callback_.is_null()) {
     next_paint_callback_.Run();
     next_paint_callback_.Reset();
@@ -375,8 +376,8 @@ bool AppListView::ShouldDescendIntoChildForEventHandling(
                 ->GetCollapsedLauncherPageBounds()
                 .Contains(location);
 
-  return views::BubbleDelegateView::ShouldDescendIntoChildForEventHandling(
-      child, location);
+  return views::BubbleDialogDelegateView::
+      ShouldDescendIntoChildForEventHandling(child, location);
 }
 
 void AppListView::Prerender() {
@@ -435,14 +436,14 @@ void AppListView::InitContents(gfx::NativeView parent, int initial_apps_page) {
   app_list_main_view_ = new AppListMainView(delegate_);
   AddChildView(app_list_main_view_);
   app_list_main_view_->SetPaintToLayer(true);
-  app_list_main_view_->SetFillsBoundsOpaquely(false);
+  app_list_main_view_->layer()->SetFillsBoundsOpaquely(false);
   app_list_main_view_->layer()->SetMasksToBounds(true);
 
   // This will be added to the |search_box_widget_| after the app list widget is
   // initialized.
   search_box_view_ = new SearchBoxView(app_list_main_view_, delegate_);
   search_box_view_->SetPaintToLayer(true);
-  search_box_view_->SetFillsBoundsOpaquely(false);
+  search_box_view_->layer()->SetFillsBoundsOpaquely(false);
   search_box_view_->layer()->SetMasksToBounds(true);
 
   // TODO(vadimt): Remove ScopedTracker below once crbug.com/440224 and
@@ -464,7 +465,7 @@ void AppListView::InitContents(gfx::NativeView parent, int initial_apps_page) {
     speech_view_ = new SpeechView(delegate_);
     speech_view_->SetVisible(false);
     speech_view_->SetPaintToLayer(true);
-    speech_view_->SetFillsBoundsOpaquely(false);
+    speech_view_->layer()->SetFillsBoundsOpaquely(false);
     speech_view_->layer()->SetOpacity(0.0f);
     AddChildView(speech_view_);
   }
@@ -501,7 +502,7 @@ void AppListView::InitChildWidgets() {
 #if defined(USE_AURA)
   // Mouse events on the search box shadow should not be captured.
   aura::Window* window = search_box_widget_->GetNativeWindow();
-  window->SetEventTargeter(scoped_ptr<ui::EventTargeter>(
+  window->SetEventTargeter(std::unique_ptr<ui::EventTargeter>(
       new SearchBoxWindowTargeter(search_box_view_)));
 #endif
 
@@ -517,11 +518,11 @@ void AppListView::InitAsBubbleInternal(gfx::NativeView parent,
 
   InitContents(parent, initial_apps_page);
 
+  AddAccelerator(ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE));
   set_color(kContentsBackgroundColor);
   set_margins(gfx::Insets());
   set_parent_window(parent);
   set_close_on_deactivate(false);
-  set_close_on_esc(false);
   set_anchor_view_insets(gfx::Insets(kArrowOffset + anchor_offset.y(),
                                      kArrowOffset + anchor_offset.x(),
                                      kArrowOffset - anchor_offset.y(),
@@ -534,11 +535,11 @@ void AppListView::InitAsBubbleInternal(gfx::NativeView parent,
     // TODO(tapted): Remove ScopedTracker below once crbug.com/431326 is fixed.
     tracked_objects::ScopedTracker tracking_profile(
         FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "431326 views::BubbleDelegateView::CreateBubble()"));
+            "431326 views::BubbleDialogDelegateView::CreateBubble()"));
 
     // This creates the app list widget. (Before this, child widgets cannot be
     // created.)
-    views::BubbleDelegateView::CreateBubble(this);
+    views::BubbleDialogDelegateView::CreateBubble(this);
   }
 
   SetBubbleArrow(arrow);
@@ -552,7 +553,7 @@ void AppListView::InitAsBubbleInternal(gfx::NativeView parent,
   GetBubbleFrameView()->set_background(new AppListBackground(
       GetBubbleFrameView()->bubble_border()->GetBorderCornerRadius()));
   set_background(NULL);
-  window->SetEventTargeter(scoped_ptr<ui::EventTargeter>(
+  window->SetEventTargeter(std::unique_ptr<ui::EventTargeter>(
       new views::BubbleWindowTargeter(this)));
 #else
   set_background(new AppListBackground(
@@ -588,8 +589,15 @@ void AppListView::InitAsBubbleInternal(gfx::NativeView parent,
 void AppListView::OnBeforeBubbleWidgetInit(
     views::Widget::InitParams* params,
     views::Widget* widget) const {
+  if (!params->native_widget) {
+    views::ViewsDelegate* views_delegate = views::ViewsDelegate::GetInstance();
+    if (views_delegate && !views_delegate->native_widget_factory().is_null()) {
+      params->native_widget =
+          views_delegate->native_widget_factory().Run(*params, widget);
+    }
+  }
 #if defined(USE_AURA) && !defined(OS_CHROMEOS)
-  if (delegate_ && delegate_->ForceNativeDesktop())
+  if (!params->native_widget && delegate_ && delegate_->ForceNativeDesktop())
     params->native_widget = new views::DesktopNativeWidgetAura(widget);
 #endif
 #if defined(OS_WIN)
@@ -608,15 +616,12 @@ void AppListView::OnBeforeBubbleWidgetInit(
 #endif
 }
 
-views::View* AppListView::GetInitiallyFocusedView() {
-  return app_list_main_view_->search_box_view()->search_box();
+int AppListView::GetDialogButtons() const {
+  return ui::DIALOG_BUTTON_NONE;
 }
 
-gfx::ImageSkia AppListView::GetWindowIcon() {
-  if (delegate_)
-    return delegate_->GetWindowIcon();
-
-  return gfx::ImageSkia();
+views::View* AppListView::GetInitiallyFocusedView() {
+  return app_list_main_view_->search_box_view()->search_box();
 }
 
 bool AppListView::WidgetHasHitTestMask() const {
@@ -632,36 +637,29 @@ void AppListView::GetWidgetHitTestMask(gfx::Path* mask) const {
 }
 
 bool AppListView::AcceleratorPressed(const ui::Accelerator& accelerator) {
-  // The accelerator is added by BubbleDelegateView.
-  if (accelerator.key_code() == ui::VKEY_ESCAPE) {
-    if (switches::IsExperimentalAppListEnabled()) {
-      // If the ContentsView does not handle the back action, then this is the
-      // top level, so we close the app list.
-      if (!app_list_main_view_->contents_view()->Back()) {
-        GetWidget()->Deactivate();
-        Close();
-      }
-      return true;
-    }
-
-    if (app_list_main_view_->search_box_view()->HasSearch()) {
-      app_list_main_view_->search_box_view()->ClearSearch();
-    } else if (app_list_main_view_->contents_view()
-                   ->apps_container_view()
-                   ->IsInFolderView()) {
-      app_list_main_view_->contents_view()
-          ->apps_container_view()
-          ->app_list_folder_view()
-          ->CloseFolderPage();
-      return true;
-    } else {
+  DCHECK_EQ(ui::VKEY_ESCAPE, accelerator.key_code());
+  if (switches::IsExperimentalAppListEnabled()) {
+    // If the ContentsView does not handle the back action, then this is the
+    // top level, so we close the app list.
+    if (!app_list_main_view_->contents_view()->Back()) {
       GetWidget()->Deactivate();
-      Close();
+      CloseAppList();
     }
-    return true;
+  } else if (app_list_main_view_->search_box_view()->HasSearch()) {
+    app_list_main_view_->search_box_view()->ClearSearch();
+  } else if (app_list_main_view_->contents_view()
+                 ->apps_container_view()
+                 ->IsInFolderView()) {
+    app_list_main_view_->contents_view()
+        ->apps_container_view()
+        ->app_list_folder_view()
+        ->CloseFolderPage();
+  } else {
+    GetWidget()->Deactivate();
+    CloseAppList();
   }
-
-  return false;
+  // Don't let DialogClientView handle the accelerator.
+  return true;
 }
 
 void AppListView::Layout() {
@@ -688,13 +686,13 @@ void AppListView::Layout() {
 }
 
 void AppListView::SchedulePaintInRect(const gfx::Rect& rect) {
-  BubbleDelegateView::SchedulePaintInRect(rect);
+  BubbleDialogDelegateView::SchedulePaintInRect(rect);
   if (GetBubbleFrameView())
     GetBubbleFrameView()->SchedulePaint();
 }
 
 void AppListView::OnWidgetDestroying(views::Widget* widget) {
-  BubbleDelegateView::OnWidgetDestroying(widget);
+  BubbleDialogDelegateView::OnWidgetDestroying(widget);
   if (delegate_ && widget == GetWidget())
     delegate_->ViewClosing();
 }
@@ -710,7 +708,7 @@ void AppListView::OnWidgetActivationChanged(views::Widget* widget,
 
 void AppListView::OnWidgetVisibilityChanged(views::Widget* widget,
                                             bool visible) {
-  BubbleDelegateView::OnWidgetVisibilityChanged(widget, visible);
+  BubbleDialogDelegateView::OnWidgetVisibilityChanged(widget, visible);
 
   if (widget != GetWidget())
     return;

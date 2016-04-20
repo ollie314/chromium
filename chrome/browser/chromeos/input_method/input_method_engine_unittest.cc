@@ -14,8 +14,8 @@
 #include "base/test/histogram_tester.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/mock_input_method_manager.h"
-#include "chrome/browser/input_method/input_method_engine_base.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/input_method/input_method_engine_base.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/mock_component_extension_ime_manager_delegate.h"
@@ -64,11 +64,11 @@ void InitInputMethod() {
   ime_list.push_back(ext1);
   delegate->set_ime_list(ime_list);
   comp_ime_manager->Initialize(
-      scoped_ptr<ComponentExtensionIMEManagerDelegate>(delegate));
+      std::unique_ptr<ComponentExtensionIMEManagerDelegate>(delegate));
 
   MockInputMethodManager* manager = new MockInputMethodManager;
   manager->SetComponentExtensionIMEManager(
-      scoped_ptr<ComponentExtensionIMEManager>(comp_ime_manager));
+      std::unique_ptr<ComponentExtensionIMEManager>(comp_ime_manager));
   InitializeForTesting(manager);
 }
 
@@ -145,7 +145,7 @@ class InputMethodEngineTest : public testing::Test {
   void CreateEngine(bool whitelisted) {
     engine_.reset(new InputMethodEngine());
     observer_ = new TestObserver();
-    scoped_ptr<InputMethodEngineBase::Observer> observer_ptr(observer_);
+    std::unique_ptr<InputMethodEngineBase::Observer> observer_ptr(observer_);
     engine_->Initialize(std::move(observer_ptr),
                         whitelisted ? kTestExtensionId : kTestExtensionId2,
                         ProfileManager::GetActiveUserProfile());
@@ -158,7 +158,7 @@ class InputMethodEngineTest : public testing::Test {
     ui::IMEBridge::Get()->SetCurrentInputContext(input_context);
   }
 
-  scoped_ptr<InputMethodEngine> engine_;
+  std::unique_ptr<InputMethodEngine> engine_;
 
   TestObserver* observer_;
   std::vector<std::string> languages_;
@@ -166,7 +166,7 @@ class InputMethodEngineTest : public testing::Test {
   GURL options_page_;
   GURL input_view_;
 
-  scoped_ptr<MockIMEInputContextHandler> mock_ime_input_context_handler_;
+  std::unique_ptr<MockIMEInputContextHandler> mock_ime_input_context_handler_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(InputMethodEngineTest);

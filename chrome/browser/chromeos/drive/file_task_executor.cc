@@ -18,8 +18,8 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/common/extensions/api/file_manager_private.h"
+#include "components/drive/chromeos/file_system_interface.h"
 #include "components/drive/drive.pb.h"
-#include "components/drive/file_system_interface.h"
 #include "components/drive/service/drive_service_interface.h"
 #include "content/public/browser/browser_thread.h"
 #include "storage/browser/fileapi/file_system_url.h"
@@ -44,8 +44,7 @@ class FileTaskExecutorDelegateImpl : public FileTaskExecutorDelegate {
   }
 
   void OpenBrowserWindow(const GURL& open_link) override {
-    chrome::ScopedTabbedBrowserDisplayer displayer(
-         profile_, chrome::HOST_DESKTOP_TYPE_ASH);
+    chrome::ScopedTabbedBrowserDisplayer displayer(profile_);
     chrome::AddSelectedTabWithURL(displayer.browser(), open_link,
                                   ui::PAGE_TRANSITION_LINK);
     // Since the ScopedTabbedBrowserDisplayer does not guarantee that the
@@ -68,7 +67,7 @@ FileTaskExecutor::FileTaskExecutor(Profile* profile, const std::string& app_id)
 }
 
 FileTaskExecutor::FileTaskExecutor(
-    scoped_ptr<FileTaskExecutorDelegate> delegate,
+    std::unique_ptr<FileTaskExecutorDelegate> delegate,
     const std::string& app_id)
     : delegate_(std::move(delegate)),
       app_id_(app_id),
@@ -113,8 +112,9 @@ void FileTaskExecutor::Execute(
   }
 }
 
-void FileTaskExecutor::OnFileEntryFetched(FileError error,
-                                          scoped_ptr<ResourceEntry> entry) {
+void FileTaskExecutor::OnFileEntryFetched(
+    FileError error,
+    std::unique_ptr<ResourceEntry> entry) {
   // Here, we are only interested in files.
   if (entry.get() && !entry->has_file_specific_info())
     error = FILE_ERROR_NOT_FOUND;

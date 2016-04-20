@@ -4,6 +4,8 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -239,13 +241,13 @@ class FileSystemQuotaClientTest : public testing::Test {
 };
 
 TEST_F(FileSystemQuotaClientTest, NoFileSystemTest) {
-  scoped_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
+  std::unique_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
 
   EXPECT_EQ(0, GetOriginUsage(quota_client.get(), kDummyURL1, kTemporary));
 }
 
 TEST_F(FileSystemQuotaClientTest, NoFileTest) {
-  scoped_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
+  std::unique_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
   const TestFile kFiles[] = {
     {true, NULL, 0, kDummyURL1, kTemporary},
   };
@@ -257,7 +259,7 @@ TEST_F(FileSystemQuotaClientTest, NoFileTest) {
 }
 
 TEST_F(FileSystemQuotaClientTest, OneFileTest) {
-  scoped_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
+  std::unique_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
   const TestFile kFiles[] = {
     {true, NULL, 0, kDummyURL1, kTemporary},
     {false, "foo", 4921, kDummyURL1, kTemporary},
@@ -273,7 +275,7 @@ TEST_F(FileSystemQuotaClientTest, OneFileTest) {
 }
 
 TEST_F(FileSystemQuotaClientTest, TwoFilesTest) {
-  scoped_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
+  std::unique_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
   const TestFile kFiles[] = {
     {true, NULL, 0, kDummyURL1, kTemporary},
     {false, "foo", 10310, kDummyURL1, kTemporary},
@@ -290,7 +292,7 @@ TEST_F(FileSystemQuotaClientTest, TwoFilesTest) {
 }
 
 TEST_F(FileSystemQuotaClientTest, EmptyFilesTest) {
-  scoped_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
+  std::unique_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
   const TestFile kFiles[] = {
     {true, NULL, 0, kDummyURL1, kTemporary},
     {false, "foo", 0, kDummyURL1, kTemporary},
@@ -308,7 +310,7 @@ TEST_F(FileSystemQuotaClientTest, EmptyFilesTest) {
 }
 
 TEST_F(FileSystemQuotaClientTest, SubDirectoryTest) {
-  scoped_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
+  std::unique_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
   const TestFile kFiles[] = {
     {true, NULL, 0, kDummyURL1, kTemporary},
     {true, "dirtest", 0, kDummyURL1, kTemporary},
@@ -326,7 +328,7 @@ TEST_F(FileSystemQuotaClientTest, SubDirectoryTest) {
 }
 
 TEST_F(FileSystemQuotaClientTest, MultiTypeTest) {
-  scoped_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
+  std::unique_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
   const TestFile kFiles[] = {
     {true, NULL, 0, kDummyURL1, kTemporary},
     {true, "dirtest", 0, kDummyURL1, kTemporary},
@@ -354,7 +356,7 @@ TEST_F(FileSystemQuotaClientTest, MultiTypeTest) {
 }
 
 TEST_F(FileSystemQuotaClientTest, MultiDomainTest) {
-  scoped_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
+  std::unique_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
   const TestFile kFiles[] = {
     {true, NULL, 0, kDummyURL1, kTemporary},
     {true, "dir1", 0, kDummyURL1, kTemporary},
@@ -400,7 +402,7 @@ TEST_F(FileSystemQuotaClientTest, MultiDomainTest) {
 }
 
 TEST_F(FileSystemQuotaClientTest, GetUsage_MultipleTasks) {
-  scoped_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
+  std::unique_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
   const TestFile kFiles[] = {
     {true, NULL, 0, kDummyURL1, kTemporary},
     {false, "foo",   11, kDummyURL1, kTemporary},
@@ -430,7 +432,7 @@ TEST_F(FileSystemQuotaClientTest, GetUsage_MultipleTasks) {
 }
 
 TEST_F(FileSystemQuotaClientTest, GetOriginsForType) {
-  scoped_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
+  std::unique_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
   const TestFile kFiles[] = {
     {true, NULL, 0, kDummyURL1, kTemporary},
     {true, NULL, 0, kDummyURL2, kTemporary},
@@ -446,7 +448,7 @@ TEST_F(FileSystemQuotaClientTest, GetOriginsForType) {
 }
 
 TEST_F(FileSystemQuotaClientTest, GetOriginsForHost) {
-  scoped_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
+  std::unique_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
   const char* kURL1 = "http://foo.com/";
   const char* kURL2 = "https://foo.com/";
   const char* kURL3 = "http://foo.com:1/";
@@ -472,7 +474,7 @@ TEST_F(FileSystemQuotaClientTest, GetOriginsForHost) {
 }
 
 TEST_F(FileSystemQuotaClientTest, IncognitoTest) {
-  scoped_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(true));
+  std::unique_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(true));
   const TestFile kFiles[] = {
     {true, NULL, 0, kDummyURL1, kTemporary},
     {false, "foo", 10, kDummyURL1, kTemporary},
@@ -491,7 +493,7 @@ TEST_F(FileSystemQuotaClientTest, IncognitoTest) {
 }
 
 TEST_F(FileSystemQuotaClientTest, DeleteOriginTest) {
-  scoped_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
+  std::unique_ptr<FileSystemQuotaClient> quota_client(NewQuotaClient(false));
   const TestFile kFiles[] = {
     {true, NULL,  0, "http://foo.com/",  kTemporary},
     {false, "a",  1, "http://foo.com/",  kTemporary},

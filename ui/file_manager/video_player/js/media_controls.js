@@ -57,6 +57,17 @@ function MediaControls(containerElement, onMediaError) {
   this.soundButton_ = null;
 
   /**
+   * @type {HTMLElement}
+   * @private
+   */
+  this.subtitlesButton_ = null;
+
+  /**
+   * @private {TextTrack}
+   */
+  this.subtitlesTrack_ = null;
+
+  /**
    * @type {boolean}
    * @private
    */
@@ -78,6 +89,11 @@ function MediaControls(containerElement, onMediaError) {
    * @private {boolean}
    */
   this.seeking_ = false;
+
+  /**
+   * @private {boolean}
+   */
+  this.showRemainingTime_ = false;
 }
 
 /**
@@ -96,17 +112,21 @@ MediaControls.ButtonStateType = {
 MediaControls.prototype.getMedia = function() { return this.media_ };
 
 /**
- * Format the time in hh:mm:ss format (omitting redundant leading zeros).
- *
+ * Format the time in hh:mm:ss format (omitting redundant leading zeros)
+ * adding '-' sign if given value is negative.
  * @param {number} timeInSec Time in seconds.
  * @return {string} Formatted time string.
  * @private
  */
 MediaControls.formatTime_ = function(timeInSec) {
+  var result = '';
+  if (timeInSec < 0) {
+    timeInSec *= -1;
+    result += '-';
+  }
   var seconds = Math.floor(timeInSec % 60);
   var minutes = Math.floor((timeInSec / 60) % 60);
   var hours = Math.floor(timeInSec / 60 / 60);
-  var result = '';
   if (hours) result += hours + ':';
   if (hours && (minutes < 10)) result += '0';
   result += minutes + ':';
@@ -246,15 +266,26 @@ MediaControls.prototype.initPlayButton = function(opt_parent) {
 MediaControls.PROGRESS_RANGE = 5000;
 
 /**
- * 5 seconds should be skipped when left/right key is pressed on progress bar.
+ * 5 seconds should be skipped when left/right key is pressed.
  */
-MediaControls.PROGRESS_MAX_SECONDS_TO_SKIP = 5;
+MediaControls.PROGRESS_MAX_SECONDS_TO_SMALL_SKIP = 5;
+
+/**
+ * 10 seconds should be skipped when J/L key is pressed.
+ */
+MediaControls.PROGRESS_MAX_SECONDS_TO_BIG_SKIP = 10;
 
 /**
  * 10% of duration should be skipped when the video is too short to skip 5
  * seconds.
  */
-MediaControls.PROGRESS_MAX_RATIO_TO_SKIP = 0.1;
+MediaControls.PROGRESS_MAX_RATIO_TO_SMALL_SKIP = 0.1;
+
+/**
+ * 20% of duration should be skipped when the video is too short to skip 10
+ * seconds.
+ */
+MediaControls.PROGRESS_MAX_RATIO_TO_BIG_SKIP = 0.2;
 
 /**
  * @param {HTMLElement=} opt_parent Parent container.
@@ -266,6 +297,8 @@ MediaControls.prototype.initTimeControls = function(opt_parent) {
 
   this.currentTimeSpacer_ = this.createControl('spacer', timeBox);
   this.currentTime_ = this.createControl('current', timeBox);
+  this.currentTime_.addEventListener('click',
+      this.onTimeLabelClick_.bind(this));
   // Set the initial width to the minimum to reduce the flicker.
   this.updateTimeLabel_(0, 0);
 
@@ -283,10 +316,6 @@ MediaControls.prototype.initTimeControls = function(opt_parent) {
       function(event) {
         this.onProgressDrag_();
       }.bind(this));
-  this.progressSlider_.addEventListener('keydown',
-      this.onProgressKeyDownOrKeyPress_.bind(this));
-  this.progressSlider_.addEventListener('keypress',
-      this.onProgressKeyDownOrKeyPress_.bind(this));
   timeControls.appendChild(this.progressSlider_);
 };
 
@@ -340,35 +369,45 @@ MediaControls.prototype.onProgressDrag_ = function() {
 };
 
 /**
- * Handles ArrowRight/ArrowLeft key on progress slider to skip forward/backword.
- * @param {!Event} event
+ * Skips forward/backword.
+ * @param {number} sec Seconds to skip. Set negative value to skip backword.
  * @private
  */
-MediaControls.prototype.onProgressKeyDownOrKeyPress_ = function(event) {
-  if (event.code !== 'ArrowRight' && event.code !== 'ArrowLeft')
-    return;
-
-  event.preventDefault();
-
+MediaControls.prototype.skip_ = function(sec) {
   if (this.media_ && this.media_.duration > 0) {
-    // On left/right key for progress bar, min(5 seconds, 10% of video) should
-    // be skipped.
-    var secondsToSkip = Math.min(
-        MediaControls.PROGRESS_MAX_SECONDS_TO_SKIP,
-        this.media_.duration * MediaControls.PROGRESS_MAX_RATIO_TO_SKIP);
     var stepsToSkip = MediaControls.PROGRESS_RANGE *
-        (secondsToSkip / this.media_.duration);
-
-    if (event.code === 'ArrowRight') {
-      this.progressSlider_.value = Math.min(
-          this.progressSlider_.value + stepsToSkip,
-          this.progressSlider_.max);
-    } else {
-      this.progressSlider_.value = Math.max(
-          this.progressSlider_.value - stepsToSkip, 0);
-    }
+        (sec / this.media_.duration);
+    this.progressSlider_.value = Math.max(Math.min(
+        this.progressSlider_.value + stepsToSkip,
+        this.progressSlider_.max), 0);
     this.onProgressChange_(this.progressSlider_.ratio);
   }
+};
+
+/**
+ * Invokes small skip.
+ * @param {boolean} forward Whether to skip forward or backword.
+ */
+MediaControls.prototype.smallSkip = function(forward) {
+  var secondsToSkip = Math.min(
+      MediaControls.PROGRESS_MAX_SECONDS_TO_SMALL_SKIP,
+      this.media_.duration * MediaControls.PROGRESS_MAX_RATIO_TO_SMALL_SKIP);
+  if (!forward)
+    secondsToSkip *= -1;
+  this.skip_(secondsToSkip);
+};
+
+/**
+ * Invokes big skip.
+ * @param {boolean} forward Whether to skip forward or backword.
+ */
+MediaControls.prototype.bigSkip = function(forward) {
+  var secondsToSkip = Math.min(
+      MediaControls.PROGRESS_MAX_SECONDS_TO_BIG_SKIP,
+      this.media_.duration * MediaControls.PROGRESS_MAX_RATIO_TO_BIG_SKIP);
+  if (!forward)
+    secondsToSkip *= -1;
+  this.skip_(secondsToSkip);
 };
 
 /**
@@ -398,10 +437,18 @@ MediaControls.prototype.setSeeking_ = function(seeking) {
   this.updatePlayButtonState_(this.isPlaying());
 };
 
+/**
+ * Click handler for the time label.
+ * @private
+ */
+MediaControls.prototype.onTimeLabelClick_ = function(event) {
+  this.showRemainingTime_ = !this.showRemainingTime_;
+  this.updateTimeLabel_(this.media_.currentTime, this.media_.duration);
+}
 
 /**
  * Update the label for current playing position and video duration.
- * The label should be like "0:00 / 6:20".
+ * The label should be like "0:06 / 0:32" or "-0:26 / 0:32".
  * @param {number} current Current playing position.
  * @param {number=} opt_duration Video's duration.
  * @private
@@ -418,10 +465,12 @@ MediaControls.prototype.updateTimeLabel_ = function(current, opt_duration) {
 
   if (isFinite(duration)) {
     this.currentTime_.textContent =
-        MediaControls.formatTime_(current) + ' / ' +
-        MediaControls.formatTime_(duration);
+        (this.showRemainingTime_ ? MediaControls.formatTime_(current - duration)
+          : MediaControls.formatTime_(current)) + ' / ' +
+          MediaControls.formatTime_(duration);
     // Keep the maximum space to prevent time label from moving while playing.
     this.currentTimeSpacer_.textContent =
+        (this.showRemainingTime_ ? '-' : '') +
         MediaControls.formatTime_(duration) + ' / ' +
         MediaControls.formatTime_(duration);
   } else {
@@ -517,6 +566,68 @@ MediaControls.prototype.onVolumeDrag_ = function() {
   }
 };
 
+/**
+ * Initializes subtitles button.
+ */
+MediaControls.prototype.initSubtitlesButton = function() {
+  this.subtitlesTrack_ = null;
+  this.subtitlesButton_ =
+      this.createButton('subtitles', this.onSubtitlesButtonClicked_.bind(this));
+};
+
+/**
+ * @param {Event} event Mouse click event.
+ * @private
+ */
+MediaControls.prototype.onSubtitlesButtonClicked_ = function(event) {
+  if (!this.subtitlesTrack_) {
+    return;
+  }
+  this.toggleSubtitlesMode_(this.subtitlesTrack_.mode === 'hidden');
+};
+
+/**
+ * @param {boolean} on Whether enabled or not.
+ * @private
+ */
+MediaControls.prototype.toggleSubtitlesMode_ = function(on) {
+  if (!this.subtitlesTrack_) {
+    return;
+  }
+  if (on) {
+    this.subtitlesTrack_.mode = 'showing';
+    this.subtitlesButton_.setAttribute('showing', '');
+    this.subtitlesButton_.setAttribute('aria-label',
+        str('VIDEO_PLAYER_DISABLE_SUBTITLES_BUTTON_LABEL'));
+  } else {
+    this.subtitlesTrack_.mode = 'hidden';
+    this.subtitlesButton_.removeAttribute('showing');
+    this.subtitlesButton_.setAttribute('aria-label',
+        str('VIDEO_PLAYER_ENABLE_SUBTITLES_BUTTON_LABEL'));
+  }
+};
+
+/**
+ * @param {TextTrack} track Subtitles track
+ * @private
+ */
+MediaControls.prototype.attachTextTrack_ = function(track) {
+  this.subtitlesTrack_ = track;
+  if (this.subtitlesTrack_) {
+    this.toggleSubtitlesMode_(true);
+    this.subtitlesButton_.removeAttribute('unavailable');
+  } else {
+    this.subtitlesButton_.setAttribute('unavailable', '');
+  }
+};
+
+/**
+ * @private
+ */
+MediaControls.prototype.detachTextTrack_ = function() {
+  this.subtitlesTrack_ = null;
+};
+
 /*
  * Media event handlers.
  */
@@ -547,6 +658,11 @@ MediaControls.prototype.attachMedia = function(mediaElement) {
     /* Copy the user selected volume to the new media element. */
     this.savedVolume_ = this.media_.volume = this.volume_.ratio;
   }
+  if (this.media_.textTracks && this.media_.textTracks.length > 0) {
+    this.attachTextTrack_(this.media_.textTracks[0]);
+  } else {
+    this.attachTextTrack_(null);
+  }
 };
 
 /**
@@ -563,6 +679,7 @@ MediaControls.prototype.detachMedia = function() {
   this.media_.removeEventListener('error', this.onMediaError_);
 
   this.media_ = null;
+  this.detachTextTrack_();
 };
 
 /**
@@ -742,6 +859,7 @@ function VideoControls(
   this.initPlayButton();
   this.initTimeControls();
   this.initVolumeControls();
+  this.initSubtitlesButton();
 
   // Create the cast button.
   // We need to use <button> since cr.ui.MenuButton.decorate modifies prototype

@@ -7,11 +7,11 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "build/build_config.h"
@@ -28,7 +28,7 @@ class PluginMetricsProvider;
 class PrefRegistrySimple;
 class PrefService;
 
-#if !defined(OS_CHROMEOS) && !defined(OS_IOS)
+#if !defined(OS_CHROMEOS)
 class SigninStatusMetricsProvider;
 #endif
 
@@ -49,7 +49,7 @@ class ChromeMetricsServiceClient
   ~ChromeMetricsServiceClient() override;
 
   // Factory function.
-  static scoped_ptr<ChromeMetricsServiceClient> Create(
+  static std::unique_ptr<ChromeMetricsServiceClient> Create(
       metrics::MetricsStateManager* state_manager,
       PrefService* local_state);
 
@@ -70,11 +70,14 @@ class ChromeMetricsServiceClient
   void InitializeSystemProfileMetrics(
       const base::Closure& done_callback) override;
   void CollectFinalMetricsForLog(const base::Closure& done_callback) override;
-  scoped_ptr<metrics::MetricsLogUploader> CreateUploader(
+  std::unique_ptr<metrics::MetricsLogUploader> CreateUploader(
       const base::Callback<void(int)>& on_upload_complete) override;
   base::TimeDelta GetStandardUploadInterval() override;
   base::string16 GetRegistryBackupKey() override;
   void OnPluginLoadingError(const base::FilePath& plugin_path) override;
+  bool IsReportingPolicyManaged() override;
+  EnableMetricsDefault GetDefaultOptIn() override;
+  bool IsUMACellularUploadLogicEnabled() override;
 
  private:
   explicit ChromeMetricsServiceClient(
@@ -83,8 +86,11 @@ class ChromeMetricsServiceClient
   // Completes the two-phase initialization of ChromeMetricsServiceClient.
   void Initialize();
 
-  // Callback that continues the init task by loading plugin information.
+  // Callback that continues the init task by getting a Bluetooth Adapter.
   void OnInitTaskGotHardwareClass();
+
+  // Callback that continues the init task by loading plugin information.
+  void OnInitTaskGotBluetoothAdapter();
 
   // Called after the Plugin init task has been completed that continues the
   // init task by launching a task to gather Google Update statistics.
@@ -145,7 +151,7 @@ class ChromeMetricsServiceClient
   metrics::MetricsStateManager* metrics_state_manager_;
 
   // The MetricsService that |this| is a client of.
-  scoped_ptr<metrics::MetricsService> metrics_service_;
+  std::unique_ptr<metrics::MetricsService> metrics_service_;
 
   content::NotificationRegistrar registrar_;
 
@@ -200,7 +206,7 @@ class ChromeMetricsServiceClient
 
   // Subscription for receiving callbacks that a URL was opened from the
   // omnibox.
-  scoped_ptr<base::CallbackList<void(OmniboxLog*)>::Subscription>
+  std::unique_ptr<base::CallbackList<void(OmniboxLog*)>::Subscription>
       omnibox_url_opened_subscription_;
 
   // Whether this client has already uploaded profiler data during this session.

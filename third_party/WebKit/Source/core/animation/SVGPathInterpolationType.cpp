@@ -10,30 +10,30 @@
 
 namespace blink {
 
-PassOwnPtr<InterpolationValue> SVGPathInterpolationType::maybeConvertSVGValue(const SVGPropertyBase& svgValue) const
+InterpolationValue SVGPathInterpolationType::maybeConvertSVGValue(const SVGPropertyBase& svgValue) const
 {
     if (svgValue.type() != AnimatedPath)
         return nullptr;
 
-    return PathInterpolationFunctions::convertValue(*this, toSVGPath(svgValue).byteStream());
+    return PathInterpolationFunctions::convertValue(toSVGPath(svgValue).byteStream());
 }
 
-PassOwnPtr<InterpolationValue> SVGPathInterpolationType::maybeConvertNeutral(const UnderlyingValue& underlyingValue, ConversionCheckers& conversionCheckers) const
+InterpolationValue SVGPathInterpolationType::maybeConvertNeutral(const InterpolationValue& underlying, ConversionCheckers& conversionCheckers) const
 {
-    return PathInterpolationFunctions::maybeConvertNeutral(*this, underlyingValue, conversionCheckers);
+    return PathInterpolationFunctions::maybeConvertNeutral(underlying, conversionCheckers);
 }
 
-PassOwnPtr<PairwisePrimitiveInterpolation> SVGPathInterpolationType::mergeSingleConversions(InterpolationValue& startValue, InterpolationValue& endValue) const
+PairwiseInterpolationValue SVGPathInterpolationType::mergeSingleConversions(InterpolationValue&& start, InterpolationValue&& end) const
 {
-    return PathInterpolationFunctions::mergeSingleConversions(*this, startValue, endValue);
+    return PathInterpolationFunctions::mergeSingleConversions(std::move(start), std::move(end));
 }
 
-void SVGPathInterpolationType::composite(UnderlyingValue& underlyingValue, double underlyingFraction, const InterpolationValue& value) const
+void SVGPathInterpolationType::composite(UnderlyingValueOwner& underlyingValueOwner, double underlyingFraction, const InterpolationValue& value, double interpolationFraction) const
 {
-    PathInterpolationFunctions::composite(underlyingValue, underlyingFraction, value);
+    PathInterpolationFunctions::composite(underlyingValueOwner, underlyingFraction, *this, value);
 }
 
-PassRefPtrWillBeRawPtr<SVGPropertyBase> SVGPathInterpolationType::appliedSVGValue(const InterpolableValue& interpolableValue, const NonInterpolableValue* nonInterpolableValue) const
+SVGPropertyBase* SVGPathInterpolationType::appliedSVGValue(const InterpolableValue& interpolableValue, const NonInterpolableValue* nonInterpolableValue) const
 {
     return SVGPath::create(CSSPathValue::create(PathInterpolationFunctions::appliedValue(interpolableValue, nonInterpolableValue)));
 }

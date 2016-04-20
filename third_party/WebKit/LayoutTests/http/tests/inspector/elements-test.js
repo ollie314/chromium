@@ -23,7 +23,7 @@ InspectorTest.dumpComputedStyle = function()
             continue;
         var dumpText = "";
         dumpText += treeElement.title.querySelector(".property-name").textContent;
-        dumpText += ": ";
+        dumpText += " ";
         dumpText += treeElement.title.querySelector(".property-value").textContent;
         InspectorTest.addResult(dumpText);
         for (var trace of treeElement.children()) {
@@ -379,7 +379,7 @@ function printStyleSection(section, omitLonghands, includeSelectorGroupMarks)
         var media = medias[i];
         InspectorTest.addResult(media.textContent);
     }
-    var selector = section._titleElement.querySelector(".selector");
+    var selector = section._titleElement.querySelector(".selector") || section._titleElement.querySelector(".keyframe-key");
     var selectorText = includeSelectorGroupMarks ? buildMarkedSelectors(selector) : selector.textContent;
     // Dump " {".
     selectorText += selector.nextSibling.textContent;
@@ -545,8 +545,8 @@ InspectorTest.dumpElementsTree = function(rootNode, depth, resultsArray)
     function dumpMap(name, map)
     {
         var result = [];
-        for (var id in map)
-            result.push(id + "=" + map[id]);
+        for (var id of map.keys())
+            result.push(id + "=" + map.get(id));
         if (!result.length)
             return "";
         return name + ":[" + result.join(",") + "]";
@@ -916,11 +916,12 @@ InspectorTest.dumpBreadcrumb = function(message)
     InspectorTest.addResult(result.join(" > "));
 }
 
-InspectorTest.matchingSelectors = function(rule)
+InspectorTest.matchingSelectors = function(matchedStyles, rule)
 {
     var selectors = [];
-    for (var i = 0; i < rule.matchingSelectors.length; ++i)
-        selectors.push(rule.selectors[rule.matchingSelectors[i]].text);
+    var matchingSelectors = matchedStyles.matchingSelectors(rule);
+    for (var i = 0; i < matchingSelectors.length; ++i)
+        selectors.push(rule.selectors[matchingSelectors[i]].text);
     return "[" + selectors.join(", ") + "]";
 }
 

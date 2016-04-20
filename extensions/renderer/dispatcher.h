@@ -18,7 +18,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/scoped_observer.h"
 #include "base/timer/timer.h"
-#include "content/public/renderer/render_process_observer.h"
+#include "content/public/renderer/render_thread_observer.h"
 #include "extensions/common/event_filter.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extensions_client.h"
@@ -67,7 +67,7 @@ struct Message;
 
 // Dispatches extension control messages sent to the renderer and stores
 // renderer extension related state.
-class Dispatcher : public content::RenderProcessObserver,
+class Dispatcher : public content::RenderThreadObserver,
                    public UserScriptSetManager::Observer {
  public:
   explicit Dispatcher(DispatcherDelegate* delegate);
@@ -108,7 +108,13 @@ class Dispatcher : public content::RenderProcessObserver,
       v8::Local<v8::Context> v8_context,
       const GURL& url);
 
+  // This method is not allowed to run JavaScript code in the frame.
   void DidCreateDocumentElement(blink::WebLocalFrame* frame);
+
+  // These methods may run (untrusted) JavaScript code in the frame, and
+  // cause |render_frame| to become invalid.
+  void RunScriptsAtDocumentStart(content::RenderFrame* render_frame);
+  void RunScriptsAtDocumentEnd(content::RenderFrame* render_frame);
 
   void OnExtensionResponse(int request_id,
                            bool success,
@@ -147,9 +153,8 @@ class Dispatcher : public content::RenderProcessObserver,
   FRIEND_TEST_ALL_PREFIXES(RendererPermissionsPolicyDelegateTest,
                            CannotScriptWebstore);
 
-  // RenderProcessObserver implementation:
+  // RenderThreadObserver implementation:
   bool OnControlMessageReceived(const IPC::Message& message) override;
-  void WebKitInitialized() override;
   void IdleNotification() override;
   void OnRenderProcessShutdown() override;
 
@@ -291,9 +296,6 @@ class Dispatcher : public content::RenderProcessObserver,
 
   // Mapping of port IDs to tabs. If there is no tab, the value would be -1.
   std::map<int, int> port_to_tab_id_map_;
-
-  // True once WebKit has been initialized (and it is therefore safe to poke).
-  bool is_webkit_initialized_;
 
   // It is important for this to come after the ScriptInjectionManager, so that
   // the observer is destroyed before the UserScriptSet.

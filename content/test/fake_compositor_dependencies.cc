@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "cc/test/fake_external_begin_frame_source.h"
@@ -53,7 +54,7 @@ bool FakeCompositorDependencies::IsGpuMemoryBufferCompositorResourcesEnabled() {
 }
 
 bool FakeCompositorDependencies::IsElasticOverscrollEnabled() {
-  return false;
+  return true;
 }
 std::vector<unsigned> FakeCompositorDependencies::GetImageTextureTargets() {
   return std::vector<unsigned>(static_cast<size_t>(gfx::BufferFormat::LAST) + 1,
@@ -90,10 +91,15 @@ FakeCompositorDependencies::GetSharedMainThreadContextProvider() {
   return nullptr;
 }
 
-scoped_ptr<cc::BeginFrameSource>
+std::unique_ptr<cc::BeginFrameSource>
 FakeCompositorDependencies::CreateExternalBeginFrameSource(int routing_id) {
   double refresh_rate = 200.0;
-  return make_scoped_ptr(new cc::FakeExternalBeginFrameSource(refresh_rate));
+  return base::WrapUnique(new cc::FakeExternalBeginFrameSource(refresh_rate));
+}
+
+cc::ImageSerializationProcessor*
+FakeCompositorDependencies::GetImageSerializationProcessor() {
+  return nullptr;
 }
 
 cc::TaskGraphRunner* FakeCompositorDependencies::GetTaskGraphRunner() {

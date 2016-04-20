@@ -1,4 +1,3 @@
-
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
  *
@@ -35,7 +34,6 @@
 #include "../platform/WebCanvas.h"
 #include "../platform/WebCommon.h"
 #include "../platform/WebFloatSize.h"
-#include "../platform/WebFrameTimingEvent.h"
 #include "../platform/WebInputEventResult.h"
 #include "../platform/WebPoint.h"
 #include "../platform/WebRect.h"
@@ -63,12 +61,6 @@ public:
     // Returns the current size of the WebWidget.
     virtual WebSize size() { return WebSize(); }
 
-    // Used to group a series of resize events. For example, if the user
-    // drags a resizer then willStartLiveResize will be called, followed by a
-    // sequence of resize events, ending with willEndLiveResize when the user
-    // lets go of the resizer.
-    virtual void willStartLiveResize() { }
-
     // Called to resize the WebWidget.
     virtual void resize(const WebSize&) { }
 
@@ -78,10 +70,6 @@ public:
     // shrink the visible viewport to allow things like the ChromeOS virtual
     // keyboard to overlay over content but allow scrolling it into view.
     virtual void resizeVisualViewport(const WebSize&) { }
-
-    // Ends a group of resize events that was started with a call to
-    // willStartLiveResize.
-    virtual void willEndLiveResize() { }
 
     // Called to notify the WebWidget of entering/exiting fullscreen mode.
     virtual void didEnterFullScreen() { }
@@ -139,14 +127,6 @@ public:
         const WebFloatSize& elasticOverscrollDelta,
         float scaleFactor,
         float topControlsShownRatioDelta) { }
-
-    // Records composite or render events for the Performance Timeline.
-    // See http://w3c.github.io/frame-timing/ for definition of terms.
-    enum FrameTimingEventType {
-        CompositeEvent,
-        RenderEvent,
-    };
-    virtual void recordFrameTimingEvent(FrameTimingEventType eventType, int64_t RectId, const WebVector<WebFrameTimingEvent>& events) { }
 
     // Called to inform the WebWidget that mouse capture was lost.
     virtual void mouseCaptureLost() { }

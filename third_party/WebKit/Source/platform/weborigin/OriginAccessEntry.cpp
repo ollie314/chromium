@@ -74,7 +74,7 @@ bool IsSubdomainOfHost(const String& subdomain, const String& host)
 
     return true;
 }
-}
+} // namespace
 
 OriginAccessEntry::OriginAccessEntry(const String& protocol, const String& host, SubdomainSetting subdomainSetting)
     : m_protocol(protocol.lower())
@@ -108,12 +108,17 @@ OriginAccessEntry::OriginAccessEntry(const String& protocol, const String& host,
 
 OriginAccessEntry::MatchResult OriginAccessEntry::matchesOrigin(const SecurityOrigin& origin) const
 {
-    ASSERT(origin.host() == origin.host().lower());
     ASSERT(origin.protocol() == origin.protocol().lower());
 
     if (m_protocol != origin.protocol())
         return DoesNotMatchOrigin;
 
+    return matchesDomain(origin);
+}
+
+OriginAccessEntry::MatchResult OriginAccessEntry::matchesDomain(const SecurityOrigin& origin) const
+{
+    ASSERT(origin.host() == origin.host().lower());
     // Special case: Include subdomains and empty host means "all hosts, including ip addresses".
     if (m_subdomainSettings != DisallowSubdomains && m_host.isEmpty())
         return MatchesOrigin;

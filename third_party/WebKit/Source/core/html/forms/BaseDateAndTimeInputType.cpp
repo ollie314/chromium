@@ -31,6 +31,7 @@
 #include "core/html/forms/BaseDateAndTimeInputType.h"
 
 #include "core/html/HTMLInputElement.h"
+#include "core/html/forms/BaseChooserOnlyDateAndTimeInputType.h"
 #include "platform/text/PlatformLocale.h"
 #include "wtf/CurrentTime.h"
 #include "wtf/DateMath.h"
@@ -45,6 +46,15 @@ using namespace HTMLNames;
 
 static const int msecPerMinute = 60 * 1000;
 static const int msecPerSecond = 1000;
+
+InputTypeView* BaseDateAndTimeInputType::createView()
+{
+    if (!RuntimeEnabledFeatures::inputMultipleFieldsUIEnabled())
+        return BaseChooserOnlyDateAndTimeInputType::create(element(), *this);
+    // TODO(tkent): Returns MultipleFieldsDateAndTimeInputTypeView.
+    // crbug.com/243714
+    return this;
+}
 
 double BaseDateAndTimeInputType::valueAsDate() const
 {

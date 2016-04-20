@@ -24,7 +24,7 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
-#include "ui/base/resource/material_design/material_design_controller.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/canvas.h"
@@ -34,7 +34,7 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_source.h"
-#include "ui/gfx/ipc/gfx_param_traits.h"
+#include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "url/gurl.h"
 
@@ -129,10 +129,6 @@ bool ExtensionAction::ParseIconFromCanvasDictionary(
     gfx::ImageSkia* icon) {
   for (base::DictionaryValue::Iterator iter(dict); !iter.IsAtEnd();
        iter.Advance()) {
-    int icon_size = 0;
-    if (!base::StringToInt(iter.key(), &icon_size))
-      continue;
-
     const base::BinaryValue* image_data;
     std::string binary_string64;
     IPC::Message pickle;
@@ -151,8 +147,14 @@ bool ExtensionAction::ParseIconFromCanvasDictionary(
     if (!IPC::ReadParam(&pickle, &pickle_iter, &bitmap))
       return false;
     CHECK(!bitmap.isNull());
+
+    // Chrome helpfully scales the provided icon(s), but let's not go overboard.
+    const int kActionIconMaxSize = 10 * extension_misc::EXTENSION_ICON_ACTION;
+    if (bitmap.drawsNothing() || bitmap.width() > kActionIconMaxSize)
+      continue;
+
     float scale =
-        static_cast<float>(icon_size) / ExtensionAction::ActionIconSize();
+        static_cast<float>(bitmap.width()) / ExtensionAction::ActionIconSize();
     icon->AddRepresentation(gfx::ImageSkiaRep(bitmap, scale));
   }
   return true;
@@ -289,7 +291,7 @@ bool ExtensionAction::HasIcon(int tab_id) const {
 }
 
 void ExtensionAction::SetDefaultIconForTest(
-    scoped_ptr<ExtensionIconSet> default_icon) {
+    std::unique_ptr<ExtensionIconSet> default_icon) {
   default_icon_ = std::move(default_icon);
 }
 

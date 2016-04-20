@@ -7,6 +7,16 @@
     'chromium_code': 1,
   },
   'targets': [
+   {
+      # GN version: //ui/base/ime:text_input_types
+      'target_name': 'text_input_types',
+      'type': 'none',
+      'sources' : [
+        'text_input_flags.h',
+        'text_input_mode.h',
+        'text_input_type.h',
+      ],
+    },
     {
       # GN version: //ui/base/ime
       'target_name': 'ui_base_ime',
@@ -19,12 +29,14 @@
         '../../../third_party/icu/icu.gyp:icui18n',
         '../../../third_party/icu/icu.gyp:icuuc',
         '../../../url/url.gyp:url_lib',
+        '../../display/display.gyp:display',
         '../../events/events.gyp:dom_keycode_converter',
         '../../events/events.gyp:events',
         '../../events/events.gyp:events_base',
         '../../gfx/gfx.gyp:gfx',
         '../../gfx/gfx.gyp:gfx_geometry',
         '../ui_base.gyp:ui_base',
+        ':text_input_types',
       ],
       'defines': [
         'UI_BASE_IME_IMPLEMENTATION',
@@ -56,8 +68,6 @@
         'chromeos/input_method_descriptor.h',
         'chromeos/input_method_manager.cc',
         'chromeos/input_method_manager.h',
-        'chromeos/input_method_whitelist.cc',
-        'chromeos/input_method_whitelist.h',
         'chromeos/mock_component_extension_ime_manager_delegate.cc',
         'chromeos/mock_component_extension_ime_manager_delegate.h',
         'chromeos/mock_ime_candidate_window_handler.cc',
@@ -107,7 +117,6 @@
         'mock_input_method.h',
         'text_input_client.cc',
         'text_input_client.h',
-        'text_input_type.h',
         'ui_base_ime_export.h',
         'win/imm32_manager.cc',
         'win/imm32_manager.h',

@@ -17,13 +17,16 @@
 #include "base/process/process.h"
 #include "base/strings/string16.h"
 #include "build/build_config.h"
+#include "cc/output/compositor_frame.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/page_type.h"
+#include "ipc/message_filter.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "url/gurl.h"
 
@@ -56,6 +59,7 @@ namespace content {
 class BrowserContext;
 class MessageLoopRunner;
 class RenderViewHost;
+class RenderWidgetHost;
 class WebContents;
 
 // Navigate a frame with ID |iframe_id| to |url|, blocking until the navigation
@@ -74,17 +78,15 @@ GURL GetFileUrlWithQuery(const base::FilePath& path,
 bool IsLastCommittedEntryOfPageType(WebContents* web_contents,
                                     content::PageType page_type);
 
-// Waits for a load stop for the specified |web_contents|'s controller, if the
-// tab is currently web_contents.  Otherwise returns immediately.  Tests should
-// use WaitForLoadStop instead and check that last navigation succeeds, and
-// this function should only be used if the navigation leads to web_contents
-// being destroyed.
+// Waits for |web_contents| to stop loading.  If |web_contents| is not loading
+// returns immediately.  Tests should use WaitForLoadStop instead and check that
+// last navigation succeeds, and this function should only be used if the
+// navigation leads to web_contents being destroyed.
 void WaitForLoadStopWithoutSuccessCheck(WebContents* web_contents);
 
-// Waits for a load stop for the specified |web_contents|'s controller, if the
-// tab is currently web_contents.  Otherwise returns immediately.  Returns true
-// if the last navigation succeeded (resulted in a committed navigation entry
-// of type PAGE_TYPE_NORMAL).
+// Waits for |web_contents| to stop loading.  If |web_contents| is not loading
+// returns immediately.  Returns true if the last navigation succeeded (resulted
+// in a committed navigation entry of type PAGE_TYPE_NORMAL).
 // TODO(alexmos): tests that use this function to wait for successful
 // navigations should be refactored to do EXPECT_TRUE(WaitForLoadStop()).
 bool WaitForLoadStop(WebContents* web_contents);
@@ -231,6 +233,10 @@ bool FrameMatchesName(const std::string& name, RenderFrameHost* frame);
 bool FrameIsChildOfMainFrame(RenderFrameHost* frame);
 bool FrameHasSourceUrl(const GURL& url, RenderFrameHost* frame);
 
+// Finds the child frame at the specified |index| for |frame| and returns its
+// RenderFrameHost.  Returns nullptr if such child frame does not exist.
+RenderFrameHost* ChildFrameAt(RenderFrameHost* frame, size_t index);
+
 // Executes the WebUI resource test runner injecting each resource ID in
 // |js_resource_ids| prior to executing the tests.
 //
@@ -275,6 +281,15 @@ void RunTaskAndWaitForInterstitialDetach(content::WebContents* web_contents,
 // via domAutomationController. The caller should make sure this extra
 // message is handled properly.
 bool WaitForRenderFrameReady(RenderFrameHost* rfh) WARN_UNUSED_RESULT;
+
+// Enable accessibility support for all of the frames in this WebContents
+void EnableAccessibilityForWebContents(WebContents* web_contents);
+
+// Wait until the focused accessible node changes in any WebContents.
+void WaitForAccessibilityFocusChange();
+
+// Retrieve information about the node that's focused in the accessibility tree.
+ui::AXNodeData GetFocusedAccessibilityNodeInfo(WebContents* web_contents);
 
 // Watches title changes on a WebContents, blocking until an expected title is
 // set.
@@ -402,7 +417,7 @@ class WebContentsAddedObserver {
   base::Callback<void(WebContents*)> web_contents_created_callback_;
 
   WebContents* web_contents_;
-  scoped_ptr<RenderViewCreatedObserver> child_observer_;
+  std::unique_ptr<RenderViewCreatedObserver> child_observer_;
   scoped_refptr<MessageLoopRunner> runner_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsAddedObserver);
@@ -414,7 +429,7 @@ bool RequestFrame(WebContents* web_contents);
 // Watches compositor frame changes, blocking until a frame has been
 // composited. This class is intended to be run on the main thread; to
 // synchronize the main thread against the impl thread.
-class FrameWatcher : public BrowserMessageFilter {
+class FrameWatcher : public IPC::MessageFilter {
  public:
   FrameWatcher();
 
@@ -424,18 +439,72 @@ class FrameWatcher : public BrowserMessageFilter {
   // Wait for |frames_to_wait| swap mesages from the compositor.
   void WaitFrames(int frames_to_wait);
 
+  // Return the meta data received in the last compositor
+  // swap frame.
+  const cc::CompositorFrameMetadata& LastMetadata();
+
  private:
   ~FrameWatcher() override;
 
   // Overridden BrowserMessageFilter methods.
   bool OnMessageReceived(const IPC::Message& message) override;
 
-  void ReceivedFrameSwap();
+  void ReceivedFrameSwap(cc::CompositorFrameMetadata meta_data);
 
   int frames_to_wait_;
   base::Closure quit_;
+  cc::CompositorFrameMetadata last_metadata_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameWatcher);
+};
+
+// This class is intended to synchronize the renderer main thread, renderer impl
+// thread and the browser main thread.
+class MainThreadFrameObserver : public IPC::Listener {
+ public:
+  explicit MainThreadFrameObserver(RenderWidgetHost* render_widget_host);
+  ~MainThreadFrameObserver() override;
+
+  // Synchronizes the browser main thread with the renderer main thread and impl
+  // thread.
+  void Wait();
+
+  // Overridden IPC::Listener methods.
+  bool OnMessageReceived(const IPC::Message& msg) override;
+
+ private:
+  void Quit();
+
+  RenderWidgetHost* render_widget_host_;
+  std::unique_ptr<base::RunLoop> run_loop_;
+  int routing_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(MainThreadFrameObserver);
+};
+
+// Watches for an input msg to be consumed.
+class InputMsgWatcher : public BrowserMessageFilter {
+ public:
+  InputMsgWatcher(RenderWidgetHost* render_widget_host,
+                  blink::WebInputEvent::Type type);
+
+  // Wait until ack message occurs, returning the ack result from
+  // the message.
+  uint32_t WaitForAck();
+
+ private:
+  ~InputMsgWatcher() override;
+
+  // Overridden BrowserMessageFilter methods.
+  bool OnMessageReceived(const IPC::Message& message) override;
+
+  void ReceivedAck(blink::WebInputEvent::Type ack_type, uint32_t ack_state);
+
+  blink::WebInputEvent::Type wait_for_type_;
+  uint32_t ack_result_;
+  base::Closure quit_;
+
+  DISALLOW_COPY_AND_ASSIGN(InputMsgWatcher);
 };
 
 }  // namespace content

@@ -6,10 +6,10 @@
 
 #include <stddef.h>
 
-#include "base/mac/bundle_locations.h"
-#include "base/mac/sdk_forward_declarations.h"
+#import "base/mac/bundle_locations.h"
+#import "base/mac/foundation_util.h"
+#import "base/mac/sdk_forward_declarations.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_stats.h"
@@ -56,13 +56,16 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/bookmarks/managed/managed_bookmark_service.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #include "grit/theme_resources.h"
+#include "ui/base/clipboard/clipboard_util_mac.h"
 #import "ui/base/cocoa/cocoa_base_utils.h"
+#import "ui/base/cocoa/nsview_additions.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -165,10 +168,6 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 - (void)moveToState:(BookmarkBar::State)nextState
       withAnimation:(BOOL)animate;
 
-// Return the backdrop to the bookmark bar as various types.
-- (BackgroundGradientView*)backgroundGradientView;
-- (AnimatableView*)animatableView;
-
 // Create buttons for all items in the given bookmark node tree.
 // Modifies self->buttons_.  Do not add more buttons than will fit on the view.
 - (void)addNodesToButtonList:(const BookmarkNode*)node;
@@ -256,8 +255,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
 - (id)initWithBrowser:(Browser*)browser
          initialWidth:(CGFloat)initialWidth
-             delegate:(id<BookmarkBarControllerDelegate>)delegate
-       resizeDelegate:(id<ViewResizer>)resizeDelegate {
+             delegate:(id<BookmarkBarControllerDelegate>)delegate {
   if ((self = [super initWithNibName:@"BookmarkBar"
                               bundle:base::mac::FrameworkBundle()])) {
     currentState_ = BookmarkBar::HIDDEN;
@@ -270,7 +268,6 @@ void RecordAppLaunch(Profile* profile, GURL url) {
         ManagedBookmarkServiceFactory::GetForProfile(browser_->profile());
     buttons_.reset([[NSMutableArray alloc] init]);
     delegate_ = delegate;
-    resizeDelegate_ = resizeDelegate;
     folderTarget_.reset(
         [[BookmarkFolderTarget alloc] initWithController:self
                                                  profile:browser_->profile()]);
@@ -294,17 +291,16 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     contextMenuController_.reset(
         [[BookmarkContextMenuCocoaController alloc]
             initWithBookmarkBarController:self]);
-
-    // This call triggers an -awakeFromNib, which builds the bar, which might
-    // use |folderImage_| and |contextMenuController_|. Ensure it happens after
-    // |folderImage_| is loaded and |contextMenuController_| is created.
-    [[self animatableView] setResizeDelegate:resizeDelegate];
   }
   return self;
 }
 
 - (Browser*)browser {
   return browser_;
+}
+
+- (BookmarkBarToolbarView*)controlledView {
+  return base::mac::ObjCCastStrict<BookmarkBarToolbarView>([self view]);
 }
 
 - (BookmarkContextMenuCocoaController*)menuController {
@@ -374,20 +370,28 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 }
 
 - (void)browserWillBeDestroyed {
+  // If |bridge_| is null it means -viewDidLoad has not yet been called, which
+  // can only happen if the nib wasn't loaded. Retrieving it via -[self view]
+  // would load it now, but it's too late for that, so let it be nil. Note this
+  // should only happen in tests.
+  BookmarkBarToolbarView* view = nil;
+  if (bridge_)
+    view = [self controlledView];
+
   // Clear delegate so it doesn't get called during stopAnimation.
-  [[self animatableView] setResizeDelegate:nil];
+  [view setResizeDelegate:nil];
 
   // We better stop any in-flight animation if we're being killed.
-  [[self animatableView] stopAnimation];
+  [view stopAnimation];
 
   // Remove our view from its superview so it doesn't attempt to reference
   // it when the controller is gone.
   //TODO(dmaclach): Remove -- http://crbug.com/25845
-  [[self view] removeFromSuperview];
+  [view removeFromSuperview];
 
   // Be sure there is no dangling pointer.
-  if ([[self view] respondsToSelector:@selector(setController:)])
-    [[self view] performSelector:@selector(setController:) withObject:nil];
+  if ([view respondsToSelector:@selector(setController:)])
+    [view performSelector:@selector(setController:) withObject:nil];
 
   // For safety, make sure the buttons can no longer call us.
   for (BookmarkButton* button in buttons_.get()) {
@@ -814,18 +818,6 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   [self updateTheme:[[[self view] window] themeProvider]];
 }
 
-// (Private) Method is the same as [self view], but is provided to be explicit.
-- (BackgroundGradientView*)backgroundGradientView {
-  DCHECK([[self view] isKindOfClass:[BackgroundGradientView class]]);
-  return (BackgroundGradientView*)[self view];
-}
-
-// (Private) Method is the same as [self view], but is provided to be explicit.
-- (AnimatableView*)animatableView {
-  DCHECK([[self view] isKindOfClass:[AnimatableView class]]);
-  return (AnimatableView*)[self view];
-}
-
 - (BookmarkLaunchLocation)bookmarkLaunchLocation {
   return currentState_ == BookmarkBar::DETACHED ?
       BOOKMARK_LAUNCH_LOCATION_DETACHED_BAR :
@@ -865,6 +857,11 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   int bookmarkChildren = bookmarkModel_->bookmark_bar_node()->child_count();
   if (bookmarkChildren > displayedButtonCount_) {
     [offTheSideButton_ setHidden:NO];
+    // Set the off the side button as needing re-display. This is needed to
+    // avoid the button being shown with a black background the first time
+    // it's displayed. See https://codereview.chromium.org/1630453002/ for
+    // more context.
+    [offTheSideButton_ setNeedsDisplay:YES];
   } else {
     // If we just deleted the last item in an off-the-side menu so the
     // button will be going away, make sure the menu goes away.
@@ -954,16 +951,17 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     // Else fall through and do the change instantly.
   }
 
-  // Set our height.
-  [resizeDelegate_ resizeView:[self view]
-                    newHeight:[self preferredHeight]];
+  BookmarkBarToolbarView* view = [self controlledView];
+
+  // Set our height immediately via -[AnimatableView setHeight:].
+  [view setHeight:[self preferredHeight]];
 
   // Only show the divider if showing the normal bookmark bar.
   BOOL showsDivider = [self isInState:BookmarkBar::SHOW];
-  [[self backgroundGradientView] setShowsDivider:showsDivider];
+  [view setShowsDivider:showsDivider];
 
   // Make sure we're shown.
-  [[self view] setHidden:![self isVisible]];
+  [view setHidden:![self isVisible]];
 
   // Update everything else.
   [self layoutSubviews];
@@ -972,11 +970,11 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
 // (Private)
 - (BOOL)doBookmarkBarAnimation {
+  BookmarkBarToolbarView* view = [self controlledView];
   if ([self isAnimatingFromState:BookmarkBar::HIDDEN
                          toState:BookmarkBar::SHOW]) {
-    [[self backgroundGradientView] setShowsDivider:YES];
-    [[self view] setHidden:NO];
-    AnimatableView* view = [self animatableView];
+    [view setShowsDivider:YES];
+    [view setHidden:NO];
     // Height takes into account the extra height we have since the toolbar
     // only compresses when we're done.
     [view animateToNewHeight:(chrome::kBookmarkBarHeight -
@@ -984,23 +982,20 @@ void RecordAppLaunch(Profile* profile, GURL url) {
                     duration:kBookmarkBarAnimationDuration];
   } else if ([self isAnimatingFromState:BookmarkBar::SHOW
                                 toState:BookmarkBar::HIDDEN]) {
-    [[self backgroundGradientView] setShowsDivider:YES];
-    [[self view] setHidden:NO];
-    AnimatableView* view = [self animatableView];
+    [view setShowsDivider:YES];
+    [view setHidden:NO];
     [view animateToNewHeight:0
                     duration:kBookmarkBarAnimationDuration];
   } else if ([self isAnimatingFromState:BookmarkBar::SHOW
                                 toState:BookmarkBar::DETACHED]) {
-    [[self backgroundGradientView] setShowsDivider:YES];
-    [[self view] setHidden:NO];
-    AnimatableView* view = [self animatableView];
+    [view setShowsDivider:YES];
+    [view setHidden:NO];
     [view animateToNewHeight:chrome::kNTPBookmarkBarHeight
                     duration:kBookmarkBarAnimationDuration];
   } else if ([self isAnimatingFromState:BookmarkBar::DETACHED
                                 toState:BookmarkBar::SHOW]) {
-    [[self backgroundGradientView] setShowsDivider:YES];
-    [[self view] setHidden:NO];
-    AnimatableView* view = [self animatableView];
+    [view setShowsDivider:YES];
+    [view setHidden:NO];
     // Height takes into account the extra height we have since the toolbar
     // only compresses when we're done.
     [view animateToNewHeight:(chrome::kBookmarkBarHeight -
@@ -1036,7 +1031,12 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
   switch (currentState_) {
     case BookmarkBar::SHOW:
-      return chrome::kBookmarkBarHeight;
+      // When on a Retina display, -[ToolbarContrller baseToolbarHeight] reduces
+      // the height of the toolbar by 1pt. In this case the bookmark bar needs
+      // to be 1pt taller to maintain the proper spacing between bookmark icons
+      // and toolbar items. See https://crbug.com/326245 .
+      return [[self view] cr_lineWidth] == 0.5 ? chrome::kBookmarkBarHeight + 1
+                                               : chrome::kBookmarkBarHeight;
     case BookmarkBar::DETACHED:
       return chrome::kNTPBookmarkBarHeight;
     case BookmarkBar::HIDDEN:
@@ -1300,9 +1300,9 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   if (!appsPageShortcutButton_.get())
     return NO;
 
-  BOOL visible = bookmarkModel_->loaded() &&
-      chrome::ShouldShowAppsShortcutInBookmarkBar(
-          browser_->profile(), browser_->host_desktop_type());
+  BOOL visible =
+      bookmarkModel_->loaded() &&
+      chrome::ShouldShowAppsShortcutInBookmarkBar(browser_->profile());
   [appsPageShortcutButton_ setHidden:!visible];
   return visible;
 }
@@ -1514,7 +1514,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
 // (Private)
 - (void)stopCurrentAnimation {
-  [[self animatableView] stopAnimation];
+  [[self controlledView] stopAnimation];
 }
 
 // Delegate method for |AnimatableView| (a superclass of
@@ -2441,11 +2441,11 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   }
   if ([self isAnimatingToState:BookmarkBar::DETACHED]) {
     return static_cast<CGFloat>(
-        [[self animatableView] currentAnimationProgress]);
+        [[self controlledView] currentAnimationProgress]);
   }
   if ([self isAnimatingFromState:BookmarkBar::DETACHED]) {
     return static_cast<CGFloat>(
-        1 - [[self animatableView] currentAnimationProgress]);
+        1 - [[self controlledView] currentAnimationProgress]);
   }
   return 0;
 }
@@ -2464,9 +2464,8 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 
 #pragma mark BookmarkButtonDelegate Protocol
 
-- (void)fillPasteboard:(NSPasteboard*)pboard
-       forDragOfButton:(BookmarkButton*)button {
-  [[self folderTarget] fillPasteboard:pboard forDragOfButton:button];
+- (NSPasteboardItem*)pasteboardItemForDragOfButton:(BookmarkButton*)button {
+  return [[self folderTarget] pasteboardItemForDragOfButton:button];
 }
 
 // BookmarkButtonDelegate protocol implementation.  When menus are
@@ -2566,7 +2565,8 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   // Don't allow drops that would result in cycles.
   if (button) {
     NSData* data = [[info draggingPasteboard]
-                    dataForType:kBookmarkButtonDragType];
+        dataForType:ui::ClipboardUtil::UTIForPasteboardType(
+                        kBookmarkButtonDragType)];
     if (data && [info draggingSource]) {
       BookmarkButton* sourceButton = nil;
       [data getBytes:&sourceButton length:sizeof(sourceButton)];

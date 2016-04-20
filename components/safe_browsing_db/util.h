@@ -47,8 +47,39 @@ enum SBThreatType {
   // Url detected by the client-side malware IP list. This IP list is part
   // of the client side detection model.
   SB_THREAT_TYPE_CLIENT_SIDE_MALWARE_URL,
+
+  // Url leads to a blacklisted resource script. Note that no warnings should be
+  // shown on this threat type, but an incident report might be sent.
+  SB_THREAT_TYPE_BLACKLISTED_RESOURCE,
 };
 
+// Metadata that indicates what kind of URL match this is.
+enum class ThreatPatternType {
+  NONE,          // Pattern type didn't appear in the metadata
+  LANDING,       // The match is a landing page
+  DISTRIBUTION,  // The match is a distribution page
+};
+
+// Metadata that was returned by a GetFullHash call. This is the parsed version
+// of the PB (from Pver3, or Pver4 local) or JSON (from Pver4 via GMSCore).
+// Some fields are only applicable to certain lists.
+struct ThreatMetadata {
+  ThreatMetadata();
+  ThreatMetadata(const ThreatMetadata& other);
+  ~ThreatMetadata();
+
+  // Type of blacklisted page. Used on malware and UwS lists.
+  // This will be NONE if it wasn't present in the reponse.
+  ThreatPatternType threat_pattern_type;
+
+  // List of permissions blocked. Used with threat_type API_ABUSE.
+  // This will be empty if it wasn't present in the response.
+  std::vector<std::string> api_permissions;
+
+  // Opaque base64 string used for user-population experiments in pver4.
+  // This will be empty if it wasn't present in the response.
+  std::string population_id;
+};
 
 // A truncated hash's type.
 typedef uint32_t SBPrefix;
@@ -64,7 +95,7 @@ struct SBFullHashResult {
   SBFullHash hash;
   // TODO(shess): Refactor to allow ListType here.
   int list_id;
-  std::string metadata;
+  ThreatMetadata metadata;
   // Used only for V4 results. The cache lifetime for this result. The response
   // must not be cached for more than this duration to avoid false positives.
   base::TimeDelta cache_duration;
@@ -74,6 +105,7 @@ struct SBFullHashResult {
 struct SBCachedFullHashResult {
   SBCachedFullHashResult();
   explicit SBCachedFullHashResult(const base::Time& in_expire_after);
+  SBCachedFullHashResult(const SBCachedFullHashResult& other);
   ~SBCachedFullHashResult();
 
   base::Time expire_after;
@@ -97,9 +129,12 @@ extern const char kIPBlacklist[];
 extern const char kUnwantedUrlList[];
 // SafeBrowsing off-domain inclusion whitelist list name.
 extern const char kInclusionWhitelist[];
-// This array must contain all Safe Browsing lists.
-extern const char* kAllLists[9];
-
+// SafeBrowsing module whitelist list name.
+extern const char kModuleWhitelist[];
+// Blacklisted resource URLs list name.
+extern const char kResourceBlacklist[];
+/// This array must contain all Safe Browsing lists.
+extern const char* kAllLists[11];
 
 enum ListType {
   INVALID = -1,
@@ -123,8 +158,11 @@ enum ListType {
   // See above comment.  Leave 15 available.
   INCLUSIONWHITELIST = 16,
   // See above comment.  Leave 17 available.
+  MODULEWHITELIST = 18,
+  // See above comment. Leave 19 available.
+  RESOURCEBLACKLIST = 20,
+  // See above comment.  Leave 21 available.
 };
-
 
 inline bool SBFullHashEqual(const SBFullHash& a, const SBFullHash& b) {
   return !memcmp(a.full_hash, b.full_hash, sizeof(a.full_hash));

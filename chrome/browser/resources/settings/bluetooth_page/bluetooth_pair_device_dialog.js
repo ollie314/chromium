@@ -6,9 +6,6 @@
  * @fileoverview
  * 'settings-bluetooth-pair-device-dialog' is the settings dialog for pairing
  * a bluetooth device.
- *
- * @group Chrome Settings Elements
- * @element settings-bluetooth-pair-device-dialog
  */
 
 (function() {
@@ -39,7 +36,7 @@ Polymer({
      */
     digits: {
       type: Array,
-      readonly: true,
+      readOnly: true,
       value: [0, 1, 2, 3, 4, 5],
     },
   },

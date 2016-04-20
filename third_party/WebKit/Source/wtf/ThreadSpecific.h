@@ -42,11 +42,12 @@
 #ifndef WTF_ThreadSpecific_h
 #define WTF_ThreadSpecific_h
 
+#include "wtf/Allocator.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/Partitions.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/WTF.h"
 #include "wtf/WTFExport.h"
+#include "wtf/allocator/Partitions.h"
 
 #if OS(POSIX)
 #include <pthread.h>
@@ -63,6 +64,7 @@ WTF_EXPORT void ThreadSpecificThreadExit();
 #endif
 
 template<typename T> class ThreadSpecific {
+    USING_FAST_MALLOC(ThreadSpecific);
     WTF_MAKE_NONCOPYABLE(ThreadSpecific);
 public:
     ThreadSpecific();

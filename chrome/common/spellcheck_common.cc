@@ -18,8 +18,6 @@
 namespace chrome {
 namespace spellcheck_common {
 
-const char kMultilingualSpellcheckFieldTrial[] = "MultilingualSpellcheck";
-
 struct LanguageRegion {
   const char* language;  // The language.
   const char* language_region;  // language & region, used by dictionaries.
@@ -40,12 +38,13 @@ static const LanguageRegion g_supported_spellchecker_languages[] = {
   {"da", "da-DK"},
   {"de", "de-DE"},
   {"el", "el-GR"},
-  {"en-AU", "en-AU"},
+  {"en-AU", "en-GB"},
   {"en-CA", "en-CA"},
   {"en-GB", "en-GB"},
   {"en-US", "en-US"},
   {"es", "es-ES"},
   {"et", "et-EE"},
+  {"fa", "fa-IR"},
   {"fo", "fo-FO"},
   {"fr", "fr-FR"},
   {"he", "he-IL"},
@@ -115,13 +114,13 @@ base::FilePath GetVersionedFileName(const std::string& input_language,
                         // crash.
     {"tg-TG", "-5-0"},  // Mar 4, 2014: Add Tajik dictionary.
 
-    // Oct 28, 2014: Update from upstream, add new words.
-    {"en-AU", "-4-0"},
-    {"en-GB", "-4-0"},
+    // April 2016: Local fixes
+    {"en-CA", "-7-1"},
+    {"en-GB", "-7-1"},
+    {"en-US", "-7-1"},
 
-    // March 10, 2015: Update from upstream, enable typographical apostrophe.
-    {"en-CA", "-6-1"},
-    {"en-US", "-6-1"},
+    // March 2016: Initial check-in of Persian
+    {"fa-IR", "-7-0"},
   };
 
   // Generate the bdict file name using default version string or special
@@ -185,24 +184,6 @@ void GetISOLanguageCountryCodeFromLocale(const std::string& locale,
   }
   *language_code = std::string(language);
   *country_code = std::string(country);
-}
-
-bool IsMultilingualSpellcheckEnabled() {
-  // TODO(rouslan): Remove field trial and command line flags when M49 is
-  // stable.
-  const std::string& group_name =
-      base::FieldTrialList::FindFullName(kMultilingualSpellcheckFieldTrial);
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableMultilingualSpellChecker)) {
-    return false;
-  }
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableMultilingualSpellChecker)) {
-    return true;
-  }
-  // Enabled by default, but can be disabled in field trial.
-  return !base::StartsWith(group_name, "Disabled",
-                           base::CompareCase::INSENSITIVE_ASCII);
 }
 
 }  // namespace spellcheck_common

@@ -12,7 +12,6 @@ import android.view.ViewGroup;
 import org.chromium.android_webview.test.util.JavascriptEventObserver;
 import org.chromium.android_webview.test.util.VideoSurfaceViewUtils;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.parameter.ParameterizedTest;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
@@ -196,8 +195,6 @@ public class AwContentsClientFullScreenTest extends AwTestBase {
 
     @MediumTest
     @Feature({"AndroidWebView"})
-    // Run in single-process mode only. Blocked by inline video support crbug.com/545618.
-    @ParameterizedTest.Set
     public void testHolePunchingSurfaceNotCreatedForClearVideo()
             throws Throwable {
         loadTestPage(VIDEO_TEST_URL);
@@ -316,8 +313,6 @@ public class AwContentsClientFullScreenTest extends AwTestBase {
 
     @MediumTest
     @Feature({"AndroidWebView"})
-    // Run in single-process mode only. Blocked by inline video support crbug.com/545618.
-    @ParameterizedTest.Set
     public void testPowerSaveBlockerIsEnabledDuringFullscreenPlayback_videoInsideDiv()
             throws Throwable {
         doTestPowerSaveBlockerIsEnabledDuringFullscreenPlayback(VIDEO_INSIDE_DIV_TEST_URL);
@@ -343,8 +338,6 @@ public class AwContentsClientFullScreenTest extends AwTestBase {
 
     @MediumTest
     @Feature({"AndroidWebView"})
-    // Run in single-process mode only. Blocked by inline video support crbug.com/545618.
-    @ParameterizedTest.Set
     public void testPowerSaveBlockerIsEnabledDuringEmbeddedPlayback()
             throws Throwable {
         assertFalse(DOMUtils.isFullscreen(getWebContentsOnUiThread()));
@@ -364,8 +357,6 @@ public class AwContentsClientFullScreenTest extends AwTestBase {
 
     @MediumTest
     @Feature({"AndroidWebView"})
-    // Run in single-process mode only. Blocked by inline video support crbug.com/545618.
-    @ParameterizedTest.Set
     public void testPowerSaveBlockerIsTransferredToFullscreen()
             throws Throwable {
         assertFalse(DOMUtils.isFullscreen(getWebContentsOnUiThread()));
@@ -394,8 +385,6 @@ public class AwContentsClientFullScreenTest extends AwTestBase {
 
     @MediumTest
     @Feature({"AndroidWebView"})
-    // Run in single-process mode only. Blocked by inline video support crbug.com/545618.
-    @ParameterizedTest.Set
     public void testPowerSaveBlockerIsTransferredToEmbedded()
             throws Throwable {
         // Enter fullscreen.
@@ -438,13 +427,13 @@ public class AwContentsClientFullScreenTest extends AwTestBase {
             throws InterruptedException {
         // We need to poll because it takes time to synchronize the state between the android
         // views and Javascript.
-        CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 try {
-                    return getKeepScreenOn(view) == expected
+                    return getKeepScreenOnOnInstrumentationThread(view) == expected
                             && DOMUtils.isMediaPaused(getWebContentsOnUiThread(), VIDEO_ID)
-                                != expected;
+                            != expected;
                 } catch (InterruptedException | TimeoutException e) {
                     fail(e.getMessage());
                     return false;
@@ -455,17 +444,31 @@ public class AwContentsClientFullScreenTest extends AwTestBase {
 
     private void assertKeepScreenOnActive(final View view, final boolean expected)
             throws Exception {
-        assertTrue(getKeepScreenOn(view) == expected
+        assertTrue(getKeepScreenOnOnInstrumentationThread(view) == expected
                 && DOMUtils.isMediaPaused(getWebContentsOnUiThread(), VIDEO_ID) != expected);
     }
 
-    private boolean getKeepScreenOn(View view) {
+    private boolean getKeepScreenOnOnInstrumentationThread(final View view) {
+        try {
+            return runTestOnUiThreadAndGetResult(new Callable<Boolean>() {
+                @Override
+                public Boolean call() {
+                    return getKeepScreenOnOnUiThread(view);
+                }
+            });
+        } catch (Exception e) {
+            fail(e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean getKeepScreenOnOnUiThread(View view) {
         // The power save blocker is added to a child anchor view,
         // so we need to traverse the hierarchy.
         if (view instanceof ViewGroup) {
             ViewGroup viewGroup = (ViewGroup) view;
             for (int i = 0; i < viewGroup.getChildCount(); i++) {
-                if (getKeepScreenOn(viewGroup.getChildAt(i))) {
+                if (getKeepScreenOnOnUiThread(viewGroup.getChildAt(i))) {
                     return true;
                 }
             }
@@ -475,7 +478,7 @@ public class AwContentsClientFullScreenTest extends AwTestBase {
 
     private void assertWaitForIsFullscreen() throws InterruptedException {
         // We need to poll because the Javascript state is updated asynchronously
-        CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 try {
@@ -490,7 +493,7 @@ public class AwContentsClientFullScreenTest extends AwTestBase {
 
     private void assertWaitForIsEmbedded() throws InterruptedException {
         // We need to poll because the Javascript state is updated asynchronously
-        CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 try {

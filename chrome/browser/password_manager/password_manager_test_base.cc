@@ -6,7 +6,6 @@
 
 #include <string>
 
-#include "base/command_line.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
@@ -25,7 +24,6 @@
 #include "components/password_manager/core/browser/password_manager_test_utils.h"
 #include "components/password_manager/core/browser/test_password_store.h"
 #include "components/password_manager/core/common/password_manager_features.h"
-#include "components/password_manager/core/common/password_manager_switches.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -39,6 +37,12 @@ NavigationObserver::NavigationObserver(content::WebContents* web_contents)
 NavigationObserver::~NavigationObserver() {
 }
 
+void NavigationObserver::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (quit_on_entry_committed_)
+    message_loop_runner_->Quit();
+}
+
 void NavigationObserver::DidFinishLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url) {
@@ -49,12 +53,6 @@ void NavigationObserver::DidFinishLoad(
   } else if (!render_frame_host->GetParent()) {
     message_loop_runner_->Quit();
   }
-}
-
-void NavigationObserver::NavigationEntryCommitted(
-    const content::LoadCommittedDetails& load_details) {
-  if (quit_on_entry_committed_)
-    message_loop_runner_->Quit();
 }
 
 void NavigationObserver::Wait() {
@@ -172,12 +170,12 @@ class BubbleObserver : public PromptObserver {
   DISALLOW_COPY_AND_ASSIGN(BubbleObserver);
 };
 
-scoped_ptr<PromptObserver> PromptObserver::Create(
+std::unique_ptr<PromptObserver> PromptObserver::Create(
     content::WebContents* web_contents) {
   if (ChromePasswordManagerClient::IsTheHotNewBubbleUIEnabled()) {
-    return scoped_ptr<PromptObserver>(new BubbleObserver(web_contents));
+    return std::unique_ptr<PromptObserver>(new BubbleObserver(web_contents));
   } else {
-    return scoped_ptr<PromptObserver>(new InfoBarObserver(web_contents));
+    return std::unique_ptr<PromptObserver>(new InfoBarObserver(web_contents));
   }
 }
 
@@ -234,7 +232,7 @@ void PasswordManagerBrowserTestBase::VerifyPasswordIsSavedAndFilled(
   NavigateToFile(filename);
 
   NavigationObserver observer(WebContents());
-  scoped_ptr<PromptObserver> prompt_observer(
+  std::unique_ptr<PromptObserver> prompt_observer(
       PromptObserver::Create(WebContents()));
   ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), submission_script));
   observer.Wait();

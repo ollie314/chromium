@@ -7,11 +7,11 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include <memory>
 #include <vector>
 
 #import "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #import "ui/accelerated_widget_mac/accelerated_widget_mac.h"
 #include "ui/base/ime/input_method_delegate.h"
 #include "ui/compositor/layer_owner.h"
@@ -49,6 +49,9 @@ class VIEWS_EXPORT BridgedNativeWidget
       public ui::AcceleratedWidgetMacNSView,
       public BridgedNativeWidgetOwner {
  public:
+  // Contains NativeViewHost->gfx::NativeView associations.
+  using AssociatedViews = std::map<const views::View*, NSView*>;
+
   // Ways of changing the visibility of the bridged NSWindow.
   enum WindowVisibilityState {
     HIDE_WINDOW,               // Hides with -[NSWindow orderOut:].
@@ -156,6 +159,12 @@ class VIEWS_EXPORT BridgedNativeWidget
   // Creates a ui::Compositor which becomes responsible for drawing the window.
   void CreateLayer(ui::LayerType layer_type, bool translucent);
 
+  // Updates |associated_views_| on NativeViewHost::Attach()/Detach().
+  void SetAssociationForView(const views::View* view, NSView* native_view);
+  void ClearAssociationForView(const views::View* view);
+  // Sorts child NSViews according to NativeViewHosts order in views hierarchy.
+  void ReorderChildViews();
+
   NativeWidgetMac* native_widget_mac() { return native_widget_mac_; }
   BridgedContentView* ns_view() { return bridged_view_; }
   NSWindow* ns_window() { return window_; }
@@ -251,9 +260,9 @@ class VIEWS_EXPORT BridgedNativeWidget
   base::scoped_nsobject<NSWindow> window_;
   base::scoped_nsobject<ViewsNSWindowDelegate> window_delegate_;
   base::scoped_nsobject<BridgedContentView> bridged_view_;
-  scoped_ptr<ui::InputMethod> input_method_;
-  scoped_ptr<CocoaMouseCapture> mouse_capture_;
-  scoped_ptr<TooltipManager> tooltip_manager_;
+  std::unique_ptr<ui::InputMethod> input_method_;
+  std::unique_ptr<CocoaMouseCapture> mouse_capture_;
+  std::unique_ptr<TooltipManager> tooltip_manager_;
   FocusManager* focus_manager_;  // Weak. Owned by our Widget.
   Widget::InitParams::Type widget_type_;
 
@@ -261,8 +270,8 @@ class VIEWS_EXPORT BridgedNativeWidget
   std::vector<BridgedNativeWidget*> child_windows_;
 
   base::scoped_nsobject<NSView> compositor_superview_;
-  scoped_ptr<ui::AcceleratedWidgetMac> compositor_widget_;
-  scoped_ptr<ui::Compositor> compositor_;
+  std::unique_ptr<ui::AcceleratedWidgetMac> compositor_widget_;
+  std::unique_ptr<ui::Compositor> compositor_;
 
   // Tracks the bounds when the window last started entering fullscreen. Used to
   // provide an answer for GetRestoredBounds(), but not ever sent to Cocoa (it
@@ -288,6 +297,8 @@ class VIEWS_EXPORT BridgedNativeWidget
   // If true, the window has been made visible or changed shape and the window
   // shadow needs to be invalidated when a frame is received for the new shape.
   bool invalidate_shadow_on_frame_swap_ = false;
+
+  AssociatedViews associated_views_;
 
   DISALLOW_COPY_AND_ASSIGN(BridgedNativeWidget);
 };

@@ -21,7 +21,7 @@
 #include "content/public/common/security_style.h"
 #include "content/public/common/window_container_type.h"
 #include "third_party/WebKit/public/platform/WebDisplayMode.h"
-#include "third_party/WebKit/public/web/WebDragOperation.h"
+#include "third_party/WebKit/public/platform/WebDragOperation.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -40,6 +40,7 @@ class ColorChooser;
 class DownloadItem;
 class JavaScriptDialogManager;
 class PageState;
+class RenderFrameHost;
 class RenderViewHost;
 class SessionStorageNamespace;
 class WebContents;
@@ -60,11 +61,16 @@ class Rect;
 class Size;
 }
 
+namespace url {
+class Origin;
+}
+
 namespace blink {
 class WebGestureEvent;
 }
 
 namespace content {
+class RenderWidgetHost;
 
 struct OpenURLParams;
 
@@ -351,10 +357,9 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Shows a chooser for the user to select a nearby Bluetooth device. The
   // observer must live at least as long as the returned chooser object.
-  virtual scoped_ptr<BluetoothChooser> RunBluetoothChooser(
-      WebContents* web_contents,
-      const BluetoothChooser::EventHandler& event_handler,
-      const GURL& origin);
+  virtual std::unique_ptr<BluetoothChooser> RunBluetoothChooser(
+      RenderFrameHost* frame,
+      const BluetoothChooser::EventHandler& event_handler);
 
   // Returns true if the delegate will embed a WebContents-owned fullscreen
   // render widget.  In this case, the delegate may access the widget by calling
@@ -521,7 +526,12 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Called when the active render widget is forwarding a RemoteChannel
   // compositor proto.  This is used in Blimp mode.
-  virtual void ForwardCompositorProto(const std::vector<uint8_t>& proto) {}
+  virtual void ForwardCompositorProto(
+      RenderWidgetHost* render_widget_host,
+      const std::vector<uint8_t>& proto) {}
+
+  // Requests the app banner. This method is called from the DevTools.
+  virtual void RequestAppBannerFromDevTools(content::WebContents* web_contents);
 
  protected:
   virtual ~WebContentsDelegate();

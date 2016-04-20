@@ -15,7 +15,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/prefs/pref_service.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/pattern.h"
@@ -25,7 +24,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
-#include "chrome/browser/apps/scoped_keep_alive.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/api/tabs/windows_util.h"
@@ -42,11 +40,10 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_iterator.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
@@ -59,6 +56,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/translate/core/common/language_detection_details.h"
 #include "components/ui/zoom/zoom_controller.h"
@@ -67,13 +65,12 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/app_window/app_window.h"
+#include "extensions/browser/extension_api_frame_id_map.h"
 #include "extensions/browser/extension_function_dispatcher.h"
-#include "extensions/browser/extension_function_util.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_zoom_request_client.h"
 #include "extensions/browser/file_reader.h"
@@ -205,8 +202,8 @@ bool MatchesBool(bool* boolean, bool value) {
 }
 
 template <typename T>
-void AssignOptionalValue(const scoped_ptr<T>& source,
-                         scoped_ptr<T>& destination) {
+void AssignOptionalValue(const std::unique_ptr<T>& source,
+                         std::unique_ptr<T>& destination) {
   if (source.get()) {
     destination.reset(new T(*source.get()));
   }
@@ -288,7 +285,8 @@ void ZoomModeToZoomSettings(ZoomController::ZoomMode zoom_mode,
 // Windows ---------------------------------------------------------------------
 
 bool WindowsGetFunction::RunSync() {
-  scoped_ptr<windows::Get::Params> params(windows::Get::Params::Create(*args_));
+  std::unique_ptr<windows::Get::Params> params(
+      windows::Get::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   ApiParameterExtractor<windows::Get::Params> extractor(params.get());
@@ -306,7 +304,7 @@ bool WindowsGetFunction::RunSync() {
 }
 
 bool WindowsGetCurrentFunction::RunSync() {
-  scoped_ptr<windows::GetCurrent::Params> params(
+  std::unique_ptr<windows::GetCurrent::Params> params(
       windows::GetCurrent::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -325,7 +323,7 @@ bool WindowsGetCurrentFunction::RunSync() {
 }
 
 bool WindowsGetLastFocusedFunction::RunSync() {
-  scoped_ptr<windows::GetLastFocused::Params> params(
+  std::unique_ptr<windows::GetLastFocused::Params> params(
       windows::GetLastFocused::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -354,7 +352,7 @@ bool WindowsGetLastFocusedFunction::RunSync() {
 }
 
 bool WindowsGetAllFunction::RunSync() {
-  scoped_ptr<windows::GetAll::Params> params(
+  std::unique_ptr<windows::GetAll::Params> params(
       windows::GetAll::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -426,7 +424,7 @@ bool WindowsCreateFunction::ShouldOpenIncognitoWindow(
 }
 
 bool WindowsCreateFunction::RunSync() {
-  scoped_ptr<windows::Create::Params> params(
+  std::unique_ptr<windows::Create::Params> params(
       windows::Create::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
   std::vector<GURL> urls;
@@ -519,11 +517,12 @@ bool WindowsCreateFunction::RunSync() {
         bool use_panels = PanelManager::ShouldUsePanels(extension_id);
         if (use_panels) {
           create_panel = true;
+#if !defined(USE_ASH)
           // Non-ash supports both docked and detached panel types.
-          if (chrome::GetActiveDesktop() != chrome::HOST_DESKTOP_TYPE_ASH &&
-              create_data->type == windows::CREATE_TYPE_DETACHED_PANEL) {
+          if (create_data->type == windows::CREATE_TYPE_DETACHED_PANEL) {
             panel_create_mode = PanelManager::CREATE_AS_DETACHED;
           }
+#endif  // USE_ASH
         } else {
           window_type = Browser::TYPE_POPUP;
         }
@@ -585,27 +584,24 @@ bool WindowsCreateFunction::RunSync() {
       urls.push_back(GURL(chrome::kChromeUINewTabURL));
 
 #if defined(USE_ASH)
-    if (chrome::GetActiveDesktop() == chrome::HOST_DESKTOP_TYPE_ASH) {
-      AppWindow::CreateParams create_params;
-      create_params.window_type = AppWindow::WINDOW_TYPE_V1_PANEL;
-      create_params.window_key = extension_id;
-      create_params.window_spec.bounds = window_bounds;
-      create_params.focused = saw_focus_key && focused;
-      AppWindow* app_window = new AppWindow(
-          window_profile,
-          new ChromeAppDelegate(make_scoped_ptr(new ScopedKeepAlive)),
-          extension());
-      AshPanelContents* ash_panel_contents = new AshPanelContents(app_window);
-      app_window->Init(urls[0], ash_panel_contents, create_params);
-      WindowController* window_controller =
-          WindowControllerList::GetInstance()->FindWindowById(
-              app_window->session_id().id());
-      if (!window_controller)
-        return false;
-      SetResult(window_controller->CreateWindowValueWithTabs(extension()));
-      return true;
-    }
-#endif
+    AppWindow::CreateParams create_params;
+    create_params.window_type = AppWindow::WINDOW_TYPE_V1_PANEL;
+    create_params.window_key = extension_id;
+    create_params.window_spec.bounds = window_bounds;
+    create_params.focused = saw_focus_key && focused;
+    AppWindow* app_window =
+        new AppWindow(window_profile, new ChromeAppDelegate(true), extension());
+    AshPanelContents* ash_panel_contents = new AshPanelContents(app_window);
+    app_window->Init(urls[0], ash_panel_contents, render_frame_host(),
+                     create_params);
+    WindowController* window_controller =
+        WindowControllerList::GetInstance()->FindWindowById(
+            app_window->session_id().id());
+    if (!window_controller)
+      return false;
+    SetResult(window_controller->CreateWindowValueWithTabs(extension()));
+    return true;
+#else
     std::string title =
         web_app::GenerateApplicationNameFromExtensionId(extension_id);
     content::SiteInstance* source_site_instance =
@@ -624,38 +620,38 @@ bool WindowsCreateFunction::RunSync() {
     SetResult(panel->extension_window_controller()->CreateWindowValueWithTabs(
         extension()));
     return true;
+#endif
   }
 
   // Create a new BrowserWindow.
-  chrome::HostDesktopType host_desktop_type = chrome::GetActiveDesktop();
   if (create_panel)
     window_type = Browser::TYPE_POPUP;
-  Browser::CreateParams create_params(window_type, window_profile,
-                                      host_desktop_type);
+  Browser::CreateParams create_params(window_type, window_profile);
   if (extension_id.empty()) {
     create_params.initial_bounds = window_bounds;
   } else {
     create_params = Browser::CreateParams::CreateForApp(
         web_app::GenerateApplicationNameFromExtensionId(extension_id),
-        false /* trusted_source */,
-        window_bounds,
-        window_profile,
-        host_desktop_type);
+        false /* trusted_source */, window_bounds, window_profile);
   }
   create_params.initial_show_state = ui::SHOW_STATE_NORMAL;
   if (create_data && create_data->state) {
     create_params.initial_show_state =
         ConvertToWindowShowState(create_data->state);
   }
-  create_params.host_desktop_type = chrome::GetActiveDesktop();
 
   Browser* new_window = new Browser(create_params);
 
-  for (std::vector<GURL>::iterator i = urls.begin(); i != urls.end(); ++i) {
-    WebContents* tab = chrome::AddSelectedTabWithURL(
-        new_window, *i, ui::PAGE_TRANSITION_LINK);
+  for (const GURL& url : urls) {
+    chrome::NavigateParams navigate_params(new_window, url,
+                                           ui::PAGE_TRANSITION_LINK);
+    navigate_params.disposition = NEW_FOREGROUND_TAB;
+    navigate_params.source_site_instance =
+        render_frame_host()->GetSiteInstance();
+    chrome::Navigate(&navigate_params);
     if (create_panel) {
-      TabHelper::FromWebContents(tab)->SetExtensionAppIconById(extension_id);
+      TabHelper::FromWebContents(navigate_params.target_contents)
+          ->SetExtensionAppIconById(extension_id);
     }
   }
 
@@ -703,7 +699,7 @@ bool WindowsCreateFunction::RunSync() {
 }
 
 bool WindowsUpdateFunction::RunSync() {
-  scoped_ptr<windows::Update::Params> params(
+  std::unique_ptr<windows::Update::Params> params(
       windows::Update::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -807,7 +803,7 @@ bool WindowsUpdateFunction::RunSync() {
 }
 
 bool WindowsRemoveFunction::RunSync() {
-  scoped_ptr<windows::Remove::Params> params(
+  std::unique_ptr<windows::Remove::Params> params(
       windows::Remove::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -834,7 +830,7 @@ bool TabsGetSelectedFunction::RunSync() {
   // windowId defaults to "current" window.
   int window_id = extension_misc::kCurrentWindowId;
 
-  scoped_ptr<tabs::GetSelected::Params> params(
+  std::unique_ptr<tabs::GetSelected::Params> params(
       tabs::GetSelected::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   if (params->window_id.get())
@@ -850,13 +846,13 @@ bool TabsGetSelectedFunction::RunSync() {
     error_ = keys::kNoSelectedTabError;
     return false;
   }
-  SetResult(ExtensionTabUtil::CreateTabValue(
+  results_ = tabs::Get::Results::Create(*ExtensionTabUtil::CreateTabObject(
       contents, tab_strip, tab_strip->active_index(), extension()));
   return true;
 }
 
 bool TabsGetAllInWindowFunction::RunSync() {
-  scoped_ptr<tabs::GetAllInWindow::Params> params(
+  std::unique_ptr<tabs::GetAllInWindow::Params> params(
       tabs::GetAllInWindow::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   // windowId defaults to "current" window.
@@ -874,7 +870,8 @@ bool TabsGetAllInWindowFunction::RunSync() {
 }
 
 bool TabsQueryFunction::RunSync() {
-  scoped_ptr<tabs::Query::Params> params(tabs::Query::Params::Create(*args_));
+  std::unique_ptr<tabs::Query::Params> params(
+      tabs::Query::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   bool loading_status_set = params->query_info.status != tabs::TAB_STATUS_NONE;
@@ -913,11 +910,10 @@ bool TabsQueryFunction::RunSync() {
     window_type = tabs::ToString(params->query_info.window_type);
 
   base::ListValue* result = new base::ListValue();
-  Browser* last_active_browser = chrome::FindAnyBrowser(
-      GetProfile(), include_incognito(), chrome::GetActiveDesktop());
+  Browser* last_active_browser =
+      chrome::FindAnyBrowser(GetProfile(), include_incognito());
   Browser* current_browser = GetCurrentBrowser();
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    Browser* browser = *it;
+  for (auto* browser : *BrowserList::GetInstance()) {
     if (!GetProfile()->IsSameProfile(browser->profile()))
       continue;
 
@@ -988,26 +984,38 @@ bool TabsQueryFunction::RunSync() {
         continue;
       }
 
-      // "title" and "url" properties are considered privileged data and can
-      // only be checked if the extension has the "tabs" permission. Otherwise,
-      // these properties are ignored.
-      if (extension_->permissions_data()->HasAPIPermissionForTab(
-              ExtensionTabUtil::GetTabId(web_contents), APIPermission::kTab)) {
+      if (!title.empty() || !url_patterns.is_empty()) {
+        // "title" and "url" properties are considered privileged data and can
+        // only be checked if the extension has the "tabs" permission or it has
+        // access to the WebContents's origin. Otherwise, this tab is considered
+        // not matched.
+        if (!extension_->permissions_data()->HasAPIPermissionForTab(
+                ExtensionTabUtil::GetTabId(web_contents),
+                APIPermission::kTab) &&
+            !extension_->permissions_data()->HasHostPermission(
+                web_contents->GetURL())) {
+          continue;
+        }
+
         if (!title.empty() &&
             !base::MatchPattern(web_contents->GetTitle(),
-                                base::UTF8ToUTF16(title)))
+                                base::UTF8ToUTF16(title))) {
           continue;
+        }
 
         if (!url_patterns.is_empty() &&
-            !url_patterns.MatchesURL(web_contents->GetURL()))
+            !url_patterns.MatchesURL(web_contents->GetURL())) {
           continue;
+        }
       }
 
       if (loading_status_set && loading != web_contents->IsLoading())
         continue;
 
-      result->Append(ExtensionTabUtil::CreateTabValue(
-          web_contents, tab_strip, i, extension()));
+      result->Append(ExtensionTabUtil::CreateTabObject(web_contents, tab_strip,
+                                                       i, extension())
+                         ->ToValue()
+                         .release());
     }
   }
 
@@ -1016,7 +1024,8 @@ bool TabsQueryFunction::RunSync() {
 }
 
 bool TabsCreateFunction::RunSync() {
-  scoped_ptr<tabs::Create::Params> params(tabs::Create::Params::Create(*args_));
+  std::unique_ptr<tabs::Create::Params> params(
+      tabs::Create::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   ExtensionTabUtil::OpenTabParams options;
@@ -1031,7 +1040,7 @@ bool TabsCreateFunction::RunSync() {
   AssignOptionalValue(params->create_properties.url, options.url);
 
   std::string error;
-  scoped_ptr<base::DictionaryValue> result(
+  std::unique_ptr<base::DictionaryValue> result(
       ExtensionTabUtil::OpenTab(this, options, &error));
   if (!result) {
     SetError(error);
@@ -1046,7 +1055,7 @@ bool TabsCreateFunction::RunSync() {
 }
 
 bool TabsDuplicateFunction::RunSync() {
-  scoped_ptr<tabs::Duplicate::Params> params(
+  std::unique_ptr<tabs::Duplicate::Params> params(
       tabs::Duplicate::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   int tab_id = params->tab_id;
@@ -1081,14 +1090,14 @@ bool TabsDuplicateFunction::RunSync() {
   }
 
   // Return data about the newly created tab.
-  SetResult(ExtensionTabUtil::CreateTabValue(
+  results_ = tabs::Get::Results::Create(*ExtensionTabUtil::CreateTabObject(
       new_contents, new_tab_strip, new_tab_index, extension()));
 
   return true;
 }
 
 bool TabsGetFunction::RunSync() {
-  scoped_ptr<tabs::Get::Params> params(tabs::Get::Params::Create(*args_));
+  std::unique_ptr<tabs::Get::Params> params(tabs::Get::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   int tab_id = params->tab_id;
 
@@ -1105,7 +1114,7 @@ bool TabsGetFunction::RunSync() {
                   &error_))
     return false;
 
-  SetResult(ExtensionTabUtil::CreateTabValue(
+  results_ = tabs::Get::Results::Create(*ExtensionTabUtil::CreateTabObject(
       contents, tab_strip, tab_index, extension()));
   return true;
 }
@@ -1117,13 +1126,14 @@ bool TabsGetCurrentFunction::RunSync() {
   // empty tab (hence returning true).
   WebContents* caller_contents = GetSenderWebContents();
   if (caller_contents && ExtensionTabUtil::GetTabId(caller_contents) >= 0)
-    SetResult(ExtensionTabUtil::CreateTabValue(caller_contents, extension()));
+    results_ = tabs::Get::Results::Create(
+        *ExtensionTabUtil::CreateTabObject(caller_contents, extension()));
 
   return true;
 }
 
 bool TabsHighlightFunction::RunSync() {
-  scoped_ptr<tabs::Highlight::Params> params(
+  std::unique_ptr<tabs::Highlight::Params> params(
       tabs::Highlight::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -1193,7 +1203,8 @@ TabsUpdateFunction::TabsUpdateFunction() : web_contents_(NULL) {
 }
 
 bool TabsUpdateFunction::RunAsync() {
-  scoped_ptr<tabs::Update::Params> params(tabs::Update::Params::Create(*args_));
+  std::unique_ptr<tabs::Update::Params> params(
+      tabs::Update::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   int tab_id = -1;
@@ -1274,17 +1285,17 @@ bool TabsUpdateFunction::RunAsync() {
   if (params->update_properties.muted.get()) {
     TabMutedResult tab_muted_result = chrome::SetTabAudioMuted(
         contents, *params->update_properties.muted,
-        TAB_MUTED_REASON_EXTENSION, extension()->id());
+        TabMutedReason::EXTENSION, extension()->id());
 
     switch (tab_muted_result) {
-      case TAB_MUTED_RESULT_SUCCESS:
+      case TabMutedResult::SUCCESS:
         break;
-      case TAB_MUTED_RESULT_FAIL_NOT_ENABLED:
+      case TabMutedResult::FAIL_NOT_ENABLED:
         error_ = ErrorUtils::FormatErrorMessage(
             keys::kCannotUpdateMuteDisabled, base::IntToString(tab_id),
             switches::kEnableTabAudioMuting);
         return false;
-      case TAB_MUTED_RESULT_FAIL_TABCAPTURE:
+      case TabMutedResult::FAIL_TABCAPTURE:
         error_ = ErrorUtils::FormatErrorMessage(keys::kCannotUpdateMuteCaptured,
                                                 base::IntToString(tab_id));
         return false;
@@ -1335,12 +1346,10 @@ bool TabsUpdateFunction::UpdateURL(const std::string &url_string,
   // JavaScript URLs can do the same kinds of things as cross-origin XHR, so
   // we need to check host permissions before allowing them.
   if (url.SchemeIs(url::kJavaScriptScheme)) {
-    content::RenderProcessHost* process = web_contents_->GetRenderProcessHost();
     if (!extension()->permissions_data()->CanAccessPage(
             extension(),
             web_contents_->GetURL(),
             tab_id,
-            process ? process->GetID() : -1,
             &error_)) {
       return false;
     }
@@ -1350,13 +1359,15 @@ bool TabsUpdateFunction::UpdateURL(const std::string &url_string,
         ->ExecuteScript(
             HostID(HostID::EXTENSIONS, extension_id()),
             ScriptExecutor::JAVASCRIPT,
-            net::UnescapeURLComponent(url.GetContent(),
-                                      net::UnescapeRule::URL_SPECIAL_CHARS |
-                                          net::UnescapeRule::SPACES),
-            ScriptExecutor::TOP_FRAME, ScriptExecutor::DONT_MATCH_ABOUT_BLANK,
-            UserScript::DOCUMENT_IDLE, ScriptExecutor::MAIN_WORLD,
-            ScriptExecutor::DEFAULT_PROCESS, GURL(), GURL(), user_gesture_,
-            ScriptExecutor::NO_RESULT,
+            net::UnescapeURLComponent(
+                url.GetContent(),
+                net::UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS |
+                    net::UnescapeRule::PATH_SEPARATORS |
+                    net::UnescapeRule::SPACES),
+            ScriptExecutor::SINGLE_FRAME, ExtensionApiFrameIdMap::kTopFrameId,
+            ScriptExecutor::DONT_MATCH_ABOUT_BLANK, UserScript::DOCUMENT_IDLE,
+            ScriptExecutor::MAIN_WORLD, ScriptExecutor::DEFAULT_PROCESS, GURL(),
+            GURL(), user_gesture_, ScriptExecutor::NO_RESULT,
             base::Bind(&TabsUpdateFunction::OnExecuteCodeFinished, this));
 
     *is_async = true;
@@ -1378,7 +1389,8 @@ void TabsUpdateFunction::PopulateResult() {
   if (!has_callback())
     return;
 
-  SetResult(ExtensionTabUtil::CreateTabValue(web_contents_, extension()));
+  results_ = tabs::Get::Results::Create(
+      *ExtensionTabUtil::CreateTabObject(web_contents_, extension()));
 }
 
 void TabsUpdateFunction::OnExecuteCodeFinished(
@@ -1393,12 +1405,13 @@ void TabsUpdateFunction::OnExecuteCodeFinished(
 }
 
 bool TabsMoveFunction::RunSync() {
-  scoped_ptr<tabs::Move::Params> params(tabs::Move::Params::Create(*args_));
+  std::unique_ptr<tabs::Move::Params> params(
+      tabs::Move::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   int new_index = params->move_properties.index;
   int* window_id = params->move_properties.window_id.get();
-  scoped_ptr<base::ListValue> tab_values(new base::ListValue());
+  std::unique_ptr<base::ListValue> tab_values(new base::ListValue());
 
   size_t num_tabs = 0;
   if (params->tab_ids.as_integers) {
@@ -1427,7 +1440,7 @@ bool TabsMoveFunction::RunSync() {
     error_ = "No tabs given.";
     return false;
   } else if (num_tabs == 1) {
-    scoped_ptr<base::Value> value;
+    std::unique_ptr<base::Value> value;
     CHECK(tab_values.get()->Remove(0, &value));
     SetResult(value.release());
   } else {
@@ -1510,8 +1523,11 @@ bool TabsMoveFunction::MoveTab(int tab_id,
           *new_index, web_contents, TabStripModel::ADD_NONE);
 
       if (has_callback()) {
-        tab_values->Append(ExtensionTabUtil::CreateTabValue(
-            web_contents, target_tab_strip, *new_index, extension()));
+        tab_values->Append(
+            ExtensionTabUtil::CreateTabObject(web_contents, target_tab_strip,
+                                              *new_index, extension())
+                ->ToValue()
+                .release());
       }
 
       return true;
@@ -1529,15 +1545,17 @@ bool TabsMoveFunction::MoveTab(int tab_id,
     source_tab_strip->MoveWebContentsAt(tab_index, *new_index, false);
 
   if (has_callback()) {
-    tab_values->Append(ExtensionTabUtil::CreateTabValue(
-        contents, source_tab_strip, *new_index, extension()));
+    tab_values->Append(ExtensionTabUtil::CreateTabObject(
+                           contents, source_tab_strip, *new_index, extension())
+                           ->ToValue()
+                           .release());
   }
 
   return true;
 }
 
 bool TabsReloadFunction::RunSync() {
-  scoped_ptr<tabs::Reload::Params> params(
+  std::unique_ptr<tabs::Reload::Params> params(
       tabs::Reload::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -1584,7 +1602,7 @@ bool TabsReloadFunction::RunSync() {
                          ui::PAGE_TRANSITION_RELOAD, false);
     GetCurrentBrowser()->OpenURL(params);
   } else if (bypass_cache) {
-    web_contents->GetController().ReloadIgnoringCache(true);
+    web_contents->GetController().ReloadBypassingCache(true);
   } else {
     web_contents->GetController().Reload(true);
   }
@@ -1593,7 +1611,8 @@ bool TabsReloadFunction::RunSync() {
 }
 
 bool TabsRemoveFunction::RunSync() {
-  scoped_ptr<tabs::Remove::Params> params(tabs::Remove::Params::Create(*args_));
+  std::unique_ptr<tabs::Remove::Params> params(
+      tabs::Remove::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   if (params->tab_ids.as_integers) {
@@ -1641,6 +1660,10 @@ TabsCaptureVisibleTabFunction::TabsCaptureVisibleTabFunction()
     : chrome_details_(this) {
 }
 
+bool TabsCaptureVisibleTabFunction::HasPermission() {
+  return true;
+}
+
 bool TabsCaptureVisibleTabFunction::IsScreenshotEnabled() {
   PrefService* service = chrome_details_.GetProfile()->GetPrefs();
   if (service->GetBoolean(prefs::kDisableScreenshots)) {
@@ -1648,6 +1671,10 @@ bool TabsCaptureVisibleTabFunction::IsScreenshotEnabled() {
     return false;
   }
   return true;
+}
+
+bool TabsCaptureVisibleTabFunction::ClientAllowsTransparency() {
+  return false;
 }
 
 WebContents* TabsCaptureVisibleTabFunction::GetWebContentsForID(int window_id) {
@@ -1666,6 +1693,40 @@ WebContents* TabsCaptureVisibleTabFunction::GetWebContentsForID(int window_id) {
     return NULL;
   }
   return contents;
+}
+
+bool TabsCaptureVisibleTabFunction::RunAsync() {
+  using api::extension_types::ImageDetails;
+
+  EXTENSION_FUNCTION_VALIDATE(args_);
+
+  int context_id = extension_misc::kCurrentWindowId;
+  args_->GetInteger(0, &context_id);
+
+  std::unique_ptr<ImageDetails> image_details;
+  if (args_->GetSize() > 1) {
+    base::Value* spec = NULL;
+    EXTENSION_FUNCTION_VALIDATE(args_->Get(1, &spec) && spec);
+    image_details = ImageDetails::FromValue(*spec);
+  }
+
+  WebContents* contents = GetWebContentsForID(context_id);
+
+  return CaptureAsync(
+      contents, image_details.get(),
+      base::Bind(&TabsCaptureVisibleTabFunction::CopyFromBackingStoreComplete,
+                 this));
+}
+
+void TabsCaptureVisibleTabFunction::OnCaptureSuccess(const SkBitmap& bitmap) {
+  std::string base64_result;
+  if (!EncodeBitmap(bitmap, &base64_result)) {
+    OnCaptureFailure(FAILURE_REASON_ENCODING_FAILED);
+    return;
+  }
+
+  SetResult(new base::StringValue(base64_result));
+  SendResponse(true);
 }
 
 void TabsCaptureVisibleTabFunction::OnCaptureFailure(FailureReason reason) {
@@ -1692,7 +1753,7 @@ void TabsCaptureVisibleTabFunction::RegisterProfilePrefs(
 }
 
 bool TabsDetectLanguageFunction::RunAsync() {
-  scoped_ptr<tabs::DetectLanguage::Params> params(
+  std::unique_ptr<tabs::DetectLanguage::Params> params(
       tabs::DetectLanguage::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -1814,7 +1875,7 @@ bool ExecuteCodeInTabFunction::Init() {
   base::DictionaryValue* details_value = NULL;
   if (!args_->GetDictionary(1, &details_value))
     return false;
-  scoped_ptr<InjectDetails> details(new InjectDetails());
+  std::unique_ptr<InjectDetails> details(new InjectDetails());
   if (!InjectDetails::Populate(*details_value, details.get()))
     return false;
 
@@ -1854,15 +1915,45 @@ bool ExecuteCodeInTabFunction::CanExecuteScriptOnPage() {
 
   CHECK(contents);
 
+  int frame_id = details_->frame_id ? *details_->frame_id
+                                    : ExtensionApiFrameIdMap::kTopFrameId;
+  content::RenderFrameHost* rfh =
+      ExtensionApiFrameIdMap::GetRenderFrameHostById(contents, frame_id);
+  if (!rfh) {
+    error_ = ErrorUtils::FormatErrorMessage(keys::kFrameNotFoundError,
+                                            base::IntToString(frame_id),
+                                            base::IntToString(execute_tab_id_));
+    return false;
+  }
+
+  // Content scripts declared in manifest.json can access frames at about:-URLs
+  // if the extension has permission to access the frame's origin, so also allow
+  // programmatic content scripts at about:-URLs for allowed origins.
+  GURL effective_document_url(rfh->GetLastCommittedURL());
+  bool is_about_url = effective_document_url.SchemeIs(url::kAboutScheme);
+  if (is_about_url && details_->match_about_blank &&
+      *details_->match_about_blank) {
+    effective_document_url = GURL(rfh->GetLastCommittedOrigin().Serialize());
+  }
+
+  if (!effective_document_url.is_valid()) {
+    // Unknown URL, e.g. because no load was committed yet. Allow for now, the
+    // renderer will check again and fail the injection if needed.
+    return true;
+  }
+
   // NOTE: This can give the wrong answer due to race conditions, but it is OK,
   // we check again in the renderer.
-  content::RenderProcessHost* process = contents->GetRenderProcessHost();
   if (!extension()->permissions_data()->CanAccessPage(
-          extension(),
-          contents->GetURL(),
-          execute_tab_id_,
-          process ? process->GetID() : -1,
-          &error_)) {
+          extension(), effective_document_url, execute_tab_id_, &error_)) {
+    if (is_about_url &&
+        extension()->permissions_data()->active_permissions().HasAPIPermission(
+            APIPermission::kTab)) {
+      error_ = ErrorUtils::FormatErrorMessage(
+          manifest_errors::kCannotAccessAboutUrl,
+          rfh->GetLastCommittedURL().spec(),
+          rfh->GetLastCommittedOrigin().Serialize());
+    }
     return false;
   }
 
@@ -1937,7 +2028,7 @@ content::WebContents* ZoomAPIFunction::GetWebContents(int tab_id) {
 }
 
 bool TabsSetZoomFunction::RunAsync() {
-  scoped_ptr<tabs::SetZoom::Params> params(
+  std::unique_ptr<tabs::SetZoom::Params> params(
       tabs::SetZoom::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -1969,7 +2060,7 @@ bool TabsSetZoomFunction::RunAsync() {
 }
 
 bool TabsGetZoomFunction::RunAsync() {
-  scoped_ptr<tabs::GetZoom::Params> params(
+  std::unique_ptr<tabs::GetZoom::Params> params(
       tabs::GetZoom::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -1989,7 +2080,7 @@ bool TabsGetZoomFunction::RunAsync() {
 bool TabsSetZoomSettingsFunction::RunAsync() {
   using api::tabs::ZoomSettings;
 
-  scoped_ptr<tabs::SetZoomSettings::Params> params(
+  std::unique_ptr<tabs::SetZoomSettings::Params> params(
       tabs::SetZoomSettings::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -2039,7 +2130,7 @@ bool TabsSetZoomSettingsFunction::RunAsync() {
 }
 
 bool TabsGetZoomSettingsFunction::RunAsync() {
-  scoped_ptr<tabs::GetZoomSettings::Params> params(
+  std::unique_ptr<tabs::GetZoomSettings::Params> params(
       tabs::GetZoomSettings::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 

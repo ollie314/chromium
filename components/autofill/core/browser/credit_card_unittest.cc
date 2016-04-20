@@ -246,6 +246,41 @@ TEST(CreditCardTest, IsLocalDuplicateOfServerCard) {
   }
 }
 
+TEST(CreditCardTest, HasSameNumberAs) {
+  CreditCard a(base::GenerateGUID(), std::string());
+  CreditCard b(base::GenerateGUID(), std::string());
+
+  // Empty cards have the same empty number.
+  EXPECT_TRUE(a.HasSameNumberAs(b));
+  EXPECT_TRUE(b.HasSameNumberAs(a));
+
+  // Same number.
+  a.set_record_type(CreditCard::LOCAL_CARD);
+  a.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("4111111111111111"));
+  a.set_record_type(CreditCard::LOCAL_CARD);
+  b.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("4111111111111111"));
+  EXPECT_TRUE(a.HasSameNumberAs(b));
+  EXPECT_TRUE(b.HasSameNumberAs(a));
+
+  // Local cards shouldn't match even if the last 4 are the same.
+  a.set_record_type(CreditCard::LOCAL_CARD);
+  a.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("4111111111111111"));
+  a.set_record_type(CreditCard::LOCAL_CARD);
+  b.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("4111222222221111"));
+  EXPECT_FALSE(a.HasSameNumberAs(b));
+  EXPECT_FALSE(b.HasSameNumberAs(a));
+
+  // Likewise if one is an unmasked server card.
+  a.set_record_type(CreditCard::FULL_SERVER_CARD);
+  EXPECT_FALSE(a.HasSameNumberAs(b));
+  EXPECT_FALSE(b.HasSameNumberAs(a));
+
+  // But if one is a masked card, then they should.
+  b.set_record_type(CreditCard::MASKED_SERVER_CARD);
+  EXPECT_TRUE(a.HasSameNumberAs(b));
+  EXPECT_TRUE(b.HasSameNumberAs(a));
+}
+
 TEST(CreditCardTest, Compare) {
   CreditCard a(base::GenerateGUID(), std::string());
   CreditCard b(base::GenerateGUID(), std::string());
@@ -301,23 +336,24 @@ TEST(CreditCardTest, UpdateFromImportedCard) {
   CreditCard b = a;
   b.set_guid(base::GenerateGUID());
   b.set_origin("https://www.example.org");
-  b.SetRawInfo(CREDIT_CARD_NAME, ASCIIToUTF16("J. Dillinger"));
+  b.SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("J. Dillinger"));
   b.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("08"));
   b.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2019"));
 
   EXPECT_TRUE(a.UpdateFromImportedCard(b, "en-US"));
   EXPECT_EQ("https://www.example.org", a.origin());
-  EXPECT_EQ(ASCIIToUTF16("J. Dillinger"), a.GetRawInfo(CREDIT_CARD_NAME));
+  EXPECT_EQ(ASCIIToUTF16("J. Dillinger"), a.GetRawInfo(CREDIT_CARD_NAME_FULL));
   EXPECT_EQ(ASCIIToUTF16("08"), a.GetRawInfo(CREDIT_CARD_EXP_MONTH));
   EXPECT_EQ(ASCIIToUTF16("2019"), a.GetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR));
 
   // Try again, but with no name set for |b|.
   a = original_card;
-  b.SetRawInfo(CREDIT_CARD_NAME, base::string16());
+  b.SetRawInfo(CREDIT_CARD_NAME_FULL, base::string16());
 
   EXPECT_TRUE(a.UpdateFromImportedCard(b, "en-US"));
   EXPECT_EQ("https://www.example.org", a.origin());
-  EXPECT_EQ(ASCIIToUTF16("John Dillinger"), a.GetRawInfo(CREDIT_CARD_NAME));
+  EXPECT_EQ(ASCIIToUTF16("John Dillinger"),
+            a.GetRawInfo(CREDIT_CARD_NAME_FULL));
   EXPECT_EQ(ASCIIToUTF16("08"), a.GetRawInfo(CREDIT_CARD_EXP_MONTH));
   EXPECT_EQ(ASCIIToUTF16("2019"), a.GetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR));
 
@@ -325,11 +361,12 @@ TEST(CreditCardTest, UpdateFromImportedCard) {
   // |a| should be unchanged.
   a = original_card;
   a.set_origin("Chrome settings");
-  b.SetRawInfo(CREDIT_CARD_NAME, ASCIIToUTF16("J. Dillinger"));
+  b.SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("J. Dillinger"));
 
   EXPECT_TRUE(a.UpdateFromImportedCard(b, "en-US"));
   EXPECT_EQ("Chrome settings", a.origin());
-  EXPECT_EQ(ASCIIToUTF16("John Dillinger"), a.GetRawInfo(CREDIT_CARD_NAME));
+  EXPECT_EQ(ASCIIToUTF16("John Dillinger"),
+            a.GetRawInfo(CREDIT_CARD_NAME_FULL));
   EXPECT_EQ(ASCIIToUTF16("09"), a.GetRawInfo(CREDIT_CARD_EXP_MONTH));
   EXPECT_EQ(ASCIIToUTF16("2017"), a.GetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR));
 
@@ -339,7 +376,7 @@ TEST(CreditCardTest, UpdateFromImportedCard) {
 
   EXPECT_TRUE(a.UpdateFromImportedCard(b, "en-US"));
   EXPECT_EQ("Chrome settings", a.origin());
-  EXPECT_EQ(ASCIIToUTF16("J. Dillinger"), a.GetRawInfo(CREDIT_CARD_NAME));
+  EXPECT_EQ(ASCIIToUTF16("J. Dillinger"), a.GetRawInfo(CREDIT_CARD_NAME_FULL));
   EXPECT_EQ(ASCIIToUTF16("08"), a.GetRawInfo(CREDIT_CARD_EXP_MONTH));
   EXPECT_EQ(ASCIIToUTF16("2019"), a.GetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR));
 
@@ -350,7 +387,7 @@ TEST(CreditCardTest, UpdateFromImportedCard) {
 
   EXPECT_TRUE(a.UpdateFromImportedCard(b, "en-US"));
   EXPECT_EQ("Chrome settings", a.origin());
-  EXPECT_EQ(ASCIIToUTF16("J. Dillinger"), a.GetRawInfo(CREDIT_CARD_NAME));
+  EXPECT_EQ(ASCIIToUTF16("J. Dillinger"), a.GetRawInfo(CREDIT_CARD_NAME_FULL));
   EXPECT_EQ(ASCIIToUTF16("08"), a.GetRawInfo(CREDIT_CARD_EXP_MONTH));
   EXPECT_EQ(ASCIIToUTF16("2019"), a.GetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR));
 
@@ -361,27 +398,6 @@ TEST(CreditCardTest, UpdateFromImportedCard) {
 
   EXPECT_FALSE(a.UpdateFromImportedCard(b, "en-US"));
   EXPECT_EQ(original_card, a);
-}
-
-TEST(CreditCardTest, IsComplete) {
-  CreditCard card(base::GenerateGUID(), "https://www.example.com/");
-  EXPECT_FALSE(card.IsComplete());
-  card.SetRawInfo(CREDIT_CARD_NAME, ASCIIToUTF16("Wally T. Walrus"));
-  EXPECT_FALSE(card.IsComplete());
-  card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("01"));
-  EXPECT_FALSE(card.IsComplete());
-  card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2014"));
-
-  for (size_t i = 0; i < arraysize(kValidNumbers); ++i) {
-    SCOPED_TRACE(kValidNumbers[i]);
-    card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16(kValidNumbers[i]));
-    EXPECT_TRUE(card.IsComplete());
-  }
-  for (size_t i = 0; i < arraysize(kInvalidNumbers); ++i) {
-    SCOPED_TRACE(kInvalidNumbers[i]);
-    card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16(kInvalidNumbers[i]));
-    EXPECT_FALSE(card.IsComplete());
-  }
 }
 
 TEST(CreditCardTest, IsValid) {
@@ -403,20 +419,16 @@ TEST(CreditCardTest, IsValid) {
   card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("41111"));
   EXPECT_FALSE(card.IsValid());
 
-  // Valid
-  card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("12"));
-  card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("9999"));
-  card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("4111111111111111"));
-  EXPECT_TRUE(card.IsValid());
-}
-
-TEST(CreditCardTest, InvalidMastercardNumber) {
-  CreditCard card(base::GenerateGUID(), "https://www.example.com/");
-
-  test::SetCreditCardInfo(&card, "Baby Face Nelson",
-                          "5200000000000004", "01", "2010");
-  EXPECT_EQ(kMasterCard, card.type());
-  EXPECT_FALSE(card.IsComplete());
+  for (size_t i = 0; i < arraysize(kValidNumbers); ++i) {
+    SCOPED_TRACE(kValidNumbers[i]);
+    card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16(kValidNumbers[i]));
+    EXPECT_TRUE(card.IsValid());
+  }
+  for (size_t i = 0; i < arraysize(kInvalidNumbers); ++i) {
+    SCOPED_TRACE(kInvalidNumbers[i]);
+    card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16(kInvalidNumbers[i]));
+    EXPECT_FALSE(card.IsValid());
+  }
 }
 
 // Verify that we preserve exactly what the user typed for credit card numbers.

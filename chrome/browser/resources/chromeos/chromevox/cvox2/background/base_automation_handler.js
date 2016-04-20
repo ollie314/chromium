@@ -30,14 +30,18 @@ BaseAutomationHandler = function(node) {
    */
   this.listenerMap_ = {
     alert: this.onAlert,
+    ariaAttributeChanged: this.onEventIfInRange,
+    checkedStateChanged: this.onEventIfInRange,
     focus: this.onFocus,
-    hover: this.onEventDefault,
+    hover: this.onEventWithFlushedOutput,
     loadComplete: this.onLoadComplete,
-    menuStart: this.onEventDefault,
-    menuEnd: this.onEventDefault,
+    menuListItemSelected: this.onEventDefault,
+    menuStart: this.onMenuStart,
+    menuEnd: this.onMenuEnd,
     scrollPositionChanged: this.onScrollPositionChanged,
-    textChanged: this.onTextOrTextSelectionChanged,
-    textSelectionChanged: this.onTextOrTextSelectionChanged,
+    selection: this.onEventWithFlushedOutput,
+    textChanged: this.onTextChanged,
+    textSelectionChanged: this.onTextSelectionChanged,
     valueChanged: this.onValueChanged
   };
 
@@ -124,12 +128,46 @@ BaseAutomationHandler.prototype = {
   /**
    * @param {!AutomationEvent} evt
    */
+  onEventIfInRange: function(evt) {
+    // TODO(dtseng): Consider the end of the current range as well.
+    if (AutomationUtil.isDescendantOf(
+        global.backgroundObj.currentRange.start.node, evt.target) ||
+            evt.target.state.focused)
+      this.onEventDefault(evt);
+  },
+
+  /**
+   * @param {!AutomationEvent} evt
+   */
+  onEventWithFlushedOutput: function(evt) {
+    Output.flushNextSpeechUtterance();
+    this.onEventDefault(evt);
+  },
+
+  /**
+   * @param {!AutomationEvent} evt
+   */
+  onMenuStart: function(evt) {},
+
+  /**
+   * @param {!AutomationEvent} evt
+   */
+  onMenuEnd: function(evt) {},
+
+  /**
+   * @param {!AutomationEvent} evt
+   */
   onScrollPositionChanged: function(evt) {},
 
   /**
    * @param {!AutomationEvent} evt
    */
-  onTextOrTextSelectionChanged: function(evt) {},
+  onTextChanged: function(evt) {},
+
+  /**
+   * @param {!AutomationEvent} evt
+   */
+  onTextSelectionChanged: function(evt) {},
 
   /**
    * @param {!AutomationEvent} evt

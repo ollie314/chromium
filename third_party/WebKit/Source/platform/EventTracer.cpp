@@ -32,6 +32,8 @@
 
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_event_argument.h"
+#include "platform/TracedValue.h"
 #include "public/platform/Platform.h"
 #include "wtf/Assertions.h"
 #include "wtf/text/StringUTF8Adaptor.h"
@@ -41,34 +43,6 @@ namespace blink {
 
 static_assert(sizeof(TraceEvent::TraceEventHandle) == sizeof(base::trace_event::TraceEventHandle), "TraceEventHandle types must be the same");
 static_assert(sizeof(TraceEvent::TraceEventAPIAtomicWord) == sizeof(const char*), "TraceEventAPIAtomicWord must be pointer-sized.");
-
-namespace {
-
-class ConvertableToTraceFormatWrapper : public base::trace_event::ConvertableToTraceFormat {
-public:
-    // We move a reference pointer from |convertable| to |m_convertable|,
-    // rather than copying, for thread safety. https://crbug.com/478149
-    explicit ConvertableToTraceFormatWrapper(PassRefPtr<blink::TraceEvent::ConvertableToTraceFormat> convertable)
-        : m_convertable(convertable)
-    {
-        ASSERT(m_convertable);
-    }
-    void AppendAsTraceFormat(std::string* out) const override
-    {
-        // TODO(bashi): Avoid copying.
-        String traceFormat = m_convertable->asTraceFormat();
-        StringUTF8Adaptor utf8(traceFormat);
-        out->append(utf8.data(), utf8.length());
-    }
-    // TODO(bashi): Override EstimateTraceMemoryOverhead()
-
-private:
-    ~ConvertableToTraceFormatWrapper() override {}
-
-    RefPtr<blink::TraceEvent::ConvertableToTraceFormat> m_convertable;
-};
-
-} // namespace
 
 // The dummy variable is needed to avoid a crash when someone updates the state variables
 // before EventTracer::initialize() is called.
@@ -95,37 +69,39 @@ const unsigned char* EventTracer::getTraceCategoryEnabledFlag(const char* catego
 }
 
 TraceEvent::TraceEventHandle EventTracer::addTraceEvent(char phase, const unsigned char* categoryEnabledFlag,
-    const char* name, unsigned long long id, unsigned long long bindId, double timestamp,
+    const char* name, const char* scope, unsigned long long id, unsigned long long bindId, double timestamp,
     int numArgs, const char* argNames[], const unsigned char argTypes[],
     const unsigned long long argValues[],
-    PassRefPtr<TraceEvent::ConvertableToTraceFormat> convertableValue1,
-    PassRefPtr<TraceEvent::ConvertableToTraceFormat> convertableValue2,
+    PassOwnPtr<TracedValue> tracedValue1,
+    PassOwnPtr<TracedValue> tracedValue2,
     unsigned flags)
 {
-    scoped_refptr<base::trace_event::ConvertableToTraceFormat> wrappers[2];
+    std::unique_ptr<base::trace_event::ConvertableToTraceFormat> convertables[2];
     ASSERT(numArgs <= 2);
+    // We move m_tracedValues from TracedValues for thread safety.
+    // https://crbug.com/478149
     if (numArgs >= 1 && argTypes[0] == TRACE_VALUE_TYPE_CONVERTABLE)
-        wrappers[0] = new ConvertableToTraceFormatWrapper(convertableValue1);
+        convertables[0] = std::move(tracedValue1->m_tracedValue);
     if (numArgs >= 2 && argTypes[1] == TRACE_VALUE_TYPE_CONVERTABLE)
-        wrappers[1] = new ConvertableToTraceFormatWrapper(convertableValue2);
-    return addTraceEvent(phase, categoryEnabledFlag, name, id, bindId, timestamp, numArgs, argNames, argTypes, argValues, wrappers, flags);
+        convertables[1] = std::move(tracedValue2->m_tracedValue);
+    return addTraceEvent(phase, categoryEnabledFlag, name, scope, id, bindId, timestamp, numArgs, argNames, argTypes, argValues, convertables, flags);
 }
 
 TraceEvent::TraceEventHandle EventTracer::addTraceEvent(char phase, const unsigned char* categoryEnabledFlag,
-    const char* name, unsigned long long id, unsigned long long bindId, double timestamp,
+    const char* name, const char* scope, unsigned long long id, unsigned long long bindId, double timestamp,
     int numArgs, const char** argNames, const unsigned char* argTypes,
     const unsigned long long* argValues, unsigned flags)
 {
-    return addTraceEvent(phase, categoryEnabledFlag, name, id, bindId, timestamp, numArgs, argNames, argTypes, argValues, nullptr, flags);
+    return addTraceEvent(phase, categoryEnabledFlag, name, scope, id, bindId, timestamp, numArgs, argNames, argTypes, argValues, nullptr, flags);
 }
 
 TraceEvent::TraceEventHandle EventTracer::addTraceEvent(char phase, const unsigned char* categoryEnabledFlag,
-    const char* name, unsigned long long id, unsigned long long bindId, double timestamp,
+    const char* name, const char* scope, unsigned long long id, unsigned long long bindId, double timestamp,
     int numArgs, const char** argNames, const unsigned char* argTypes, const unsigned long long* argValues,
-    const scoped_refptr<base::trace_event::ConvertableToTraceFormat>* convertables, unsigned flags)
+    std::unique_ptr<base::trace_event::ConvertableToTraceFormat>* convertables, unsigned flags)
 {
     base::TimeTicks timestampTimeTicks = base::TimeTicks() + base::TimeDelta::FromSecondsD(timestamp);
-    base::trace_event::TraceEventHandle handle = TRACE_EVENT_API_ADD_TRACE_EVENT_WITH_THREAD_ID_AND_TIMESTAMP(phase, categoryEnabledFlag, name, id, bindId, base::PlatformThread::CurrentId(), timestampTimeTicks, numArgs, argNames, argTypes, argValues, convertables, flags);
+    base::trace_event::TraceEventHandle handle = TRACE_EVENT_API_ADD_TRACE_EVENT_WITH_THREAD_ID_AND_TIMESTAMP(phase, categoryEnabledFlag, name, scope, id, bindId, base::PlatformThread::CurrentId(), timestampTimeTicks, numArgs, argNames, argTypes, argValues, convertables, flags);
     TraceEvent::TraceEventHandle result;
     memcpy(&result, &handle, sizeof(result));
     return result;

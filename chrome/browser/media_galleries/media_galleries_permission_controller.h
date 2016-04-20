@@ -8,12 +8,12 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/media_galleries/media_galleries_dialog_controller.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences.h"
@@ -61,14 +61,12 @@ class MediaGalleriesPermissionController
   base::string16 GetHeader() const override;
   base::string16 GetSubtext() const override;
   bool IsAcceptAllowed() const override;
-  bool ShouldShowFolderViewer(const Entry& entry) const override;
   std::vector<base::string16> GetSectionHeaders() const override;
   Entries GetSectionEntries(size_t index) const override;
   // Auxiliary button for this dialog is the 'Add Folder' button.
   base::string16 GetAuxiliaryButtonText() const override;
   void DidClickAuxiliaryButton() override;
   void DidToggleEntry(GalleryDialogId gallery_id, bool selected) override;
-  void DidClickOpenFolderViewer(GalleryDialogId gallery_id) override;
   void DidForgetEntry(GalleryDialogId gallery_id) override;
   base::string16 GetAcceptButtonText() const override;
   void DialogFinished(bool accepted) override;
@@ -207,11 +205,11 @@ class MediaGalleriesPermissionController
   MediaGalleriesPreferences* preferences_;
 
   // The view that's showing.
-  scoped_ptr<MediaGalleriesDialog> dialog_;
+  std::unique_ptr<MediaGalleriesDialog> dialog_;
 
   scoped_refptr<ui::SelectFileDialog> select_folder_dialog_;
 
-  scoped_ptr<MediaGalleryContextMenu> context_menu_;
+  std::unique_ptr<MediaGalleryContextMenu> context_menu_;
 
   // Creates the dialog. Only changed for unit tests.
   CreateDialogCallback create_dialog_callback_;

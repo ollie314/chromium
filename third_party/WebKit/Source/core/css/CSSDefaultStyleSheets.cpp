@@ -45,41 +45,43 @@ using namespace HTMLNames;
 
 CSSDefaultStyleSheets& CSSDefaultStyleSheets::instance()
 {
-    DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<CSSDefaultStyleSheets>, cssDefaultStyleSheets, (adoptPtrWillBeNoop(new CSSDefaultStyleSheets())));
-    return *cssDefaultStyleSheets;
+    DEFINE_STATIC_LOCAL(CSSDefaultStyleSheets, cssDefaultStyleSheets, (new CSSDefaultStyleSheets));
+    return cssDefaultStyleSheets;
 }
 
 static const MediaQueryEvaluator& screenEval()
 {
-    DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<MediaQueryEvaluator>, staticScreenEval, (adoptPtrWillBeNoop (new MediaQueryEvaluator("screen"))));
-    return *staticScreenEval;
+    DEFINE_STATIC_LOCAL(MediaQueryEvaluator, staticScreenEval, (new MediaQueryEvaluator("screen")));
+    return staticScreenEval;
 }
 
 static const MediaQueryEvaluator& printEval()
 {
-    DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<MediaQueryEvaluator>, staticPrintEval, (adoptPtrWillBeNoop (new MediaQueryEvaluator("print"))));
-    return *staticPrintEval;
+    DEFINE_STATIC_LOCAL(MediaQueryEvaluator, staticPrintEval, (new MediaQueryEvaluator("print")));
+    return staticPrintEval;
 }
 
-static PassRefPtrWillBeRawPtr<StyleSheetContents> parseUASheet(const String& str)
+static StyleSheetContents* parseUASheet(const String& str)
 {
-    RefPtrWillBeRawPtr<StyleSheetContents> sheet = StyleSheetContents::create(CSSParserContext(UASheetMode, 0));
+    StyleSheetContents* sheet = StyleSheetContents::create(CSSParserContext(UASheetMode, 0));
     sheet->parseString(str);
     // User Agent stylesheets are parsed once for the lifetime of the renderer
     // process and are intentionally leaked.
-    LEAK_SANITIZER_IGNORE_OBJECT(sheet.get());
-    return sheet.release();
+    LEAK_SANITIZER_IGNORE_OBJECT(sheet);
+    return sheet;
 }
 
 CSSDefaultStyleSheets::CSSDefaultStyleSheets()
     : m_defaultStyle(nullptr)
     , m_defaultMobileViewportStyle(nullptr)
+    , m_defaultTelevisionViewportStyle(nullptr)
     , m_defaultQuirksStyle(nullptr)
     , m_defaultPrintStyle(nullptr)
     , m_defaultViewSourceStyle(nullptr)
     , m_defaultXHTMLMobileProfileStyle(nullptr)
     , m_defaultStyleSheet(nullptr)
     , m_mobileViewportStyleSheet(nullptr)
+    , m_televisionViewportStyleSheet(nullptr)
     , m_quirksStyleSheet(nullptr)
     , m_svgStyleSheet(nullptr)
     , m_mathmlStyleSheet(nullptr)
@@ -107,8 +109,8 @@ RuleSet* CSSDefaultStyleSheets::defaultViewSourceStyle()
     if (!m_defaultViewSourceStyle) {
         m_defaultViewSourceStyle = RuleSet::create();
         // Loaded stylesheet is leaked on purpose.
-        RefPtrWillBeRawPtr<StyleSheetContents> stylesheet = parseUASheet(loadResourceAsASCIIString("view-source.css"));
-        m_defaultViewSourceStyle->addRulesFromSheet(stylesheet.release().leakRef(), screenEval());
+        StyleSheetContents* stylesheet = parseUASheet(loadResourceAsASCIIString("view-source.css"));
+        m_defaultViewSourceStyle->addRulesFromSheet(stylesheet, screenEval());
     }
     return m_defaultViewSourceStyle.get();
 }
@@ -118,8 +120,8 @@ RuleSet* CSSDefaultStyleSheets::defaultXHTMLMobileProfileStyle()
     if (!m_defaultXHTMLMobileProfileStyle) {
         m_defaultXHTMLMobileProfileStyle = RuleSet::create();
         // Loaded stylesheet is leaked on purpose.
-        RefPtrWillBeRawPtr<StyleSheetContents> stylesheet = parseUASheet(loadResourceAsASCIIString("xhtmlmp.css"));
-        m_defaultXHTMLMobileProfileStyle->addRulesFromSheet(stylesheet.release().leakRef(), screenEval());
+        StyleSheetContents* stylesheet = parseUASheet(loadResourceAsASCIIString("xhtmlmp.css"));
+        m_defaultXHTMLMobileProfileStyle->addRulesFromSheet(stylesheet, screenEval());
     }
     return m_defaultXHTMLMobileProfileStyle.get();
 }
@@ -132,6 +134,16 @@ RuleSet* CSSDefaultStyleSheets::defaultMobileViewportStyle()
         m_defaultMobileViewportStyle->addRulesFromSheet(m_mobileViewportStyleSheet.get(), screenEval());
     }
     return m_defaultMobileViewportStyle.get();
+}
+
+RuleSet* CSSDefaultStyleSheets::defaultTelevisionViewportStyle()
+{
+    if (!m_defaultTelevisionViewportStyle) {
+        m_defaultTelevisionViewportStyle = RuleSet::create();
+        m_televisionViewportStyleSheet = parseUASheet(loadResourceAsASCIIString("viewportTelevision.css"));
+        m_defaultTelevisionViewportStyle->addRulesFromSheet(m_televisionViewportStyleSheet.get(), screenEval());
+    }
+    return m_defaultTelevisionViewportStyle.get();
 }
 
 void CSSDefaultStyleSheets::ensureDefaultStyleSheetsForElement(const Element& element, bool& changedDefaultStyle)
@@ -165,30 +177,33 @@ void CSSDefaultStyleSheets::ensureDefaultStyleSheetsForElement(const Element& el
         changedDefaultStyle = true;
     }
 
-    // FIXME: This only works because we Force recalc the entire document so the new sheet
-    // is loaded for <html> and the correct styles apply to everyone.
-    if (!m_fullscreenStyleSheet && Fullscreen::isFullScreen(element.document())) {
-        String fullscreenRules = loadResourceAsASCIIString("fullscreen.css") + LayoutTheme::theme().extraFullScreenStyleSheet();
-        m_fullscreenStyleSheet = parseUASheet(fullscreenRules);
-        m_defaultStyle->addRulesFromSheet(fullscreenStyleSheet(), screenEval());
-        m_defaultQuirksStyle->addRulesFromSheet(fullscreenStyleSheet(), screenEval());
-        changedDefaultStyle = true;
-    }
-
     ASSERT(!m_defaultStyle->features().hasIdsInSelectors());
     ASSERT(m_defaultStyle->features().siblingRules.isEmpty());
+}
+
+void CSSDefaultStyleSheets::ensureDefaultStyleSheetForFullscreen()
+{
+    if (m_fullscreenStyleSheet)
+        return;
+
+    String fullscreenRules = loadResourceAsASCIIString("fullscreen.css") + LayoutTheme::theme().extraFullScreenStyleSheet();
+    m_fullscreenStyleSheet = parseUASheet(fullscreenRules);
+    m_defaultStyle->addRulesFromSheet(fullscreenStyleSheet(), screenEval());
+    m_defaultQuirksStyle->addRulesFromSheet(fullscreenStyleSheet(), screenEval());
 }
 
 DEFINE_TRACE(CSSDefaultStyleSheets)
 {
     visitor->trace(m_defaultStyle);
     visitor->trace(m_defaultMobileViewportStyle);
+    visitor->trace(m_defaultTelevisionViewportStyle);
     visitor->trace(m_defaultQuirksStyle);
     visitor->trace(m_defaultPrintStyle);
     visitor->trace(m_defaultViewSourceStyle);
     visitor->trace(m_defaultXHTMLMobileProfileStyle);
     visitor->trace(m_defaultStyleSheet);
     visitor->trace(m_mobileViewportStyleSheet);
+    visitor->trace(m_televisionViewportStyleSheet);
     visitor->trace(m_quirksStyleSheet);
     visitor->trace(m_svgStyleSheet);
     visitor->trace(m_mathmlStyleSheet);

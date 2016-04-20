@@ -10,7 +10,6 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task_runner_util.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
@@ -22,6 +21,7 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/proto/data_store.pb.h"
+#include "components/prefs/pref_service.h"
 
 namespace data_reduction_proxy {
 
@@ -29,7 +29,7 @@ DataReductionProxyService::DataReductionProxyService(
     DataReductionProxySettings* settings,
     PrefService* prefs,
     net::URLRequestContextGetter* request_context_getter,
-    scoped_ptr<DataStore> store,
+    std::unique_ptr<DataStore> store,
     const scoped_refptr<base::SequencedTaskRunner>& ui_task_runner,
     const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
     const scoped_refptr<base::SequencedTaskRunner>& db_task_runner,
@@ -113,26 +113,27 @@ void DataReductionProxyService::UpdateContentLengths(
   }
 }
 
-void DataReductionProxyService::AddEvent(scoped_ptr<base::Value> event) {
+void DataReductionProxyService::AddEvent(std::unique_ptr<base::Value> event) {
   DCHECK(CalledOnValidThread());
   event_store_->AddEvent(std::move(event));
 }
 
-void DataReductionProxyService::AddEnabledEvent(scoped_ptr<base::Value> event,
-                                                bool enabled) {
+void DataReductionProxyService::AddEnabledEvent(
+    std::unique_ptr<base::Value> event,
+    bool enabled) {
   DCHECK(CalledOnValidThread());
   event_store_->AddEnabledEvent(std::move(event), enabled);
 }
 
 void DataReductionProxyService::AddEventAndSecureProxyCheckState(
-    scoped_ptr<base::Value> event,
+    std::unique_ptr<base::Value> event,
     SecureProxyCheckState state) {
   DCHECK(CalledOnValidThread());
   event_store_->AddEventAndSecureProxyCheckState(std::move(event), state);
 }
 
 void DataReductionProxyService::AddAndSetLastBypassEvent(
-    scoped_ptr<base::Value> event,
+    std::unique_ptr<base::Value> event,
     int64_t expiration_ticks) {
   DCHECK(CalledOnValidThread());
   event_store_->AddAndSetLastBypassEvent(std::move(event), expiration_ticks);
@@ -260,7 +261,7 @@ void DataReductionProxyService::SetProxyPrefs(bool enabled, bool at_startup) {
 
 void DataReductionProxyService::LoadHistoricalDataUsage(
     const HistoricalDataUsageCallback& load_data_usage_callback) {
-  scoped_ptr<std::vector<DataUsageBucket>> data_usage(
+  std::unique_ptr<std::vector<DataUsageBucket>> data_usage(
       new std::vector<DataUsageBucket>());
   std::vector<DataUsageBucket>* data_usage_ptr = data_usage.get();
   db_task_runner_->PostTaskAndReply(
@@ -272,7 +273,7 @@ void DataReductionProxyService::LoadHistoricalDataUsage(
 
 void DataReductionProxyService::LoadCurrentDataUsageBucket(
     const LoadCurrentDataUsageCallback& load_current_data_usage_callback) {
-  scoped_ptr<DataUsageBucket> bucket(new DataUsageBucket());
+  std::unique_ptr<DataUsageBucket> bucket(new DataUsageBucket());
   DataUsageBucket* bucket_ptr = bucket.get();
   db_task_runner_->PostTaskAndReply(
       FROM_HERE,
@@ -282,7 +283,7 @@ void DataReductionProxyService::LoadCurrentDataUsageBucket(
 }
 
 void DataReductionProxyService::StoreCurrentDataUsageBucket(
-    scoped_ptr<DataUsageBucket> current) {
+    std::unique_ptr<DataUsageBucket> current) {
   db_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&DBDataOwner::StoreCurrentDataUsageBucket,

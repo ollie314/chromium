@@ -5,12 +5,12 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_MANAGER_H_
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_MANAGER_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
 #include "base/stl_util.h"
@@ -36,9 +36,6 @@ class BrowserSavePasswordProgressLogger;
 class PasswordManagerClient;
 class PasswordManagerDriver;
 class PasswordFormManager;
-
-// TODO(melandory): Separate the PasswordFormManager API interface and the
-// implementation in two classes http://crbug.com/473184.
 
 // Per-tab password manager. Handles creation and management of UI elements,
 // receiving password form data from the renderer and managing the password
@@ -66,6 +63,8 @@ class PasswordManager : public LoginModel {
   void Autofill(password_manager::PasswordManagerDriver* driver,
                 const autofill::PasswordForm& form_for_autofill,
                 const autofill::PasswordFormMap& best_matches,
+                const std::vector<std::unique_ptr<autofill::PasswordForm>>&
+                    federated_matches,
                 const autofill::PasswordForm& preferred_match,
                 bool wait_for_username) const;
 
@@ -82,11 +81,23 @@ class PasswordManager : public LoginModel {
 
   void GenerationAvailableForForm(const autofill::PasswordForm& form);
 
+  // Presaves the form with generated password.
+  void OnPresaveGeneratedPassword(const autofill::PasswordForm& password_form);
+
   // Update the state of generation for this form.
+  // If |password_is_generated| == false, removes the presaved form.
   void SetHasGeneratedPasswordForForm(
       password_manager::PasswordManagerDriver* driver,
       const autofill::PasswordForm& form,
       bool password_is_generated);
+
+  // Update the generation element and whether generation was triggered
+  // manually.
+  void SetGenerationElementAndReasonForForm(
+      password_manager::PasswordManagerDriver* driver,
+      const autofill::PasswordForm& form,
+      const base::string16& generation_element,
+      bool is_manually_triggered);
 
   // TODO(isherman): This should not be public, but is currently being used by
   // the LoginPrompt code.
@@ -132,6 +143,10 @@ class PasswordManager : public LoginModel {
   // Causes all |pending_login_managers_| to query the password store again.
   // Results in updating the fill information on the page.
   void UpdateFormManagers();
+
+  // Cleans the state by removing all the PasswordFormManager instances and
+  // visible forms.
+  void DropFormManagers();
 
   PasswordManagerClient* client() { return client_; }
 
@@ -208,7 +223,7 @@ class PasswordManager : public LoginModel {
   // send the PasswordFormManager back to the pending_login_managers_ set.
   // Scoped in case PasswordManager gets deleted (e.g tab closes) between the
   // time a user submits a login form and gets to the next page.
-  scoped_ptr<PasswordFormManager> provisional_save_manager_;
+  std::unique_ptr<PasswordFormManager> provisional_save_manager_;
 
   // The embedder-level client. Must outlive this class.
   PasswordManagerClient* const client_;

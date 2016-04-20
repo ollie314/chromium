@@ -6,12 +6,9 @@
 
 namespace instance_id {
 
-InstanceID::InstanceID(const std::string& app_id)
-    : app_id_(app_id) {
-}
+InstanceID::InstanceID(const std::string& app_id) : app_id_(app_id) {}
 
-InstanceID::~InstanceID() {
-}
+InstanceID::~InstanceID() {}
 
 void InstanceID::SetTokenRefreshCallback(const TokenRefreshCallback& callback) {
   token_refresh_callback_ = callback;

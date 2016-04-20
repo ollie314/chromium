@@ -11,7 +11,6 @@
 #include <memory>
 #include <string>
 
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 #include "net/base/linked_hash_map.h"
 #include "net/base/net_export.h"
@@ -35,7 +34,9 @@ using ::operator<<;
 // It's expected that keys are rarely deleted from a SpdyHeaderBlock.
 class NET_EXPORT SpdyHeaderBlock {
  private:
-  using MapType = linked_hash_map<base::StringPiece, base::StringPiece>;
+  using MapType = linked_hash_map<base::StringPiece,
+                                  base::StringPiece,
+                                  base::StringPieceHash>;
   class Storage;
 
  public:
@@ -87,6 +88,7 @@ class NET_EXPORT SpdyHeaderBlock {
   class NET_EXPORT StringPieceProxy {
    public:
     ~StringPieceProxy();
+    StringPieceProxy(const StringPieceProxy& other);
 
     // Assignment modifies the underlying SpdyHeaderBlock.
     StringPieceProxy& operator=(const base::StringPiece other);
@@ -123,11 +125,11 @@ class NET_EXPORT SpdyHeaderBlock {
   void AppendHeader(const base::StringPiece key, const base::StringPiece value);
 
   MapType block_;
-  scoped_ptr<Storage> storage_;
+  std::unique_ptr<Storage> storage_;
 };
 
 // Converts a SpdyHeaderBlock into NetLog event parameters.
-NET_EXPORT scoped_ptr<base::Value> SpdyHeaderBlockNetLogCallback(
+NET_EXPORT std::unique_ptr<base::Value> SpdyHeaderBlockNetLogCallback(
     const SpdyHeaderBlock* headers,
     NetLogCaptureMode capture_mode);
 

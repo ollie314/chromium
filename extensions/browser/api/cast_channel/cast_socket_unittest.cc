@@ -26,7 +26,6 @@
 #include "extensions/common/api/cast_channel/cast_channel.pb.h"
 #include "net/base/address_list.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/log/test_net_log.h"
 #include "net/socket/socket_test_util.h"
 #include "net/socket/ssl_client_socket.h"
@@ -84,12 +83,18 @@ CastMessage CreateTestMessage() {
 class MockTCPSocket : public net::TCPClientSocket {
  public:
   explicit MockTCPSocket(const net::MockConnect& connect_data)
-      : TCPClientSocket(net::AddressList(), nullptr, net::NetLog::Source()),
+      : TCPClientSocket(net::AddressList(),
+                        nullptr,
+                        nullptr,
+                        net::NetLog::Source()),
         connect_data_(connect_data),
         do_nothing_(false) {}
 
   explicit MockTCPSocket(bool do_nothing)
-      : TCPClientSocket(net::AddressList(), nullptr, net::NetLog::Source()) {
+      : TCPClientSocket(net::AddressList(),
+                        nullptr,
+                        nullptr,
+                        net::NetLog::Source()) {
     CHECK(do_nothing);
     do_nothing_ = do_nothing;
   }

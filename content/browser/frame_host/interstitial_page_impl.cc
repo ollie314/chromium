@@ -11,6 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -53,28 +54,6 @@ using blink::WebDragOperation;
 using blink::WebDragOperationsMask;
 
 namespace content {
-namespace {
-
-void ResourceRequestHelper(ResourceDispatcherHostImpl* rdh,
-                           int process_id,
-                           int render_view_host_id,
-                           ResourceRequestAction action) {
-  switch (action) {
-    case BLOCK:
-      rdh->BlockRequestsForRoute(process_id, render_view_host_id);
-      break;
-    case RESUME:
-      rdh->ResumeBlockedRequestsForRoute(process_id, render_view_host_id);
-      break;
-    case CANCEL:
-      rdh->CancelBlockedRequestsForRoute(process_id, render_view_host_id);
-      break;
-    default:
-      NOTREACHED();
-  }
-}
-
-}  // namespace
 
 class InterstitialPageImpl::InterstitialPageRVHDelegateView
   : public RenderViewHostDelegateView {
@@ -148,6 +127,14 @@ InterstitialPage* InterstitialPage::GetInterstitialPage(
   return iter->second;
 }
 
+InterstitialPage* InterstitialPage::FromRenderFrameHost(RenderFrameHost* rfh) {
+  if (!rfh)
+    return nullptr;
+  return static_cast<RenderFrameHostImpl*>(rfh)
+      ->delegate()
+      ->GetAsInterstitialPage();
+}
+
 InterstitialPageImpl::InterstitialPageImpl(
     WebContents* web_contents,
     RenderWidgetHostDelegate* render_widget_host_delegate,
@@ -173,15 +160,17 @@ InterstitialPageImpl::InterstitialPageImpl(
       // TODO(creis): We will also need to pass delegates for the RVHM as we
       // start to use it.
       frame_tree_(new InterstitialPageNavigatorImpl(this, controller_),
-                  this, this, this,
+                  this,
+                  this,
+                  this,
                   static_cast<WebContentsImpl*>(web_contents)),
       original_child_id_(web_contents->GetRenderProcessHost()->GetID()),
       original_rvh_id_(web_contents->GetRenderViewHost()->GetRoutingID()),
       should_revert_web_contents_title_(false),
-      web_contents_was_loading_(false),
       resource_dispatcher_host_notified_(false),
       rvh_delegate_view_(new InterstitialPageRVHDelegateView(this)),
       create_view_(true),
+      pause_throbber_(false),
       delegate_(delegate),
       weak_ptr_factory_(this) {
   InitInterstitialPageMap();
@@ -233,8 +222,8 @@ void InterstitialPageImpl::Show() {
   (*g_web_contents_to_interstitial_page)[web_contents_] = this;
 
   if (new_navigation_) {
-    scoped_ptr<NavigationEntryImpl> entry =
-        make_scoped_ptr(new NavigationEntryImpl);
+    std::unique_ptr<NavigationEntryImpl> entry =
+        base::WrapUnique(new NavigationEntryImpl);
     entry->SetURL(url_);
     entry->SetVirtualURL(url_);
     entry->set_page_type(PAGE_TYPE_INTERSTITIAL);
@@ -424,6 +413,10 @@ void InterstitialPageImpl::UpdateTitle(
   controller_->delegate()->NotifyNavigationStateChanged(INVALIDATE_TYPE_TITLE);
 }
 
+InterstitialPage* InterstitialPageImpl::GetAsInterstitialPage() {
+  return this;
+}
+
 AccessibilityMode InterstitialPageImpl::GetAccessibilityMode() const {
   if (web_contents_)
     return static_cast<WebContentsImpl*>(web_contents_)->GetAccessibilityMode();
@@ -475,6 +468,10 @@ RenderViewHostDelegateView* InterstitialPageImpl::GetDelegateView() {
   return rvh_delegate_view_.get();
 }
 
+WebContents* InterstitialPageImpl::GetWebContents() const {
+  return web_contents();
+}
+
 const GURL& InterstitialPageImpl::GetMainFrameLastCommittedURL() const {
   return url_;
 }
@@ -507,6 +504,9 @@ void InterstitialPageImpl::DidNavigate(
     return;
   }
 
+  // The interstitial is not loading anymore so stop the throbber.
+  pause_throbber_ = true;
+
   // The RenderViewHost has loaded its contents, we can show it now.
   if (!controller_->delegate()->IsHidden())
     render_view_host_->GetWidget()->GetView()->Show();
@@ -524,14 +524,6 @@ void InterstitialPageImpl::DidNavigate(
     // Hide the original RVH since we're showing the interstitial instead.
     rwh_view->Hide();
   }
-
-  // Notify the tab we are not loading so the throbber is stopped. It also
-  // causes a WebContentsObserver::DidStopLoading callback that the
-  // AutomationProvider (used by the UI tests) expects to consider a navigation
-  // as complete. Without this, navigating in a UI test to a URL that triggers
-  // an interstitial would hang.
-  web_contents_was_loading_ = controller_->delegate()->IsLoading();
-  controller_->delegate()->SetIsLoading(false, true, NULL);
 }
 
 RendererPreferences InterstitialPageImpl::GetRendererPrefs(
@@ -560,17 +552,6 @@ void InterstitialPageImpl::HandleKeyboardEvent(
   if (enabled())
     render_widget_host_delegate_->HandleKeyboardEvent(event);
 }
-
-#if defined(OS_WIN)
-gfx::NativeViewAccessible
-InterstitialPageImpl::GetParentNativeViewAccessible() {
-  if (web_contents_) {
-    WebContentsImpl* wci = static_cast<WebContentsImpl*>(web_contents_);
-    return wci->GetParentNativeViewAccessible();
-  }
-  return NULL;
-}
-#endif
 
 WebContents* InterstitialPageImpl::web_contents() const {
   return web_contents_;
@@ -641,8 +622,8 @@ void InterstitialPageImpl::Proceed() {
   action_taken_ = PROCEED_ACTION;
 
   // Resumes the throbber, if applicable.
-  if (web_contents_was_loading_)
-    controller_->delegate()->SetIsLoading(true, true, NULL);
+  pause_throbber_ = false;
+  controller_->delegate()->DidProceedOnInterstitial();
 
   // If this is a new navigation, the old page is going away, so we cancel any
   // blocked requests for it.  If it is not a new navigation, then it means the
@@ -839,22 +820,25 @@ void InterstitialPageImpl::TakeActionOnResourceDispatcher(
   // The tab might not have a render_view_host if it was closed (in which case,
   // we have taken care of the blocked requests when processing
   // NOTIFY_RENDER_WIDGET_HOST_DESTROYED.
-  // Also we need to test there is a ResourceDispatcherHostImpl, as when unit-
-  // tests we don't have one.
   RenderViewHostImpl* rvh = RenderViewHostImpl::FromID(original_child_id_,
                                                        original_rvh_id_);
-  if (!rvh || !ResourceDispatcherHostImpl::Get())
+  if (!rvh)
     return;
 
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(
-          &ResourceRequestHelper,
-          ResourceDispatcherHostImpl::Get(),
-          original_child_id_,
-          original_rvh_id_,
-          action));
+  RenderFrameHostImpl* rfh =
+      static_cast<RenderFrameHostImpl*>(rvh->GetMainFrame());
+  switch (action) {
+    case BLOCK:
+      ResourceDispatcherHost::BlockRequestsForFrameFromUI(rfh);
+      break;
+    case RESUME:
+      ResourceDispatcherHost::ResumeBlockedRequestsForFrameFromUI(rfh);
+      break;
+    default:
+      DCHECK_EQ(action, CANCEL);
+      ResourceDispatcherHostImpl::CancelBlockedRequestsForFrameFromUI(rfh);
+      break;
+  }
 }
 
 void InterstitialPageImpl::OnDomOperationResponse(

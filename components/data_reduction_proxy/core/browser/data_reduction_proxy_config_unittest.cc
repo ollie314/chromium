@@ -6,17 +6,22 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <map>
 #include <utility>
 #include <vector>
 
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
+#include "base/memory/ref_counted.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/safe_sprintf.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/test/histogram_tester.h"
+#include "base/test/simple_test_tick_clock.h"
+#include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator_test_utils.h"
@@ -28,6 +33,7 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
 #include "components/variations/variations_associated_data.h"
 #include "net/base/external_estimate_provider.h"
+#include "net/base/load_flags.h"
 #include "net/base/network_quality_estimator.h"
 #include "net/http/http_status_code.h"
 #include "net/log/test_net_log.h"
@@ -61,10 +67,7 @@ class DataReductionProxyConfigTest : public testing::Test {
         DataReductionProxyParams::kAllowed |
             DataReductionProxyParams::kFallbackAllowed |
             DataReductionProxyParams::kPromoAllowed,
-        TestDataReductionProxyParams::HAS_EVERYTHING &
-            ~TestDataReductionProxyParams::HAS_SSL_ORIGIN &
-            ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-            ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN));
+        TestDataReductionProxyParams::HAS_EVERYTHING));
   }
 
   void ResetSettings(bool allowed,
@@ -81,6 +84,10 @@ class DataReductionProxyConfigTest : public testing::Test {
     if (holdback)
       flags |= DataReductionProxyParams::kHoldback;
     config()->ResetParamFlagsForTest(flags);
+  }
+
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner() {
+    return message_loop_.task_runner();
   }
 
   void ExpectSecureProxyCheckResult(SecureProxyCheckFetchResult result) {
@@ -126,11 +133,11 @@ class DataReductionProxyConfigTest : public testing::Test {
     test_context_->RunUntilIdle();
   }
 
-  scoped_ptr<DataReductionProxyConfig> BuildConfig(
-      scoped_ptr<DataReductionProxyParams> params) {
+  std::unique_ptr<DataReductionProxyConfig> BuildConfig(
+      std::unique_ptr<DataReductionProxyParams> params) {
     params->EnableQuic(false);
-    return make_scoped_ptr(new DataReductionProxyConfig(
-        test_context_->net_log(), std::move(params),
+    return base::WrapUnique(new DataReductionProxyConfig(
+        task_runner(), test_context_->net_log(), std::move(params),
         test_context_->configurator(), test_context_->event_creator()));
   }
 
@@ -154,15 +161,14 @@ class DataReductionProxyConfigTest : public testing::Test {
 
  private:
   base::MessageLoopForIO message_loop_;
-  scoped_ptr<DataReductionProxyTestContext> test_context_;
-  scoped_ptr<TestDataReductionProxyParams> expected_params_;
+  std::unique_ptr<DataReductionProxyTestContext> test_context_;
+  std::unique_ptr<TestDataReductionProxyParams> expected_params_;
 };
 
 TEST_F(DataReductionProxyConfigTest, TestUpdateConfigurator) {
   ResetSettings(true, true, true, false);
 
   std::vector<net::ProxyServer> expected_http_proxies;
-  std::vector<net::ProxyServer> expected_https_proxies;
   config()->UpdateConfigurator(true, false);
   EXPECT_TRUE(configurator()->enabled());
   expected_http_proxies.push_back(net::ProxyServer::FromURI(
@@ -171,13 +177,10 @@ TEST_F(DataReductionProxyConfigTest, TestUpdateConfigurator) {
       params()->DefaultFallbackOrigin(), net::ProxyServer::SCHEME_HTTP));
   EXPECT_THAT(configurator()->proxies_for_http(),
               testing::ContainerEq(expected_http_proxies));
-  EXPECT_THAT(configurator()->proxies_for_https(),
-              testing::ContainerEq(expected_https_proxies));
 
   config()->UpdateConfigurator(false, false);
   EXPECT_FALSE(configurator()->enabled());
   EXPECT_TRUE(configurator()->proxies_for_http().empty());
-  EXPECT_TRUE(configurator()->proxies_for_https().empty());
 }
 
 TEST_F(DataReductionProxyConfigTest, TestUpdateConfiguratorHoldback) {
@@ -186,7 +189,6 @@ TEST_F(DataReductionProxyConfigTest, TestUpdateConfiguratorHoldback) {
   config()->UpdateConfigurator(true, false);
   EXPECT_FALSE(configurator()->enabled());
   EXPECT_TRUE(configurator()->proxies_for_http().empty());
-  EXPECT_TRUE(configurator()->proxies_for_https().empty());
 }
 
 TEST_F(DataReductionProxyConfigTest, TestOnIPAddressChanged) {
@@ -253,191 +255,128 @@ TEST_F(DataReductionProxyConfigTest, AreProxiesBypassed) {
     // proxies in retry map
     bool origin;
     bool fallback_origin;
-    bool ssl_origin;
 
     bool expected_result;
   } tests[] = {
       {
-       // proxy flags
-       false,
-       false,
-       // is https request
-       false,
-       // proxies in retry map
-       false,
-       false,
-       false,
-       // expected result
-       false,
+          // proxy flags
+          false, false,
+          // is https request
+          false,
+          // proxies in retry map
+          false, false,
+          // expected result
+          false,
       },
       {
-       // proxy flags
-       false,
-       false,
-       // is https request
-       true,
-       // proxies in retry map
-       false,
-       false,
-       true,
-       // expected result
-       true,
+          // proxy flags
+          false, false,
+          // is https request
+          true,
+          // proxies in retry map
+          false, false,
+          // expected result
+          false,
       },
       {
-       // proxy flags
-       false,
-       true,
-       // is https request
-       false,
-       // proxies in retry map
-       false,
-       false,
-       false,
-       // expected result
-       false,
+          // proxy flags
+          false, true,
+          // is https request
+          false,
+          // proxies in retry map
+          false, false,
+          // expected result
+          false,
       },
       {
-       // proxy flags
-       true,
-       false,
-       // is https request
-       false,
-       // proxies in retry map
-       false,
-       false,
-       false,
-       // expected result
-       false,
+          // proxy flags
+          true, false,
+          // is https request
+          false,
+          // proxies in retry map
+          false, false,
+          // expected result
+          false,
       },
       {
-       // proxy flags
-       true,
-       false,
-       // is https request
-       false,
-       // proxies in retry map
-       true,
-       false,
-       false,
-       // expected result
-       true,
+          // proxy flags
+          true, false,
+          // is https request
+          false,
+          // proxies in retry map
+          true, false,
+          // expected result
+          true,
       },
       {
-       // proxy flags
-       true,
-       true,
-       // is https request
-       false,
-       // proxies in retry map
-       false,
-       false,
-       false,
-       // expected result
-       false,
+          // proxy flags
+          true, true,
+          // is https request
+          false,
+          // proxies in retry map
+          false, false,
+          // expected result
+          false,
       },
       {
-       // proxy flags
-       true,
-       true,
-       // is https request
-       false,
-       // proxies in retry map
-       true,
-       false,
-       false,
-       // expected result
-       false,
+          // proxy flags
+          true, true,
+          // is https request
+          false,
+          // proxies in retry map
+          true, false,
+          // expected result
+          false,
       },
       {
-       // proxy flags
-       true,
-       true,
-       // is https request
-       false,
-       // proxies in retry map
-       true,
-       true,
-       false,
-       // expected result
-       true,
+          // proxy flags
+          true, true,
+          // is https request
+          false,
+          // proxies in retry map
+          true, true,
+          // expected result
+          true,
       },
       {
-       // proxy flags
-       true,
-       true,
-       // is https request
-       false,
-       // proxies in retry map
-       true,
-       true,
-       true,
-       // expected result
-       true,
+          // proxy flags
+          true, true,
+          // is https request
+          true,
+          // proxies in retry map
+          false, false,
+          // expected result
+          false,
       },
       {
-       // proxy flags
-       true,
-       true,
-       // is https request
-       true,
-       // proxies in retry map
-       false,
-       false,
-       false,
-       // expected result
-       false,
+          // proxy flags
+          true, true,
+          // is https request
+          true,
+          // proxies in retry map
+          false, false,
+          // expected result
+          false,
       },
       {
-       // proxy flags
-       true,
-       true,
-       // is https request
-       true,
-       // proxies in retry map
-       false,
-       false,
-       true,
-       // expected result
-       true,
+          // proxy flags
+          true, true,
+          // is https request
+          false,
+          // proxies in retry map
+          false, true,
+          // expected result
+          false,
       },
       {
-       // proxy flags
-       true,
-       true,
-       // is https request
-       false,
-       // proxies in retry map
-       false,
-       true,
-       false,
-       // expected result
-       false,
-      },
-      {
-       // proxy flags
-       true,
-       true,
-       // is https request
-       true,
-       // proxies in retry map
-       true,
-       true,
-       true,
-       // expected result
-       true,
-      },
-      {
-       // proxy flags
-       true,
-       true,
-       // is https request
-       true,
-       // proxies in retry map
-       true,
-       true,
-       false,
-       // expected result
-       false,
+          // proxy flags
+          true, true,
+          // is https request
+          true,
+          // proxies in retry map
+          true, true,
+          // expected result
+          false,
       },
   };
 
@@ -446,8 +385,6 @@ TEST_F(DataReductionProxyConfigTest, AreProxiesBypassed) {
       TestDataReductionProxyParams::DefaultOrigin());
   std::string fallback_origin = GetRetryMapKeyFromOrigin(
       TestDataReductionProxyParams::DefaultFallbackOrigin());
-  std::string ssl_origin = GetRetryMapKeyFromOrigin(
-      TestDataReductionProxyParams::DefaultSSLOrigin());
 
   for (size_t i = 0; i < arraysize(tests); ++i) {
     net::ProxyConfig::ProxyRules rules;
@@ -459,7 +396,6 @@ TEST_F(DataReductionProxyConfigTest, AreProxiesBypassed) {
       proxies.push_back(fallback_origin);
 
     std::string proxy_rules = "http=" + base::JoinString(proxies, ",") +
-                              ",direct://;" + "https=" + ssl_origin +
                               ",direct://;";
 
     rules.ParseFromString(proxy_rules);
@@ -469,13 +405,10 @@ TEST_F(DataReductionProxyConfigTest, AreProxiesBypassed) {
       flags |= DataReductionProxyParams::kAllowed;
     if (tests[i].fallback_allowed)
       flags |= DataReductionProxyParams::kFallbackAllowed;
-    unsigned int has_definitions =
-        TestDataReductionProxyParams::HAS_EVERYTHING &
-        ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-        ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN;
-    scoped_ptr<TestDataReductionProxyParams> params(
+    unsigned int has_definitions = TestDataReductionProxyParams::HAS_EVERYTHING;
+    std::unique_ptr<TestDataReductionProxyParams> params(
         new TestDataReductionProxyParams(flags, has_definitions));
-    scoped_ptr<DataReductionProxyConfig> config =
+    std::unique_ptr<DataReductionProxyConfig> config =
         BuildConfig(std::move(params));
 
     net::ProxyRetryInfoMap retry_map;
@@ -486,8 +419,6 @@ TEST_F(DataReductionProxyConfigTest, AreProxiesBypassed) {
       retry_map[origin] = retry_info;
     if (tests[i].fallback_origin)
       retry_map[fallback_origin] = retry_info;
-    if (tests[i].ssl_origin)
-      retry_map[ssl_origin] = retry_info;
 
     bool was_bypassed = config->AreProxiesBypassed(retry_map,
                                                    rules,
@@ -518,13 +449,11 @@ TEST_F(DataReductionProxyConfigTest, AreProxiesBypassedRetryDelay) {
   int flags = 0;
   flags |= DataReductionProxyParams::kAllowed;
   flags |= DataReductionProxyParams::kFallbackAllowed;
-  unsigned int has_definitions =
-      TestDataReductionProxyParams::HAS_EVERYTHING &
-      ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-      ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN;
-  scoped_ptr<TestDataReductionProxyParams> params(
+  unsigned int has_definitions = TestDataReductionProxyParams::HAS_EVERYTHING;
+  std::unique_ptr<TestDataReductionProxyParams> params(
       new TestDataReductionProxyParams(flags, has_definitions));
-  scoped_ptr<DataReductionProxyConfig> config = BuildConfig(std::move(params));
+  std::unique_ptr<DataReductionProxyConfig> config =
+      BuildConfig(std::move(params));
 
   net::ProxyRetryInfoMap retry_map;
   net::ProxyRetryInfo retry_info;
@@ -565,112 +494,59 @@ TEST_F(DataReductionProxyConfigTest, IsDataReductionProxyWithParams) {
   const struct {
     net::HostPortPair host_port_pair;
     bool fallback_allowed;
-    bool set_dev_origin;
     bool expected_result;
     net::HostPortPair expected_first;
     net::HostPortPair expected_second;
     bool expected_is_fallback;
-    bool expected_is_ssl;
   } tests[] = {
       {net::ProxyServer::FromURI(TestDataReductionProxyParams::DefaultOrigin(),
                                  net::ProxyServer::SCHEME_HTTP)
            .host_port_pair(),
-       true,
-       false,
-       true,
+       true, true,
        net::ProxyServer::FromURI(TestDataReductionProxyParams::DefaultOrigin(),
                                  net::ProxyServer::SCHEME_HTTP)
            .host_port_pair(),
        net::ProxyServer::FromURI(
            TestDataReductionProxyParams::DefaultFallbackOrigin(),
-           net::ProxyServer::SCHEME_HTTP).host_port_pair(),
-       false,
+           net::ProxyServer::SCHEME_HTTP)
+           .host_port_pair(),
        false},
       {net::ProxyServer::FromURI(TestDataReductionProxyParams::DefaultOrigin(),
                                  net::ProxyServer::SCHEME_HTTP)
            .host_port_pair(),
-       false,
-       false,
-       true,
+       false, true,
        net::ProxyServer::FromURI(TestDataReductionProxyParams::DefaultOrigin(),
                                  net::ProxyServer::SCHEME_HTTP)
            .host_port_pair(),
-       net::HostPortPair::FromURL(GURL()),
-       false,
-       false},
+       net::HostPortPair::FromURL(GURL()), false},
       {net::ProxyServer::FromURI(
            TestDataReductionProxyParams::DefaultFallbackOrigin(),
-           net::ProxyServer::SCHEME_HTTP).host_port_pair(),
-       true,
-       false,
-       true,
-       net::ProxyServer::FromURI(
-           TestDataReductionProxyParams::DefaultFallbackOrigin(),
-           net::ProxyServer::SCHEME_HTTP).host_port_pair(),
-       net::HostPortPair::FromURL(GURL()),
-       true,
-       false},
-      {net::ProxyServer::FromURI(
-           TestDataReductionProxyParams::DefaultFallbackOrigin(),
-           net::ProxyServer::SCHEME_HTTP).host_port_pair(),
-       false,
-       false,
-       false,
-       net::HostPortPair::FromURL(GURL()),
-       net::HostPortPair::FromURL(GURL()),
-       false,
-       false},
-      {net::ProxyServer::FromURI(
-           TestDataReductionProxyParams::DefaultSSLOrigin(),
-           net::ProxyServer::SCHEME_HTTP).host_port_pair(),
-       true,
-       false,
-       true,
-       net::ProxyServer::FromURI(
-           TestDataReductionProxyParams::DefaultSSLOrigin(),
-           net::ProxyServer::SCHEME_HTTP).host_port_pair(),
-       net::HostPortPair::FromURL(GURL()),
-       false,
-       true},
-      {net::ProxyServer::FromURI(
-           TestDataReductionProxyParams::DefaultDevOrigin(),
-           net::ProxyServer::SCHEME_HTTP).host_port_pair(),
-       true,
-       true,
-       true,
-       net::ProxyServer::FromURI(
-           TestDataReductionProxyParams::DefaultDevOrigin(),
-           net::ProxyServer::SCHEME_HTTP).host_port_pair(),
-       net::ProxyServer::FromURI(
-           TestDataReductionProxyParams::DefaultDevFallbackOrigin(),
-           net::ProxyServer::SCHEME_HTTP).host_port_pair(),
-       false,
-       false},
-      {net::ProxyServer::FromURI(TestDataReductionProxyParams::DefaultOrigin(),
-                                 net::ProxyServer::SCHEME_HTTP)
+           net::ProxyServer::SCHEME_HTTP)
            .host_port_pair(),
-       true,
-       true,
-       false,
-       net::HostPortPair::FromURL(GURL()),
-       net::HostPortPair::FromURL(GURL()),
-       false,
-       false},
+       true, true, net::ProxyServer::FromURI(
+                       TestDataReductionProxyParams::DefaultFallbackOrigin(),
+                       net::ProxyServer::SCHEME_HTTP)
+                       .host_port_pair(),
+       net::HostPortPair::FromURL(GURL()), true},
+      {net::ProxyServer::FromURI(
+           TestDataReductionProxyParams::DefaultFallbackOrigin(),
+           net::ProxyServer::SCHEME_HTTP)
+           .host_port_pair(),
+       false, false, net::HostPortPair::FromURL(GURL()),
+       net::HostPortPair::FromURL(GURL()), false},
   };
   for (size_t i = 0; i < arraysize(tests); ++i) {
     int flags = DataReductionProxyParams::kAllowed;
     if (tests[i].fallback_allowed)
       flags |= DataReductionProxyParams::kFallbackAllowed;
     unsigned int has_definitions = TestDataReductionProxyParams::HAS_EVERYTHING;
-    if (!tests[i].set_dev_origin) {
-      has_definitions &= ~TestDataReductionProxyParams::HAS_DEV_ORIGIN;
-      has_definitions &= ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN;
-    }
-    scoped_ptr<TestDataReductionProxyParams> params(
+    std::unique_ptr<TestDataReductionProxyParams> params(
         new TestDataReductionProxyParams(flags, has_definitions));
     DataReductionProxyTypeInfo proxy_type_info;
-    scoped_ptr<DataReductionProxyConfig> config(new DataReductionProxyConfig(
-        net_log(), std::move(params), configurator(), event_creator()));
+    std::unique_ptr<DataReductionProxyConfig> config(
+        new DataReductionProxyConfig(task_runner(), net_log(),
+                                     std::move(params), configurator(),
+                                     event_creator()));
     EXPECT_EQ(
         tests[i].expected_result,
         config->IsDataReductionProxy(tests[i].host_port_pair, &proxy_type_info))
@@ -701,7 +577,6 @@ TEST_F(DataReductionProxyConfigTest, IsDataReductionProxyWithParams) {
     }
 
     EXPECT_EQ(tests[i].expected_is_fallback, proxy_type_info.is_fallback) << i;
-    EXPECT_EQ(tests[i].expected_is_ssl, proxy_type_info.is_ssl) << i;
   }
 }
 
@@ -763,11 +638,12 @@ TEST_F(DataReductionProxyConfigTest, IsDataReductionProxyWithMutableConfig) {
       },
   };
 
-  scoped_ptr<DataReductionProxyMutableConfigValues> config_values =
+  std::unique_ptr<DataReductionProxyMutableConfigValues> config_values =
       DataReductionProxyMutableConfigValues::CreateFromParams(params());
   config_values->UpdateValues(proxies_for_http);
-  scoped_ptr<DataReductionProxyConfig> config(new DataReductionProxyConfig(
-      net_log(), std::move(config_values), configurator(), event_creator()));
+  std::unique_ptr<DataReductionProxyConfig> config(new DataReductionProxyConfig(
+      task_runner(), net_log(), std::move(config_values), configurator(),
+      event_creator()));
   for (size_t i = 0; i < arraysize(tests); ++i) {
     DataReductionProxyTypeInfo proxy_type_info;
     EXPECT_EQ(tests[i].expected_result,
@@ -783,7 +659,6 @@ TEST_F(DataReductionProxyConfigTest, IsDataReductionProxyWithMutableConfig) {
     EXPECT_THAT(proxy_type_info.proxy_servers,
                 testing::ContainerEq(expected_proxy_servers))
         << i;
-    EXPECT_FALSE(proxy_type_info.is_ssl) << i;
   }
 }
 
@@ -894,8 +769,9 @@ TEST_F(DataReductionProxyConfigTest, LoFiOn) {
     base::HistogramTester histogram_tester;
     net::TestURLRequestContext context_;
     net::TestDelegate delegate_;
-    scoped_ptr<net::URLRequest> request =
+    std::unique_ptr<net::URLRequest> request =
         context_.CreateRequest(GURL(), net::IDLE, &delegate_);
+    request->SetLoadFlags(request->load_flags() | net::LOAD_MAIN_FRAME);
     bool should_enable_lofi = config()->ShouldEnableLoFiMode(*request.get());
     if (tests[i].expect_bucket_count != 0) {
       histogram_tester.ExpectBucketCount(
@@ -913,15 +789,16 @@ class TestNetworkQualityEstimator : public net::NetworkQualityEstimator {
  public:
   explicit TestNetworkQualityEstimator(
       const std::map<std::string, std::string>& variation_params)
-      : NetworkQualityEstimator(scoped_ptr<net::ExternalEstimateProvider>(),
-                                variation_params),
+      : NetworkQualityEstimator(
+            std::unique_ptr<net::ExternalEstimateProvider>(),
+            variation_params),
         rtt_estimate_(base::TimeDelta()),
         downstream_throughput_kbps_estimate_(INT32_MAX),
         rtt_since_(base::TimeDelta()) {}
 
   ~TestNetworkQualityEstimator() override {}
 
-  bool GetRTTEstimate(base::TimeDelta* rtt) const override {
+  bool GetURLRequestRTTEstimate(base::TimeDelta* rtt) const override {
     DCHECK(rtt);
     *rtt = rtt_estimate_;
     return true;
@@ -935,8 +812,8 @@ class TestNetworkQualityEstimator : public net::NetworkQualityEstimator {
 
   void SetRTT(base::TimeDelta rtt) { rtt_estimate_ = rtt; }
 
-  bool GetRecentMedianRTT(const base::TimeTicks& begin_timestamp,
-                          base::TimeDelta* rtt) const override {
+  bool GetRecentURLRequestRTTMedian(const base::TimeTicks& begin_timestamp,
+                                    base::TimeDelta* rtt) const override {
     DCHECK(rtt);
     *rtt = rtt_since_;
     return true;
@@ -963,8 +840,8 @@ class TestNetworkQualityEstimator : public net::NetworkQualityEstimator {
 };
 
 TEST_F(DataReductionProxyConfigTest, AutoLoFiParams) {
-  DataReductionProxyConfig config(nullptr, nullptr, configurator(),
-                                  event_creator());
+  DataReductionProxyConfig config(task_runner(), nullptr, nullptr,
+                                  configurator(), event_creator());
   variations::testing::ClearAllVariationParams();
   std::map<std::string, std::string> variation_params;
   std::map<std::string, std::string> variation_params_flag;
@@ -1068,8 +945,8 @@ TEST_F(DataReductionProxyConfigTest, AutoLoFiParams) {
 }
 
 TEST_F(DataReductionProxyConfigTest, AutoLoFiParamsSlowConnectionsFlag) {
-  DataReductionProxyConfig config(nullptr, nullptr, configurator(),
-                                  event_creator());
+  DataReductionProxyConfig config(task_runner(), nullptr, nullptr,
+                                  configurator(), event_creator());
   variations::testing::ClearAllVariationParams();
 
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
@@ -1123,12 +1000,116 @@ TEST_F(DataReductionProxyConfigTest, AutoLoFiParamsSlowConnectionsFlag) {
       &test_network_quality_estimator));
 }
 
-// Tests if metrics for LoFi accuracy are recorded properly.
-TEST_F(DataReductionProxyConfigTest, AutoLoFiAccuracy) {
-  base::HistogramTester histogram_tester;
+// Tests if metrics for Lo-Fi accuracy are recorded properly.
+TEST_F(DataReductionProxyConfigTest, LoFiAccuracy) {
+  scoped_ptr<base::SimpleTestTickClock> tick_clock(
+      new base::SimpleTestTickClock());
 
-  DataReductionProxyConfig config(nullptr, nullptr, configurator(),
-                                  event_creator());
+  std::vector<base::TimeDelta> lofi_accuracy_recording_intervals;
+  lofi_accuracy_recording_intervals.push_back(base::TimeDelta::FromSeconds(0));
+
+  TestDataReductionProxyConfig config(
+      DataReductionProxyParams::kAllowed |
+          DataReductionProxyParams::kFallbackAllowed,
+      TestDataReductionProxyParams::HAS_EVERYTHING, task_runner(), nullptr,
+      configurator(), event_creator());
+  config.SetLofiAccuracyRecordingIntervals(lofi_accuracy_recording_intervals);
+  config.SetTickClock(tick_clock.get());
+
+  variations::testing::ClearAllVariationParams();
+  std::map<std::string, std::string> variation_params;
+
+  int expected_rtt_msec = 120;
+  int expected_hysteresis_sec = 360;
+
+  variation_params["rtt_msec"] = base::IntToString(expected_rtt_msec);
+  variation_params["hysteresis_period_seconds"] =
+      base::IntToString(expected_hysteresis_sec);
+
+  const struct {
+    std::string description;
+    std::string field_trial_group;
+    base::TimeDelta rtt;
+    base::TimeDelta recent_rtt;
+    bool expect_network_quality_slow;
+    uint32_t bucket_to_check;
+    uint32_t expected_bucket_count;
+  } tests[] = {
+      {"Predicted slow, actually slow, Enabled group", "Enabled",
+       base::TimeDelta::FromMilliseconds(expected_rtt_msec + 1),
+       base::TimeDelta::FromMilliseconds(expected_rtt_msec + 1), true, 0, 1},
+      {"Predicted slow, actually slow, Enabled_NoControl group",
+       "Enabled_NoControl",
+       base::TimeDelta::FromMilliseconds(expected_rtt_msec + 1),
+       base::TimeDelta::FromMilliseconds(expected_rtt_msec + 1), true, 0, 1},
+      {"Predicted slow, actually slow, Control group", "Control",
+       base::TimeDelta::FromMilliseconds(expected_rtt_msec + 1),
+       base::TimeDelta::FromMilliseconds(expected_rtt_msec + 1), true, 0, 1},
+      {"Predicted slow, actually not slow", "Enabled",
+       base::TimeDelta::FromMilliseconds(expected_rtt_msec + 1),
+       base::TimeDelta::FromMilliseconds(expected_rtt_msec - 1), true, 1, 1},
+      {"Predicted not slow, actually slow", "Enabled",
+       base::TimeDelta::FromMilliseconds(expected_rtt_msec - 1),
+       base::TimeDelta::FromMilliseconds(expected_rtt_msec + 1), false, 2, 1},
+      {"Predicted not slow, actually not slow", "Enabled",
+       base::TimeDelta::FromMilliseconds(expected_rtt_msec - 1),
+       base::TimeDelta::FromMilliseconds(expected_rtt_msec - 1), false, 3, 1},
+  };
+
+  for (const auto& test : tests) {
+    base::FieldTrialList field_trial_list(nullptr);
+    variations::testing::ClearAllVariationIDs();
+    variations::testing::ClearAllVariationParams();
+    ASSERT_TRUE(variations::AssociateVariationParams(
+        params::GetLoFiFieldTrialName(), test.field_trial_group,
+        variation_params))
+        << test.description;
+
+    ASSERT_NE(nullptr,
+              base::FieldTrialList::CreateFieldTrial(
+                  params::GetLoFiFieldTrialName(), test.field_trial_group))
+        << test.description;
+    config.PopulateAutoLoFiParams();
+
+    std::map<std::string, std::string> network_quality_estimator_params;
+    TestNetworkQualityEstimator test_network_quality_estimator(
+        network_quality_estimator_params);
+
+    base::HistogramTester histogram_tester;
+    // RTT is higher than threshold. Network is slow.
+    // Network was predicted to be slow and actually was slow.
+    test_network_quality_estimator.SetRTT(test.rtt);
+    test_network_quality_estimator.SetMedianRTTSince(test.recent_rtt);
+    ASSERT_EQ(test.expect_network_quality_slow,
+              config.IsNetworkQualityProhibitivelySlow(
+                  &test_network_quality_estimator))
+        << test.description;
+    RunUntilIdle();
+    histogram_tester.ExpectTotalCount(
+        "DataReductionProxy.LoFi.Accuracy.0.Unknown", 1);
+    histogram_tester.ExpectBucketCount(
+        "DataReductionProxy.LoFi.Accuracy.0.Unknown", test.bucket_to_check,
+        test.expected_bucket_count);
+  }
+}
+
+// Tests if metrics for Lo-Fi accuracy are recorded properly at the specified
+// interval.
+TEST_F(DataReductionProxyConfigTest, LoFiAccuracyNonZeroDelay) {
+  scoped_ptr<base::SimpleTestTickClock> tick_clock(
+      new base::SimpleTestTickClock());
+
+  std::vector<base::TimeDelta> lofi_accuracy_recording_intervals;
+  lofi_accuracy_recording_intervals.push_back(base::TimeDelta::FromSeconds(1));
+
+  TestDataReductionProxyConfig config(
+      DataReductionProxyParams::kAllowed |
+          DataReductionProxyParams::kFallbackAllowed,
+      TestDataReductionProxyParams::HAS_EVERYTHING, task_runner(), nullptr,
+      configurator(), event_creator());
+  config.SetLofiAccuracyRecordingIntervals(lofi_accuracy_recording_intervals);
+  config.SetTickClock(tick_clock.get());
+
   variations::testing::ClearAllVariationParams();
   std::map<std::string, std::string> variation_params;
 
@@ -1151,56 +1132,24 @@ TEST_F(DataReductionProxyConfigTest, AutoLoFiAccuracy) {
   TestNetworkQualityEstimator test_network_quality_estimator(
       network_quality_estimator_params);
 
+  base::HistogramTester histogram_tester;
   // RTT is higher than threshold. Network is slow.
   // Network was predicted to be slow and actually was slow.
   test_network_quality_estimator.SetRTT(
       base::TimeDelta::FromMilliseconds(expected_rtt_msec + 1));
   test_network_quality_estimator.SetMedianRTTSince(
       base::TimeDelta::FromMilliseconds(expected_rtt_msec + 1));
-  EXPECT_TRUE(config.IsNetworkQualityProhibitivelySlow(
+  ASSERT_TRUE(config.IsNetworkQualityProhibitivelySlow(
       &test_network_quality_estimator));
-  config.RecordAutoLoFiAccuracyRate(&test_network_quality_estimator);
+  tick_clock->Advance(base::TimeDelta::FromSeconds(1));
+
+  // Sleep to ensure that the delayed task is posted.
+  base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(1));
+  RunUntilIdle();
+  histogram_tester.ExpectTotalCount(
+      "DataReductionProxy.LoFi.Accuracy.1.Unknown", 1);
   histogram_tester.ExpectBucketCount(
-      "DataReductionProxy.AutoLoFiAccuracy.Unknown", 0, 1);
-
-  // Network was predicted to be slow but actually was not slow.
-  test_network_quality_estimator.SetMedianRTTSince(
-      base::TimeDelta::FromMilliseconds(expected_rtt_msec - 1));
-  EXPECT_TRUE(config.IsNetworkQualityProhibitivelySlow(
-      &test_network_quality_estimator));
-  config.RecordAutoLoFiAccuracyRate(&test_network_quality_estimator);
-  histogram_tester.ExpectBucketCount(
-      "DataReductionProxy.AutoLoFiAccuracy.Unknown", 1, 1);
-
-  config.network_quality_last_checked_ =
-      base::TimeTicks::Now() -
-      base::TimeDelta::FromSeconds(expected_hysteresis_sec + 1);
-
-  // Network was predicted to be not slow but actually was slow.
-  test_network_quality_estimator.SetRTT(
-      base::TimeDelta::FromMilliseconds(expected_rtt_msec - 1));
-  test_network_quality_estimator.SetMedianRTTSince(
-      base::TimeDelta::FromMilliseconds(expected_rtt_msec + 1));
-  EXPECT_FALSE(config.IsNetworkQualityProhibitivelySlow(
-      &test_network_quality_estimator));
-  config.RecordAutoLoFiAccuracyRate(&test_network_quality_estimator);
-  histogram_tester.ExpectBucketCount(
-      "DataReductionProxy.AutoLoFiAccuracy.Unknown", 2, 1);
-
-  // Network was predicted to be not slow but actually was not slow.
-  test_network_quality_estimator.SetMedianRTTSince(
-      base::TimeDelta::FromMilliseconds(expected_rtt_msec - 1));
-  EXPECT_FALSE(config.IsNetworkQualityProhibitivelySlow(
-      &test_network_quality_estimator));
-  config.RecordAutoLoFiAccuracyRate(&test_network_quality_estimator);
-  histogram_tester.ExpectBucketCount(
-      "DataReductionProxy.AutoLoFiAccuracy.Unknown", 3, 1);
-
-  // Make sure that all buckets contain exactly one value.
-  for (size_t bucket = 0; bucket < 4; ++bucket) {
-    histogram_tester.ExpectBucketCount(
-        "DataReductionProxy.AutoLoFiAccuracy.Unknown", bucket, 1);
-  }
+      "DataReductionProxy.LoFi.Accuracy.1.Unknown", 0, 1);
 }
 
 }  // namespace data_reduction_proxy

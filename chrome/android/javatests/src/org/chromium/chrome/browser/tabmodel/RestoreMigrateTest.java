@@ -10,7 +10,10 @@ import android.test.suitebuilder.annotation.SmallTest;
 import org.chromium.base.StreamUtil;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.TabState;
+import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabIdManager;
 import org.chromium.chrome.test.util.ApplicationData;
 import org.chromium.chrome.test.util.browser.tabmodel.MockTabModelSelector;
 
@@ -24,10 +27,6 @@ import java.util.concurrent.ExecutionException;
  * Test that migrating the old tab state folder structure to the new one works.
  */
 public class RestoreMigrateTest extends InstrumentationTestCase {
-
-    private static void disableReporting() {
-        TabPersistentStore.sReportingDisabledForTests = true;
-    }
 
     private void writeStateFile(final TabModelSelector selector, int index) throws IOException {
         byte[] data = ThreadUtils.runOnUiThreadBlockingNoException(
@@ -236,8 +235,10 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
                 getInstrumentation().getTargetContext(), null, null);
 
         int maxId = Math.max(getMaxId(selector0), getMaxId(selector1));
-        disableReporting();
-        assertEquals("Invalid next id", maxId + 1, storeIn.loadStateInternal());
+        RecordHistogram.disableForTests();
+        storeIn.loadState();
+        assertEquals("Invalid next id", maxId + 1,
+                TabIdManager.getInstance().generateValidId(Tab.INVALID_TAB_ID));
     }
 
     /**
@@ -263,9 +264,9 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
         TabPersistentStore storeIn1 = new TabPersistentStore(selectorIn1, 1,
                 getInstrumentation().getTargetContext(), null, null);
 
-        disableReporting();
-        storeIn0.loadStateInternal();
-        storeIn1.loadStateInternal();
+        RecordHistogram.disableForTests();
+        storeIn0.loadState();
+        storeIn1.loadState();
 
         assertEquals("Unexpected number of tabs to load", 6, storeIn0.getRestoredTabCount());
         assertEquals("Unexpected number of tabst o load", 3, storeIn1.getRestoredTabCount());

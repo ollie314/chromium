@@ -7,9 +7,9 @@
 #include <utility>
 #include <vector>
 
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_samples.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
 #include "base/test/simple_test_clock.h"
@@ -27,6 +27,7 @@
 #include "components/password_manager/core/common/credential_manager_types.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/password_manager/core/common/password_manager_ui.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -54,7 +55,7 @@ class TestSyncService : public ProfileSyncServiceMock {
   ~TestSyncService() override {}
 
   // FakeSyncService:
-  bool HasSyncSetupCompleted() const override { return true; }
+  bool IsFirstSetupComplete() const override { return true; }
   bool IsSyncAllowed() const override { return true; }
   bool IsSyncActive() const override { return true; }
   syncer::ModelTypeSet GetActiveDataTypes() const override {
@@ -75,9 +76,9 @@ class TestSyncService : public ProfileSyncServiceMock {
   bool smartlock_enabled_;
 };
 
-scoped_ptr<KeyedService> TestingSyncFactoryFunction(
+std::unique_ptr<KeyedService> TestingSyncFactoryFunction(
     content::BrowserContext* context) {
-  return make_scoped_ptr(new TestSyncService(static_cast<Profile*>(context)));
+  return base::WrapUnique(new TestSyncService(static_cast<Profile*>(context)));
 }
 
 }  // namespace
@@ -131,7 +132,6 @@ class ManagePasswordsBubbleModelTest : public ::testing::Test {
                       ManagePasswordsBubbleModel::DisplayReason reason);
   void PretendPasswordWaiting();
   void PretendUpdatePasswordWaiting();
-  void PretendCredentialsWaiting();
   void PretendAutoSigningIn();
   void PretendManagingPasswords();
 
@@ -145,9 +145,9 @@ class ManagePasswordsBubbleModelTest : public ::testing::Test {
  private:
   content::TestBrowserThreadBundle thread_bundle_;
   TestingProfile profile_;
-  scoped_ptr<content::WebContents> test_web_contents_;
+  std::unique_ptr<content::WebContents> test_web_contents_;
   base::FieldTrialList field_trials_;
-  scoped_ptr<ManagePasswordsBubbleModel> model_;
+  std::unique_ptr<ManagePasswordsBubbleModel> model_;
 };
 
 void ManagePasswordsBubbleModelTest::SetUpWithState(
@@ -182,14 +182,6 @@ void ManagePasswordsBubbleModelTest::PretendUpdatePasswordWaiting() {
   EXPECT_CALL(*controller(), GetCurrentForms()).WillOnce(ReturnRef(forms));
   EXPECT_CALL(*controller(), IsPasswordOverridden()).WillOnce(Return(false));
   SetUpWithState(password_manager::ui::PENDING_PASSWORD_UPDATE_STATE,
-                 ManagePasswordsBubbleModel::AUTOMATIC);
-}
-
-void ManagePasswordsBubbleModelTest::PretendCredentialsWaiting() {
-  std::vector<const autofill::PasswordForm*> forms;
-  EXPECT_CALL(*controller(), GetCurrentForms()).WillOnce(ReturnRef(forms));
-  EXPECT_CALL(*controller(), GetFederatedForms()).WillOnce(ReturnRef(forms));
-  SetUpWithState(password_manager::ui::CREDENTIAL_REQUEST_STATE,
                  ManagePasswordsBubbleModel::AUTOMATIC);
 }
 
@@ -253,7 +245,7 @@ TEST_F(ManagePasswordsBubbleModelTest, CloseWithoutInteraction) {
   EXPECT_EQ(model()->dismissal_reason(),
             password_manager::metrics_util::NO_DIRECT_INTERACTION);
   EXPECT_EQ(password_manager::ui::PENDING_PASSWORD_STATE, model()->state());
-  scoped_ptr<base::SimpleTestClock> clock(new base::SimpleTestClock);
+  std::unique_ptr<base::SimpleTestClock> clock(new base::SimpleTestClock);
   base::Time now = base::Time::Now();
   clock->SetNow(now);
   model()->set_clock(std::move(clock));
@@ -314,55 +306,9 @@ TEST_F(ManagePasswordsBubbleModelTest, ClickDone) {
   DestroyModelExpectReason(password_manager::metrics_util::CLICKED_DONE);
 }
 
-TEST_F(ManagePasswordsBubbleModelTest, ClickCredential) {
-  PretendCredentialsWaiting();
-
-  autofill::PasswordForm form;
-  EXPECT_CALL(
-      *controller(),
-      ChooseCredential(
-          form, password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD));
-  model()->OnChooseCredentials(
-      form, password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD);
-  EXPECT_EQ(model()->dismissal_reason(),
-            password_manager::metrics_util::CLICKED_CREDENTIAL);
-  DestroyModelExpectReason(password_manager::metrics_util::CLICKED_CREDENTIAL);
-}
-
-TEST_F(ManagePasswordsBubbleModelTest, ClickCancelCredential) {
-  PretendCredentialsWaiting();
-
-  EXPECT_CALL(*controller(), ChooseCredential(_, _)).Times(0);
-  model()->OnCancelClicked();
-  EXPECT_EQ(model()->dismissal_reason(),
-            password_manager::metrics_util::CLICKED_CANCEL);
-  DestroyModelExpectReason(password_manager::metrics_util::CLICKED_CANCEL);
-}
-
-TEST_F(ManagePasswordsBubbleModelTest, DismissCredential) {
-  PretendCredentialsWaiting();
-
-  EXPECT_CALL(*controller(), ChooseCredential(_, _)).Times(0);
-  EXPECT_EQ(model()->dismissal_reason(),
-            password_manager::metrics_util::NO_DIRECT_INTERACTION);
-  DestroyModelExpectReason(
-      password_manager::metrics_util::NO_DIRECT_INTERACTION);
-}
-
 TEST_F(ManagePasswordsBubbleModelTest, PopupAutoSigninToast) {
-  // Pop up the first time with the warm welcome.
   PretendAutoSigningIn();
 
-  EXPECT_TRUE(model()->ShouldShowAutoSigninWarmWelcome());
-  model()->OnAutoSignOKClicked();
-  EXPECT_EQ(model()->dismissal_reason(),
-            password_manager::metrics_util::CLICKED_OK);
-  EXPECT_FALSE(model()->ShouldShowAutoSigninWarmWelcome());
-  DestroyModelExpectReason(password_manager::metrics_util::CLICKED_OK);
-
-  // Pop up the second time without the warm welcome.
-  PretendAutoSigningIn();
-  EXPECT_FALSE(model()->ShouldShowAutoSigninWarmWelcome());
   model()->OnAutoSignInToastTimeout();
   EXPECT_EQ(model()->dismissal_reason(),
             password_manager::metrics_util::AUTO_SIGNIN_TOAST_TIMEOUT);
@@ -417,6 +363,13 @@ TEST_F(ManagePasswordsBubbleModelTest, OmitSmartLockWarmWelcome) {
   EXPECT_FALSE(model()->ShouldShowGoogleSmartLockWelcome());
   EXPECT_FALSE(prefs()->GetBoolean(
       password_manager::prefs::kWasSavePrompFirstRunExperienceShown));
+}
+
+TEST_F(ManagePasswordsBubbleModelTest, OnBrandLinkClicked) {
+  PretendPasswordWaiting();
+
+  EXPECT_CALL(*controller(), NavigateToSmartLockHelpPage());
+  model()->OnBrandLinkClicked();
 }
 
 namespace {
@@ -540,56 +493,3 @@ const ManageLinkTestCase kManageLinkTestCases[] = {
 INSTANTIATE_TEST_CASE_P(Default,
                         ManagePasswordsBubbleModelManageLinkTest,
                         ::testing::ValuesIn(kManageLinkTestCases));
-
-enum class BrandLinkTarget { SMART_LOCK_HOME, SMART_LOCK_HELP };
-
-struct BrandLinkTestCase {
-  const char* experiment_group;
-  SmartLockStatus smartlock_status;
-  BrandLinkTarget expected_target;
-};
-
-class ManagePasswordsBubbleModelBrandLinkTest
-    : public ManagePasswordsBubbleModelTest,
-      public ::testing::WithParamInterface<BrandLinkTestCase> {};
-
-TEST_P(ManagePasswordsBubbleModelBrandLinkTest, OnBrandLinkClicked) {
-  BrandLinkTestCase test_case = GetParam();
-  TestSyncService* sync_service = static_cast<TestSyncService*>(
-      ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          profile(), &TestingSyncFactoryFunction));
-  sync_service->set_smartlock_enabled(test_case.smartlock_status ==
-                                      SmartLockStatus::ENABLE);
-  if (test_case.experiment_group) {
-    base::FieldTrialList::CreateFieldTrial(kBrandingExperimentName,
-                                           test_case.experiment_group);
-  }
-
-  PretendManagingPasswords();
-
-  switch (test_case.expected_target) {
-    case BrandLinkTarget::SMART_LOCK_HOME:
-      EXPECT_CALL(*controller(), NavigateToExternalPasswordManager());
-      break;
-    case BrandLinkTarget::SMART_LOCK_HELP:
-      EXPECT_CALL(*controller(), NavigateToSmartLockHelpPage());
-      break;
-  }
-
-  model()->OnBrandLinkClicked();
-}
-
-namespace {
-
-const BrandLinkTestCase kBrandLinkTestCases[] = {
-    {kSmartLockBrandingGroupName, SmartLockStatus::ENABLE,
-     BrandLinkTarget::SMART_LOCK_HOME},
-    {kSmartLockBrandingSavePromptOnlyGroupName, SmartLockStatus::ENABLE,
-     BrandLinkTarget::SMART_LOCK_HELP},
-};
-
-}  // namespace
-
-INSTANTIATE_TEST_CASE_P(Default,
-                        ManagePasswordsBubbleModelBrandLinkTest,
-                        ::testing::ValuesIn(kBrandLinkTestCases));

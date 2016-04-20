@@ -5,7 +5,8 @@
 #ifndef UI_NATIVE_THEME_COMMON_THEME_H_
 #define UI_NATIVE_THEME_COMMON_THEME_H_
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "ui/native_theme/native_theme.h"
 
 class SkCanvas;
@@ -24,32 +25,16 @@ namespace ui {
 SkColor NATIVE_THEME_EXPORT GetAuraColor(NativeTheme::ColorId color_id,
                                          const NativeTheme* base_theme);
 
-gfx::Size NATIVE_THEME_EXPORT CommonThemeGetPartSize(
-    NativeTheme::Part part,
-    NativeTheme::State state,
-    const NativeTheme::ExtraParams& extra);
-
-void NATIVE_THEME_EXPORT CommonThemePaintComboboxArrow(
-    SkCanvas* canvas,
-    const gfx::Rect& rect);
-
-void NATIVE_THEME_EXPORT
-    CommonThemePaintMenuSeparator(SkCanvas* canvas, const gfx::Rect& rect);
-
-void NATIVE_THEME_EXPORT CommonThemePaintMenuGutter(SkCanvas* canvas,
-                                                    const gfx::Rect& rect);
-
-void NATIVE_THEME_EXPORT CommonThemePaintMenuBackground(SkCanvas* canvas,
-                                                        const gfx::Rect& rect);
-
 void NATIVE_THEME_EXPORT CommonThemePaintMenuItemBackground(
+    const NativeTheme* theme,
     SkCanvas* canvas,
     NativeTheme::State state,
-    const gfx::Rect& rect);
+    const gfx::Rect& rect,
+    const NativeTheme::MenuItemExtraParams& menu_item);
 
 // Creates a gfx::Canvas wrapping an SkCanvas.
-scoped_ptr<gfx::Canvas> NATIVE_THEME_EXPORT CommonThemeCreateCanvas(
-    SkCanvas* sk_canvas);
+std::unique_ptr<gfx::Canvas> NATIVE_THEME_EXPORT
+CommonThemeCreateCanvas(SkCanvas* sk_canvas);
 
 }  // namespace ui
 

@@ -44,11 +44,19 @@
                 "title": "iPhone 5",
                 "screen": {
                     "horizontal": {
+                        "outline" : {
+                            "image": "@url(iPhone5-landscape.svg)",
+                            "insets" : { "left": 115, "top": 25, "right": 115, "bottom": 28 }
+                        },
                         "width": 568,
                         "height": 320
                     },
                     "device-pixel-ratio": 2,
                     "vertical": {
+                        "outline" : {
+                            "image": "@url(iPhone5-portrait.svg)",
+                            "insets" : { "left": 29, "top": 105, "right": 25, "bottom": 111 }
+                        },
                         "width": 320,
                         "height": 568
                     }
@@ -81,11 +89,19 @@
                 "title": "iPhone 6",
                 "screen": {
                     "horizontal": {
+                        "outline" : {
+                            "image": "@url(iPhone6-landscape.svg)",
+                            "insets" : { "left": 106, "top": 28, "right": 106, "bottom": 28 }
+                        },
                         "width": 667,
                         "height": 375
                     },
                     "device-pixel-ratio": 2,
                     "vertical": {
+                        "outline" : {
+                            "image": "@url(iPhone6-portrait.svg)",
+                            "insets" : { "left": 28, "top": 105, "right": 28, "bottom": 105 }
+                        },
                         "width": 375,
                         "height": 667
                     }
@@ -118,11 +134,19 @@
                 "title": "iPhone 6 Plus",
                 "screen": {
                     "horizontal": {
+                        "outline" : {
+                            "image": "@url(iPhone6Plus-landscape.svg)",
+                            "insets" : { "left": 109, "top": 29, "right": 109, "bottom": 27 }
+                        },
                         "width": 736,
                         "height": 414
                     },
                     "device-pixel-ratio": 3,
                     "vertical": {
+                        "outline" : {
+                            "image": "@url(iPhone6Plus-portrait.svg)",
+                            "insets" : { "left": 26, "top": 107, "right": 30, "bottom": 111 }
+                        },
                         "width": 414,
                         "height": 736
                     }
@@ -296,12 +320,20 @@
                 "screen": {
                     "device-pixel-ratio": 2.625,
                     "vertical": {
-                        "width": 411,
-                        "height": 731
+                        "outline" : {
+                            "image": "@url(Nexus5X-portrait.svg)",
+                            "insets" : { "left": 20, "top": 92, "right": 22, "bottom": 108 }
+                        },
+                        "width": 412,
+                        "height": 732
                     },
                     "horizontal": {
-                        "width": 731,
-                        "height": 411
+                        "outline" : {
+                            "image": "@url(Nexus5X-landscape.svg)",
+                            "insets" : { "left": 94, "top": 23, "right": 100, "bottom": 20 }
+                        },
+                        "width": 732,
+                        "height": 412
                     }
                 },
                 "modes": [
@@ -388,13 +420,21 @@
                 "title": "Nexus 6P",
                 "screen": {
                     "horizontal": {
-                        "width": 773,
-                        "height": 435
+                        "outline" : {
+                            "image": "@url(Nexus6P-landscape.svg)",
+                            "insets" : { "left": 94, "top": 48, "right": 97, "bottom": 48 }
+                        },
+                        "width": 732,
+                        "height": 412
                     },
-                    "device-pixel-ratio": 3.3,
+                    "device-pixel-ratio": 3.5,
                     "vertical": {
-                        "width": 435,
-                        "height": 773
+                        "outline" : {
+                            "image": "@url(Nexus6P-portrait.svg)",
+                            "insets" : { "left": 58, "top": 94, "right": 58, "bottom": 97 }
+                        },
+                        "width": 412,
+                        "height": 732
                     }
                 },
                 "capabilities": [
@@ -499,7 +539,7 @@
                         "width": 533,
                         "height": 320
                     },
-                    "device-pixel-ratio": 1.4,
+                    "device-pixel-ratio": 1.5,
                     "vertical": {
                         "width": 320,
                         "height": 533
@@ -510,6 +550,78 @@
                     "mobile"
                 ],
                 "user-agent": "Mozilla/5.0 (compatible; MSIE 10.0; Windows Phone 8.0; Trident/6.0; IEMobile/10.0; ARM; Touch; NOKIA; Lumia 520)",
+                "type": "phone",
+                "modes": [
+                    {
+                        "title": "default",
+                        "orientation": "vertical",
+                        "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }
+                    },
+                    {
+                        "title": "default",
+                        "orientation": "horizontal",
+                        "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "emulated-device",
+            "device": {
+                "show-by-default": false,
+                "title": "Microsoft Lumia 550",
+                "screen": {
+                    "horizontal": {
+                        "width": 640,
+                        "height": 360
+                    },
+                    "device-pixel-ratio": 2,
+                    "vertical": {
+                        "width": 640,
+                        "height": 360
+                    }
+                },
+                "capabilities": [
+                    "touch",
+                    "mobile"
+                ],
+                "user-agent": "Mozilla/5.0 (Windows Phone 10.0; Android 4.2.1; Microsoft; Lumia 550) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/46.0.2486.0 Mobile Safari/537.36 Edge/14.14263",
+                "type": "phone",
+                "modes": [
+                    {
+                        "title": "default",
+                        "orientation": "vertical",
+                        "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }
+                    },
+                    {
+                        "title": "default",
+                        "orientation": "horizontal",
+                        "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "emulated-device",
+            "device": {
+                "show-by-default": false,
+                "title": "Microsoft Lumia 950",
+                "screen": {
+                    "horizontal": {
+                        "width": 640,
+                        "height": 360
+                    },
+                    "device-pixel-ratio": 4,
+                    "vertical": {
+                        "width": 360,
+                        "height": 640
+                    }
+                },
+                "capabilities": [
+                    "touch",
+                    "mobile"
+                ],
+                "user-agent": "Mozilla/5.0 (Windows Phone 10.0; Android 4.2.1; Microsoft; Lumia 950) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/46.0.2486.0 Mobile Safari/537.36 Edge/14.14263",
                 "type": "phone",
                 "modes": [
                     {
@@ -678,11 +790,19 @@
                 "title": "iPad",
                 "screen": {
                     "horizontal": {
+                        "outline" : {
+                            "image": "@url(iPad-landscape.svg)",
+                            "insets" : { "left": 112, "top": 56, "right": 116, "bottom": 52 }
+                        },
                         "width": 1024,
                         "height": 768
                     },
                     "device-pixel-ratio": 2,
                     "vertical": {
+                        "outline" : {
+                            "image": "@url(iPad-portrait.svg)",
+                            "insets" : { "left": 52, "top": 114, "right": 55, "bottom": 114 }
+                        },
                         "width": 768,
                         "height": 1024
                     }

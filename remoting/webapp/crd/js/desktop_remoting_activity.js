@@ -16,20 +16,23 @@ var remoting = remoting || {};
  *
  * @param {remoting.Activity} parentActivity
  * @param {remoting.SessionLogger} logger
+ * @param {Array<string>=} opt_additionalCapabilities
  * @implements {remoting.ClientSession.EventHandler}
  * @implements {base.Disposable}
  * @constructor
  */
-remoting.DesktopRemotingActivity = function(parentActivity, logger) {
+remoting.DesktopRemotingActivity = function(
+    parentActivity, logger, opt_additionalCapabilities) {
   /** @private */
   this.parentActivity_ = parentActivity;
   /** @private {remoting.DesktopConnectedView} */
   this.connectedView_ = null;
 
+  opt_additionalCapabilities = opt_additionalCapabilities || [];
   /** @private */
   this.sessionFactory_ = new remoting.ClientSessionFactory(
       document.querySelector('#client-container .client-plugin-container'),
-      [/* No special capabilities required. */]);
+      opt_additionalCapabilities);
 
   /** @private {remoting.ClientSession} */
   this.session_ = null;
@@ -95,19 +98,11 @@ remoting.DesktopRemotingActivity.prototype.onConnected =
   }
 
   this.connectedView_ = remoting.DesktopConnectedView.create(
-      document.getElementById('client-container'), connectionInfo);
+      base.getHtmlElement('client-container'), connectionInfo);
 
   // Apply the default or previously-specified keyboard remapping.
   var remapping = connectionInfo.host().options.getRemapKeys();
   this.connectedView_.setRemapKeys(remapping);
-
-  if (connectionInfo.plugin().hasCapability(
-          remoting.ClientSession.Capability.VIDEO_RECORDER)) {
-    var recorder = new remoting.VideoFrameRecorder();
-    connectionInfo.plugin().extensions().register(recorder);
-    this.connectedView_.setVideoFrameRecorder(recorder);
-  }
-
   this.parentActivity_.onConnected(connectionInfo);
 };
 

@@ -16,11 +16,12 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "components/network_time/network_time_tracker.h"
 #include "components/ssl_errors/error_info.h"
 #include "components/url_formatter/url_formatter.h"
-#include "net/base/net_util.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "net/base/url_util.h"
 #include "net/cert/x509_cert_types.h"
 #include "net/cert/x509_certificate.h"
 #include "url/gurl.h"
@@ -64,32 +65,6 @@ void RecordSSLInterstitialCause(bool overridable, SSLInterstitialCause event) {
     UMA_HISTOGRAM_ENUMERATION("interstitial.ssl.cause.nonoverridable", event,
                               UNUSED_INTERSTITIAL_CAUSE_ENTRY);
   }
-}
-
-size_t GetLevensteinDistance(const std::string& str1, const std::string& str2) {
-  if (str1 == str2)
-    return 0;
-  if (str1.size() == 0)
-    return str2.size();
-  if (str2.size() == 0)
-    return str1.size();
-  std::vector<size_t> kFirstRow(str2.size() + 1, 0);
-  std::vector<size_t> kSecondRow(str2.size() + 1, 0);
-
-  for (size_t i = 0; i < kFirstRow.size(); ++i)
-    kFirstRow[i] = i;
-  for (size_t i = 0; i < str1.size(); ++i) {
-    kSecondRow[0] = i + 1;
-    for (size_t j = 0; j < str2.size(); ++j) {
-      int cost = str1[i] == str2[j] ? 0 : 1;
-      kSecondRow[j + 1] =
-          std::min(std::min(kSecondRow[j] + 1, kFirstRow[j + 1] + 1),
-                   kFirstRow[j] + cost);
-    }
-    for (size_t j = 0; j < kFirstRow.size(); j++)
-      kFirstRow[j] = kSecondRow[j];
-  }
-  return kSecondRow[str2.size()];
 }
 
 std::vector<HostnameTokens> GetTokenizedDNSNames(
@@ -143,23 +118,30 @@ base::LazyInstance<base::Time> g_testing_build_time = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
+static ssl_errors::ErrorInfo::ErrorType RecordErrorType(int cert_error) {
+  ssl_errors::ErrorInfo::ErrorType error_type =
+      ssl_errors::ErrorInfo::NetErrorToErrorType(cert_error);
+  UMA_HISTOGRAM_ENUMERATION("interstitial.ssl_error_type", error_type,
+                            ssl_errors::ErrorInfo::END_OF_ENUM);
+  UMA_HISTOGRAM_ENUMERATION("interstitial.ssl.connection_type",
+                            net::NetworkChangeNotifier::GetConnectionType(),
+                            net::NetworkChangeNotifier::CONNECTION_LAST);
+  return error_type;
+}
+
 void RecordUMAStatistics(bool overridable,
                          const base::Time& current_time,
                          const GURL& request_url,
                          int cert_error,
                          const net::X509Certificate& cert) {
-  ssl_errors::ErrorInfo::ErrorType type =
-      ssl_errors::ErrorInfo::NetErrorToErrorType(cert_error);
-  UMA_HISTOGRAM_ENUMERATION("interstitial.ssl_error_type", type,
-                            ssl_errors::ErrorInfo::END_OF_ENUM);
-  switch (type) {
+  ssl_errors::ErrorInfo::ErrorType error_type = RecordErrorType(cert_error);
+
+  switch (error_type) {
     case ssl_errors::ErrorInfo::CERT_DATE_INVALID: {
-      if (IsUserClockInThePast(base::Time::NowFromSystemTime())) {
-        RecordSSLInterstitialCause(overridable, CLOCK_PAST);
-      } else if (IsUserClockInTheFuture(base::Time::NowFromSystemTime())) {
-        RecordSSLInterstitialCause(overridable, CLOCK_FUTURE);
-      } else if (cert.HasExpired() &&
-                 (current_time - cert.valid_expiry()).InDays() < 28) {
+      // Note: not reached when displaying the bad clock interstitial.
+      // See |RecordUMAStatisticsForClockInterstitial| below.
+      if (cert.HasExpired() &&
+          (current_time - cert.valid_expiry()).InDays() < 28) {
         RecordSSLInterstitialCause(overridable, EXPIRED_RECENTLY);
       }
       break;
@@ -202,43 +184,57 @@ void RecordUMAStatistics(bool overridable,
     default:
       break;
   }
-  UMA_HISTOGRAM_ENUMERATION("interstitial.ssl.connection_type",
-                            net::NetworkChangeNotifier::GetConnectionType(),
-                            net::NetworkChangeNotifier::CONNECTION_LAST);
 }
 
-bool IsUserClockInThePast(const base::Time& time_now) {
-  base::Time build_time;
-  if (!g_testing_build_time.Get().is_null()) {
-    build_time = g_testing_build_time.Get();
-  } else {
-#if defined(DONT_EMBED_BUILD_METADATA) && !defined(OFFICIAL_BUILD)
-    return false;
-#else
-    build_time = base::GetBuildTime();
-#endif
-  }
+void RecordUMAStatisticsForClockInterstitial(bool overridable,
+                                             ssl_errors::ClockState clock_state,
+                                             int cert_error) {
+  ssl_errors::ErrorInfo::ErrorType error_type = RecordErrorType(cert_error);
+  DCHECK(error_type == ssl_errors::ErrorInfo::CERT_DATE_INVALID);
 
-  if (time_now < build_time - base::TimeDelta::FromDays(2))
-    return true;
-  return false;
+  if (clock_state == ssl_errors::CLOCK_STATE_FUTURE) {
+    RecordSSLInterstitialCause(overridable, CLOCK_FUTURE);
+  } else if (clock_state == ssl_errors::CLOCK_STATE_PAST) {
+    RecordSSLInterstitialCause(overridable, CLOCK_PAST);
+  } else {
+    NOTREACHED();
+  }
 }
 
-bool IsUserClockInTheFuture(const base::Time& time_now) {
-  base::Time build_time;
-  if (!g_testing_build_time.Get().is_null()) {
-    build_time = g_testing_build_time.Get();
-  } else {
-#if defined(DONT_EMBED_BUILD_METADATA) && !defined(OFFICIAL_BUILD)
-    return false;
-#else
-    build_time = base::GetBuildTime();
-#endif
+ClockState GetClockState(
+    const base::Time& now_system,
+    const network_time::NetworkTimeTracker* network_time_tracker) {
+  base::Time now_network;
+  base::TimeDelta uncertainty;
+  const base::TimeDelta kNetworkTimeFudge = base::TimeDelta::FromMinutes(5);
+  ClockState network_state = CLOCK_STATE_UNKNOWN;
+  if (network_time_tracker->GetNetworkTime(&now_network, &uncertainty)) {
+    if (now_system < now_network - uncertainty - kNetworkTimeFudge) {
+      network_state = CLOCK_STATE_PAST;
+    } else if (now_system > now_network + uncertainty + kNetworkTimeFudge) {
+      network_state = CLOCK_STATE_FUTURE;
+    } else {
+      network_state = CLOCK_STATE_OK;
+    }
   }
 
-  if (time_now > build_time + base::TimeDelta::FromDays(365))
-    return true;
-  return false;
+  ClockState build_time_state = CLOCK_STATE_UNKNOWN;
+  base::Time build_time = g_testing_build_time.Get().is_null()
+                              ? base::GetBuildTime()
+                              : g_testing_build_time.Get();
+  if (now_system < build_time - base::TimeDelta::FromDays(2)) {
+    build_time_state = CLOCK_STATE_PAST;
+  } else if (now_system > build_time + base::TimeDelta::FromDays(365)) {
+    build_time_state = CLOCK_STATE_FUTURE;
+  }
+
+  UMA_HISTOGRAM_ENUMERATION("interstitial.ssl.clockstate.network",
+                            network_state, CLOCK_STATE_MAX);
+  UMA_HISTOGRAM_ENUMERATION("interstitial.ssl.clockstate.build_time",
+                            build_time_state, CLOCK_STATE_MAX);
+
+  return network_state == CLOCK_STATE_UNKNOWN ? build_time_state
+                                              : network_state;
 }
 
 void SetBuildTimeForTesting(const base::Time& testing_time) {
@@ -317,6 +313,36 @@ bool AnyNamesUnderName(const std::vector<HostnameTokens>& potential_children,
   return false;
 }
 
+// Returns the Levenshtein distance between |str1| and |str2|.
+// Which is the minimum number of single-character edits (i.e. insertions,
+// deletions or substitutions) required to change one word into the other.
+// https://en.wikipedia.org/wiki/Levenshtein_distance
+size_t GetLevenshteinDistance(const std::string& str1,
+                              const std::string& str2) {
+  if (str1 == str2)
+    return 0;
+  if (str1.size() == 0)
+    return str2.size();
+  if (str2.size() == 0)
+    return str1.size();
+
+  std::vector<size_t> row(str2.size() + 1);
+  for (size_t i = 0; i < row.size(); ++i)
+    row[i] = i;
+
+  for (size_t i = 0; i < str1.size(); ++i) {
+    row[0] = i + 1;
+    size_t previous = i;
+    for (size_t j = 0; j < str2.size(); ++j) {
+      size_t old_row = row[j + 1];
+      int cost = str1[i] == str2[j] ? 0 : 1;
+      row[j + 1] = std::min(std::min(row[j], row[j + 1]) + 1, previous + cost);
+      previous = old_row;
+    }
+  }
+  return row[str2.size()];
+}
+
 bool IsSubDomainOutsideWildcard(const GURL& request_url,
                                 const net::X509Certificate& cert) {
   std::string host_name = request_url.host();
@@ -382,11 +408,11 @@ bool IsCertLikelyFromMultiTenantHosting(const GURL& request_url,
   // considered as a shared certificate. Include the host name in the URL also
   // while comparing.
   dns_names.push_back(host_name);
-  static const size_t kMinimumEditDsitance = 5;
+  static const size_t kMinimumEditDistance = 5;
   for (size_t i = 0; i < dns_names_size; ++i) {
     for (size_t j = i + 1; j < dns_names_size; ++j) {
-      size_t edit_distance = GetLevensteinDistance(dns_names[i], dns_names[j]);
-      if (edit_distance < kMinimumEditDsitance)
+      size_t edit_distance = GetLevenshteinDistance(dns_names[i], dns_names[j]);
+      if (edit_distance < kMinimumEditDistance)
         return false;
     }
   }

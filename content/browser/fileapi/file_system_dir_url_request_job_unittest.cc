@@ -22,7 +22,6 @@
 #include "content/public/test/test_file_system_backend.h"
 #include "content/public/test/test_file_system_context.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_request_headers.h"
 #include "net/url_request/url_request.h"
@@ -215,7 +214,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
 
   void CreateDirectory(const base::StringPiece& dir_name) {
     base::FilePath path = base::FilePath().AppendASCII(dir_name);
-    scoped_ptr<FileSystemOperationContext> context(NewOperationContext());
+    std::unique_ptr<FileSystemOperationContext> context(NewOperationContext());
     ASSERT_EQ(base::File::FILE_OK, file_util()->CreateDirectory(
         context.get(),
         CreateURL(path),
@@ -225,14 +224,14 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
 
   void EnsureFileExists(const base::StringPiece file_name) {
     base::FilePath path = base::FilePath().AppendASCII(file_name);
-    scoped_ptr<FileSystemOperationContext> context(NewOperationContext());
+    std::unique_ptr<FileSystemOperationContext> context(NewOperationContext());
     ASSERT_EQ(base::File::FILE_OK, file_util()->EnsureFileExists(
         context.get(), CreateURL(path), NULL));
   }
 
   void TruncateFile(const base::StringPiece file_name, int64_t length) {
     base::FilePath path = base::FilePath().AppendASCII(file_name);
-    scoped_ptr<FileSystemOperationContext> context(NewOperationContext());
+    std::unique_ptr<FileSystemOperationContext> context(NewOperationContext());
     ASSERT_EQ(base::File::FILE_OK, file_util()->Truncate(
         context.get(), CreateURL(path), length));
   }
@@ -240,7 +239,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   base::File::Error GetFileInfo(const base::FilePath& path,
                                 base::File::Info* file_info,
                                 base::FilePath* platform_file_path) {
-    scoped_ptr<FileSystemOperationContext> context(NewOperationContext());
+    std::unique_ptr<FileSystemOperationContext> context(NewOperationContext());
     return file_util()->GetFileInfo(context.get(),
                                     CreateURL(path),
                                     file_info, platform_file_path);
@@ -252,9 +251,11 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
                           const std::string& url,
                           bool is_directory,
                           int64_t size) {
+#define NUMBER "([0-9-]*)"
 #define STR "([^\"]*)"
     icu::UnicodeString pattern("^<script>addRow\\(\"" STR "\",\"" STR
-                               "\",(0|1),\"" STR "\",\"" STR "\"\\);</script>");
+        "\",(0|1)," NUMBER ",\"" STR "\"," NUMBER ",\"" STR "\"\\);</script>");
+#undef NUMBER
 #undef STR
     icu::UnicodeString input(entry_line.c_str());
 
@@ -262,7 +263,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     icu::RegexMatcher match(pattern, input, 0, status);
 
     EXPECT_TRUE(match.find());
-    EXPECT_EQ(5, match.groupCount());
+    EXPECT_EQ(7, match.groupCount());
     EXPECT_EQ(icu::UnicodeString(name.c_str()), match.group(1, status));
     EXPECT_EQ(icu::UnicodeString(url.c_str()), match.group(2, status));
     EXPECT_EQ(icu::UnicodeString(is_directory ? "1" : "0"),
@@ -270,11 +271,11 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     if (size >= 0) {
       icu::UnicodeString size_string(
           base::FormatBytesUnlocalized(size).c_str());
-      EXPECT_EQ(size_string, match.group(4, status));
+      EXPECT_EQ(size_string, match.group(5, status));
     }
 
-    icu::UnicodeString date_ustr(match.group(5, status));
-    scoped_ptr<icu::DateFormat> formatter(
+    icu::UnicodeString date_ustr(match.group(7, status));
+    std::unique_ptr<icu::DateFormat> formatter(
         icu::DateFormat::createDateTimeInstance(icu::DateFormat::kShort));
     UErrorCode parse_status = U_ZERO_ERROR;
     UDate udate = formatter->parse(date_ustr, parse_status);
@@ -298,9 +299,9 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
 
   base::ScopedTempDir temp_dir_;
   net::URLRequestContext empty_context_;
-  scoped_ptr<net::TestDelegate> delegate_;
-  scoped_ptr<net::URLRequest> request_;
-  scoped_ptr<FileSystemDirURLRequestJobFactory> job_factory_;
+  std::unique_ptr<net::TestDelegate> delegate_;
+  std::unique_ptr<net::URLRequest> request_;
+  std::unique_ptr<FileSystemDirURLRequestJobFactory> job_factory_;
   scoped_refptr<MockSpecialStoragePolicy> special_storage_policy_;
   scoped_refptr<FileSystemContext> file_system_context_;
   base::WeakPtrFactory<FileSystemDirURLRequestJobTest> weak_factory_;

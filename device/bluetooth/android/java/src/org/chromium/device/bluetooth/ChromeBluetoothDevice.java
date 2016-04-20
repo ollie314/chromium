@@ -59,7 +59,10 @@ final class ChromeBluetoothDevice {
      */
     @CalledByNative
     private void onBluetoothDeviceAndroidDestruction() {
-        disconnectGatt();
+        if (mBluetoothGatt != null) {
+            mBluetoothGatt.close();
+            mBluetoothGatt = null;
+        }
         mNativeBluetoothDeviceAndroid = 0;
     }
 
@@ -119,6 +122,9 @@ final class ChromeBluetoothDevice {
     @CalledByNative
     private void createGattConnectionImpl(Context context) {
         Log.i(TAG, "connectGatt");
+
+        if (mBluetoothGatt != null) mBluetoothGatt.close();
+
         // autoConnect set to false as under experimentation using autoConnect failed to complete
         // connections.
         mBluetoothGatt =
@@ -148,6 +154,11 @@ final class ChromeBluetoothDevice {
                             : "Disconnected");
             if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
                 mBluetoothGatt.discoverServices();
+            } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
+                if (mBluetoothGatt != null) {
+                    mBluetoothGatt.close();
+                    mBluetoothGatt = null;
+                }
             }
             ThreadUtils.runOnUiThread(new Runnable() {
                 @Override
@@ -240,6 +251,44 @@ final class ChromeBluetoothDevice {
                         Log.v(TAG, "onCharacteristicWrite when chromeCharacteristic == null.");
                     } else {
                         chromeCharacteristic.onCharacteristicWrite(status);
+                    }
+                }
+            });
+        }
+
+        @Override
+        public void onDescriptorRead(
+                final Wrappers.BluetoothGattDescriptorWrapper descriptor, final int status) {
+            ThreadUtils.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    ChromeBluetoothRemoteGattDescriptor chromeDescriptor =
+                            mWrapperToChromeDescriptorsMap.get(descriptor);
+                    if (chromeDescriptor == null) {
+                        // Android events arriving with no Chrome object is expected rarely: only
+                        // when the event races object destruction.
+                        Log.v(TAG, "onDescriptorRead when chromeDescriptor == null.");
+                    } else {
+                        chromeDescriptor.onDescriptorRead(status);
+                    }
+                }
+            });
+        }
+
+        @Override
+        public void onDescriptorWrite(
+                final Wrappers.BluetoothGattDescriptorWrapper descriptor, final int status) {
+            ThreadUtils.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    ChromeBluetoothRemoteGattDescriptor chromeDescriptor =
+                            mWrapperToChromeDescriptorsMap.get(descriptor);
+                    if (chromeDescriptor == null) {
+                        // Android events arriving with no Chrome object is expected rarely: only
+                        // when the event races object destruction.
+                        Log.v(TAG, "onDescriptorWrite when chromeDescriptor == null.");
+                    } else {
+                        chromeDescriptor.onDescriptorWrite(status);
                     }
                 }
             });

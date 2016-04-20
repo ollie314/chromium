@@ -5,11 +5,12 @@
 #ifndef UI_CHROMEOS_NETWORK_NETWORK_STATE_NOTIFIER_H_
 #define UI_CHROMEOS_NETWORK_NETWORK_STATE_NOTIFIER_H_
 
+#include <memory>
 #include <set>
+#include <string>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "chromeos/network/network_connection_observer.h"
@@ -82,7 +83,7 @@ class UI_CHROMEOS_EXPORT NetworkStateNotifier
       const std::string& error_name,
       const std::string& service_path,
       const std::string& shill_connect_error,
-      scoped_ptr<base::DictionaryValue> shill_error_data);
+      std::unique_ptr<base::DictionaryValue> shill_error_data);
   void ShowConnectErrorNotification(
       const std::string& error_name,
       const std::string& service_path,
@@ -108,7 +109,7 @@ class UI_CHROMEOS_EXPORT NetworkStateNotifier
   bool did_show_out_of_credits_;
   base::Time out_of_credits_notify_time_;
   std::set<std::string> cellular_activating_;
-  bool need_vpn_disconnection_notify_;
+  std::string connected_vpn_;
   base::WeakPtrFactory<NetworkStateNotifier> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkStateNotifier);

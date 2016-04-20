@@ -29,7 +29,6 @@ const float kInactiveIconAlpha = 0.2f;
 // pressed states.
 // TODO(tdanderson|estade): Request these colors from ThemeProvider.
 const int kHoveredAlpha = 0x14;
-const SkColor kHoveredPressedColor = SK_ColorBLACK;
 const int kPressedAlpha = 0x24;
 
 }  // namespace
@@ -44,7 +43,6 @@ FrameCaptionButton::FrameCaptionButton(views::ButtonListener* listener,
       paint_as_active_(false),
       use_light_images_(false),
       alpha_(255),
-      icon_image_id_(gfx::VectorIconId::VECTOR_ICON_NONE),
       swap_images_animation_(new gfx::SlideAnimation(this)) {
   swap_images_animation_->Reset(1);
 
@@ -59,11 +57,15 @@ FrameCaptionButton::~FrameCaptionButton() {
 void FrameCaptionButton::SetImage(CaptionButtonIcon icon,
                                   Animate animate,
                                   gfx::VectorIconId icon_image_id) {
+  gfx::ImageSkia new_icon_image = gfx::CreateVectorIcon(
+      icon_image_id, 12,
+      use_light_images_ ? SK_ColorWHITE : gfx::kChromeIconGrey);
+
   // The early return is dependent on |animate| because callers use SetImage()
   // with ANIMATE_NO to progress the crossfade animation to the end.
   if (icon == icon_ &&
       (animate == ANIMATE_YES || !swap_images_animation_->is_animating()) &&
-      icon_image_id == icon_image_id_) {
+      new_icon_image.BackedBySameObjectAs(icon_image_)) {
     return;
   }
 
@@ -72,9 +74,7 @@ void FrameCaptionButton::SetImage(CaptionButtonIcon icon,
 
   icon_ = icon;
   icon_image_id_ = icon_image_id;
-  icon_image_ = gfx::CreateVectorIcon(
-      icon_image_id, 12,
-      use_light_images_ ? SK_ColorWHITE : gfx::kChromeIconGrey);
+  icon_image_ = new_icon_image;
 
   if (animate == ANIMATE_YES) {
     swap_images_animation_->Reset(0);
@@ -115,8 +115,10 @@ void FrameCaptionButton::OnPaint(gfx::Canvas* canvas) {
   else if (state() == STATE_PRESSED)
     bg_alpha = kPressedAlpha;
 
-  if (bg_alpha != SK_AlphaTRANSPARENT)
-    canvas->DrawColor(SkColorSetA(kHoveredPressedColor, bg_alpha));
+  if (bg_alpha != SK_AlphaTRANSPARENT) {
+    canvas->DrawColor(SkColorSetA(
+        use_light_images_ ? SK_ColorWHITE : SK_ColorBLACK, bg_alpha));
+  }
 
   int icon_alpha = swap_images_animation_->CurrentValueBetween(0, 255);
   int crossfade_icon_alpha = 0;

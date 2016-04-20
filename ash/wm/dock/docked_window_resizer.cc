@@ -12,10 +12,13 @@
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/wm/aura/wm_window_aura.h"
+#include "ash/wm/common/window_parenting_utils.h"
+#include "ash/wm/common/wm_event.h"
 #include "ash/wm/dock/docked_window_layout_manager.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/wm_event.h"
 #include "ash/wm/workspace/magnetism_matcher.h"
 #include "ash/wm/workspace/workspace_window_resizer.h"
 #include "base/command_line.h"
@@ -64,17 +67,21 @@ DockedWindowResizer::Create(WindowResizer* next_window_resizer,
 void DockedWindowResizer::Drag(const gfx::Point& location, int event_flags) {
   last_location_ = location;
   ::wm::ConvertPointToScreen(GetTarget()->parent(), &last_location_);
+  base::WeakPtr<DockedWindowResizer> resizer(weak_ptr_factory_.GetWeakPtr());
+
   if (!did_move_or_resize_) {
     did_move_or_resize_ = true;
-    StartedDragging();
+    StartedDragging(resizer);
   }
+  if (!resizer)
+    return;
+
   gfx::Point offset;
   gfx::Rect bounds(CalculateBoundsForDrag(location));
   MaybeSnapToEdge(bounds, &offset);
   gfx::Point modified_location(location);
   modified_location.Offset(offset.x(), offset.y());
 
-  base::WeakPtr<DockedWindowResizer> resizer(weak_ptr_factory_.GetWeakPtr());
   next_window_resizer_->Drag(modified_location, event_flags);
   if (!resizer)
     return;
@@ -181,7 +188,8 @@ void DockedWindowResizer::MaybeSnapToEdge(const gfx::Rect& bounds,
   }
 }
 
-void DockedWindowResizer::StartedDragging() {
+void DockedWindowResizer::StartedDragging(
+    base::WeakPtr<DockedWindowResizer>& resizer) {
   // During resizing the window width is preserved by DockedwindowLayoutManager.
   if (is_docked_ &&
       (details().bounds_change & WindowResizer::kBoundsChange_Resizes)) {
@@ -192,6 +200,8 @@ void DockedWindowResizer::StartedDragging() {
   // At this point we are not yet animating the window as it may not be
   // inside the docked area.
   dock_layout_->StartDragging(GetTarget());
+  if (!resizer)
+    return;
   // Reparent workspace windows during the drag to elevate them above workspace.
   // Other windows for which the DockedWindowResizer is instantiated include
   // panels and windows that are already docked. Those do not need reparenting.
@@ -202,9 +212,12 @@ void DockedWindowResizer::StartedDragging() {
     aura::Window* docked_container = Shell::GetContainer(
         GetTarget()->GetRootWindow(),
         kShellWindowId_DockedContainer);
-    wm::ReparentChildWithTransientChildren(GetTarget(),
-                                           GetTarget()->parent(),
-                                           docked_container);
+    ReparentChildWithTransientChildren(
+        ash::wm::WmWindowAura::Get(GetTarget()),
+        ash::wm::WmWindowAura::Get(GetTarget()->parent()),
+        ash::wm::WmWindowAura::Get(docked_container));
+    if (!resizer)
+      return;
   }
   if (is_docked_)
     dock_layout_->DockDraggedWindow(GetTarget());
@@ -276,9 +289,10 @@ DockedAction DockedWindowResizer::MaybeReparentWindowOnDragCompletion(
   if ((is_resized || !is_attached_panel) &&
       is_docked_ != (window->parent() == dock_container)) {
     if (is_docked_) {
-      wm::ReparentChildWithTransientChildren(window,
-                                             window->parent(),
-                                             dock_container);
+      wm::ReparentChildWithTransientChildren(
+          wm::WmWindowAura::Get(window),
+          wm::WmWindowAura::Get(window->parent()),
+          wm::WmWindowAura::Get(dock_container));
       action = DOCKED_ACTION_DOCK;
     } else if (window->parent()->id() == kShellWindowId_DockedContainer) {
       // Reparent the window back to workspace.
@@ -292,9 +306,10 @@ DockedAction DockedWindowResizer::MaybeReparentWindowOnDragCompletion(
       aura::Window* previous_parent = window->parent();
       aura::client::ParentWindowWithContext(window, window, near_last_location);
       if (window->parent() != previous_parent) {
-        wm::ReparentTransientChildrenOfChild(window,
-                                             previous_parent,
-                                             window->parent());
+        wm::ReparentTransientChildrenOfChild(
+            ash::wm::WmWindowAura::Get(window),
+            ash::wm::WmWindowAura::Get(previous_parent),
+            ash::wm::WmWindowAura::Get(window->parent()));
       }
       action = was_docked_ ? DOCKED_ACTION_UNDOCK : DOCKED_ACTION_NONE;
     }

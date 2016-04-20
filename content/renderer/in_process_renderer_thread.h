@@ -5,6 +5,7 @@
 #ifndef CONTENT_RENDERER_IN_PROCESS_RENDERER_THREAD_H_
 #define CONTENT_RENDERER_IN_PROCESS_RENDERER_THREAD_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
@@ -28,7 +29,7 @@ class InProcessRendererThread : public base::Thread {
 
  private:
   InProcessChildThreadParams params_;
-  scoped_ptr<RenderProcess> render_process_;
+  std::unique_ptr<RenderProcess> render_process_;
 
   DISALLOW_COPY_AND_ASSIGN(InProcessRendererThread);
 };

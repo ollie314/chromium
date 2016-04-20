@@ -13,7 +13,6 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/views/profiles/profile_chooser_view.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -134,10 +133,6 @@ bool ProfileSigninConfirmationDialogViews::Cancel() {
   return true;
 }
 
-void ProfileSigninConfirmationDialogViews::OnClosed() {
-  Cancel();
-}
-
 ui::ModalType ProfileSigninConfirmationDialogViews::GetModalType() const {
   return ui::MODAL_TYPE_WINDOW;
 }
@@ -228,6 +223,10 @@ void ProfileSigninConfirmationDialogViews::ViewHierarchyChanged(
       explanation_label_, 1, 1,
       views::GridLayout::FILL, views::GridLayout::FILL,
       kPreferredWidth, explanation_label_->GetHeightForWidth(kPreferredWidth));
+}
+
+void ProfileSigninConfirmationDialogViews::WindowClosing() {
+  Cancel();
 }
 
 void ProfileSigninConfirmationDialogViews::StyledLabelLinkClicked(

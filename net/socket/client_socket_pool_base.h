@@ -24,10 +24,12 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <cstddef>
 #include <deque>
 #include <list>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -35,7 +37,6 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -68,7 +69,7 @@ class NET_EXPORT_PRIVATE ConnectJob {
     virtual ~Delegate() {}
 
     // Alerts the delegate that the connection completed. |job| must
-    // be destroyed by the delegate. A scoped_ptr<> isn't used because
+    // be destroyed by the delegate. A std::unique_ptr<> isn't used because
     // the caller of this function doesn't own |job|.
     virtual void OnConnectJobComplete(int result,
                                       ConnectJob* job) = 0;
@@ -81,6 +82,7 @@ class NET_EXPORT_PRIVATE ConnectJob {
   ConnectJob(const std::string& group_name,
              base::TimeDelta timeout_duration,
              RequestPriority priority,
+             ClientSocketPool::RespectLimits respect_limits,
              Delegate* delegate,
              const BoundNetLog& net_log);
   virtual ~ConnectJob();
@@ -92,7 +94,7 @@ class NET_EXPORT_PRIVATE ConnectJob {
   // Releases ownership of the underlying socket to the caller.
   // Returns the released socket, or NULL if there was a connection
   // error.
-  scoped_ptr<StreamSocket> PassSocket();
+  std::unique_ptr<StreamSocket> PassSocket();
 
   // Begins connecting the socket.  Returns OK on success, ERR_IO_PENDING if it
   // cannot complete synchronously without blocking, or another net error code
@@ -117,7 +119,10 @@ class NET_EXPORT_PRIVATE ConnectJob {
 
  protected:
   RequestPriority priority() const { return priority_; }
-  void SetSocket(scoped_ptr<StreamSocket> socket);
+  ClientSocketPool::RespectLimits respect_limits() const {
+    return respect_limits_;
+  }
+  void SetSocket(std::unique_ptr<StreamSocket> socket);
   StreamSocket* socket() { return socket_.get(); }
   void NotifyDelegateOfCompletion(int rv);
   void ResetTimer(base::TimeDelta remainingTime);
@@ -138,10 +143,11 @@ class NET_EXPORT_PRIVATE ConnectJob {
   const base::TimeDelta timeout_duration_;
   // TODO(akalin): Support reprioritization.
   const RequestPriority priority_;
+  const ClientSocketPool::RespectLimits respect_limits_;
   // Timer to abort jobs that take too long.
   base::OneShotTimer timer_;
   Delegate* delegate_;
-  scoped_ptr<StreamSocket> socket_;
+  std::unique_ptr<StreamSocket> socket_;
   BoundNetLog net_log_;
   // A ConnectJob is idle until Connect() has been called.
   bool idle_;
@@ -173,7 +179,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     Request(ClientSocketHandle* handle,
             const CompletionCallback& callback,
             RequestPriority priority,
-            bool ignore_limits,
+            ClientSocketPool::RespectLimits respect_limits,
             Flags flags,
             const BoundNetLog& net_log);
 
@@ -182,7 +188,9 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     ClientSocketHandle* handle() const { return handle_; }
     const CompletionCallback& callback() const { return callback_; }
     RequestPriority priority() const { return priority_; }
-    bool ignore_limits() const { return ignore_limits_; }
+    ClientSocketPool::RespectLimits respect_limits() const {
+      return respect_limits_;
+    }
     Flags flags() const { return flags_; }
     const BoundNetLog& net_log() const { return net_log_; }
 
@@ -200,7 +208,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     const CompletionCallback callback_;
     // TODO(akalin): Support reprioritization.
     const RequestPriority priority_;
-    const bool ignore_limits_;
+    const ClientSocketPool::RespectLimits respect_limits_;
     const Flags flags_;
     const BoundNetLog net_log_;
 
@@ -215,7 +223,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     ConnectJobFactory() {}
     virtual ~ConnectJobFactory() {}
 
-    virtual scoped_ptr<ConnectJob> NewConnectJob(
+    virtual std::unique_ptr<ConnectJob> NewConnectJob(
         const std::string& group_name,
         const Request& request,
         ConnectJob::Delegate* delegate) const = 0;
@@ -250,7 +258,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
 
   // See ClientSocketPool::RequestSocket for documentation on this function.
   int RequestSocket(const std::string& group_name,
-                    scoped_ptr<const Request> request);
+                    std::unique_ptr<const Request> request);
 
   // See ClientSocketPool::RequestSocket for documentation on this function.
   void RequestSockets(const std::string& group_name,
@@ -263,7 +271,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
 
   // See ClientSocketPool::ReleaseSocket for documentation on this function.
   void ReleaseSocket(const std::string& group_name,
-                     scoped_ptr<StreamSocket> socket,
+                     std::unique_ptr<StreamSocket> socket,
                      int id);
 
   // See ClientSocketPool::FlushWithError for documentation on this function.
@@ -329,7 +337,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
   bool CloseOneIdleConnectionInHigherLayeredPool();
 
   // See ClientSocketPool::GetInfoAsValue for documentation on this function.
-  scoped_ptr<base::DictionaryValue> GetInfoAsValue(
+  std::unique_ptr<base::DictionaryValue> GetInfoAsValue(
       const std::string& name,
       const std::string& type) const;
 
@@ -406,8 +414,8 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
 
     // Returns the priority of the top of the pending request queue
     // (which may be less than the maximum priority over the entire
-    // queue, due to how we prioritize requests with |ignore_limits|
-    // set over others).
+    // queue, due to how we prioritize requests with |respect_limits|
+    // DISABLED over others).
     RequestPriority TopPendingPriority() const {
       // NOTE: FirstMax().value()->priority() is not the same as
       // FirstMax().priority()!
@@ -426,7 +434,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     // Otherwise, returns false.
     bool TryToUseUnassignedConnectJob();
 
-    void AddJob(scoped_ptr<ConnectJob> job, bool is_preconnect);
+    void AddJob(std::unique_ptr<ConnectJob> job, bool is_preconnect);
     // Remove |job| from this group, which must already own |job|.
     void RemoveJob(ConnectJob* job);
     void RemoveAllJobs();
@@ -449,15 +457,15 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     // Inserts the request into the queue based on priority
     // order. Older requests are prioritized over requests of equal
     // priority.
-    void InsertPendingRequest(scoped_ptr<const Request> request);
+    void InsertPendingRequest(std::unique_ptr<const Request> request);
 
     // Gets and removes the next pending request. Returns NULL if
     // there are no pending requests.
-    scoped_ptr<const Request> PopNextPendingRequest();
+    std::unique_ptr<const Request> PopNextPendingRequest();
 
     // Finds the pending request for |handle| and removes it. Returns
     // the removed pending request, or NULL if there was none.
-    scoped_ptr<const Request> FindAndRemovePendingRequest(
+    std::unique_ptr<const Request> FindAndRemovePendingRequest(
         ClientSocketHandle* handle);
 
     void IncrementActiveSocketCount() { active_socket_count_++; }
@@ -472,7 +480,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
    private:
     // Returns the iterator's pending request after removing it from
     // the queue.
-    scoped_ptr<const Request> RemovePendingRequest(
+    std::unique_ptr<const Request> RemovePendingRequest(
         const RequestQueue::Pointer& pointer);
 
     // Called when the backup socket timer fires.
@@ -507,6 +515,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
   struct CallbackResultPair {
     CallbackResultPair();
     CallbackResultPair(const CompletionCallback& callback_in, int result_in);
+    CallbackResultPair(const CallbackResultPair& other);
     ~CallbackResultPair();
 
     CompletionCallback callback;
@@ -549,7 +558,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
   void ProcessPendingRequest(const std::string& group_name, Group* group);
 
   // Assigns |socket| to |handle| and updates |group|'s counters appropriately.
-  void HandOutSocket(scoped_ptr<StreamSocket> socket,
+  void HandOutSocket(std::unique_ptr<StreamSocket> socket,
                      ClientSocketHandle::SocketReuseType reuse_type,
                      const LoadTimingInfo::ConnectTiming& connect_timing,
                      ClientSocketHandle* handle,
@@ -558,7 +567,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
                      const BoundNetLog& net_log);
 
   // Adds |socket| to the list of idle sockets for |group|.
-  void AddIdleSocket(scoped_ptr<StreamSocket> socket, Group* group);
+  void AddIdleSocket(std::unique_ptr<StreamSocket> socket, Group* group);
 
   // Iterates through |group_map_|, canceling all ConnectJobs and deleting
   // groups if they are no longer needed.
@@ -642,7 +651,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
   const base::TimeDelta unused_idle_socket_timeout_;
   const base::TimeDelta used_idle_socket_timeout_;
 
-  const scoped_ptr<ConnectJobFactory> connect_job_factory_;
+  const std::unique_ptr<ConnectJobFactory> connect_job_factory_;
 
   // TODO(vandebo) Remove when backup jobs move to TransportClientSocketPool
   bool connect_backup_jobs_enabled_;
@@ -680,12 +689,16 @@ class ClientSocketPoolBase {
     Request(ClientSocketHandle* handle,
             const CompletionCallback& callback,
             RequestPriority priority,
+            ClientSocketPool::RespectLimits respect_limits,
             internal::ClientSocketPoolBaseHelper::Flags flags,
-            bool ignore_limits,
             const scoped_refptr<SocketParams>& params,
             const BoundNetLog& net_log)
-        : internal::ClientSocketPoolBaseHelper::Request(
-              handle, callback, priority, ignore_limits, flags, net_log),
+        : internal::ClientSocketPoolBaseHelper::Request(handle,
+                                                        callback,
+                                                        priority,
+                                                        respect_limits,
+                                                        flags,
+                                                        net_log),
           params_(params) {}
 
     const scoped_refptr<SocketParams>& params() const { return params_; }
@@ -699,7 +712,7 @@ class ClientSocketPoolBase {
     ConnectJobFactory() {}
     virtual ~ConnectJobFactory() {}
 
-    virtual scoped_ptr<ConnectJob> NewConnectJob(
+    virtual std::unique_ptr<ConnectJob> NewConnectJob(
         const std::string& group_name,
         const Request& request,
         ConnectJob::Delegate* delegate) const = 0;
@@ -749,14 +762,13 @@ class ClientSocketPoolBase {
   int RequestSocket(const std::string& group_name,
                     const scoped_refptr<SocketParams>& params,
                     RequestPriority priority,
+                    ClientSocketPool::RespectLimits respect_limits,
                     ClientSocketHandle* handle,
                     const CompletionCallback& callback,
                     const BoundNetLog& net_log) {
-    scoped_ptr<const Request> request(
-        new Request(handle, callback, priority,
-                    internal::ClientSocketPoolBaseHelper::NORMAL,
-                    params->ignore_limits(),
-                    params, net_log));
+    std::unique_ptr<const Request> request(new Request(
+        handle, callback, priority, respect_limits,
+        internal::ClientSocketPoolBaseHelper::NORMAL, params, net_log));
     return helper_.RequestSocket(group_name, std::move(request));
   }
 
@@ -767,9 +779,10 @@ class ClientSocketPoolBase {
                       const scoped_refptr<SocketParams>& params,
                       int num_sockets,
                       const BoundNetLog& net_log) {
-    const Request request(NULL /* no handle */, CompletionCallback(), IDLE,
+    const Request request(nullptr /* no handle */, CompletionCallback(), IDLE,
+                          ClientSocketPool::RespectLimits::ENABLED,
                           internal::ClientSocketPoolBaseHelper::NO_IDLE_SOCKETS,
-                          params->ignore_limits(), params, net_log);
+                          params, net_log);
     helper_.RequestSockets(group_name, request, num_sockets);
   }
 
@@ -779,7 +792,7 @@ class ClientSocketPoolBase {
   }
 
   void ReleaseSocket(const std::string& group_name,
-                     scoped_ptr<StreamSocket> socket,
+                     std::unique_ptr<StreamSocket> socket,
                      int id) {
     return helper_.ReleaseSocket(group_name, std::move(socket), id);
   }
@@ -825,8 +838,9 @@ class ClientSocketPoolBase {
     return helper_.CleanupIdleSockets(force);
   }
 
-  scoped_ptr<base::DictionaryValue> GetInfoAsValue(const std::string& name,
-                                        const std::string& type) const {
+  std::unique_ptr<base::DictionaryValue> GetInfoAsValue(
+      const std::string& name,
+      const std::string& type) const {
     return helper_.GetInfoAsValue(name, type);
   }
 
@@ -858,7 +872,7 @@ class ClientSocketPoolBase {
         : connect_job_factory_(connect_job_factory) {}
     ~ConnectJobFactoryAdaptor() override {}
 
-    scoped_ptr<ConnectJob> NewConnectJob(
+    std::unique_ptr<ConnectJob> NewConnectJob(
         const std::string& group_name,
         const internal::ClientSocketPoolBaseHelper::Request& request,
         ConnectJob::Delegate* delegate) const override {
@@ -871,7 +885,7 @@ class ClientSocketPoolBase {
       return connect_job_factory_->ConnectionTimeout();
     }
 
-    const scoped_ptr<ConnectJobFactory> connect_job_factory_;
+    const std::unique_ptr<ConnectJobFactory> connect_job_factory_;
   };
 
   internal::ClientSocketPoolBaseHelper helper_;

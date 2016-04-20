@@ -29,27 +29,27 @@
 
 namespace blink {
 
-InsertNodeBeforeCommand::InsertNodeBeforeCommand(PassRefPtrWillBeRawPtr<Node> insertChild, PassRefPtrWillBeRawPtr<Node> refChild,
+InsertNodeBeforeCommand::InsertNodeBeforeCommand(Node* insertChild, Node* refChild,
     ShouldAssumeContentIsAlwaysEditable shouldAssumeContentIsAlwaysEditable)
     : SimpleEditCommand(refChild->document())
     , m_insertChild(insertChild)
     , m_refChild(refChild)
     , m_shouldAssumeContentIsAlwaysEditable(shouldAssumeContentIsAlwaysEditable)
 {
-    ASSERT(m_insertChild);
-    ASSERT(!m_insertChild->parentNode());
-    ASSERT(m_refChild);
-    ASSERT(m_refChild->parentNode());
+    DCHECK(m_insertChild);
+    DCHECK(!m_insertChild->parentNode()) << m_insertChild;
+    DCHECK(m_refChild);
+    DCHECK(m_refChild->parentNode()) << m_refChild;
 
-    ASSERT(m_refChild->parentNode()->hasEditableStyle() || !m_refChild->parentNode()->inActiveDocument());
+    DCHECK(m_refChild->parentNode()->hasEditableStyle() || !m_refChild->parentNode()->inActiveDocument()) << m_refChild->parentNode();
 }
 
-void InsertNodeBeforeCommand::doApply()
+void InsertNodeBeforeCommand::doApply(EditingState*)
 {
     ContainerNode* parent = m_refChild->parentNode();
     if (!parent || (m_shouldAssumeContentIsAlwaysEditable == DoNotAssumeContentIsAlwaysEditable && !parent->isContentEditable(Node::UserSelectAllIsAlwaysNonEditable)))
         return;
-    ASSERT(parent->isContentEditable(Node::UserSelectAllIsAlwaysNonEditable));
+    DCHECK(parent->isContentEditable(Node::UserSelectAllIsAlwaysNonEditable)) << parent;
 
     parent->insertBefore(m_insertChild.get(), m_refChild.get(), IGNORE_EXCEPTION);
 }
@@ -69,4 +69,4 @@ DEFINE_TRACE(InsertNodeBeforeCommand)
     SimpleEditCommand::trace(visitor);
 }
 
-}
+} // namespace blink

@@ -222,7 +222,7 @@ AutomationNodeImpl.prototype = {
   },
 
   get state() {
-    return GetState(this.treeID, this.id);
+    return GetState(this.treeID, this.id) || {};
   },
 
   get role() {
@@ -602,8 +602,10 @@ var intAttributes = [
     'backgroundColor',
     'color',
     'colorValue',
+    'descriptionFrom',
     'hierarchicalLevel',
     'invalidState',
+    'nameFrom',
     'posInSet',
     'scrollX',
     'scrollXMax',
@@ -990,5 +992,5 @@ AutomationRootNode.destroy = function(treeID) {
   AutomationRootNodeImpl.destroy(treeID);
 }
 
-exports.AutomationNode = AutomationNode;
-exports.AutomationRootNode = AutomationRootNode;
+exports.$set('AutomationNode', AutomationNode);
+exports.$set('AutomationRootNode', AutomationRootNode);

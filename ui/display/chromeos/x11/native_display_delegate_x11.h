@@ -8,13 +8,13 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/event_types.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
 #include "ui/display/display_export.h"
@@ -97,8 +97,10 @@ class DISPLAY_EXPORT NativeDisplayDelegateX11 : public NativeDisplayDelegate {
       const DisplaySnapshot& output) override;
   bool SetColorCalibrationProfile(const DisplaySnapshot& output,
                                   ColorCalibrationProfile new_profile) override;
-  bool SetGammaRamp(const ui::DisplaySnapshot& output,
-                    const std::vector<GammaRampRGBEntry>& lut) override;
+  bool SetColorCorrection(const ui::DisplaySnapshot& output,
+                          const std::vector<GammaRampRGBEntry>& degamma_lut,
+                          const std::vector<GammaRampRGBEntry>& gamma_lut,
+                          const std::vector<float>& correction_matrix) override;
   void AddObserver(NativeDisplayObserver* observer) override;
   void RemoveObserver(NativeDisplayObserver* observer) override;
 
@@ -157,11 +159,11 @@ class DISPLAY_EXPORT NativeDisplayDelegateX11 : public NativeDisplayDelegate {
   // propagate them.
   ScopedVector<DisplaySnapshot> cached_outputs_;
 
-  scoped_ptr<HelperDelegate> helper_delegate_;
+  std::unique_ptr<HelperDelegate> helper_delegate_;
 
   // Processes X11 display events associated with the root window and notifies
   // |observers_| when a display change has occurred.
-  scoped_ptr<NativeDisplayEventDispatcherX11> platform_event_dispatcher_;
+  std::unique_ptr<NativeDisplayEventDispatcherX11> platform_event_dispatcher_;
 
   // List of observers waiting for display configuration change events.
   base::ObserverList<NativeDisplayObserver> observers_;

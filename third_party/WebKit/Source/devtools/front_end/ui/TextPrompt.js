@@ -281,6 +281,9 @@ WebInspector.TextPrompt.prototype = {
      */
     onKeyDown: function(event)
     {
+        if (isEnterKey(event))
+            return;
+
         var handled = false;
         delete this._needUpdateAutocomplete;
 
@@ -389,10 +392,10 @@ WebInspector.TextPrompt.prototype = {
     {
         this.clearAutoComplete(true);
         var selection = this._element.getComponentSelection();
-        if (!selection.rangeCount)
+        var selectionRange = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+        if (!selectionRange)
             return;
 
-        var selectionRange = selection.getRangeAt(0);
         var shouldExit;
 
         if (!force && !this.isCaretAtEndOfPrompt() && !this.isSuggestBoxVisible())
@@ -468,7 +471,7 @@ WebInspector.TextPrompt.prototype = {
 
     /**
      * @param {string} prefix
-     * @return {!Array.<string>}
+     * @return {!WebInspector.SuggestBox.Suggestions}
      */
     additionalCompletions: function(prefix)
     {
@@ -486,18 +489,20 @@ WebInspector.TextPrompt.prototype = {
     _completionsReady: function(selection, originalWordPrefixRange, reverse, force, completions, selectedIndex)
     {
         var prefix = originalWordPrefixRange.toString();
-        if (prefix || force) {
-            if (prefix)
-                completions = completions.concat(this.additionalCompletions(prefix));
-            else
-                completions = this.additionalCompletions(prefix).concat(completions);
-        }
 
         // Filter out dupes.
         var store = new Set();
         completions = completions.filter(item => !store.has(item) && !!store.add(item));
+        var annotatedCompletions = completions.map(item => ({title: item}));
 
-        if (!this._waitingForCompletions || !completions.length) {
+        if (prefix || force) {
+            if (prefix)
+                annotatedCompletions = annotatedCompletions.concat(this.additionalCompletions(prefix));
+            else
+                annotatedCompletions = this.additionalCompletions(prefix).concat(annotatedCompletions);
+        }
+
+        if (!this._waitingForCompletions || !annotatedCompletions.length) {
             this.hideSuggestBox();
             return;
         }
@@ -519,7 +524,7 @@ WebInspector.TextPrompt.prototype = {
         this._userEnteredText = fullWordRange.toString();
 
         if (this._suggestBox)
-            this._suggestBox.updateSuggestions(this._boxForAnchorAtStart(selection, fullWordRange), completions, selectedIndex, !this.isCaretAtEndOfPrompt(), this._userEnteredText);
+            this._suggestBox.updateSuggestions(this._boxForAnchorAtStart(selection, fullWordRange), annotatedCompletions, selectedIndex, !this.isCaretAtEndOfPrompt(), this._userEnteredText);
 
         if (selectedIndex === -1)
             return;
@@ -528,7 +533,7 @@ WebInspector.TextPrompt.prototype = {
         this._commonPrefix = this._buildCommonPrefix(completions, wordPrefixLength);
 
         if (this.isCaretAtEndOfPrompt()) {
-            var completionText = completions[selectedIndex];
+            var completionText = annotatedCompletions[selectedIndex].title;
             var prefixText = this._userEnteredRange.toString();
             var suffixText = completionText.substring(wordPrefixLength);
             this._userEnteredRange.deleteContents();
@@ -581,6 +586,11 @@ WebInspector.TextPrompt.prototype = {
      */
     _applySuggestion: function(completionText, isIntermediateSuggestion)
     {
+        if (!this._userEnteredRange) {
+            // We could have already cleared autocompletion range by the time this is called. (crbug.com/587683)
+            return;
+        }
+
         var wordPrefixLength = this._userEnteredText ? this._userEnteredText.length : 0;
 
         this._userEnteredRange.deleteContents();
@@ -674,10 +684,10 @@ WebInspector.TextPrompt.prototype = {
     isCaretAtEndOfPrompt: function()
     {
         var selection = this._element.getComponentSelection();
-        if (!selection.rangeCount || !selection.isCollapsed)
+        var selectionRange = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+        if (!selectionRange || !selection.isCollapsed)
             return false;
 
-        var selectionRange = selection.getRangeAt(0);
         var node = selectionRange.startContainer;
         if (!node.isSelfOrDescendant(this._element))
             return false;
@@ -771,7 +781,7 @@ WebInspector.TextPrompt.prototype = {
      */
     tabKeyPressed: function(event)
     {
-        this._completeCommonPrefix();
+        this.acceptAutoComplete();
 
         // Consume the key.
         return true;
@@ -809,6 +819,8 @@ WebInspector.TextPromptWithHistory = function(completions, stopCharacters)
      * @type {number}
      */
     this._historyOffset = 1;
+
+    this._addCompletionsFromHistory = true;
 }
 
 WebInspector.TextPromptWithHistory.prototype = {
@@ -824,19 +836,23 @@ WebInspector.TextPromptWithHistory.prototype = {
     /**
      * @override
      * @param {string} prefix
-     * @return {!Array.<string>}
+     * @return {!WebInspector.SuggestBox.Suggestions}
      */
     additionalCompletions: function(prefix)
     {
-        if (!this.isCaretAtEndOfPrompt())
+        if (!this._addCompletionsFromHistory || !this.isCaretAtEndOfPrompt())
             return [];
         var result = [];
         var text = this.text();
+        var set = new Set();
         for (var i = this._data.length - 1; i >= 0 && result.length < 50; --i) {
             var item = this._data[i];
             if (!item.startsWith(text))
                 continue;
-            result.push(item.substring(text.length - prefix.length));
+            if (set.has(item))
+                continue;
+            set.add(item);
+            result.push({title: item.substring(text.length - prefix.length), className: "additional"});
         }
         return result;
     },
@@ -848,6 +864,14 @@ WebInspector.TextPromptWithHistory.prototype = {
     {
         this._data = [].concat(data);
         this._historyOffset = 1;
+    },
+
+    /**
+     * @param {boolean} value
+     */
+    setAddCompletionsFromHistory: function(value)
+    {
+        this._addCompletionsFromHistory = value;
     },
 
     /**

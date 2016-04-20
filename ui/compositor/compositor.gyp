@@ -111,6 +111,7 @@
         '<(DEPTH)/testing/gtest.gyp:gtest',
         '<(DEPTH)/third_party/WebKit/public/blink.gyp:blink_minimal',
         '<(DEPTH)/ui/base/ui_base.gyp:ui_base',
+        '<(DEPTH)/ui/display/display.gyp:display',
         '<(DEPTH)/ui/gfx/gfx.gyp:gfx',
         '<(DEPTH)/ui/gfx/gfx.gyp:gfx_geometry',
         '<(DEPTH)/ui/gl/gl.gyp:gl',
@@ -129,6 +130,9 @@
         'test/layer_animation_observer_test_api.h',
         'test/layer_animator_test_controller.cc',
         'test/layer_animator_test_controller.h',
+        'test/multi_layer_animator_test_controller.cc',
+        'test/multi_layer_animator_test_controller.h',
+        'test/multi_layer_animator_test_controller_delegate.h',
         'test/test_compositor_host.h',
         'test/test_compositor_host_android.cc',
         'test/test_compositor_host_mac.mm',
@@ -162,6 +166,7 @@
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/base/base.gyp:test_support_base',
         '<(DEPTH)/cc/cc.gyp:cc',
+        '<(DEPTH)/cc/cc.gyp:cc_surfaces',
         '<(DEPTH)/cc/cc_tests.gyp:cc_test_support',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/testing/gmock.gyp:gmock',
@@ -190,15 +195,6 @@
         ['OS=="linux"', {
           'dependencies': [
             '<(DEPTH)/third_party/mesa/mesa.gyp:osmesa',
-          ],
-        }],
-        ['os_posix == 1 and OS != "mac"', {
-          'conditions': [
-            ['use_allocator!="none"', {
-              'dependencies': [
-                '<(DEPTH)/base/allocator/allocator.gyp:allocator',
-              ],
-            }],
           ],
         }],
         ['OS == "android"', {

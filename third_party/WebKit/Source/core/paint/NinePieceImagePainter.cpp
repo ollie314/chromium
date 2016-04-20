@@ -4,7 +4,6 @@
 
 #include "core/paint/NinePieceImagePainter.h"
 
-#include "core/frame/UseCounter.h"
 #include "core/layout/ImageQualityController.h"
 #include "core/layout/LayoutBoxModelObject.h"
 #include "core/paint/BoxPainter.h"
@@ -35,28 +34,23 @@ bool NinePieceImagePainter::paint(GraphicsContext& graphicsContext, const Layout
     if (!styleImage->canRender())
         return false;
 
-    // Find out if the hasImage() check in ComputedStyle::border*Width had any affect, i.e. if a border is non-zero while border-style is
-    // none or hidden.
-    if ((style.borderLeftWidth() && (style.borderLeft().style() == BNONE || style.borderLeft().style() == BHIDDEN))
-        || (style.borderRightWidth() && (style.borderRight().style() == BNONE || style.borderRight().style() == BHIDDEN))
-        || (style.borderTopWidth() && (style.borderTop().style() == BNONE || style.borderTop().style() == BHIDDEN))
-        || (style.borderBottomWidth() && (style.borderBottom().style() == BNONE || style.borderBottom().style() == BHIDDEN)))
-        UseCounter::count(m_layoutObject.document(), UseCounter::BorderImageWithBorderStyleNone);
-
     // FIXME: border-image is broken with full page zooming when tiling has to happen, since the tiling function
     // doesn't have any understanding of the zoom that is in effect on the tile.
     LayoutRect rectWithOutsets = rect;
     rectWithOutsets.expand(style.imageOutsets(ninePieceImage));
     LayoutRect borderImageRect = rectWithOutsets;
 
-    IntSize imageSize = roundedIntSize(m_layoutObject.calculateImageIntrinsicDimensions(styleImage, borderImageRect.size(),
-        LayoutBoxModelObject::DoNotScaleByEffectiveZoom));
+    // NinePieceImage returns the image slices without effective zoom applied and thus we compute
+    // the nine piece grid on top of the image in unzoomed coordinates.
+    LayoutSize defaultObjectSize = borderImageRect.size();
+    defaultObjectSize.scale(1 / style.effectiveZoom());
+    IntSize imageSize = roundedIntSize(styleImage->imageSize(m_layoutObject, 1, defaultObjectSize));
 
     IntRectOutsets borderWidths(style.borderTopWidth(), style.borderRightWidth(),
         style.borderBottomWidth(), style.borderLeftWidth());
     NinePieceImageGrid grid(ninePieceImage, imageSize, pixelSnappedIntRect(borderImageRect), borderWidths);
 
-    RefPtr<Image> image = styleImage->image(&m_layoutObject, imageSize, style.effectiveZoom());
+    RefPtr<Image> image = styleImage->image(m_layoutObject, imageSize, 1);
 
     InterpolationQuality interpolationQuality = BoxPainter::chooseInterpolationQuality(m_layoutObject, image.get(), 0, rectWithOutsets.size());
     InterpolationQuality previousInterpolationQuality = graphicsContext.imageInterpolationQuality();
@@ -67,6 +61,10 @@ bool NinePieceImagePainter::paint(GraphicsContext& graphicsContext, const Layout
 
     for (NinePiece piece = MinPiece; piece < MaxPiece; ++piece) {
         NinePieceImageGrid::NinePieceDrawInfo drawInfo = grid.getNinePieceDrawInfo(piece);
+
+        // The nine piece grid is computed in unscaled image coordinates but must be drawn using
+        // scaled image coordinates.
+        drawInfo.source.scale(styleImage->imageScaleFactor());
 
         if (drawInfo.isDrawable) {
             if (drawInfo.isCornerPiece) {

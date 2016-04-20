@@ -93,11 +93,17 @@ bool InputMethodCompare(const input_method::InputMethodDescriptor& im1,
 ComponentExtensionEngine::ComponentExtensionEngine() {
 }
 
+ComponentExtensionEngine::ComponentExtensionEngine(
+    const ComponentExtensionEngine& other) = default;
+
 ComponentExtensionEngine::~ComponentExtensionEngine() {
 }
 
 ComponentExtensionIME::ComponentExtensionIME() {
 }
+
+ComponentExtensionIME::ComponentExtensionIME(
+    const ComponentExtensionIME& other) = default;
 
 ComponentExtensionIME::~ComponentExtensionIME() {
 }
@@ -118,7 +124,7 @@ ComponentExtensionIMEManager::~ComponentExtensionIMEManager() {
 }
 
 void ComponentExtensionIMEManager::Initialize(
-    scoped_ptr<ComponentExtensionIMEManagerDelegate> delegate) {
+    std::unique_ptr<ComponentExtensionIMEManagerDelegate> delegate) {
   delegate_ = std::move(delegate);
   std::vector<ComponentExtensionIME> ext_list = delegate_->ListIME();
   for (size_t i = 0; i < ext_list.size(); ++i) {

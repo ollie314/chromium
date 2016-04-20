@@ -35,7 +35,6 @@
 #include "platform/geometry/IntRect.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Allocator.h"
-#include "wtf/RefCounted.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
@@ -71,7 +70,7 @@ struct DateTimeChooserParameters {
 };
 
 // For pickers like color pickers and date pickers.
-class CORE_EXPORT DateTimeChooser : public RefCountedWillBeGarbageCollectedFinalized<DateTimeChooser> {
+class CORE_EXPORT DateTimeChooser : public GarbageCollectedFinalized<DateTimeChooser> {
 public:
     virtual ~DateTimeChooser();
 

@@ -48,7 +48,7 @@
 #include "ui/base/dragdrop/drop_target_win.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_win.h"
-#include "ui/gfx/win/dpi.h"
+#include "ui/display/win/screen_win.h"
 #endif
 
 namespace app_list {
@@ -166,7 +166,7 @@ class RowMoveAnimationDelegate : public gfx::AnimationDelegate {
   // The view that needs to be wrapped. Owned by views hierarchy.
   views::View* view_;
 
-  scoped_ptr<ui::Layer> layer_;
+  std::unique_ptr<ui::Layer> layer_;
   const gfx::Rect layer_start_;
   const gfx::Rect layer_target_;
 
@@ -191,7 +191,7 @@ class ItemRemoveAnimationDelegate : public gfx::AnimationDelegate {
   }
 
  private:
-  scoped_ptr<views::View> view_;
+  std::unique_ptr<views::View> view_;
 
   DISALLOW_COPY_AND_ASSIGN(ItemRemoveAnimationDelegate);
 };
@@ -338,7 +338,9 @@ class SynchronousDrag : public ui::DragSourceWin {
     GetCursorPos(&p);
     ScreenToClient(GetGridViewHWND(), &p);
     gfx::Point grid_view_pt(p.x, p.y);
-    grid_view_pt = gfx::win::ScreenToDIPPoint(grid_view_pt);
+    grid_view_pt =
+        display::win::ScreenWin::ClientToDIPPoint(GetGridViewHWND(),
+                                                  grid_view_pt);
     views::View::ConvertPointFromWidget(grid_view_, &grid_view_pt);
     return grid_view_pt;
   }
@@ -382,7 +384,7 @@ AppsGridView::AppsGridView(AppsGridViewDelegate* delegate)
   // Clip any icons that are outside the grid view's bounds. These icons would
   // otherwise be visible to the user when the grid view is off screen.
   layer()->SetMasksToBounds(true);
-  SetFillsBoundsOpaquely(false);
+  layer()->SetFillsBoundsOpaquely(false);
 
   pagination_model_.SetTransitionDurations(kPageTransitionDurationInMs,
                                            kOverscrollPageTransitionDurationMs);
@@ -803,9 +805,7 @@ void AppsGridView::InitiateDragFromReparentItemInRootLevelGridView(
   AddChildView(view);
   drag_view_ = view;
   drag_view_->SetPaintToLayer(true);
-  // Note: For testing purpose, SetFillsBoundsOpaquely can be set to true to
-  // show the gray background.
-  drag_view_->SetFillsBoundsOpaquely(false);
+  drag_view_->layer()->SetFillsBoundsOpaquely(false);
   drag_view_->SetBoundsRect(drag_view_rect);
   drag_view_->SetDragUIState();  // Hide the title of the drag_view_.
 
@@ -889,7 +889,9 @@ bool AppsGridView::IsAnimatingView(AppListItemView* view) {
 
 gfx::Size AppsGridView::GetPreferredSize() const {
   const gfx::Insets insets(GetInsets());
-  int page_switcher_height = page_switcher_view_->GetPreferredSize().height();
+  // If we are in a folder, ignore the page switcher for height calculations.
+  int page_switcher_height =
+      folder_delegate_ ? 0 : page_switcher_view_->GetPreferredSize().height();
   gfx::Size size = GetTileGridSize();
   size.Enlarge(insets.width(), insets.height() + page_switcher_height);
   return size;
@@ -1080,7 +1082,7 @@ AppListItemView* AppsGridView::CreateViewForItemAtIndex(size_t index) {
   AppListItemView* view = new AppListItemView(this,
                                               item_list_->item_at(index));
   view->SetPaintToLayer(true);
-  view->SetFillsBoundsOpaquely(false);
+  view->layer()->SetFillsBoundsOpaquely(false);
   return view;
 }
 
@@ -1297,9 +1299,8 @@ void AppsGridView::AnimateToIdealBounds() {
     } else if (visible || bounds_animator_.IsAnimating(view)) {
       bounds_animator_.AnimateViewTo(view, target);
       bounds_animator_.SetAnimationDelegate(
-          view,
-          scoped_ptr<gfx::AnimationDelegate>(
-              new ItemMoveAnimationDelegate(view)));
+          view, std::unique_ptr<gfx::AnimationDelegate>(
+                    new ItemMoveAnimationDelegate(view)));
     } else {
       view->SetBoundsRect(target);
     }
@@ -1321,12 +1322,12 @@ void AppsGridView::AnimationBetweenRows(AppListItemView* view,
   const int dir = current_page < target_page ||
       (current_page == target_page && current.y() < target.y()) ? 1 : -1;
 
-  scoped_ptr<ui::Layer> layer;
+  std::unique_ptr<ui::Layer> layer;
   if (animate_current) {
     layer = view->RecreateLayer();
     layer->SuppressPaint();
 
-    view->SetFillsBoundsOpaquely(false);
+    view->layer()->SetFillsBoundsOpaquely(false);
     view->layer()->SetOpacity(0.f);
   }
 
@@ -1342,7 +1343,7 @@ void AppsGridView::AnimationBetweenRows(AppListItemView* view,
 
   bounds_animator_.SetAnimationDelegate(
       view,
-      scoped_ptr<gfx::AnimationDelegate>(
+      std::unique_ptr<gfx::AnimationDelegate>(
           new RowMoveAnimationDelegate(view, layer.release(), current_out)));
 }
 
@@ -1814,9 +1815,8 @@ void AppsGridView::MoveItemToFolder(AppListItemView* item_view,
   view_model_.Remove(drag_view_index);
   bounds_animator_.AnimateViewTo(drag_view_, drag_view_->bounds());
   bounds_animator_.SetAnimationDelegate(
-      drag_view_,
-      scoped_ptr<gfx::AnimationDelegate>(
-          new ItemRemoveAnimationDelegate(drag_view_)));
+      drag_view_, std::unique_ptr<gfx::AnimationDelegate>(
+                      new ItemRemoveAnimationDelegate(drag_view_)));
   UpdatePaging();
 }
 
@@ -1929,9 +1929,8 @@ bool AppsGridView::ReparentItemToAnotherFolder(AppListItemView* item_view,
   view_model_.Remove(drag_view_index);
   bounds_animator_.AnimateViewTo(drag_view_, drag_view_->bounds());
   bounds_animator_.SetAnimationDelegate(
-      drag_view_,
-      scoped_ptr<gfx::AnimationDelegate>(
-          new ItemRemoveAnimationDelegate(drag_view_)));
+      drag_view_, std::unique_ptr<gfx::AnimationDelegate>(
+                      new ItemRemoveAnimationDelegate(drag_view_)));
   UpdatePaging();
 
   return true;

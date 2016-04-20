@@ -6,9 +6,11 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "ash/test/ash_test_base.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/notification.h"
@@ -30,7 +32,6 @@
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "ui/aura/test/test_screen.h"
 #include "ui/gfx/screen.h"
-#include "ui/gfx/screen_type_delegate.h"
 #endif
 
 using ::testing::NiceMock;
@@ -48,22 +49,6 @@ static const char kTestAccountId[] = "testuser@test.com";
 // Notification ID corresponding to kProfileSyncNotificationId + kTestAccountId.
 static const std::string kNotificationId =
     "chrome://settings/sync/testuser@test.com";
-
-#if defined(OS_WIN)
-class ScreenTypeDelegateDesktop : public gfx::ScreenTypeDelegate {
- public:
-  ScreenTypeDelegateDesktop() {}
-  ~ScreenTypeDelegateDesktop() override {}
-  gfx::ScreenType GetScreenTypeForNativeView(gfx::NativeView view) override {
-    return chrome::IsNativeViewInAsh(view) ?
-        gfx::SCREEN_TYPE_ALTERNATE :
-        gfx::SCREEN_TYPE_NATIVE;
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ScreenTypeDelegateDesktop);
-};
-#endif
 
 class FakeLoginUIService: public LoginUIService {
  public:
@@ -87,9 +72,9 @@ class FakeLoginUI : public LoginUIService::LoginUI {
   int focus_ui_call_count_;
 };
 
-scoped_ptr<KeyedService> BuildMockLoginUIService(
+std::unique_ptr<KeyedService> BuildMockLoginUIService(
     content::BrowserContext* profile) {
-  return make_scoped_ptr(new FakeLoginUIService());
+  return base::WrapUnique(new FakeLoginUIService());
 }
 
 class SyncErrorNotifierTest : public AshTestBase  {
@@ -104,8 +89,7 @@ class SyncErrorNotifierTest : public AshTestBase  {
     // adding desktop widgets (i.e., message center notifications).
 #if defined(OS_WIN)
     test_screen_.reset(aura::TestScreen::Create(gfx::Size()));
-    gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, test_screen_.get());
-    gfx::Screen::SetScreenTypeDelegate(&screen_type_delegate_);
+    gfx::Screen::SetScreenInstance(test_screen_.get());
 #endif
 
     AshTestBase::SetUp();
@@ -139,8 +123,7 @@ class SyncErrorNotifierTest : public AshTestBase  {
     AshTestBase::TearDown();
 
 #if defined(OS_WIN)
-    gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, nullptr);
-    gfx::Screen::SetScreenTypeDelegate(nullptr);
+    gfx::Screen::SetScreenInstance(nullptr);
     test_screen_.reset();
 #endif
 
@@ -152,8 +135,8 @@ class SyncErrorNotifierTest : public AshTestBase  {
   void VerifySyncErrorNotifierResult(GoogleServiceAuthError::State error_state,
                                      bool is_signed_in,
                                      bool is_error) {
-    EXPECT_CALL(*service_, HasSyncSetupCompleted())
-                .WillRepeatedly(Return(is_signed_in));
+    EXPECT_CALL(*service_, IsFirstSetupComplete())
+        .WillRepeatedly(Return(is_signed_in));
 
     GoogleServiceAuthError auth_error(error_state);
     EXPECT_CALL(*service_, GetAuthError()).WillRepeatedly(
@@ -176,13 +159,12 @@ class SyncErrorNotifierTest : public AshTestBase  {
   }
 
 #if defined(OS_WIN)
-  ScreenTypeDelegateDesktop screen_type_delegate_;
-  scoped_ptr<gfx::Screen> test_screen_;
+  std::unique_ptr<gfx::Screen> test_screen_;
 #endif
-  scoped_ptr<TestingProfileManager> profile_manager_;
-  scoped_ptr<SyncErrorController> error_controller_;
-  scoped_ptr<SyncErrorNotifier> error_notifier_;
-  scoped_ptr<ProfileSyncServiceMock> service_;
+  std::unique_ptr<TestingProfileManager> profile_manager_;
+  std::unique_ptr<SyncErrorController> error_controller_;
+  std::unique_ptr<SyncErrorNotifier> error_notifier_;
+  std::unique_ptr<ProfileSyncServiceMock> service_;
   TestingProfile* profile_;
   FakeLoginUI login_ui_;
   NotificationUIManager* notification_ui_manager_;

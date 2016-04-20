@@ -13,7 +13,6 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "chrome/browser/media_galleries/fileapi/media_file_system_backend.h"
 #include "chrome/browser/media_galleries/fileapi/mtp_device_map_service.h"
@@ -23,11 +22,11 @@
 #include "chrome/browser/media_galleries/media_galleries_dialog_controller.h"
 #include "chrome/browser/media_galleries/media_galleries_histograms.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences_factory.h"
-#include "chrome/browser/media_galleries/media_scan_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "components/keyed_service/content/browser_context_keyed_service_shutdown_notifier_factory.h"
+#include "components/prefs/pref_service.h"
 #include "components/storage_monitor/media_storage_util.h"
 #include "components/storage_monitor/storage_monitor.h"
 #include "content/public/browser/browser_thread.h"
@@ -275,6 +274,8 @@ MediaFileSystemInfo::MediaFileSystemInfo(const base::string16& fs_name,
 }
 
 MediaFileSystemInfo::MediaFileSystemInfo() {}
+MediaFileSystemInfo::MediaFileSystemInfo(const MediaFileSystemInfo& other) =
+    default;
 MediaFileSystemInfo::~MediaFileSystemInfo() {}
 
 // The main owner of this class is
@@ -593,12 +594,6 @@ MediaGalleriesPreferences* MediaFileSystemRegistry::GetPreferences(
   return MediaGalleriesPreferencesFactory::GetForProfile(profile);
 }
 
-MediaScanManager* MediaFileSystemRegistry::media_scan_manager() {
-  if (!media_scan_manager_)
-    media_scan_manager_.reset(new MediaScanManager);
-  return media_scan_manager_.get();
-}
-
 GalleryWatchManager* MediaFileSystemRegistry::gallery_watch_manager() {
   if (!gallery_watch_manager_)
     gallery_watch_manager_.reset(new GalleryWatchManager);
@@ -724,10 +719,6 @@ class MediaFileSystemRegistry::MediaFileSystemContextImpl
       ImportedMediaGalleryRegistry* registry =
           ImportedMediaGalleryRegistry::GetInstance();
       result = registry->RegisterPicasaFilesystemOnUIThread(fs_name, path);
-    } else if (StorageInfo::IsIPhotoDevice(device_id)) {
-      ImportedMediaGalleryRegistry* registry =
-          ImportedMediaGalleryRegistry::GetInstance();
-      result = registry->RegisterIPhotoFilesystemOnUIThread(fs_name, path);
     } else {
       result = ExternalMountPoints::GetSystemInstance()->RegisterFileSystem(
           fs_name,

@@ -3,13 +3,13 @@
 // found in the LICENSE file.
 
 #include "base/json/json_reader.h"
-#include "base/prefs/pref_value_map.h"
 #include "chrome/browser/extensions/external_policy_loader.h"
 #include "chrome/browser/extensions/policy_handlers.h"
 #include "components/policy/core/browser/policy_error_map.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/core/common/schema.h"
+#include "components/prefs/pref_value_map.h"
 #include "extensions/browser/pref_names.h"
 #include "policy/policy_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -321,9 +321,10 @@ TEST(ExtensionURLPatternListPolicyHandlerTest, ApplyPolicySettings) {
 
 TEST(ExtensionSettingsPolicyHandlerTest, CheckPolicySettings) {
   std::string error;
-  scoped_ptr<base::Value> policy_value = base::JSONReader::ReadAndReturnError(
-      kTestManagementPolicy1,
-      base::JSONParserOptions::JSON_ALLOW_TRAILING_COMMAS, NULL, &error);
+  std::unique_ptr<base::Value> policy_value =
+      base::JSONReader::ReadAndReturnError(
+          kTestManagementPolicy1,
+          base::JSONParserOptions::JSON_ALLOW_TRAILING_COMMAS, NULL, &error);
   ASSERT_TRUE(policy_value.get()) << error;
 
   policy::Schema chrome_schema =
@@ -345,9 +346,10 @@ TEST(ExtensionSettingsPolicyHandlerTest, CheckPolicySettings) {
 
 TEST(ExtensionSettingsPolicyHandlerTest, ApplyPolicySettings) {
   std::string error;
-  scoped_ptr<base::Value> policy_value = base::JSONReader::ReadAndReturnError(
-      kTestManagementPolicy2,
-      base::JSONParserOptions::JSON_ALLOW_TRAILING_COMMAS, NULL, &error);
+  std::unique_ptr<base::Value> policy_value =
+      base::JSONReader::ReadAndReturnError(
+          kTestManagementPolicy2,
+          base::JSONParserOptions::JSON_ALLOW_TRAILING_COMMAS, NULL, &error);
   ASSERT_TRUE(policy_value.get()) << error;
 
   policy::Schema chrome_schema =

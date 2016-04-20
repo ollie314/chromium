@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/macros.h"
 #include "chrome/browser/task_management/providers/task.h"
 #include "components/favicon/core/favicon_driver_observer.h"
@@ -17,7 +19,7 @@ class ProcessResourceUsage;
 namespace content {
 class RenderProcessHost;
 class WebContents;
-} // namespace content
+}  // namespace content
 
 namespace task_management {
 
@@ -54,7 +56,10 @@ class RendererTask : public Task,
                int64_t refresh_flags) override;
   Type GetType() const override;
   int GetChildProcessUniqueID() const override;
+  void GetTerminationStatus(base::TerminationStatus* out_status,
+                            int* out_error_code) const override;
   base::string16 GetProfileName() const override;
+  int GetTabId() const override;
   int64_t GetV8MemoryAllocated() const override;
   int64_t GetV8MemoryUsed() const override;
   bool ReportsWebCacheStats() const override;
@@ -66,6 +71,14 @@ class RendererTask : public Task,
                         const GURL& icon_url,
                         bool icon_url_changed,
                         const gfx::Image& image) override;
+
+  void set_termination_status(base::TerminationStatus status) {
+    termination_status_ = status;
+  }
+
+  void set_termination_error_code(int error_code) {
+    termination_error_code_ = error_code;
+  }
 
  protected:
   // Returns the title of the given |web_contents|.
@@ -98,7 +111,7 @@ class RendererTask : public Task,
   // The Mojo service wrapper that will provide us with the V8 memory usage and
   // the WebCache resource stats of the render process represented by this
   // object.
-  scoped_ptr<ProcessResourceUsage> renderer_resources_sampler_;
+  std::unique_ptr<ProcessResourceUsage> renderer_resources_sampler_;
 
   // The unique ID of the RenderProcessHost.
   const int render_process_id_;
@@ -113,6 +126,9 @@ class RendererTask : public Task,
   // The profile name associated with the browser context of the render view
   // host.
   const base::string16 profile_name_;
+
+  base::TerminationStatus termination_status_;
+  int termination_error_code_;
 
   DISALLOW_COPY_AND_ASSIGN(RendererTask);
 };

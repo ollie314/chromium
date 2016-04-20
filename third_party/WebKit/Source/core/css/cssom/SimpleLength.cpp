@@ -10,18 +10,14 @@
 
 namespace blink {
 
-String SimpleLength::cssString() const
+CSSValue* SimpleLength::toCSSValue() const
 {
-    StringBuilder s;
-    s.appendNumber(m_value);
-    s.append(unit());
-    return s.toString();
+    return cssValuePool().createValue(m_value, m_unit);
 }
 
-PassRefPtrWillBeRawPtr<CSSValue> SimpleLength::toCSSValue() const
+bool SimpleLength::containsPercent() const
 {
-    // TODO: Don't re-parse the unit.
-    return cssValuePool().createValue(m_value, CSSPrimitiveValue::fromName(unit()));
+    return lengthUnit() == CSSPrimitiveValue::UnitType::Percentage;
 }
 
 LengthValue* SimpleLength::addInternal(const LengthValue* other, ExceptionState& exceptionState)

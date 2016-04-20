@@ -5,11 +5,16 @@
 import("//build/config/features.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/ui.gni")
+import("//build/config/win/console_app.gni")
 import("//build/config/win/manifest.gni")
+import("//media/media_options.gni")
+import("//mojo/public/tools/bindings/mojom.gni")
 import("//tools/grit/repack.gni")
 import("//tools/grit/grit_rule.gni")
 if (is_android) {
   import("//build/config/android/config.gni")
+} else if (is_mac) {
+  import("//build/config/mac/rules.gni")
 }
 
 declare_args() {
@@ -32,6 +37,11 @@ static_library("content_shell_lib") {
     "android/shell_jni_registrar.h",
     "android/shell_manager.cc",
     "android/shell_manager.h",
+    "app/blink_test_platform_support.h",
+    "app/blink_test_platform_support_android.cc",
+    "app/blink_test_platform_support_linux.cc",
+    "app/blink_test_platform_support_mac.mm",
+    "app/blink_test_platform_support_win.cc",
     "app/paths_mac.h",
     "app/paths_mac.mm",
     "app/shell_crash_reporter_client.cc",
@@ -40,14 +50,16 @@ static_library("content_shell_lib") {
     "app/shell_main_delegate.h",
     "app/shell_main_delegate_mac.h",
     "app/shell_main_delegate_mac.mm",
-    "browser/blink_test_controller.cc",
-    "browser/blink_test_controller.h",
+    "browser/layout_test/blink_test_controller.cc",
+    "browser/layout_test/blink_test_controller.h",
     "browser/layout_test/layout_test_android.cc",
     "browser/layout_test/layout_test_android.h",
     "browser/layout_test/layout_test_bluetooth_adapter_provider.cc",
     "browser/layout_test/layout_test_bluetooth_adapter_provider.h",
     "browser/layout_test/layout_test_bluetooth_chooser_factory.cc",
     "browser/layout_test/layout_test_bluetooth_chooser_factory.h",
+    "browser/layout_test/layout_test_bluetooth_fake_adapter_setter_impl.cc",
+    "browser/layout_test/layout_test_bluetooth_fake_adapter_setter_impl.h",
     "browser/layout_test/layout_test_browser_context.cc",
     "browser/layout_test/layout_test_browser_context.h",
     "browser/layout_test/layout_test_browser_main.cc",
@@ -64,8 +76,6 @@ static_library("content_shell_lib") {
     "browser/layout_test/layout_test_javascript_dialog_manager.h",
     "browser/layout_test/layout_test_message_filter.cc",
     "browser/layout_test/layout_test_message_filter.h",
-    "browser/layout_test/layout_test_navigator_connect_service_factory.cc",
-    "browser/layout_test/layout_test_navigator_connect_service_factory.h",
     "browser/layout_test/layout_test_notification_manager.cc",
     "browser/layout_test/layout_test_notification_manager.h",
     "browser/layout_test/layout_test_permission_manager.cc",
@@ -76,8 +86,10 @@ static_library("content_shell_lib") {
     "browser/layout_test/layout_test_resource_dispatcher_host_delegate.h",
     "browser/layout_test/layout_test_url_request_context_getter.cc",
     "browser/layout_test/layout_test_url_request_context_getter.h",
-    "browser/notify_done_forwarder.cc",
-    "browser/notify_done_forwarder.h",
+    "browser/layout_test/secondary_test_window_observer.cc",
+    "browser/layout_test/secondary_test_window_observer.h",
+    "browser/layout_test/test_info_extractor.cc",
+    "browser/layout_test/test_info_extractor.h",
     "browser/shell.cc",
     "browser/shell.h",
     "browser/shell_access_token_store.cc",
@@ -134,8 +146,12 @@ static_library("content_shell_lib") {
     "browser/shell_web_contents_view_delegate_creator.h",
     "browser/shell_web_contents_view_delegate_mac.mm",
     "browser/shell_web_contents_view_delegate_win.cc",
+    "common/layout_test/layout_test_content_client.cc",
+    "common/layout_test/layout_test_content_client.h",
     "common/layout_test/layout_test_messages.cc",
     "common/layout_test/layout_test_messages.h",
+    "common/layout_test/layout_test_switches.cc",
+    "common/layout_test/layout_test_switches.h",
     "common/leak_detection_result.h",
     "common/shell_content_client.cc",
     "common/shell_content_client.h",
@@ -153,8 +169,8 @@ static_library("content_shell_lib") {
     "renderer/layout_test/layout_test_content_renderer_client.h",
     "renderer/layout_test/layout_test_render_frame_observer.cc",
     "renderer/layout_test/layout_test_render_frame_observer.h",
-    "renderer/layout_test/layout_test_render_process_observer.cc",
-    "renderer/layout_test/layout_test_render_process_observer.h",
+    "renderer/layout_test/layout_test_render_thread_observer.cc",
+    "renderer/layout_test/layout_test_render_thread_observer.h",
     "renderer/layout_test/leak_detector.cc",
     "renderer/layout_test/leak_detector.h",
     "renderer/layout_test/test_media_stream_renderer_factory.cc",
@@ -175,6 +191,8 @@ static_library("content_shell_lib") {
 
     # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
     "//build/config/compiler:no_size_t_to_int_warning",
+
+    "//third_party/WebKit/public:debug_devtools",
   ]
 
   defines = [ "CONTENT_SHELL_VERSION=\"$content_shell_version\"" ]
@@ -184,15 +202,14 @@ static_library("content_shell_lib") {
     "//content/public/app:both",
     "//content/public/browser",
     "//content/public/common",
-    "//content/public/plugin",
     "//content/public/renderer",
     "//content/public/utility",
   ]
   deps = [
+    ":mojo_bindings",
     ":resources",
     "//base",
     "//base:base_static",
-    "//base/allocator",
     "//base/third_party/dynamic_annotations",
     "//cc",
     "//components/crash/content/app:app_breakpad_mac_win_to_be_deleted",
@@ -207,12 +224,14 @@ static_library("content_shell_lib") {
     "//content/app/strings",
     "//content/gpu",
     "//content/test:layouttest_support",
+    "//content/test:test_support",
     "//device/bluetooth",
     "//device/bluetooth:mocks",
     "//gin",
     "//gpu",
     "//ipc",
     "//media",
+    "//media/mojo/services:application_factory",
     "//net",
     "//net:net_resources",
     "//skia",
@@ -230,17 +249,21 @@ static_library("content_shell_lib") {
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/gfx/ipc",
+    "//ui/gfx/ipc/skia",
     "//ui/gl",
     "//url",
     "//v8",
-
-    #'copy_test_netscape_plugin',  TODO(GYP)
   ]
   if (enable_plugins) {
     deps += [
       "//content/ppapi_plugin",
+      "//ppapi:blink_deprecated_test_plugin",
       "//ppapi:blink_test_plugin",
+      "//ppapi/shared_impl",
     ]
+  }
+  if (mojo_media_host == "browser") {
+    deps += [ "//media/mojo/services:application_factory" ]
   }
 
   if (is_win) {
@@ -252,7 +275,10 @@ static_library("content_shell_lib") {
   }
 
   if (is_linux) {
-    deps += [ "//build/linux:fontconfig" ]
+    deps += [
+      "//build/linux:fontconfig",
+      "//ui/gfx:test_support",
+    ]
   }
 
   if (use_x11) {
@@ -267,11 +293,13 @@ static_library("content_shell_lib") {
 
   if (is_android) {
     deps += [ "//content/shell/android:content_shell_jni_headers" ]
-    #deps -= [ "copy_test_netscape_plugin" ]  TODO(GYP)
   }
 
   if (is_posix && !is_mac) {
-    deps += [ "//components/crash/content/browser" ]
+    deps += [
+      "//components/crash/content/app",
+      "//components/crash/content/browser",
+    ]
   }
 
   if (use_aura) {
@@ -290,6 +318,7 @@ static_library("content_shell_lib") {
         "//ui/views",
         "//ui/views:test_support",
         "//ui/views/controls/webview",
+        "//ui/wm:test_support",
       ]
     } else {
       sources += [ "browser/shell_aura.cc" ]
@@ -301,11 +330,6 @@ static_library("content_shell_lib") {
     ]
   }
 
-  # The test plugin relies on X11.
-  if (is_linux && !use_x11) {
-    #deps -= [ 'copy_test_netscape_plugin' ]  TODO(GYP)
-  }
-
   if (is_chromeos) {
     deps += [
       "//chromeos",
@@ -313,7 +337,7 @@ static_library("content_shell_lib") {
     ]
   }
 
-  if (is_linux && !is_chromecast) {
+  if (is_linux) {
     deps += [ "//third_party/freetype2" ]
   }
 
@@ -326,6 +350,7 @@ static_library("content_shell_lib") {
 }
 
 grit("content_shell_resources_grit") {
+  # External code should depend on ":resources" instead.
   visibility = [ ":*" ]
   source = "shell_resources.grd"
   outputs = [
@@ -396,9 +421,21 @@ repack("pak") {
   output = "$root_out_dir/content_shell.pak"
 }
 
-# TODO(GYP): Figure out what this should be on android
-# and make linking this work on the Mac.
-if (!is_android && !is_mac) {
+if (is_android) {
+  group("content_shell") {
+    testonly = true
+    deps = [
+      "//content/shell/android:content_shell_apk",
+    ]
+  }
+} else if (is_mac) {
+  group("content_shell") {
+    testonly = true
+    deps = [
+      ":content_shell_lib",
+    ]
+  }
+} else {
   # TODO(brettw) when GYP is no longer necessary, delete
   # content/shell/app/shell.exe.manifest. This file is not used in GN.
   executable("content_shell") {
@@ -412,17 +449,21 @@ if (!is_android && !is_mac) {
       "app/shell_main.cc",
     ]
 
+    defines = []
+
     deps = [
       ":content_shell_lib",
       ":pak",
-      "//base/allocator",
       "//build/config/sanitizers:deps",
       "//build/win:default_exe_manifest",
     ]
 
     if (is_win) {
       deps += [ "//sandbox" ]
-      if (!is_asan) {
+      if (win_console_app) {
+        defines += [ "WIN_CONSOLE_APP" ]
+      } else {
+        # Set /SUBSYSTEM:WINDOWS unless a console build has been requested.
         configs -= [ "//build/config/win:console" ]
         configs += [ "//build/config/win:windowed" ]
       }
@@ -437,20 +478,10 @@ if (!is_android && !is_mac) {
       ]
     }
 
-    if (is_android) {
-      # Some tests rely on this tool. It might be nicer if these tests relied on
-      # image diff rather than having content shell depend on it.
-      data_deps = [
-        "//tools/imagediff($host_toolchain)",
-      ]
+    if (is_linux && !is_component_build) {
+      # Set rpath to find our own libfreetype even in a non-component build.
+      configs += [ "//build/config/gcc:rpath_for_built_shared_libraries" ]
     }
-  }
-} else {
-  group("content_shell") {
-    testonly = true
-    deps = [
-      ":content_shell_lib",
-    ]
   }
 }
 
@@ -491,4 +522,22 @@ if (is_mac) {
       ":content_shell_lib",
     ]
   }
+
+  mac_app_bundle("content_shell_helper_app") {
+    testonly = true
+    output_name = "$content_shell_product_name Helper"
+    sources = [
+      "app/shell_main.cc",
+    ]
+    deps = [
+      ":framework",
+    ]
+    info_plist = "app/helper-Info.plist"
+  }
+}
+
+mojom("mojo_bindings") {
+  sources = [
+    "common/layout_test/layout_test_bluetooth_fake_adapter_setter.mojom",
+  ]
 }

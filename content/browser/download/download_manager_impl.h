@@ -7,16 +7,15 @@
 
 #include <stdint.h>
 
-#include <map>
+#include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/sequenced_task_runner_helpers.h"
@@ -42,7 +41,7 @@ class DownloadRequestHandleInterface;
 class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
                                            private DownloadItemImplDelegate {
  public:
-  typedef base::Callback<void(DownloadItemImpl*)> DownloadItemImplCreated;
+  using DownloadItemImplCreated = base::Callback<void(DownloadItemImpl*)>;
 
   // Caller guarantees that |net_log| will remain valid
   // for the lifetime of DownloadManagerImpl (until Shutdown() is called).
@@ -58,7 +57,7 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
       const base::FilePath& main_file_path,
       const GURL& page_url,
       const std::string& mime_type,
-      scoped_ptr<DownloadRequestHandleInterface> request_handle,
+      std::unique_ptr<DownloadRequestHandleInterface> request_handle,
       const DownloadItemImplCreated& item_created);
 
   // Notifies DownloadManager about a successful completion of |download_item|.
@@ -70,26 +69,27 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
   void Shutdown() override;
   void GetAllDownloads(DownloadVector* result) override;
   void StartDownload(
-      scoped_ptr<DownloadCreateInfo> info,
-      scoped_ptr<ByteStreamReader> stream,
+      std::unique_ptr<DownloadCreateInfo> info,
+      std::unique_ptr<ByteStreamReader> stream,
       const DownloadUrlParameters::OnStartedCallback& on_started) override;
 
-  int RemoveDownloadsByOriginAndTime(const url::Origin& origin,
-                                     base::Time remove_begin,
-                                     base::Time remove_end) override;
-  int RemoveDownloadsBetween(base::Time remove_begin,
-                             base::Time remove_end) override;
-  int RemoveDownloads(base::Time remove_begin) override;
+  int RemoveDownloadsByURLAndTime(
+      const base::Callback<bool(const GURL&)>& url_filter,
+      base::Time remove_begin,
+      base::Time remove_end) override;
   int RemoveAllDownloads() override;
-  void DownloadUrl(scoped_ptr<DownloadUrlParameters> params) override;
+  void DownloadUrl(std::unique_ptr<DownloadUrlParameters> params) override;
   void AddObserver(Observer* observer) override;
   void RemoveObserver(Observer* observer) override;
   content::DownloadItem* CreateDownloadItem(
+      const std::string& guid,
       uint32_t id,
       const base::FilePath& current_path,
       const base::FilePath& target_path,
       const std::vector<GURL>& url_chain,
       const GURL& referrer_url,
+      const GURL& tab_url,
+      const GURL& tab_refererr_url,
       const std::string& mime_type,
       const std::string& original_mime_type,
       const base::Time& start_time,
@@ -98,6 +98,7 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
       const std::string& last_modified,
       int64_t received_bytes,
       int64_t total_bytes,
+      const std::string& hash,
       content::DownloadItem::DownloadState state,
       DownloadDangerType danger_type,
       DownloadInterruptReason interrupt_reason,
@@ -107,29 +108,31 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
   BrowserContext* GetBrowserContext() const override;
   void CheckForHistoryFilesRemoval() override;
   DownloadItem* GetDownload(uint32_t id) override;
+  DownloadItem* GetDownloadByGuid(const std::string& guid) override;
 
   // For testing; specifically, accessed from TestFileErrorInjector.
   void SetDownloadItemFactoryForTesting(
-      scoped_ptr<DownloadItemFactory> item_factory);
+      std::unique_ptr<DownloadItemFactory> item_factory);
   void SetDownloadFileFactoryForTesting(
-      scoped_ptr<DownloadFileFactory> file_factory);
+      std::unique_ptr<DownloadFileFactory> file_factory);
   virtual DownloadFileFactory* GetDownloadFileFactoryForTesting();
 
   void RemoveUrlDownloader(UrlDownloader* downloader);
 
  private:
-  typedef std::set<DownloadItem*> DownloadSet;
-  typedef base::hash_map<uint32_t, DownloadItemImpl*> DownloadMap;
-  typedef std::vector<DownloadItemImpl*> DownloadItemImplVector;
-  typedef base::Callback<bool(const DownloadItemImpl*)> DownloadRemover;
+  using DownloadSet = std::set<DownloadItem*>;
+  using DownloadMap = std::unordered_map<uint32_t, DownloadItemImpl*>;
+  using DownloadGuidMap = std::unordered_map<std::string, DownloadItemImpl*>;
+  using DownloadItemImplVector = std::vector<DownloadItemImpl*>;
+  using DownloadRemover = base::Callback<bool(const DownloadItemImpl*)>;
 
   // For testing.
   friend class DownloadManagerTest;
   friend class DownloadTest;
 
   void StartDownloadWithId(
-      scoped_ptr<DownloadCreateInfo> info,
-      scoped_ptr<ByteStreamReader> stream,
+      std::unique_ptr<DownloadCreateInfo> info,
+      std::unique_ptr<ByteStreamReader> stream,
       const DownloadUrlParameters::OnStartedCallback& on_started,
       bool new_download,
       uint32_t id);
@@ -138,7 +141,7 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
       const base::FilePath& main_file_path,
       const GURL& page_url,
       const std::string& mime_type,
-      scoped_ptr<DownloadRequestHandleInterface> request_handle,
+      std::unique_ptr<DownloadRequestHandleInterface> request_handle,
       const DownloadItemImplCreated& on_started,
       uint32_t id);
 
@@ -170,28 +173,35 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
                           const ShouldOpenDownloadCallback& callback) override;
   void CheckForFileRemoval(DownloadItemImpl* download_item) override;
   void ResumeInterruptedDownload(
-      scoped_ptr<content::DownloadUrlParameters> params,
+      std::unique_ptr<content::DownloadUrlParameters> params,
       uint32_t id) override;
   void OpenDownload(DownloadItemImpl* download) override;
   void ShowDownloadInShell(DownloadItemImpl* download) override;
   void DownloadRemoved(DownloadItemImpl* download) override;
 
   void AddUrlDownloader(
-      scoped_ptr<UrlDownloader, BrowserThread::DeleteOnIOThread> downloader);
+      std::unique_ptr<UrlDownloader, BrowserThread::DeleteOnIOThread>
+          downloader);
 
   // Factory for creation of downloads items.
-  scoped_ptr<DownloadItemFactory> item_factory_;
+  std::unique_ptr<DownloadItemFactory> item_factory_;
 
   // Factory for the creation of download files.
-  scoped_ptr<DownloadFileFactory> file_factory_;
+  std::unique_ptr<DownloadFileFactory> file_factory_;
 
   // |downloads_| is the owning set for all downloads known to the
   // DownloadManager.  This includes downloads started by the user in
   // this session, downloads initialized from the history system, and
   // "save page as" downloads.
+  // TODO(asanka): Remove this container in favor of downloads_by_guid_ as a
+  // part of http://crbug.com/593020.
   DownloadMap downloads_;
 
-  int history_size_;
+  // Same as the above, but maps from GUID to download item. Note that the
+  // container is case sensitive. Hence the key needs to be normalized to
+  // upper-case when inserting new elements here. Fortunately for us,
+  // DownloadItemImpl already normalizes the string GUID.
+  DownloadGuidMap downloads_by_guid_;
 
   // True if the download manager has been initialized and requires a shutdown.
   bool shutdown_needed_;
@@ -207,7 +217,7 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
 
   net::NetLog* net_log_;
 
-  std::vector<scoped_ptr<UrlDownloader, BrowserThread::DeleteOnIOThread>>
+  std::vector<std::unique_ptr<UrlDownloader, BrowserThread::DeleteOnIOThread>>
       url_downloaders_;
 
   base::WeakPtrFactory<DownloadManagerImpl> weak_factory_;

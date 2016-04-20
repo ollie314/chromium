@@ -10,7 +10,7 @@ function test()
     var contentReceived;
     var finalMappedLocation;
     var target = InspectorTest.createWorkspaceWithTarget();
-    var cssModel = WebInspector.CSSStyleModel.fromTarget(target);
+    var cssModel = WebInspector.CSSModel.fromTarget(target);
     WebInspector.cssWorkspaceBinding = InspectorTest.testCSSWorkspaceBinding;
 
     InspectorTest.waitForWorkspaceUISourceCodeAddedEvent(cssUISourceCodeAdded);
@@ -32,7 +32,6 @@ function test()
         join();
     }
 
-
     function createMockStyleSheetHeader(url, sourceMapURL)
     {
         const frame = InspectorTest.resourceTreeModel.mainFrame;
@@ -52,9 +51,9 @@ function test()
         const documentURL = "http://localhost:8000/inspector/stylesheet-source-mapping.html";
         const frame = InspectorTest.resourceTreeModel.mainFrame;
         var resource = new WebInspector.Resource(target, null, url, documentURL, frame.id, frame.loaderId, WebInspector.resourceTypes.Stylesheet, mimeType);
-        resource.requestContent = function(callback)
+        resource.requestContent = function()
         {
-            callback(content, false, mimeType);
+            return Promise.resolve(content);
         }
         return resource;
     }
@@ -66,20 +65,15 @@ function test()
         InspectorTest.waitForWorkspaceUISourceCodeAddedEvent(scssUISourceCodeAdded);
     }
 
-    function scssUISourceCodeAdded(uiSourceCode)
-    {
-        InspectorTest.addResult("Added SCSS uiSourceCode: " + uiSourceCode.url());
-        setImmediate(afterStyleSheetAdded);
-    }
-
     function rawLocationToUILocation(line, column)
     {
         var header = cssModel.styleSheetHeaderForId(styleSheetId);
         return InspectorTest.testCSSWorkspaceBinding.rawLocationToUILocation(new WebInspector.CSSLocation(header, line, column));
     }
 
-    function afterStyleSheetAdded()
+    function scssUISourceCodeAdded(uiSourceCode)
     {
+        InspectorTest.addResult("Added SCSS uiSourceCode: " + uiSourceCode.url());
         var cssUISourceCode = InspectorTest.testWorkspace.uiSourceCodeForURL(styleSheetURL);
         var scssUISourceCode = InspectorTest.testWorkspace.uiSourceCodeForURL("http://localhost:8000/inspector/resources/example.scss");
 
@@ -94,7 +88,7 @@ function test()
         InspectorTest.checkUILocation(scssUISourceCode, 4, 11, rawLocationToUILocation(4, 11));
         InspectorTest.checkUILocation(scssUISourceCode, 4, 13, rawLocationToUILocation(4, 15));
         InspectorTest.checkUILocation(scssUISourceCode, 4, 17, rawLocationToUILocation(4, 20));
-        scssUISourceCode.requestContent(didRequestContent);
+        scssUISourceCode.requestContent().then(didRequestContent);
 
         function didRequestContent(content, contentEncoded, mimeType)
         {

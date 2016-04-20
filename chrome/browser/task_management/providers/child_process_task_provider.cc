@@ -22,11 +22,11 @@ namespace {
 // Collects and returns the child processes data on the IO thread to get all the
 // pre-existing child process before we start observing
 // |BrowserChildProcessObserver|.
-scoped_ptr<std::vector<ChildProcessData>> CollectChildProcessData() {
+std::unique_ptr<std::vector<ChildProcessData>> CollectChildProcessData() {
   // The |BrowserChildProcessHostIterator| must only be used on the IO thread.
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  scoped_ptr<std::vector<ChildProcessData>> child_processes(
+  std::unique_ptr<std::vector<ChildProcessData>> child_processes(
       new std::vector<ChildProcessData>());
   for (BrowserChildProcessHostIterator itr; !itr.Done(); ++itr) {
     const ChildProcessData& process_data = itr.GetData();
@@ -44,9 +44,7 @@ scoped_ptr<std::vector<ChildProcessData>> CollectChildProcessData() {
 }  // namespace
 
 ChildProcessTaskProvider::ChildProcessTaskProvider()
-    : tasks_by_handle_(),
-      tasks_by_pid_(),
-      weak_ptr_factory_(this) {
+    : weak_ptr_factory_(this) {
 }
 
 ChildProcessTaskProvider::~ChildProcessTaskProvider() {
@@ -111,10 +109,11 @@ void ChildProcessTaskProvider::StopUpdating() {
 }
 
 void ChildProcessTaskProvider::ChildProcessDataCollected(
-    scoped_ptr<const std::vector<content::ChildProcessData>> child_processes) {
+    std::unique_ptr<const std::vector<content::ChildProcessData>>
+        child_processes) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  for (auto& process_data : *child_processes)
+  for (const auto& process_data : *child_processes)
     CreateTask(process_data);
 
   // Now start observing.

@@ -110,33 +110,26 @@ class CONTENT_EXPORT DownloadManager : public base::SupportsUserData::Data {
   // Returns the id assigned to the download.  If the DownloadCreateInfo
   // specifies an id, that id will be used.
   virtual void StartDownload(
-      scoped_ptr<DownloadCreateInfo> info,
-      scoped_ptr<ByteStreamReader> stream,
+      std::unique_ptr<DownloadCreateInfo> info,
+      std::unique_ptr<ByteStreamReader> stream,
       const DownloadUrlParameters::OnStartedCallback& on_started) = 0;
 
-  // Remove downloads which are same-origin with the given origin and pertain to
-  // the given time constraints. (See |RemoveDownloadsBetween|.)
-  virtual int RemoveDownloadsByOriginAndTime(const url::Origin& origin,
-                                             base::Time remove_begin,
-                                             base::Time remove_end) = 0;
-
-  // Remove downloads after remove_begin (inclusive) and before remove_end
-  // (exclusive). You may pass in null Time values to do an unbounded delete
-  // in either direction.
-  virtual int RemoveDownloadsBetween(base::Time remove_begin,
-                                     base::Time remove_end) = 0;
-
-  // Remove downloads will delete all downloads that have a timestamp that is
-  // the same or more recent than |remove_begin|. The number of downloads
-  // deleted is returned back to the caller.
-  virtual int RemoveDownloads(base::Time remove_begin) = 0;
+  // Remove downloads whose URLs match the |url_filter| and are within
+  // the given time constraints - after remove_begin (inclusive) and before
+  // remove_end (exclusive). You may pass in null Time values to do an unbounded
+  // delete in either direction.
+  virtual int RemoveDownloadsByURLAndTime(
+      const base::Callback<bool(const GURL&)>& url_filter,
+      base::Time remove_begin,
+      base::Time remove_end) = 0;
 
   // Remove all downloads will delete all downloads. The number of downloads
   // deleted is returned back to the caller.
   virtual int RemoveAllDownloads() = 0;
 
   // See DownloadUrlParameters for details about controlling the download.
-  virtual void DownloadUrl(scoped_ptr<DownloadUrlParameters> parameters) = 0;
+  virtual void DownloadUrl(
+      std::unique_ptr<DownloadUrlParameters> parameters) = 0;
 
   // Allow objects to observe the download creation process.
   virtual void AddObserver(Observer* observer) = 0;
@@ -147,11 +140,14 @@ class CONTENT_EXPORT DownloadManager : public base::SupportsUserData::Data {
   // Called by the embedder, after creating the download manager, to let it know
   // about downloads from previous runs of the browser.
   virtual DownloadItem* CreateDownloadItem(
+      const std::string& guid,
       uint32_t id,
       const base::FilePath& current_path,
       const base::FilePath& target_path,
       const std::vector<GURL>& url_chain,
       const GURL& referrer_url,
+      const GURL& tab_url,
+      const GURL& tab_referrer_url,
       const std::string& mime_type,
       const std::string& original_mime_type,
       const base::Time& start_time,
@@ -160,6 +156,7 @@ class CONTENT_EXPORT DownloadManager : public base::SupportsUserData::Data {
       const std::string& last_modified,
       int64_t received_bytes,
       int64_t total_bytes,
+      const std::string& hash,
       DownloadItem::DownloadState state,
       DownloadDangerType danger_type,
       DownloadInterruptReason interrupt_reason,
@@ -185,7 +182,13 @@ class CONTENT_EXPORT DownloadManager : public base::SupportsUserData::Data {
 
   // Get the download item for |id| if present, no matter what type of download
   // it is or state it's in.
+  // DEPRECATED: Don't add new callers for GetDownload(uint32_t). Instead keep
+  // track of the GUID and use GetDownloadByGuid(), or observe the DownloadItem
+  // if you need to keep track of a specific download. (http://crbug.com/593020)
   virtual DownloadItem* GetDownload(uint32_t id) = 0;
+
+  // Get the download item for |guid|.
+  virtual DownloadItem* GetDownloadByGuid(const std::string& guid) = 0;
 };
 
 }  // namespace content

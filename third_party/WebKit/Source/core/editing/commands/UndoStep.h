@@ -33,13 +33,12 @@
 
 #include "core/editing/commands/EditAction.h"
 #include "platform/heap/Handle.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
 class LocalFrame;
 
-class UndoStep : public RefCountedWillBeGarbageCollectedFinalized<UndoStep> {
+class UndoStep : public GarbageCollectedFinalized<UndoStep> {
 public:
     virtual ~UndoStep() { }
     DEFINE_INLINE_VIRTUAL_TRACE() { }
@@ -50,6 +49,6 @@ public:
     virtual EditAction editingAction() const = 0;
 };
 
-}
+} // namespace blink
 
 #endif

@@ -9,6 +9,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/android/feature_utilities.h"
 #include "chrome/browser/android/hung_renderer_infobar_delegate.h"
 #include "chrome/browser/android/media/media_throttle_infobar_delegate.h"
@@ -18,7 +19,6 @@
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/media_stream_capture_indicator.h"
 #include "chrome/browser/media/protected_media_identifier_permission_context.h"
-#include "chrome/browser/media/protected_media_identifier_permission_context_factory.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -122,13 +122,11 @@ void TabWebContentsDelegateAndroid::RunFileChooser(
   FileSelectHelper::RunFileChooser(web_contents, params);
 }
 
-scoped_ptr<BluetoothChooser>
+std::unique_ptr<BluetoothChooser>
 TabWebContentsDelegateAndroid::RunBluetoothChooser(
-    content::WebContents* web_contents,
-    const BluetoothChooser::EventHandler& event_handler,
-    const GURL& origin) {
-  return make_scoped_ptr(
-      new BluetoothChooserAndroid(web_contents, event_handler, origin));
+    content::RenderFrameHost* frame,
+    const BluetoothChooser::EventHandler& event_handler) {
+  return base::WrapUnique(new BluetoothChooserAndroid(frame, event_handler));
 }
 
 void TabWebContentsDelegateAndroid::CloseContents(
@@ -153,9 +151,9 @@ bool TabWebContentsDelegateAndroid::ShouldFocusLocationBarByDefault(
     GURL url = entry->GetURL();
     GURL virtual_url = entry->GetVirtualURL();
     if ((url.SchemeIs(chrome::kChromeUINativeScheme) &&
-        url.host() == chrome::kChromeUINewTabHost) ||
+        url.host_piece() == chrome::kChromeUINewTabHost) ||
         (virtual_url.SchemeIs(chrome::kChromeUINativeScheme) &&
-        virtual_url.host() == chrome::kChromeUINewTabHost)) {
+        virtual_url.host_piece() == chrome::kChromeUINewTabHost)) {
       return true;
     }
   }
@@ -421,6 +419,15 @@ void TabWebContentsDelegateAndroid::AddNewContents(
     *was_blocked = !handled;
   if (!handled)
     delete new_contents;
+}
+
+void TabWebContentsDelegateAndroid::RequestAppBannerFromDevTools(
+    content::WebContents* web_contents) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
+  if (obj.is_null())
+    return;
+  Java_TabWebContentsDelegateAndroid_requestAppBanner(env, obj.obj());
 }
 
 }  // namespace android

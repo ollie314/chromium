@@ -66,7 +66,7 @@ TEST(SurfaceHittestTest, Hittest_BadCompositorFrameDoesNotCrash) {
   // Creates a root surface.
   gfx::Rect root_rect(300, 300);
   RenderPass* root_pass = nullptr;
-  scoped_ptr<CompositorFrame> root_frame =
+  std::unique_ptr<CompositorFrame> root_frame =
       CreateCompositorFrame(root_rect, &root_pass);
 
   // Add a reference to a non-existant child surface on the root surface.
@@ -107,7 +107,7 @@ TEST(SurfaceHittestTest, Hittest_SingleSurface) {
   // Creates a root surface.
   gfx::Rect root_rect(300, 300);
   RenderPass* root_pass = nullptr;
-  scoped_ptr<CompositorFrame> root_frame =
+  std::unique_ptr<CompositorFrame> root_frame =
       CreateCompositorFrame(root_rect, &root_pass);
 
   // Submit the root frame.
@@ -138,7 +138,7 @@ TEST(SurfaceHittestTest, Hittest_ChildSurface) {
   // Creates a root surface.
   gfx::Rect root_rect(300, 300);
   RenderPass* root_pass = nullptr;
-  scoped_ptr<CompositorFrame> root_frame =
+  std::unique_ptr<CompositorFrame> root_frame =
       CreateCompositorFrame(root_rect, &root_pass);
 
   // Add a reference to the child surface on the root surface.
@@ -163,7 +163,7 @@ TEST(SurfaceHittestTest, Hittest_ChildSurface) {
 
   // Creates a child surface.
   RenderPass* child_pass = nullptr;
-  scoped_ptr<CompositorFrame> child_frame =
+  std::unique_ptr<CompositorFrame> child_frame =
       CreateCompositorFrame(child_rect, &child_pass);
 
   // Add a solid quad in the child surface.
@@ -271,7 +271,7 @@ TEST(SurfaceHittestTest, Hittest_InvalidRenderPassDrawQuad) {
   // Creates a root surface.
   gfx::Rect root_rect(300, 300);
   RenderPass* root_pass = nullptr;
-  scoped_ptr<CompositorFrame> root_frame =
+  std::unique_ptr<CompositorFrame> root_frame =
       CreateCompositorFrame(root_rect, &root_pass);
 
   // Create a RenderPassDrawQuad to a non-existant RenderPass.
@@ -303,7 +303,7 @@ TEST(SurfaceHittestTest, Hittest_InvalidRenderPassDrawQuad) {
 
   // Creates a child surface.
   RenderPass* child_pass = nullptr;
-  scoped_ptr<CompositorFrame> child_frame =
+  std::unique_ptr<CompositorFrame> child_frame =
       CreateCompositorFrame(child_rect, &child_pass);
 
   // Add a solid quad in the child surface.
@@ -392,7 +392,7 @@ TEST(SurfaceHittestTest, Hittest_RenderPassDrawQuad) {
                    &render_pass_list);
 
   RenderPass* root_pass = nullptr;
-  scoped_ptr<CompositorFrame> root_frame =
+  std::unique_ptr<CompositorFrame> root_frame =
       CreateCompositorFrameWithRenderPassList(&render_pass_list);
   root_pass = root_frame->delegated_frame_data->render_pass_list.back().get();
 
@@ -477,7 +477,7 @@ TEST(SurfaceHittestTest, Hittest_SingleSurface_WithInsetsDelegate) {
   // Creates a root surface.
   gfx::Rect root_rect(300, 300);
   RenderPass* root_pass = nullptr;
-  scoped_ptr<CompositorFrame> root_frame =
+  std::unique_ptr<CompositorFrame> root_frame =
       CreateCompositorFrame(root_rect, &root_pass);
 
   // Add a reference to the child surface on the root surface.
@@ -501,14 +501,15 @@ TEST(SurfaceHittestTest, Hittest_SingleSurface_WithInsetsDelegate) {
 
   // Creates a child surface.
   RenderPass* child_pass = nullptr;
-  scoped_ptr<CompositorFrame> child_frame =
+  std::unique_ptr<CompositorFrame> child_frame =
       CreateCompositorFrame(child_rect, &child_pass);
 
   // Add a solid quad in the child surface.
-  gfx::Rect child_solid_quad_rect(200, 200);
+  gfx::Rect child_solid_quad_rect(190, 190);
   CreateSolidColorDrawQuad(
       child_pass,
-      gfx::Transform(),
+      gfx::Transform(1.0f, 0.0f, 0.0f, 5.0f, 0.0f, 1.0f, 0.0f, 5.0f, 0.0f, 0.0f,
+                     1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f),
       root_rect, child_solid_quad_rect);
 
   // Submit the frame.
@@ -517,78 +518,81 @@ TEST(SurfaceHittestTest, Hittest_SingleSurface_WithInsetsDelegate) {
                                 SurfaceFactory::DrawCallback());
 
   TestCase test_expectations_without_insets[] = {
-    {
-      root_surface_id,
-      gfx::Point(50, 50),
-      child_surface_id,
-      gfx::Point(0, 0)
-    },
-    {
-      root_surface_id,
-      gfx::Point(60, 60),
-      child_surface_id,
-      gfx::Point(10, 10)
-    },
-    {
-      root_surface_id,
-      gfx::Point(239, 239),
-      child_surface_id,
-      gfx::Point(189, 189)
-    },
-    {
-      root_surface_id,
-      gfx::Point(249, 249),
-      child_surface_id,
-      gfx::Point(199, 199)
-    },
+      {root_surface_id, gfx::Point(55, 55), child_surface_id, gfx::Point(5, 5)},
+      {root_surface_id, gfx::Point(60, 60), child_surface_id,
+       gfx::Point(10, 10)},
+      {root_surface_id, gfx::Point(239, 239), child_surface_id,
+       gfx::Point(189, 189)},
+      {root_surface_id, gfx::Point(244, 244), child_surface_id,
+       gfx::Point(194, 194)},
+      {root_surface_id, gfx::Point(50, 50), root_surface_id,
+       gfx::Point(50, 50)},
+      {root_surface_id, gfx::Point(249, 249), root_surface_id,
+       gfx::Point(249, 249)},
   };
 
-  TestSurfaceHittestDelegate delegate;
-  RunTests(&delegate, &manager, test_expectations_without_insets,
+  TestSurfaceHittestDelegate empty_delegate;
+  RunTests(&empty_delegate, &manager, test_expectations_without_insets,
            arraysize(test_expectations_without_insets));
 
   // Verify that insets have NOT affected hit targeting.
-  EXPECT_EQ(0, delegate.target_overrides());
+  EXPECT_EQ(0, empty_delegate.reject_target_overrides());
+  EXPECT_EQ(0, empty_delegate.accept_target_overrides());
 
-  delegate.AddInsetsForSurface(child_surface_id, gfx::Insets(10, 10, 10, 10));
-
-  TestCase test_expectations_with_insets[] = {
-    // Point (50, 50) falls outside the child surface due to the insets
-    // introduced above.
-    {
-      root_surface_id,
-      gfx::Point(50, 50),
-      root_surface_id,
-      gfx::Point(50, 50)
-    },
-    // These two points still fall within the child surface.
-    {
-      root_surface_id,
-      gfx::Point(60, 60),
-      child_surface_id,
-      gfx::Point(10, 10)
-    },
-    {
-      root_surface_id,
-      gfx::Point(239, 239),
-      child_surface_id,
-      gfx::Point(189, 189)
-    },
-    // Point (249, 249) falls outside the child surface due to the insets
-    // introduced above.
-    {
-      root_surface_id,
-      gfx::Point(249, 249),
-      root_surface_id,
-      gfx::Point(249, 249)
-    },
+  TestCase test_expectations_with_reject_insets[] = {
+      // Point (55, 55) falls outside the child surface due to the insets
+      // introduced above.
+      {root_surface_id, gfx::Point(55, 55), root_surface_id,
+       gfx::Point(55, 55)},
+      // These two points still fall within the child surface.
+      {root_surface_id, gfx::Point(60, 60), child_surface_id,
+       gfx::Point(10, 10)},
+      {root_surface_id, gfx::Point(239, 239), child_surface_id,
+       gfx::Point(189, 189)},
+      // Point (244, 244) falls outside the child surface due to the insets
+      // introduced above.
+      {root_surface_id, gfx::Point(244, 244), root_surface_id,
+       gfx::Point(244, 244)},
+      // Next two points also fall within within the insets indroduced above.
+      {root_surface_id, gfx::Point(50, 50), root_surface_id,
+       gfx::Point(50, 50)},
+      {root_surface_id, gfx::Point(249, 249), root_surface_id,
+       gfx::Point(249, 249)},
   };
 
-  RunTests(&delegate, &manager, test_expectations_with_insets,
-           arraysize(test_expectations_with_insets));
+  TestSurfaceHittestDelegate reject_delegate;
+  reject_delegate.AddInsetsForRejectSurface(child_surface_id,
+                                            gfx::Insets(10, 10, 10, 10));
+  RunTests(&reject_delegate, &manager, test_expectations_with_reject_insets,
+           arraysize(test_expectations_with_reject_insets));
 
   // Verify that insets have affected hit targeting.
-  EXPECT_EQ(2, delegate.target_overrides());
+  EXPECT_EQ(4, reject_delegate.reject_target_overrides());
+  EXPECT_EQ(0, reject_delegate.accept_target_overrides());
+
+  TestCase test_expectations_with_accept_insets[] = {
+      {root_surface_id, gfx::Point(55, 55), child_surface_id, gfx::Point(5, 5)},
+      {root_surface_id, gfx::Point(60, 60), child_surface_id,
+       gfx::Point(10, 10)},
+      {root_surface_id, gfx::Point(239, 239), child_surface_id,
+       gfx::Point(189, 189)},
+      {root_surface_id, gfx::Point(244, 244), child_surface_id,
+       gfx::Point(194, 194)},
+      // Next two points fall within within the insets indroduced above.
+      {root_surface_id, gfx::Point(50, 50), child_surface_id, gfx::Point(0, 0)},
+      {root_surface_id, gfx::Point(249, 249), child_surface_id,
+       gfx::Point(199, 199)},
+  };
+
+  TestSurfaceHittestDelegate accept_delegate;
+  accept_delegate.AddInsetsForAcceptSurface(child_surface_id,
+                                            gfx::Insets(5, 5, 5, 5));
+  RunTests(&accept_delegate, &manager, test_expectations_with_accept_insets,
+           arraysize(test_expectations_with_accept_insets));
+
+  // Verify that insets have affected hit targeting.
+  EXPECT_EQ(0, accept_delegate.reject_target_overrides());
+  EXPECT_EQ(2, accept_delegate.accept_target_overrides());
 
   factory.Destroy(root_surface_id);
 }

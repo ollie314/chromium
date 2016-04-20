@@ -7,6 +7,7 @@
 
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/favicon/favicon_utils.h"
@@ -62,13 +63,13 @@ bool ChromeWebViewGuestDelegate::HandleContextMenu(
 
   // Pass it to embedder.
   int request_id = ++pending_context_menu_request_id_;
-  scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
-  scoped_ptr<base::ListValue> items =
+  std::unique_ptr<base::DictionaryValue> args(new base::DictionaryValue());
+  std::unique_ptr<base::ListValue> items =
       MenuModelToValue(pending_menu_->menu_model());
   args->Set(webview::kContextMenuItems, items.release());
   args->SetInteger(webview::kRequestId, request_id);
-  web_view_guest()->DispatchEventToView(
-      new GuestViewEvent(webview::kEventContextMenuShow, std::move(args)));
+  web_view_guest()->DispatchEventToView(base::WrapUnique(
+      new GuestViewEvent(webview::kEventContextMenuShow, std::move(args))));
   return true;
 }
 
@@ -84,9 +85,9 @@ void ChromeWebViewGuestDelegate::OnDidInitialize() {
 }
 
 // static
-scoped_ptr<base::ListValue> ChromeWebViewGuestDelegate::MenuModelToValue(
+std::unique_ptr<base::ListValue> ChromeWebViewGuestDelegate::MenuModelToValue(
     const ui::SimpleMenuModel& menu_model) {
-  scoped_ptr<base::ListValue> items(new base::ListValue());
+  std::unique_ptr<base::ListValue> items(new base::ListValue());
   for (int i = 0; i < menu_model.GetItemCount(); ++i) {
     base::DictionaryValue* item_value = new base::DictionaryValue();
     // TODO(lazyboy): We need to expose some kind of enum equivalent of
@@ -99,10 +100,8 @@ scoped_ptr<base::ListValue> ChromeWebViewGuestDelegate::MenuModelToValue(
   return items;
 }
 
-void ChromeWebViewGuestDelegate::OnShowContextMenu(
-    int request_id,
-    const MenuItemVector* items) {
-  if (!pending_menu_.get())
+void ChromeWebViewGuestDelegate::OnShowContextMenu(int request_id) {
+  if (!pending_menu_)
     return;
 
   // Make sure this was the correct request.
@@ -110,7 +109,6 @@ void ChromeWebViewGuestDelegate::OnShowContextMenu(
     return;
 
   // TODO(lazyboy): Implement.
-  DCHECK(!items);
 
   ContextMenuDelegate* menu_delegate =
       ContextMenuDelegate::FromWebContents(guest_web_contents());

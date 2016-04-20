@@ -9,6 +9,7 @@
 
 #include <map>
 #include <string>
+#include <unordered_set>
 
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
@@ -31,12 +32,18 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityContextManager {
   // that context with |beacon|. Otherwise, does nothing.
   void RouteBeacon(scoped_ptr<DomainReliabilityBeacon> beacon);
 
+  void SetConfig(const GURL& origin,
+                 scoped_ptr<DomainReliabilityConfig> config,
+                 base::TimeDelta max_age);
+  void ClearConfig(const GURL& origin);
+
   // Calls |ClearBeacons| on all contexts added to this manager, but leaves
   // the contexts themselves intact.
   void ClearBeaconsInAllContexts();
 
-  // TODO(ttuttle): Once unit tests test ContextManager directly, they can use
-  // a custom Context::Factory to get the created Context, and this can be void.
+  // TODO(juliatuttle): Once unit tests test ContextManager directly, they can
+  // use a custom Context::Factory to get the created Context, and this can be
+  // void.
   DomainReliabilityContext* AddContextForConfig(
       scoped_ptr<const DomainReliabilityConfig> config);
 
@@ -56,6 +63,11 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityContextManager {
   DomainReliabilityContext::Factory* context_factory_;
   // Owns DomainReliabilityContexts.
   ContextMap contexts_;
+  // Currently, Domain Reliability only allows header-based configuration by
+  // origins that already have baked-in configs. This is the set of origins
+  // that have removed their context (by sending "NEL: max-age=0"), so the
+  // context manager knows they are allowed to set a config again later.
+  std::unordered_set<std::string> removed_contexts_;
 
   DISALLOW_COPY_AND_ASSIGN(DomainReliabilityContextManager);
 };

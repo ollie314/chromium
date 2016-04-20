@@ -32,12 +32,12 @@
 
 namespace blink {
 
-PassRefPtrWillBeRawPtr<CustomElementDefinition> CustomElementDefinition::create(const CustomElementDescriptor& descriptor, PassRefPtrWillBeRawPtr<CustomElementLifecycleCallbacks> callbacks)
+CustomElementDefinition* CustomElementDefinition::create(const CustomElementDescriptor& descriptor, CustomElementLifecycleCallbacks* callbacks)
 {
-    return adoptRefWillBeNoop(new CustomElementDefinition(descriptor, callbacks));
+    return new CustomElementDefinition(descriptor, callbacks);
 }
 
-CustomElementDefinition::CustomElementDefinition(const CustomElementDescriptor& descriptor, PassRefPtrWillBeRawPtr<CustomElementLifecycleCallbacks> callbacks)
+CustomElementDefinition::CustomElementDefinition(const CustomElementDescriptor& descriptor, CustomElementLifecycleCallbacks* callbacks)
     : m_descriptor(descriptor)
     , m_callbacks(callbacks)
 {

@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
+#include "components/safe_browsing_db/util.h"
 
 namespace base {
 class TimeDelta;
@@ -44,7 +45,7 @@ bool ParseUpdate(const char* chunk_data,
 // results should be discarded.
 bool ParseChunk(const char* chunk_data,
                 size_t chunk_len,
-                std::vector<scoped_ptr<SBChunkData>>* chunks);
+                std::vector<std::unique_ptr<SBChunkData>>* chunks);
 
 // Parse body of "HTTP Response for Full-Length Hashes", returning the list of
 // full hashes.  Returns |false| if the data could not be parsed correctly, in

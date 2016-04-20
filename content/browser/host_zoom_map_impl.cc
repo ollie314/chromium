@@ -24,7 +24,7 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/url_constants.h"
-#include "net/base/net_util.h"
+#include "net/base/url_util.h"
 
 namespace content {
 
@@ -281,7 +281,7 @@ void HostZoomMapImpl::SetDefaultZoomLevel(double level) {
   default_zoom_level_ = level;
 }
 
-scoped_ptr<HostZoomMap::Subscription>
+std::unique_ptr<HostZoomMap::Subscription>
 HostZoomMapImpl::AddZoomLevelChangedCallback(
     const ZoomLevelChangedCallback& callback) {
   return zoom_level_changed_callbacks_.Add(callback);

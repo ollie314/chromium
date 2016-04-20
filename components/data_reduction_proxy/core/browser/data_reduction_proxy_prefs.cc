@@ -4,11 +4,13 @@
 
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
 
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
+#include <memory>
+
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 
 namespace {
 
@@ -17,7 +19,8 @@ void TransferPrefList(const char* pref_path,
                       PrefService* dest) {
   DCHECK(src->FindPreference(pref_path)->GetType() == base::Value::TYPE_LIST);
   ListPrefUpdate update_dest(dest, pref_path);
-  scoped_ptr<base::ListValue> src_list(src->GetList(pref_path)->DeepCopy());
+  std::unique_ptr<base::ListValue> src_list(
+      src->GetList(pref_path)->DeepCopy());
   update_dest->Swap(src_list.get());
   ListPrefUpdate update_src(src, pref_path);
   src->ClearPref(pref_path);
@@ -39,8 +42,6 @@ void RegisterSyncableProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterInt64Pref(prefs::kHttpOriginalContentLength, 0);
 
   registry->RegisterBooleanPref(prefs::kStatisticsPrefsMigrated, false);
-  registry->RegisterBooleanPref(prefs::kUpdateDailyReceivedContentLengths,
-                                false);
   registry->RegisterListPref(prefs::kDailyHttpOriginalContentLength);
   registry->RegisterInt64Pref(prefs::kDailyHttpOriginalContentLengthApplication,
                               0L);
@@ -140,8 +141,6 @@ void RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterInt64Pref(prefs::kDailyHttpReceivedContentLengthVideo, 0L);
   registry->RegisterInt64Pref(prefs::kDailyHttpReceivedContentLengthUnknown,
                               0L);
-  registry->RegisterBooleanPref(prefs::kUpdateDailyReceivedContentLengths,
-                                false);
   registry->RegisterListPref(
       prefs::kDailyOriginalContentLengthWithDataReductionProxyEnabled);
   registry->RegisterInt64Pref(

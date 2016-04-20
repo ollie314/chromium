@@ -27,17 +27,10 @@
 #include "content/common/set_process_title.h"
 #include "content/public/common/content_switches.h"
 #include "ppapi/c/trusted/ppb_browser_font_trusted.h"
-#include "third_party/WebKit/public/platform/linux/WebFontInfo.h"
-#include "third_party/WebKit/public/web/WebKit.h"
-#include "third_party/npapi/bindings/npapi_extensions.h"
 #include "third_party/skia/include/ports/SkFontConfigInterface.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/font_fallback_linux.h"
 #include "ui/gfx/font_render_params.h"
-
-using blink::WebCString;
-using blink::WebFontInfo;
-using blink::WebUChar;
-using blink::WebUChar32;
 
 namespace content {
 
@@ -167,12 +160,12 @@ void SandboxIPCHandler::HandleRequestFromRenderer(int fd) {
 }
 
 int SandboxIPCHandler::FindOrAddPath(const SkString& path) {
-  int count = paths_.count();
+  int count = paths_.size();
   for (int i = 0; i < count; ++i) {
-    if (path == *paths_[i])
+    if (path == paths_[i])
       return i;
   }
-  *paths_.append() = new SkString(path);
+  paths_.emplace_back(path);
   return count;
 }
 
@@ -180,19 +173,20 @@ void SandboxIPCHandler::HandleFontMatchRequest(
     int fd,
     base::PickleIterator iter,
     const std::vector<base::ScopedFD>& fds) {
-  uint32_t requested_style;
+  SkFontStyle requested_style;
   std::string family;
-  if (!iter.ReadString(&family) || !iter.ReadUInt32(&requested_style))
+  if (!iter.ReadString(&family) ||
+      !skia::ReadSkFontStyle(&iter, &requested_style))
     return;
 
   SkFontConfigInterface::FontIdentity result_identity;
   SkString result_family;
-  SkTypeface::Style result_style;
+  SkFontStyle result_style;
   SkFontConfigInterface* fc =
       SkFontConfigInterface::GetSingletonDirectInterface();
   const bool r =
       fc->matchFamilyName(family.c_str(),
-                          static_cast<SkTypeface::Style>(requested_style),
+                          requested_style,
                           &result_identity,
                           &result_family,
                           &result_style);
@@ -209,7 +203,7 @@ void SandboxIPCHandler::HandleFontMatchRequest(
     reply.WriteBool(true);
     skia::WriteSkString(&reply, result_family);
     skia::WriteSkFontIdentity(&reply, result_identity);
-    reply.WriteUInt32(result_style);
+    skia::WriteSkFontStyle(&reply, result_style);
   }
   SendRendererReply(fds, reply, -1);
 }
@@ -221,9 +215,9 @@ void SandboxIPCHandler::HandleFontOpenRequest(
   uint32_t index;
   if (!iter.ReadUInt32(&index))
     return;
-  if (index >= static_cast<uint32_t>(paths_.count()))
+  if (index >= static_cast<uint32_t>(paths_.size()))
     return;
-  const int result_fd = open(paths_[index]->c_str(), O_RDONLY);
+  const int result_fd = open(paths_[index].c_str(), O_RDONLY);
 
   base::Pickle reply;
   if (result_fd == -1) {
@@ -249,8 +243,7 @@ void SandboxIPCHandler::HandleGetFallbackFontForChar(
   // The other side of this call is
   // content/common/child_process_sandbox_support_impl_linux.cc
 
-  EnsureWebKitInitialized();
-  WebUChar32 c;
+  UChar32 c;
   if (!iter.ReadInt(&c))
     return;
 
@@ -258,27 +251,17 @@ void SandboxIPCHandler::HandleGetFallbackFontForChar(
   if (!iter.ReadString(&preferred_locale))
     return;
 
-  blink::WebFallbackFont fallbackFont;
-  WebFontInfo::fallbackFontForChar(c, preferred_locale.c_str(), &fallbackFont);
-
-  int pathIndex = FindOrAddPath(SkString(fallbackFont.filename.data()));
-  fallbackFont.fontconfigInterfaceId = pathIndex;
+  auto fallback_font = gfx::GetFallbackFontForChar(c, preferred_locale);
+  int fontconfig_interface_id =
+      FindOrAddPath(SkString(fallback_font.filename.data()));
 
   base::Pickle reply;
-  if (fallbackFont.name.data()) {
-    reply.WriteString(fallbackFont.name.data());
-  } else {
-    reply.WriteString(std::string());
-  }
-  if (fallbackFont.filename.data()) {
-    reply.WriteString(fallbackFont.filename.data());
-  } else {
-    reply.WriteString(std::string());
-  }
-  reply.WriteInt(fallbackFont.fontconfigInterfaceId);
-  reply.WriteInt(fallbackFont.ttcIndex);
-  reply.WriteBool(fallbackFont.isBold);
-  reply.WriteBool(fallbackFont.isItalic);
+  reply.WriteString(fallback_font.name);
+  reply.WriteString(fallback_font.filename);
+  reply.WriteInt(fontconfig_interface_id);
+  reply.WriteInt(fallback_font.ttc_index);
+  reply.WriteBool(fallback_font.is_bold);
+  reply.WriteBool(fallback_font.is_italic);
   SendRendererReply(fds, reply, -1);
 }
 
@@ -296,8 +279,6 @@ void SandboxIPCHandler::HandleGetStyleForStrike(
       !iter.ReadUInt16(&pixel_size)) {
     return;
   }
-
-  EnsureWebKitInitialized();
 
   gfx::FontRenderParamsQuery query;
   query.families.push_back(family);
@@ -434,21 +415,10 @@ void SandboxIPCHandler::SendRendererReply(
 }
 
 SandboxIPCHandler::~SandboxIPCHandler() {
-  paths_.deleteAll();
-  if (blink_platform_impl_)
-    blink::shutdownWithoutV8();
-
   if (IGNORE_EINTR(close(lifeline_fd_)) < 0)
     PLOG(ERROR) << "close";
   if (IGNORE_EINTR(close(browser_socket_)) < 0)
     PLOG(ERROR) << "close";
-}
-
-void SandboxIPCHandler::EnsureWebKitInitialized() {
-  if (blink_platform_impl_)
-    return;
-  blink_platform_impl_.reset(new BlinkPlatformImpl);
-  blink::initializeWithoutV8(blink_platform_impl_.get());
 }
 
 }  // namespace content

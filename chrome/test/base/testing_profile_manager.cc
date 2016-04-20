@@ -10,6 +10,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
@@ -59,7 +60,7 @@ bool TestingProfileManager::SetUp() {
 
 TestingProfile* TestingProfileManager::CreateTestingProfile(
     const std::string& profile_name,
-    scoped_ptr<syncable_prefs::PrefServiceSyncable> prefs,
+    std::unique_ptr<syncable_prefs::PrefServiceSyncable> prefs,
     const base::string16& user_name,
     int avatar_id,
     const std::string& supervised_user_id,
@@ -86,6 +87,7 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
   builder.SetPath(profile_path);
   builder.SetPrefService(std::move(prefs));
   builder.SetSupervisedUserId(supervised_user_id);
+  builder.SetProfileName(profile_name);
 
   for (TestingProfile::TestingFactories::const_iterator it = factories.begin();
        it != factories.end(); ++it) {
@@ -93,7 +95,6 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
   }
 
   TestingProfile* profile = builder.Build().release();
-  profile->set_profile_name(profile_name);
   profile_manager_->AddProfile(profile);  // Takes ownership.
 
   // Update the user metadata.
@@ -113,10 +114,10 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
 TestingProfile* TestingProfileManager::CreateTestingProfile(
     const std::string& name) {
   DCHECK(called_set_up_);
-  return CreateTestingProfile(name,
-                              scoped_ptr<syncable_prefs::PrefServiceSyncable>(),
-                              base::UTF8ToUTF16(name), 0, std::string(),
-                              TestingProfile::TestingFactories());
+  return CreateTestingProfile(
+      name, std::unique_ptr<syncable_prefs::PrefServiceSyncable>(),
+      base::UTF8ToUTF16(name), 0, std::string(),
+      TestingProfile::TestingFactories());
 }
 
 TestingProfile* TestingProfileManager::CreateGuestProfile() {
@@ -215,7 +216,7 @@ void TestingProfileManager::SetLoggedIn(bool logged_in) {
 }
 
 void TestingProfileManager::UpdateLastUser(Profile* last_active) {
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
   profile_manager_->UpdateLastUser(last_active);
 #endif
 }
@@ -233,6 +234,10 @@ ProfileManager* TestingProfileManager::profile_manager() {
 ProfileInfoCache* TestingProfileManager::profile_info_cache() {
   DCHECK(called_set_up_);
   return &profile_manager_->GetProfileInfoCache();
+}
+
+ProfileAttributesStorage* TestingProfileManager::profile_attributes_storage() {
+  return profile_info_cache();
 }
 
 void TestingProfileManager::SetUpInternal() {

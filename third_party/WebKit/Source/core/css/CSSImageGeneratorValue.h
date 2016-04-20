@@ -37,6 +37,7 @@ namespace blink {
 class Document;
 class Image;
 class LayoutObject;
+class FloatSize;
 
 struct SizeAndCount {
     DISALLOW_NEW();
@@ -58,17 +59,17 @@ public:
 
     void addClient(const LayoutObject*, const IntSize&);
     void removeClient(const LayoutObject*);
-    PassRefPtr<Image> image(const LayoutObject*, const IntSize&);
+    PassRefPtr<Image> image(const LayoutObject&, const IntSize&);
 
     bool isFixedSize() const;
-    IntSize fixedSize(const LayoutObject*);
+    IntSize fixedSize(const LayoutObject&, const FloatSize& defaultObjectSize);
 
     bool isPending() const;
-    bool knownToBeOpaque(const LayoutObject*) const;
+    bool knownToBeOpaque(const LayoutObject&) const;
 
     void loadSubimages(Document*);
 
-    PassRefPtrWillBeRawPtr<CSSImageGeneratorValue> valueWithURLsMadeAbsolute();
+    CSSImageGeneratorValue* valueWithURLsMadeAbsolute();
 
     DEFINE_INLINE_TRACE_AFTER_DISPATCH() { CSSValue::traceAfterDispatch(visitor); }
 
@@ -83,12 +84,10 @@ protected:
     LayoutObjectSizeCountMap m_clients; // A map from LayoutObjects (with entry count) to image sizes.
     HashMap<IntSize, RefPtr<Image>> m_images; // A cache of Image objects by image size.
 
-#if ENABLE(OILPAN)
-    // FIXME: Oilpan: when/if we can make the layoutObject point directly to the CSSImageGenerator value using
+    // TODO(Oilpan): when/if we can make the layoutObject point directly to the CSSImageGenerator value using
     // a member we don't need to have this hack where we keep a persistent to the instance as long as
     // there are clients in the LayoutObjectSizeCountMap.
     SelfKeepAlive<CSSImageGeneratorValue> m_keepAlive;
-#endif
 };
 
 DEFINE_CSS_VALUE_TYPE_CASTS(CSSImageGeneratorValue, isImageGeneratorValue());

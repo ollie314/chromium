@@ -8,6 +8,7 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/content_settings/core/browser/plugins_field_trial.h"
+#include "components/strings/grit/components_strings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -112,6 +113,9 @@ const PermissionsUIInfo kPermissionsUIInfo[] = {
      IDR_BLOCKED_MIDI_SYSEX, IDR_ALLOWED_MIDI_SYSEX},
     {CONTENT_SETTINGS_TYPE_KEYGEN, IDS_WEBSITE_SETTINGS_TYPE_KEYGEN,
      IDR_BLOCKED_KEYGEN, IDR_ALLOWED_KEYGEN},
+    {CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC,
+     IDS_WEBSITE_SETTINGS_TYPE_BACKGROUND_SYNC, IDR_BLOCKED_BACKGROUND_SYNC,
+     IDR_ALLOWED_BACKGROUND_SYNC},
 };
 
 }  // namespace
@@ -129,7 +133,7 @@ WebsiteSettingsUI::PermissionInfo::PermissionInfo()
 
 WebsiteSettingsUI::ChosenObjectInfo::ChosenObjectInfo(
     const WebsiteSettings::ChooserUIInfo& ui_info,
-    scoped_ptr<base::DictionaryValue> object)
+    std::unique_ptr<base::DictionaryValue> object)
     : ui_info(ui_info), object(std::move(object)) {}
 
 WebsiteSettingsUI::ChosenObjectInfo::~ChosenObjectInfo() {}

@@ -101,6 +101,11 @@ WebInspector.Toolbar.prototype = {
         this.appendToolbarItem(new WebInspector.ToolbarSeparator());
     },
 
+    appendSpacer: function()
+    {
+        this.appendToolbarItem(new WebInspector.ToolbarSeparator(true));
+    },
+
     /**
      * @param {string} text
      */
@@ -162,7 +167,7 @@ WebInspector.Toolbar.prototype = {
         if (lastSeparator && lastSeparator !== this._items.peekLast())
             lastSeparator.setVisible(false);
 
-        this.element.classList.toggle("hidden", lastSeparator && lastSeparator.visible() && !nonSeparatorVisible);
+        this.element.classList.toggle("hidden", !!lastSeparator && lastSeparator.visible() && !nonSeparatorVisible);
     }
 }
 
@@ -480,25 +485,18 @@ WebInspector.ToolbarToggle.prototype = {
  */
 WebInspector.Toolbar.createActionButton = function(action, toggledOptions, untoggledOptions)
 {
-    var button = new WebInspector.ToolbarButton(action.title(), action.icon());
+    var button = new WebInspector.ToolbarToggle(action.title(), action.icon());
     button.addEventListener("click", action.execute, action);
     action.addEventListener(WebInspector.Action.Events.Enabled, enabledChanged);
-    action.addEventListener(WebInspector.Action.Events.StateChanged, stateChanged);
-    action.addEventListener(WebInspector.Action.Events.TitleChanged, titleChanged);
+    action.addEventListener(WebInspector.Action.Events.Toggled, toggled);
     /** @type {?WebInspector.LongClickController} */
     var longClickController = null;
     /** @type {?Array<!WebInspector.ToolbarButton>} */
     var longClickButtons = null;
     /** @type {?Element} */
     var longClickGlyph = null;
-    titleChanged();
-    stateChanged();
+    toggled();
     return button;
-
-    function titleChanged()
-    {
-        WebInspector.Tooltip.install(button.element, action.title(), action.id());
-    }
 
     /**
      * @param {!WebInspector.Event} event
@@ -508,17 +506,16 @@ WebInspector.Toolbar.createActionButton = function(action, toggledOptions, untog
         button.setEnabled(/** @type {boolean} */ (event.data));
     }
 
-    function stateChanged()
+    function toggled()
     {
-        button.setState(action.state());
+        button.setToggled(action.toggled());
+        if (action.title())
+            WebInspector.Tooltip.install(button.element, action.title(), action.id());
         updateOptions();
     }
 
     function updateOptions()
     {
-        if (action.statesCount() !== 2)
-            return;
-
         var buttons = action.toggled() ? (toggledOptions || null) : (untoggledOptions || null);
 
         if (buttons && buttons.length) {
@@ -541,7 +538,7 @@ WebInspector.Toolbar.createActionButton = function(action, toggledOptions, untog
     function showOptions()
     {
         var buttons = longClickButtons.slice();
-        var mainButtonClone = new WebInspector.ToolbarButton(action.title(), action.icon());
+        var mainButtonClone = new WebInspector.ToolbarToggle(action.title(), action.icon());
         mainButtonClone.addEventListener("click", clicked);
 
         /**
@@ -552,7 +549,7 @@ WebInspector.Toolbar.createActionButton = function(action, toggledOptions, untog
             button._clicked(/** @type {!Event} */ (event.data));
         }
 
-        mainButtonClone.setState(action.state());
+        mainButtonClone.setToggled(action.toggled());
         buttons.push(mainButtonClone);
 
         var document = button.element.ownerDocument;
@@ -637,14 +634,41 @@ WebInspector.ToolbarMenuButton.prototype = {
      * @override
      * @param {!Event} event
      */
-    _clicked: function(event)
+    _mouseDown: function(event)
     {
+        if (event.buttons !== 1) {
+            WebInspector.ToolbarButton.prototype._mouseDown.call(this, event);
+            return;
+        }
+
+        if (!this._triggerTimeout)
+            this._triggerTimeout = setTimeout(this._trigger.bind(this, event), 200);
+    },
+
+    /**
+     * @param {!Event} event
+     */
+    _trigger: function(event)
+    {
+        delete this._triggerTimeout;
         var contextMenu = new WebInspector.ContextMenu(event,
             this._useSoftMenu,
             this.element.totalOffsetLeft(),
             this.element.totalOffsetTop() + this.element.offsetHeight);
         this._contextMenuHandler(contextMenu);
         contextMenu.show();
+    },
+
+    /**
+     * @override
+     * @param {!Event} event
+     */
+    _clicked: function(event)
+    {
+        if (!this._triggerTimeout)
+            return;
+        clearTimeout(this._triggerTimeout);
+        this._trigger(event);
     },
 
     __proto__: WebInspector.ToolbarButton.prototype
@@ -692,10 +716,11 @@ WebInspector.ToolbarSettingToggle.prototype = {
 /**
  * @constructor
  * @extends {WebInspector.ToolbarItem}
+ * @param {boolean=} spacer
  */
-WebInspector.ToolbarSeparator = function()
+WebInspector.ToolbarSeparator = function(spacer)
 {
-    WebInspector.ToolbarItem.call(this, createElementWithClass("div", "toolbar-divider"));
+    WebInspector.ToolbarItem.call(this, createElementWithClass("div", spacer ? "toolbar-spacer" : "toolbar-divider"));
 }
 
 WebInspector.ToolbarSeparator.prototype = {

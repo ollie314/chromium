@@ -54,23 +54,16 @@ public:
 
 private:
     PassOwnPtr<PatternData> buildPatternData(const LayoutObject&);
-    PassRefPtr<const SkPicture> asPicture(const FloatRect& tile, const AffineTransform&) const;
+    PassRefPtr<SkPicture> asPicture(const FloatRect& tile, const AffineTransform&) const;
     PatternData* patternForLayoutObject(const LayoutObject&);
 
     const LayoutSVGResourceContainer* resolveContentElement() const;
 
     bool m_shouldCollectPatternAttributes : 1;
-#if ENABLE(OILPAN)
     Persistent<PatternAttributesWrapper> m_attributesWrapper;
 
     PatternAttributes& mutableAttributes() { return m_attributesWrapper->attributes(); }
     const PatternAttributes& attributes() const { return m_attributesWrapper->attributes(); }
-#else
-    PatternAttributes m_attributes;
-
-    PatternAttributes& mutableAttributes() { return m_attributes; }
-    const PatternAttributes& attributes() const { return m_attributes; }
-#endif
 
     // FIXME: we can almost do away with this per-object map, but not quite: the tile size can be
     // relative to the client bounding box, and it gets captured in the cached Pattern shader.
@@ -81,6 +74,6 @@ private:
     HashMap<const LayoutObject*, OwnPtr<PatternData>> m_patternMap;
 };
 
-}
+} // namespace blink
 
 #endif

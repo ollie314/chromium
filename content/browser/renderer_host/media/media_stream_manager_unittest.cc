@@ -11,8 +11,8 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/browser/browser_thread_impl.h"
@@ -66,13 +66,14 @@ ResourceContext::SaltCallback GetMockSaltCallback() {
   return base::Bind(&ReturnMockSalt);
 }
 
-// This class mocks the audio manager and overrides the
-// GetAudioInputDeviceNames() method to ensure that we can run our tests on
-// the buildbots. media::AudioManagerBase
+// This class mocks the audio manager and overrides some methods to ensure that
+// we can run our tests on the buildbots.
 class MockAudioManager : public AudioManagerPlatform {
  public:
   MockAudioManager()
-      : AudioManagerPlatform(&fake_audio_log_factory_),
+      : AudioManagerPlatform(base::ThreadTaskRunnerHandle::Get(),
+                             base::ThreadTaskRunnerHandle::Get(),
+                             &fake_audio_log_factory_),
         num_output_devices_(2) {}
   ~MockAudioManager() override {}
 
@@ -101,6 +102,17 @@ class MockAudioManager : public AudioManagerPlatform {
           std::string("fake_device_name_") + base::SizeTToString(i),
           std::string("fake_device_id_") + base::SizeTToString(i)));
     }
+  }
+
+  media::AudioParameters GetDefaultOutputStreamParameters() override {
+    return media::AudioParameters(media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
+                                  media::CHANNEL_LAYOUT_STEREO, 48000, 16, 128);
+  }
+
+  media::AudioParameters GetOutputStreamParameters(
+      const std::string& device_id) override {
+    return media::AudioParameters(media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
+                                  media::CHANNEL_LAYOUT_STEREO, 48000, 16, 128);
   }
 
   void SetNumAudioOutputDevices(size_t num_devices) {
@@ -165,24 +177,21 @@ class MockMediaStreamRequester : public MediaStreamRequester {
 class MediaStreamManagerTest : public ::testing::Test {
  public:
   MediaStreamManagerTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
-        task_runner_(base::ThreadTaskRunnerHandle::Get()) {
-    // Create our own MediaStreamManager. Use fake devices to run on the bots.
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kUseFakeDeviceForMediaStream);
+      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {
     audio_manager_.reset(new MockAudioManager());
     media_stream_manager_.reset(new MediaStreamManager(audio_manager_.get()));
-}
-
-  virtual ~MediaStreamManagerTest() {
+    base::RunLoop().RunUntilIdle();
   }
+
+  ~MediaStreamManagerTest() override {}
 
   MOCK_METHOD1(Response, void(int index));
   void ResponseCallback(int index,
                         const MediaStreamDevices& devices,
-                        scoped_ptr<MediaStreamUIProxy> ui_proxy) {
+                        std::unique_ptr<MediaStreamUIProxy> ui_proxy) {
     Response(index);
-    task_runner_->PostTask(FROM_HERE, run_loop_.QuitClosure());
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  run_loop_.QuitClosure());
   }
 
  protected:
@@ -200,10 +209,12 @@ class MediaStreamManagerTest : public ::testing::Test {
         security_origin, callback);
   }
 
-  scoped_ptr<MockAudioManager> audio_manager_;
-  scoped_ptr<MediaStreamManager> media_stream_manager_;
+  // media_stream_manager_ needs to outlive thread_bundle_ because it is a
+  // MessageLoop::DestructionObserver. audio_manager_ needs to outlive
+  // thread_bundle_ because it uses the underlying message loop.
+  std::unique_ptr<MediaStreamManager> media_stream_manager_;
   content::TestBrowserThreadBundle thread_bundle_;
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  std::unique_ptr<MockAudioManager, media::AudioManagerDeleter> audio_manager_;
   base::RunLoop run_loop_;
 
  private:
@@ -223,7 +234,6 @@ TEST_F(MediaStreamManagerTest, MakeAndCancelMediaAccessRequest) {
   // No callback is expected.
   media_stream_manager_->CancelRequest(label);
   run_loop_.RunUntilIdle();
-  media_stream_manager_->WillDestroyCurrentMessageLoop();
 }
 
 TEST_F(MediaStreamManagerTest, MakeMultipleRequests) {
@@ -294,7 +304,7 @@ TEST_F(MediaStreamManagerTest, DeviceID) {
   EXPECT_NE(unique_other_id, hashed_other_id);
   EXPECT_EQ(hashed_other_id.size(), 64U);
   for (const char& c : hashed_other_id)
-    EXPECT_TRUE((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+    EXPECT_TRUE(base::IsAsciiDigit(c) || (c >= 'a' && c <= 'f'));
 }
 
 TEST_F(MediaStreamManagerTest, EnumerationOutputDevices) {

@@ -6,19 +6,20 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include <memory>
+
 #import "base/mac/foundation_util.h"
 #import "base/mac/mac_util.h"
 #import "base/mac/sdk_forward_declarations.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #import "testing/gtest_mac.h"
 #import "ui/base/cocoa/window_size_constants.h"
 #include "ui/base/ime/input_method.h"
-#import "ui/gfx/test/ui_cocoa_test_helper.h"
 #import "ui/gfx/mac/coordinate_conversion.h"
+#import "ui/gfx/test/ui_cocoa_test_helper.h"
 #import "ui/views/cocoa/bridged_content_view.h"
 #import "ui/views/cocoa/native_widget_mac_nswindow.h"
 #import "ui/views/cocoa/views_nswindow_delegate.h"
@@ -125,9 +126,7 @@ class MockNativeWidgetMac : public NativeWidgetMac {
   MockNativeWidgetMac(Widget* delegate) : NativeWidgetMac(delegate) {}
 
   // Expose a reference, so that it can be reset() independently.
-  scoped_ptr<BridgedNativeWidget>& bridge() {
-    return bridge_;
-  }
+  std::unique_ptr<BridgedNativeWidget>& bridge() { return bridge_; }
 
   // internal::NativeWidgetPrivate:
   void InitNativeWidget(const Widget::InitParams& params) override {
@@ -157,7 +156,7 @@ class BridgedNativeWidgetTestBase : public ui::CocoaTest {
         native_widget_mac_(new MockNativeWidgetMac(widget_.get())) {
   }
 
-  scoped_ptr<BridgedNativeWidget>& bridge() {
+  std::unique_ptr<BridgedNativeWidget>& bridge() {
     return native_widget_mac_->bridge();
   }
 
@@ -184,7 +183,7 @@ class BridgedNativeWidgetTestBase : public ui::CocoaTest {
   }
 
  protected:
-  scoped_ptr<Widget> widget_;
+  std::unique_ptr<Widget> widget_;
   MockNativeWidgetMac* native_widget_mac_;  // Weak. Owned by |widget_|.
 
   // Make the InitParams available to tests to cover initialization codepaths.
@@ -213,9 +212,8 @@ class BridgedNativeWidgetTest : public BridgedNativeWidgetTestBase {
   void TearDown() override;
 
  protected:
-  scoped_ptr<views::View> view_;
-  scoped_ptr<BridgedNativeWidget> bridge_;
-  BridgedContentView* ns_view_;  // Weak. Owned by bridge_.
+  std::unique_ptr<views::View> view_;
+  BridgedContentView* ns_view_;  // Weak. Owned by bridge().
   base::MessageLoopForUI message_loop_;
 
  private:
@@ -280,6 +278,8 @@ void BridgedNativeWidgetTest::SetUp() {
 }
 
 void BridgedNativeWidgetTest::TearDown() {
+  if (bridge())
+    bridge()->SetRootView(nullptr);
   view_.reset();
   BridgedNativeWidgetTestBase::TearDown();
 }
@@ -430,22 +430,22 @@ TEST_F(BridgedNativeWidgetTest, InputContext) {
 
 // Test getting complete string using text input protocol.
 TEST_F(BridgedNativeWidgetTest, TextInput_GetCompleteString) {
-  const std::string kTestString = "foo bar baz";
-  InstallTextField(kTestString);
+  const std::string test_string = "foo bar baz";
+  InstallTextField(test_string);
 
-  NSRange range = NSMakeRange(0, kTestString.size());
+  NSRange range = NSMakeRange(0, test_string.size());
   NSRange actual_range;
   NSAttributedString* text =
       [ns_view_ attributedSubstringForProposedRange:range
                                         actualRange:&actual_range];
-  EXPECT_EQ(kTestString, SysNSStringToUTF8([text string]));
+  EXPECT_EQ(test_string, SysNSStringToUTF8([text string]));
   EXPECT_EQ_RANGE(range, actual_range);
 }
 
 // Test getting middle substring using text input protocol.
 TEST_F(BridgedNativeWidgetTest, TextInput_GetMiddleSubstring) {
-  const std::string kTestString = "foo bar baz";
-  InstallTextField(kTestString);
+  const std::string test_string = "foo bar baz";
+  InstallTextField(test_string);
 
   NSRange range = NSMakeRange(4, 3);
   NSRange actual_range;
@@ -458,8 +458,8 @@ TEST_F(BridgedNativeWidgetTest, TextInput_GetMiddleSubstring) {
 
 // Test getting ending substring using text input protocol.
 TEST_F(BridgedNativeWidgetTest, TextInput_GetEndingSubstring) {
-  const std::string kTestString = "foo bar baz";
-  InstallTextField(kTestString);
+  const std::string test_string = "foo bar baz";
+  InstallTextField(test_string);
 
   NSRange range = NSMakeRange(8, 100);
   NSRange actual_range;
@@ -473,8 +473,8 @@ TEST_F(BridgedNativeWidgetTest, TextInput_GetEndingSubstring) {
 
 // Test getting empty substring using text input protocol.
 TEST_F(BridgedNativeWidgetTest, TextInput_GetEmptySubstring) {
-  const std::string kTestString = "foo bar baz";
-  InstallTextField(kTestString);
+  const std::string test_string = "foo bar baz";
+  InstallTextField(test_string);
 
   NSRange range = EmptyRange();
   NSRange actual_range;
@@ -487,21 +487,21 @@ TEST_F(BridgedNativeWidgetTest, TextInput_GetEmptySubstring) {
 
 // Test inserting text using text input protocol.
 TEST_F(BridgedNativeWidgetTest, TextInput_InsertText) {
-  const std::string kTestString = "foo";
-  InstallTextField(kTestString);
+  const std::string test_string = "foo";
+  InstallTextField(test_string);
 
-  [ns_view_ insertText:SysUTF8ToNSString(kTestString)
+  [ns_view_ insertText:SysUTF8ToNSString(test_string)
       replacementRange:EmptyRange()];
-  gfx::Range range(0, kTestString.size());
+  gfx::Range range(0, test_string.size());
   base::string16 text;
   EXPECT_TRUE([ns_view_ textInputClient]->GetTextFromRange(range, &text));
-  EXPECT_EQ(ASCIIToUTF16(kTestString), text);
+  EXPECT_EQ(ASCIIToUTF16(test_string), text);
 }
 
 // Test replacing text using text input protocol.
 TEST_F(BridgedNativeWidgetTest, TextInput_ReplaceText) {
-  const std::string kTestString = "foo bar";
-  InstallTextField(kTestString);
+  const std::string test_string = "foo bar";
+  InstallTextField(test_string);
 
   [ns_view_ insertText:@"baz" replacementRange:NSMakeRange(4, 3)];
   EXPECT_EQ("foo baz", GetText());
@@ -509,8 +509,8 @@ TEST_F(BridgedNativeWidgetTest, TextInput_ReplaceText) {
 
 // Test IME composition using text input protocol.
 TEST_F(BridgedNativeWidgetTest, TextInput_Compose) {
-  const std::string kTestString = "foo ";
-  InstallTextField(kTestString);
+  const std::string test_string = "foo ";
+  InstallTextField(test_string);
 
   EXPECT_FALSE([ns_view_ hasMarkedText]);
   EXPECT_EQ_RANGE(EmptyRange(), [ns_view_ markedRange]);
@@ -522,9 +522,9 @@ TEST_F(BridgedNativeWidgetTest, TextInput_Compose) {
             selectedRange:NSMakeRange(0, 2)
          replacementRange:EmptyRange()];
   EXPECT_TRUE([ns_view_ hasMarkedText]);
-  EXPECT_EQ_RANGE(NSMakeRange(kTestString.size(), compositionLength),
+  EXPECT_EQ_RANGE(NSMakeRange(test_string.size(), compositionLength),
                   [ns_view_ markedRange]);
-  EXPECT_EQ_RANGE(NSMakeRange(kTestString.size(), 2), [ns_view_ selectedRange]);
+  EXPECT_EQ_RANGE(NSMakeRange(test_string.size(), 2), [ns_view_ selectedRange]);
 
   // Confirm composition.
   [ns_view_ unmarkText];
@@ -653,16 +653,16 @@ TEST_F(BridgedNativeWidgetTest, TextInput_FirstRectForCharacterRange) {
   InstallTextField("");
   ui::TextInputClient* client = [ns_view_ textInputClient];
 
-  const base::string16 kTestString = base::ASCIIToUTF16("test_str");
+  const base::string16 test_string = base::ASCIIToUTF16("test_str");
   const size_t kTextLength = 8;
-  SetCompositionText(client, kTestString, 1, nullptr);
+  SetCompositionText(client, test_string, 1, nullptr);
 
   // Query bounds for the whole composition string.
   NSRange query_range = NSMakeRange(0, kTextLength);
   NSRange actual_range;
   NSRect rect = [ns_view_ firstRectForCharacterRange:query_range
                                          actualRange:&actual_range];
-  EXPECT_EQ(GetExpectedBoundsForRange(client, kTestString, query_range),
+  EXPECT_EQ(GetExpectedBoundsForRange(client, test_string, query_range),
             gfx::ScreenRectFromNSRect(rect));
   EXPECT_EQ_RANGE(query_range, actual_range);
 
@@ -670,7 +670,7 @@ TEST_F(BridgedNativeWidgetTest, TextInput_FirstRectForCharacterRange) {
   query_range = NSMakeRange(1, 4);
   rect = [ns_view_ firstRectForCharacterRange:query_range
                                   actualRange:&actual_range];
-  EXPECT_EQ(GetExpectedBoundsForRange(client, kTestString, query_range),
+  EXPECT_EQ(GetExpectedBoundsForRange(client, test_string, query_range),
             gfx::ScreenRectFromNSRect(rect));
   EXPECT_EQ_RANGE(query_range, actual_range);
 }
@@ -683,9 +683,6 @@ typedef BridgedNativeWidgetTestBase BridgedNativeWidgetSimulateFullscreenTest;
 // mashing Ctrl+Left/Right to keep OSX in a transition between Spaces to cause
 // the fullscreen transition to fail.
 TEST_F(BridgedNativeWidgetSimulateFullscreenTest, FailToEnterAndExit) {
-  if (base::mac::IsOSSnowLeopard())
-    return;
-
   base::scoped_nsobject<NSWindow> owned_window(
       [[BridgedNativeWidgetTestFullScreenWindow alloc]
           initWithContentRect:NSMakeRect(50, 50, 400, 300)

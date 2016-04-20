@@ -75,10 +75,10 @@ AudioMessageFilter::AudioOutputIPCImpl::AudioOutputIPCImpl(
 
 AudioMessageFilter::AudioOutputIPCImpl::~AudioOutputIPCImpl() {}
 
-scoped_ptr<media::AudioOutputIPC> AudioMessageFilter::CreateAudioOutputIPC(
+std::unique_ptr<media::AudioOutputIPC> AudioMessageFilter::CreateAudioOutputIPC(
     int render_frame_id) {
   DCHECK_GT(render_frame_id, 0);
-  return scoped_ptr<media::AudioOutputIPC>(
+  return std::unique_ptr<media::AudioOutputIPC>(
       new AudioOutputIPCImpl(this, render_frame_id));
 }
 
@@ -187,13 +187,14 @@ void AudioMessageFilter::OnChannelClosing() {
 void AudioMessageFilter::OnDeviceAuthorized(
     int stream_id,
     media::OutputDeviceStatus device_status,
-    const media::AudioParameters& output_params) {
+    const media::AudioParameters& output_params,
+    const std::string& matched_device_id) {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
   media::AudioOutputIPCDelegate* delegate = delegates_.Lookup(stream_id);
   if (!delegate)
     return;
 
-  delegate->OnDeviceAuthorized(device_status, output_params);
+  delegate->OnDeviceAuthorized(device_status, output_params, matched_device_id);
 }
 
 void AudioMessageFilter::OnStreamCreated(

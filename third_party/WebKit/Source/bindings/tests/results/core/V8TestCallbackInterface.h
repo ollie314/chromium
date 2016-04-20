@@ -16,7 +16,7 @@
 namespace blink {
 
 class V8TestCallbackInterface final : public TestCallbackInterface, public ActiveDOMCallback {
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(V8TestCallbackInterface);
+    USING_GARBAGE_COLLECTED_MIXIN(V8TestCallbackInterface);
 public:
     static V8TestCallbackInterface* create(v8::Local<v8::Function> callback, ScriptState* scriptState)
     {
@@ -30,14 +30,12 @@ public:
     void voidMethod() override;
     bool booleanMethod() override;
     void voidMethodBooleanArg(bool boolArg) override;
-    void voidMethodSequenceArg(const Vector<RefPtr<TestInterfaceEmpty>>& sequenceArg) override;
+    void voidMethodSequenceArg(const HeapVector<Member<TestInterfaceEmpty>>& sequenceArg) override;
     void voidMethodFloatArg(float floatArg) override;
     void voidMethodTestInterfaceEmptyArg(TestInterfaceEmpty* testInterfaceEmptyArg) override;
     void voidMethodTestInterfaceEmptyStringArg(TestInterfaceEmpty* testInterfaceEmptyArg, const String& stringArg) override;
     void callbackWithThisValueVoidMethodStringArg(ScriptValue thisValue, const String& stringArg) override;
     void customVoidMethodTestInterfaceEmptyArg(TestInterfaceEmpty* testInterfaceEmptyArg) override;
-    void voidMethodWillBeGarbageCollectedSequenceArg(const WillBeHeapVector<RefPtrWillBeMember<TestInterfaceWillBeGarbageCollected>>& sequenceArg) override;
-    void voidMethodWillBeGarbageCollectedArrayArg(const WillBeHeapVector<RefPtrWillBeMember<TestInterfaceWillBeGarbageCollected>>& arrayArg) override;
 private:
     CORE_EXPORT V8TestCallbackInterface(v8::Local<v8::Function>, ScriptState*);
 

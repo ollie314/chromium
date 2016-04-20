@@ -4,6 +4,8 @@
 
 #include "net/base/network_interfaces_linux.h"
 
+#include <memory>
+
 #if !defined(OS_ANDROID)
 #include <linux/ethtool.h>
 #endif  // !defined(OS_ANDROID)
@@ -17,7 +19,6 @@
 #include "base/files/file_path.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
@@ -26,7 +27,6 @@
 #include "net/base/escape.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/base/network_interfaces_posix.h"
 #include "url/gurl.h"
 
@@ -67,10 +67,6 @@ bool TryConvertNativeToNetIPAttributes(int native_attributes,
 }  // namespace
 
 namespace internal {
-
-inline const unsigned char* GetIPAddressData(const IPAddressNumber& ip) {
-  return ip.data();
-}
 
 // Gets the connection type for interface |ifname| by checking for wireless
 // or ethtool extensions.

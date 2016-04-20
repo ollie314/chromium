@@ -7,19 +7,25 @@
 
 #include <stddef.h>
 
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "base/prefs/pref_member.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
+#include "components/prefs/pref_member.h"
+#include "ui/shell_dialogs/select_file_dialog.h"
 
 namespace autofill {
 struct PasswordForm;
 }
+
+// Multimap from sort key to password forms.
+using DuplicatesMap =
+    std::multimap<std::string, std::unique_ptr<autofill::PasswordForm>>;
 
 class PasswordUIView;
 
@@ -47,6 +53,9 @@ class PasswordManagerPresenter
   // Gets the password entry at |index|.
   const autofill::PasswordForm* GetPassword(size_t index);
 
+  // Gets all password entries.
+  std::vector<std::unique_ptr<autofill::PasswordForm>> GetAllPasswords();
+
   // Gets the password exception entry at |index|.
   const autofill::PasswordForm* GetPasswordException(size_t index);
 
@@ -62,15 +71,33 @@ class PasswordManagerPresenter
   // |index| The index of the entry.
   void RequestShowPassword(size_t index);
 
+  // Returns true if the user is authenticated.
+  virtual bool IsUserAuthenticated();
+
  private:
   friend class PasswordManagerPresenterTest;
 
-  // Returns the password store associated with the currently active profile.
-  password_manager::PasswordStore* GetPasswordStore();
+  // Returns true if the user needs to be authenticated before a plaintext
+  // password is revealed or exported.
+  bool IsAuthenticationRequired();
 
   // Sets the password and exception list of the UI view.
   void SetPasswordList();
   void SetPasswordExceptionList();
+
+  // Sort entries of |list| based on sort key. The key is the concatenation of
+  // origin, entry type (non-Android credential, Android w/ affiliated web realm
+  // or Android w/o affiliated web realm). If |username_and_password_in_key|,
+  // username and password are also included in sort key. If there are several
+  // forms with the same key, all such forms but the first one are
+  // stored in |duplicates| instead of |list|.
+  void SortEntriesAndHideDuplicates(
+      std::vector<std::unique_ptr<autofill::PasswordForm>>* list,
+      DuplicatesMap* duplicates,
+      bool username_and_password_in_key);
+
+  // Returns the password store associated with the currently active profile.
+  password_manager::PasswordStore* GetPasswordStore();
 
   // A short class to mediate requests to the password store.
   class ListPopulater : public password_manager::PasswordStoreConsumer {
@@ -115,15 +142,13 @@ class PasswordManagerPresenter
   PasswordListPopulater populater_;
   PasswordExceptionListPopulater exception_populater_;
 
-  std::vector<scoped_ptr<autofill::PasswordForm>> password_list_;
-  std::vector<scoped_ptr<autofill::PasswordForm>> password_exception_list_;
+  std::vector<std::unique_ptr<autofill::PasswordForm>> password_list_;
+  std::vector<std::unique_ptr<autofill::PasswordForm>> password_exception_list_;
+  DuplicatesMap password_duplicates_;
+  DuplicatesMap password_exception_duplicates_;
 
   // Whether to show stored passwords or not.
   BooleanPrefMember show_passwords_;
-
-  // Indicates whether or not the password manager should require the user to
-  // reauthenticate before revealing plaintext passwords.
-  const bool require_reauthentication_;
 
   // The last time the user was successfully authenticated.
   // Used to determine whether or not to reveal plaintext passwords.
@@ -131,9 +156,6 @@ class PasswordManagerPresenter
 
   // UI view that owns this presenter.
   PasswordUIView* password_view_;
-
-  // User pref for storing accept languages.
-  std::string languages_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerPresenter);
 };

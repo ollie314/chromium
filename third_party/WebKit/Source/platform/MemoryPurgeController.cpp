@@ -8,7 +8,7 @@
 #include "platform/TraceEvent.h"
 #include "platform/graphics/ImageDecodingStore.h"
 #include "public/platform/Platform.h"
-#include "wtf/Partitions.h"
+#include "wtf/allocator/Partitions.h"
 
 namespace blink {
 
@@ -29,10 +29,6 @@ MemoryPurgeController::MemoryPurgeController()
 {
 }
 
-MemoryPurgeController::~MemoryPurgeController()
-{
-}
-
 void MemoryPurgeController::purgeMemory()
 {
     // TODO(bashi): Add UMA
@@ -44,9 +40,7 @@ void MemoryPurgeController::purgeMemory()
 
 DEFINE_TRACE(MemoryPurgeController)
 {
-#if ENABLE(OILPAN)
     visitor->trace(m_clients);
-#endif
 }
 
 } // namespace blink

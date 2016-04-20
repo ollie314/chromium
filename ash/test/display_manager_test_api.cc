@@ -4,6 +4,7 @@
 
 #include "ash/test/display_manager_test_api.h"
 
+#include <cstdarg>
 #include <vector>
 
 #include "ash/ash_switches.h"
@@ -14,20 +15,18 @@
 #include "ash/display/extended_mouse_warp_controller.h"
 #include "ash/display/mouse_cursor_event_filter.h"
 #include "ash/display/unified_mouse_warp_controller.h"
+#include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/strings/string_split.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/display/manager/display_layout_builder.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/display.h"
 
 namespace ash {
 namespace test {
-typedef std::vector<gfx::Display> DisplayList;
-typedef DisplayInfo DisplayInfo;
-typedef std::vector<DisplayInfo> DisplayInfoList;
-
 namespace {
 
 std::vector<DisplayInfo> CreateDisplayInfoListFromString(
@@ -38,7 +37,7 @@ std::vector<DisplayInfo> CreateDisplayInfoListFromString(
       specs, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   size_t index = 0;
 
-  DisplayManager::DisplayList list =
+  display::DisplayList list =
       display_manager->IsInUnifiedMode()
           ? display_manager->software_mirroring_display_list()
           : display_manager->active_display_list();
@@ -59,14 +58,13 @@ std::vector<DisplayInfo> CreateDisplayInfoListFromString(
 bool DisplayManagerTestApi::TestIfMouseWarpsAt(
     ui::test::EventGenerator& event_generator,
     const gfx::Point& point_in_screen) {
-  aura::Window* context = Shell::GetAllRootWindows()[0];
   DCHECK(!Shell::GetInstance()->display_manager()->IsInUnifiedMode());
   static_cast<ExtendedMouseWarpController*>(
       Shell::GetInstance()
           ->mouse_cursor_filter()
           ->mouse_warp_controller_for_test())
       ->allow_non_native_event_for_test();
-  gfx::Screen* screen = gfx::Screen::GetScreenFor(context);
+  gfx::Screen* screen = gfx::Screen::GetScreen();
   gfx::Display original_display =
       screen->GetDisplayNearestPoint(point_in_screen);
   event_generator.MoveMouseTo(point_in_screen);
@@ -81,8 +79,7 @@ DisplayManagerTestApi::DisplayManagerTestApi()
 
 DisplayManagerTestApi::~DisplayManagerTestApi() {}
 
-void DisplayManagerTestApi::UpdateDisplay(
-    const std::string& display_specs) {
+void DisplayManagerTestApi::UpdateDisplay(const std::string& display_specs) {
   std::vector<DisplayInfo> display_info_list =
       CreateDisplayInfoListFromString(display_specs, display_manager_);
   bool is_host_origin_set = false;
@@ -112,9 +109,12 @@ void DisplayManagerTestApi::UpdateDisplay(
     }
   }
 
+// TODO(msw): This seems to cause test hangs on Windows. http://crbug.com/584038
+#if !defined(OS_WIN)
   display_manager_->OnNativeDisplaysChanged(display_info_list);
   display_manager_->UpdateInternalDisplayModeListForTest();
   display_manager_->RunPendingTasksForTest();
+#endif
 }
 
 int64_t DisplayManagerTestApi::SetFirstDisplayAsInternalDisplay() {
@@ -162,6 +162,46 @@ bool SetDisplayResolution(int64_t display_id, const gfx::Size& resolution) {
   if (!GetDisplayModeForResolution(info, resolution, &mode))
     return false;
   return display_manager->SetDisplayMode(display_id, mode);
+}
+
+void SwapPrimaryDisplay() {
+  if (gfx::Screen::GetScreen()->GetNumDisplays() <= 1)
+    return;
+  Shell::GetInstance()->window_tree_host_manager()->SetPrimaryDisplayId(
+      ScreenUtil::GetSecondaryDisplay().id());
+}
+
+std::unique_ptr<display::DisplayLayout> CreateDisplayLayout(
+    display::DisplayPlacement::Position position,
+    int offset) {
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
+  display::DisplayIdList list = display_manager->GetCurrentDisplayIdList();
+
+  display::DisplayLayoutBuilder builder(
+      gfx::Screen::GetScreen()->GetPrimaryDisplay().id());
+  builder.SetSecondaryPlacement(ScreenUtil::GetSecondaryDisplay().id(),
+                                position, offset);
+  return builder.Build();
+}
+
+display::DisplayIdList CreateDisplayIdList2(int64_t id1, int64_t id2) {
+  display::DisplayIdList list;
+  list.push_back(id1);
+  list.push_back(id2);
+  SortDisplayIdList(&list);
+  return list;
+}
+
+display::DisplayIdList CreateDisplayIdListN(size_t count, ...) {
+  display::DisplayIdList list;
+  va_list args;
+  va_start(args, count);
+  for (size_t i = 0; i < count; i++) {
+    int64_t id = va_arg(args, int64_t);
+    list.push_back(id);
+  }
+  SortDisplayIdList(&list);
+  return list;
 }
 
 }  // namespace test

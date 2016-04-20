@@ -19,13 +19,13 @@
 #include "chrome/browser/download/download_history.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
+#include "components/drive/chromeos/file_system_interface.h"
 #include "components/drive/drive.pb.h"
-#include "components/drive/file_system_interface.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
-using content::DownloadManager;
 using content::DownloadItem;
+using content::DownloadManager;
 
 namespace drive {
 namespace {
@@ -35,13 +35,13 @@ const char kDrivePathKey[] = "DrivePath";
 
 // Mime types that we better not trust. If the file was downloade with these
 // mime types, while uploading to Drive we ignore it at guess by our own logic.
-const char* kGenericMimeTypes[] = {"text/html", "text/plain",
-                                   "application/octet-stream"};
+const char* const kGenericMimeTypes[] = {"text/html", "text/plain",
+                                         "application/octet-stream"};
 
 // Longer is better. But at the same time, this value should be short enough as
 // drive::internal::kMinFreeSpaceInBytes is not used up by file download in this
 // interval.
-const base::TimeDelta kFreeDiskSpaceDelay = base::TimeDelta::FromSeconds(3);
+const int kFreeDiskSpaceDelayInSeconds = 3;
 
 // User Data stored in DownloadItem for drive path.
 class DriveUserData : public base::SupportsUserData::Data {
@@ -104,7 +104,7 @@ void MoveDownloadedFile(const base::FilePath& downloaded_file,
 void ContinueCheckingForFileExistence(
     const content::CheckForFileExistenceCallback& callback,
     FileError error,
-    scoped_ptr<ResourceEntry> entry) {
+    std::unique_ptr<ResourceEntry> entry) {
   callback.Run(error == FILE_ERROR_OK);
 }
 
@@ -141,7 +141,8 @@ void IgnoreFreeDiskSpaceIfNeededForCallback(bool /*result*/) {}
 DownloadHandler::DownloadHandler(FileSystemInterface* file_system)
     : file_system_(file_system),
       has_pending_free_disk_space_(false),
-      free_disk_space_delay_(kFreeDiskSpaceDelay),
+      free_disk_space_delay_(
+          base::TimeDelta::FromSeconds(kFreeDiskSpaceDelayInSeconds)),
       weak_ptr_factory_(this) {}
 
 DownloadHandler::~DownloadHandler() {
@@ -166,7 +167,7 @@ void DownloadHandler::Initialize(
   if (download_manager) {
     notifier_.reset(new AllDownloadItemNotifier(download_manager, this));
     // Remove any persisted Drive DownloadItem. crbug.com/171384
-    content::DownloadManager::DownloadVector downloads;
+    DownloadManager::DownloadVector downloads;
     download_manager->GetAllDownloads(&downloads);
     for (size_t i = 0; i < downloads.size(); ++i) {
       if (IsPersistedDriveDownload(drive_tmp_download_path_, downloads[i]))

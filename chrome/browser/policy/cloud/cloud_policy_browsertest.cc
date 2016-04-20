@@ -2,21 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/invalidation/fake_invalidation_service.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
@@ -24,6 +24,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/invalidation/impl/fake_invalidation_service.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/invalidation/public/invalidation.h"
 #include "components/invalidation/public/invalidation_service.h"
@@ -38,6 +39,7 @@
 #include "components/policy/core/common/policy_switches.h"
 #include "components/policy/core/common/policy_test_utils.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_utils.h"
@@ -54,8 +56,10 @@
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_factory_chromeos.h"
 #include "chromeos/chromeos_paths.h"
+#include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/login/user_names.h"
+#include "components/signin/core/account_id/account_id.h"
 #else
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -79,10 +83,10 @@ namespace policy {
 
 namespace {
 
-scoped_ptr<KeyedService> BuildFakeProfileInvalidationProvider(
+std::unique_ptr<KeyedService> BuildFakeProfileInvalidationProvider(
     content::BrowserContext* context) {
-  return make_scoped_ptr(new invalidation::ProfileInvalidationProvider(
-      scoped_ptr<invalidation::InvalidationService>(
+  return base::WrapUnique(new invalidation::ProfileInvalidationProvider(
+      std::unique_ptr<invalidation::InvalidationService>(
           new invalidation::FakeInvalidationService)));
 }
 
@@ -170,6 +174,12 @@ void GetExpectedDefaultPolicy(PolicyMap* policy_map) {
                   POLICY_SOURCE_ENTERPRISE_DEFAULT,
                   new base::FundamentalValue(false),
                   nullptr);
+  policy_map->Set(key::kArcEnabled,
+                  POLICY_LEVEL_MANDATORY,
+                  POLICY_SCOPE_USER,
+                  POLICY_SOURCE_ENTERPRISE_DEFAULT,
+                  new base::FundamentalValue(false),
+                  nullptr);
 #endif
 }
 
@@ -227,6 +237,12 @@ void GetExpectedTestPolicy(PolicyMap* expected, const char* homepage) {
                 new base::FundamentalValue(false),
                 nullptr);
   expected->Set(key::kAllowDinosaurEasterEgg,
+                POLICY_LEVEL_MANDATORY,
+                POLICY_SCOPE_USER,
+                POLICY_SOURCE_ENTERPRISE_DEFAULT,
+                new base::FundamentalValue(false),
+                nullptr);
+  expected->Set(key::kArcEnabled,
                 POLICY_LEVEL_MANDATORY,
                 POLICY_SCOPE_USER,
                 POLICY_SOURCE_ENTERPRISE_DEFAULT,
@@ -322,7 +338,9 @@ class CloudPolicyTest : public InProcessBrowserTest,
     ASSERT_TRUE(
         PathService::Get(chromeos::DIR_USER_POLICY_KEYS, &user_policy_key_dir));
     std::string sanitized_username =
-        chromeos::CryptohomeClient::GetStubSanitizedUsername(GetTestUser());
+        chromeos::CryptohomeClient::GetStubSanitizedUsername(
+            cryptohome::Identification(
+                AccountId::FromUserEmail(GetTestUser())));
     user_policy_key_file_ = user_policy_key_dir.AppendASCII(sanitized_username)
                                                .AppendASCII("policy.pub");
 #endif
@@ -364,7 +382,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
   void OnPolicyServiceInitialized(PolicyDomain domain) override {}
 
   base::ScopedTempDir temp_dir_;
-  scoped_ptr<LocalPolicyTestServer> test_server_;
+  std::unique_ptr<LocalPolicyTestServer> test_server_;
   base::FilePath user_policy_key_file_;
   base::Closure on_policy_updated_;
 };

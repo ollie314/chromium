@@ -14,6 +14,7 @@
 #include "ash/session/session_state_delegate.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_layout_manager_observer.h"
+#include "ash/shelf/shelf_locking_manager.h"
 #include "ash/shelf/shelf_view.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
@@ -25,6 +26,7 @@
 #include "ash/test/display_manager_test_api.h"
 #include "ash/test/shelf_test_api.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
@@ -35,6 +37,7 @@
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
+#include "ui/display/manager/display_layout.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/display.h"
@@ -180,11 +183,8 @@ class ShelfDragCallback {
         scroll_.y(),
         scroll_.x());
     bool increasing_drag =
-        GetShelfLayoutManager()->SelectValueForShelfAlignment(
-            scroll_delta < 0,
-            scroll_delta > 0,
-            scroll_delta < 0,
-            scroll_delta > 0);
+        GetShelfWidget()->shelf()->SelectValueForShelfAlignment(
+            scroll_delta < 0, scroll_delta > 0, scroll_delta < 0);
     int shelf_size = GetShelfLayoutManager()->PrimaryAxisValue(
         shelf_bounds.height(),
         shelf_bounds.width());
@@ -256,10 +256,10 @@ class TestItem : public SystemTrayItem {
  public:
   TestItem()
       : SystemTrayItem(GetSystemTray()),
-        tray_view_(NULL),
-        default_view_(NULL),
-        detailed_view_(NULL),
-        notification_view_(NULL) {}
+        tray_view_(nullptr),
+        default_view_(nullptr),
+        detailed_view_(nullptr),
+        notification_view_(nullptr) {}
 
   views::View* CreateTrayView(user::LoginStatus status) override {
     tray_view_ = new views::View;
@@ -289,13 +289,13 @@ class TestItem : public SystemTrayItem {
     return notification_view_;
   }
 
-  void DestroyTrayView() override { tray_view_ = NULL; }
+  void DestroyTrayView() override { tray_view_ = nullptr; }
 
-  void DestroyDefaultView() override { default_view_ = NULL; }
+  void DestroyDefaultView() override { default_view_ = nullptr; }
 
-  void DestroyDetailedView() override { detailed_view_ = NULL; }
+  void DestroyDetailedView() override { detailed_view_ = nullptr; }
 
-  void DestroyNotificationView() override { notification_view_ = NULL; }
+  void DestroyNotificationView() override { notification_view_ = nullptr; }
 
   void UpdateAfterLoginStatusChange(user::LoginStatus status) override {}
 
@@ -329,7 +329,7 @@ class ShelfLayoutManagerTest : public ash::test::AshTestBase {
   }
 
   aura::Window* CreateTestWindow() {
-    aura::Window* window = new aura::Window(NULL);
+    aura::Window* window = new aura::Window(nullptr);
     window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
     window->SetType(ui::wm::WINDOW_TYPE_NORMAL);
     window->Init(ui::LAYER_TEXTURED);
@@ -338,7 +338,7 @@ class ShelfLayoutManagerTest : public ash::test::AshTestBase {
   }
 
   aura::Window* CreateTestWindowInParent(aura::Window* root_window) {
-    aura::Window* window = new aura::Window(NULL);
+    aura::Window* window = new aura::Window(nullptr);
     window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
     window->SetType(ui::wm::WINDOW_TYPE_NORMAL);
     window->Init(ui::LAYER_TEXTURED);
@@ -382,10 +382,14 @@ class ShelfLayoutManagerTest : public ash::test::AshTestBase {
   // Open the add user screen if |show| is true, otherwise end it.
   void ShowAddUserScreen(bool show) {
     SetUserAddingScreenRunning(show);
-    ShelfLayoutManager* manager = GetShelfWidget()->shelf_layout_manager();
-    manager->SessionStateChanged(
-        show ? SessionStateDelegate::SESSION_STATE_LOGIN_SECONDARY :
-               SessionStateDelegate::SESSION_STATE_ACTIVE);
+
+    const SessionStateDelegate::SessionState state =
+        show ? SessionStateDelegate::SESSION_STATE_LOGIN_SECONDARY
+             : SessionStateDelegate::SESSION_STATE_ACTIVE;
+    GetShelfWidget()->shelf_layout_manager()->SessionStateChanged(state);
+    test::ShelfTestAPI(GetShelfWidget()->shelf())
+        .shelf_locking_manager()
+        ->SessionStateChanged(state);
   }
 
  private:
@@ -717,7 +721,7 @@ TEST_F(ShelfLayoutManagerTest, MAYBE_SetVisible) {
   gfx::Rect shelf_bounds(
       shelf->GetWindowBoundsInScreen());
   int shelf_height = manager->GetIdealBounds().height();
-  gfx::Screen* screen = Shell::GetScreen();
+  gfx::Screen* screen = gfx::Screen::GetScreen();
   gfx::Display display = screen->GetDisplayNearestWindow(
       Shell::GetPrimaryRootWindow());
   ASSERT_NE(-1, display.id());
@@ -765,7 +769,7 @@ TEST_F(ShelfLayoutManagerTest, SideAlignmentInteractionWithLockScreen) {
   manager->SetAlignment(SHELF_ALIGNMENT_LEFT);
   EXPECT_EQ(SHELF_ALIGNMENT_LEFT, manager->GetAlignment());
   LockScreen();
-  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, manager->GetAlignment());
+  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM_LOCKED, manager->GetAlignment());
   UnlockScreen();
   EXPECT_EQ(SHELF_ALIGNMENT_LEFT, manager->GetAlignment());
 }
@@ -776,7 +780,7 @@ TEST_F(ShelfLayoutManagerTest, SideAlignmentInteractionWithAddUserScreen) {
   manager->SetAlignment(SHELF_ALIGNMENT_LEFT);
   EXPECT_EQ(SHELF_ALIGNMENT_LEFT, manager->GetAlignment());
   ShowAddUserScreen(true);
-  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, manager->GetAlignment());
+  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM_LOCKED, manager->GetAlignment());
   ShowAddUserScreen(false);
   EXPECT_EQ(SHELF_ALIGNMENT_LEFT, manager->GetAlignment());
 }
@@ -814,15 +818,15 @@ TEST_F(ShelfLayoutManagerTest, LayoutShelfWhileAnimating) {
   SetState(shelf->shelf_layout_manager(), SHELF_HIDDEN);
   shelf->shelf_layout_manager()->LayoutShelf();
   EXPECT_EQ(SHELF_HIDDEN, shelf->shelf_layout_manager()->visibility_state());
-  gfx::Display display = Shell::GetScreen()->GetDisplayNearestWindow(
+  gfx::Display display = gfx::Screen::GetScreen()->GetDisplayNearestWindow(
       Shell::GetPrimaryRootWindow());
   EXPECT_EQ(0, display.GetWorkAreaInsets().bottom());
 
   // Make sure the bounds of the two widgets changed.
   EXPECT_GE(shelf->GetNativeView()->bounds().y(),
-            Shell::GetScreen()->GetPrimaryDisplay().bounds().bottom());
+            gfx::Screen::GetScreen()->GetPrimaryDisplay().bounds().bottom());
   EXPECT_GE(shelf->status_area_widget()->GetNativeView()->bounds().y(),
-            Shell::GetScreen()->GetPrimaryDisplay().bounds().bottom());
+            gfx::Screen::GetScreen()->GetPrimaryDisplay().bounds().bottom());
 }
 
 // Test that switching to a different visibility state does not restart the
@@ -898,8 +902,10 @@ TEST_F(ShelfLayoutManagerTest, MAYBE_AutoHide) {
   EXPECT_EQ(root->bounds().bottom() - ShelfLayoutManager::kAutoHideSize,
             GetShelfWidget()->GetWindowBoundsInScreen().y());
   EXPECT_EQ(root->bounds().bottom() - ShelfLayoutManager::kAutoHideSize,
-            Shell::GetScreen()->GetDisplayNearestWindow(
-                root).work_area().bottom());
+            gfx::Screen::GetScreen()
+                ->GetDisplayNearestWindow(root)
+                .work_area()
+                .bottom());
 
   // Move the mouse to the bottom of the screen.
   generator.MoveMouseTo(0, root->bounds().bottom() - 1);
@@ -911,8 +917,10 @@ TEST_F(ShelfLayoutManagerTest, MAYBE_AutoHide) {
   EXPECT_EQ(root->bounds().bottom() - shelf->GetIdealBounds().height(),
             GetShelfWidget()->GetWindowBoundsInScreen().y());
   EXPECT_EQ(root->bounds().bottom() - ShelfLayoutManager::kAutoHideSize,
-            Shell::GetScreen()->GetDisplayNearestWindow(
-                root).work_area().bottom());
+            gfx::Screen::GetScreen()
+                ->GetDisplayNearestWindow(root)
+                .work_area()
+                .bottom());
 
   // Move mouse back up.
   generator.MoveMouseTo(0, 0);
@@ -945,9 +953,8 @@ TEST_F(ShelfLayoutManagerTest, AutoHideShelfOnScreenBoundary) {
     return;
 
   UpdateDisplay("800x600,800x600");
-  DisplayLayout display_layout(DisplayLayout::RIGHT, 0);
   Shell::GetInstance()->display_manager()->SetLayoutForCurrentDisplays(
-      display_layout);
+      test::CreateDisplayLayout(display::DisplayPlacement::RIGHT, 0));
   // Put the primary monitor's shelf on the display boundary.
   ShelfLayoutManager* shelf = GetShelfLayoutManager();
   shelf->SetAlignment(SHELF_ALIGNMENT_RIGHT);
@@ -977,7 +984,8 @@ TEST_F(ShelfLayoutManagerTest, AutoHideShelfOnScreenBoundary) {
   generator.MoveMouseTo(right_edge - 1, y);
   UpdateAutoHideStateNow();
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
-  EXPECT_EQ(right_edge - 1, Shell::GetScreen()->GetCursorScreenPoint().x());
+  EXPECT_EQ(right_edge - 1,
+            gfx::Screen::GetScreen()->GetCursorScreenPoint().x());
 
   // Moving the mouse off the light bar should hide the shelf.
   generator.MoveMouseTo(right_edge - 50, y);
@@ -990,7 +998,8 @@ TEST_F(ShelfLayoutManagerTest, AutoHideShelfOnScreenBoundary) {
   generator.MoveMouseTo(right_edge - 1, y);
   generator.MoveMouseTo(right_edge, y);
   UpdateAutoHideStateNow();
-  EXPECT_NE(right_edge - 1, Shell::GetScreen()->GetCursorScreenPoint().x());
+  EXPECT_NE(right_edge - 1,
+            gfx::Screen::GetScreen()->GetCursorScreenPoint().x());
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
 
   // Hide the shelf.
@@ -1103,7 +1112,7 @@ TEST_F(ShelfLayoutManagerTest, SetAutoHideBehavior) {
   widget->Show();
   aura::Window* window = widget->GetNativeWindow();
   gfx::Rect display_bounds(
-      Shell::GetScreen()->GetDisplayNearestWindow(window).bounds());
+      gfx::Screen::GetScreen()->GetDisplayNearestWindow(window).bounds());
 
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
@@ -1113,14 +1122,18 @@ TEST_F(ShelfLayoutManagerTest, SetAutoHideBehavior) {
 
   widget->Maximize();
   EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
-  EXPECT_EQ(Shell::GetScreen()->GetDisplayNearestWindow(
-                window).work_area().bottom(),
+  EXPECT_EQ(gfx::Screen::GetScreen()
+                ->GetDisplayNearestWindow(window)
+                .work_area()
+                .bottom(),
             widget->GetWorkAreaBoundsInScreen().bottom());
 
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
-  EXPECT_EQ(Shell::GetScreen()->GetDisplayNearestWindow(
-                window).work_area().bottom(),
+  EXPECT_EQ(gfx::Screen::GetScreen()
+                ->GetDisplayNearestWindow(window)
+                .work_area()
+                .bottom(),
             widget->GetWorkAreaBoundsInScreen().bottom());
 
   ui::ScopedAnimationDurationScaleMode animation_duration(
@@ -1132,8 +1145,10 @@ TEST_F(ShelfLayoutManagerTest, SetAutoHideBehavior) {
   StepWidgetLayerAnimatorToEnd(shelf_widget);
   StepWidgetLayerAnimatorToEnd(shelf_widget->status_area_widget());
   EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
-  EXPECT_EQ(Shell::GetScreen()->GetDisplayNearestWindow(
-                window).work_area().bottom(),
+  EXPECT_EQ(gfx::Screen::GetScreen()
+                ->GetDisplayNearestWindow(window)
+                .work_area()
+                .bottom(),
             widget->GetWorkAreaBoundsInScreen().bottom());
 }
 
@@ -1157,7 +1172,7 @@ TEST_F(ShelfLayoutManagerTest, DimmingBehavior) {
   widget->Show();
   aura::Window* window = widget->GetNativeWindow();
   gfx::Rect display_bounds(
-      Shell::GetScreen()->GetDisplayNearestWindow(window).bounds());
+      gfx::Screen::GetScreen()->GetDisplayNearestWindow(window).bounds());
 
   gfx::Point off_shelf = display_bounds.CenterPoint();
   gfx::Point on_shelf =
@@ -1288,7 +1303,7 @@ TEST_F(ShelfLayoutManagerTest, DimmingBehaviorWithMenus) {
   widget->Show();
   aura::Window* window = widget->GetNativeWindow();
   gfx::Rect display_bounds(
-      Shell::GetScreen()->GetDisplayNearestWindow(window).bounds());
+      gfx::Screen::GetScreen()->GetDisplayNearestWindow(window).bounds());
 
   // After maximization, the shelf should be visible and the dimmer created.
   widget->Maximize();
@@ -1392,7 +1407,7 @@ TEST_F(ShelfLayoutManagerTest, OpenAppListWithShelfVisibleState) {
   EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
 
   // Show app list and the shelf stays visible.
-  shell->ShowAppList(NULL);
+  shell->ShowAppList(nullptr);
   EXPECT_TRUE(shell->GetAppListTargetVisibility());
   EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
 
@@ -1422,7 +1437,7 @@ TEST_F(ShelfLayoutManagerTest, OpenAppListWithShelfAutoHideState) {
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
 
   // Show app list.
-  shell->ShowAppList(NULL);
+  shell->ShowAppList(nullptr);
   // The shelf's auto hide state won't be changed until the timer fires, so
   // calling shell->UpdateShelfVisibility() is kind of manually helping it to
   // update the state.
@@ -1464,25 +1479,20 @@ TEST_F(ShelfLayoutManagerTest, DualDisplayOpenAppListWithShelfAutoHideState) {
       GetRootWindowController(root_windows[1])->GetShelfLayoutManager();
   EXPECT_NE(shelf_1, shelf_2);
   EXPECT_NE(shelf_1->shelf_widget()->GetNativeWindow()->GetRootWindow(),
-            shelf_2->shelf_widget()->GetNativeWindow()->
-            GetRootWindow());
+            shelf_2->shelf_widget()->GetNativeWindow()->GetRootWindow());
   shelf_1->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
   shelf_1->LayoutShelf();
   shelf_2->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
   shelf_2->LayoutShelf();
 
   // Create a window in each display and show them in maximized state.
-  aura::Window* window_1 =
-      CreateTestWindowInParent(root_windows[0]);
+  aura::Window* window_1 = CreateTestWindowInParent(root_windows[0]);
   window_1->SetBounds(gfx::Rect(0, 0, 100, 100));
-  window_1->SetProperty(aura::client::kShowStateKey,
-                              ui::SHOW_STATE_MAXIMIZED);
+  window_1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
   window_1->Show();
-  aura::Window* window_2 =
-      CreateTestWindowInParent(root_windows[1]);
+  aura::Window* window_2 = CreateTestWindowInParent(root_windows[1]);
   window_2->SetBounds(gfx::Rect(201, 0, 100, 100));
-  window_2->SetProperty(aura::client::kShowStateKey,
-                                ui::SHOW_STATE_MAXIMIZED);
+  window_2->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
   window_2->Show();
 
   EXPECT_EQ(shelf_1->shelf_widget()->GetNativeWindow()->GetRootWindow(),
@@ -1502,7 +1512,7 @@ TEST_F(ShelfLayoutManagerTest, DualDisplayOpenAppListWithShelfAutoHideState) {
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf_2->auto_hide_state());
 
   // Show app list.
-  shell->ShowAppList(NULL);
+  shell->ShowAppList(nullptr);
   shell->UpdateShelfVisibility();
 
   // Only the shelf in the active display should be shown, the other is hidden.
@@ -1541,7 +1551,7 @@ TEST_F(ShelfLayoutManagerTest, OpenAppListWithShelfHiddenState) {
   EXPECT_EQ(SHELF_HIDDEN, shelf->visibility_state());
 
   // Show app list.
-  shell->ShowAppList(NULL);
+  shell->ShowAppList(nullptr);
   EXPECT_TRUE(shell->GetAppListTargetVisibility());
   EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
 
@@ -1703,7 +1713,7 @@ TEST_F(ShelfLayoutManagerTest, FullscreenWindowOnSecondDisplay) {
 #define MAYBE_SetAlignment SetAlignment
 #endif
 
-// Tests SHELF_ALIGNMENT_(LEFT, RIGHT, TOP).
+// Tests SHELF_ALIGNMENT_(LEFT, RIGHT).
 TEST_F(ShelfLayoutManagerTest, MAYBE_SetAlignment) {
   ShelfLayoutManager* shelf = GetShelfLayoutManager();
   // Force an initial layout.
@@ -1714,7 +1724,7 @@ TEST_F(ShelfLayoutManagerTest, MAYBE_SetAlignment) {
   shelf->SetAlignment(SHELF_ALIGNMENT_LEFT);
   gfx::Rect shelf_bounds(
       GetShelfWidget()->GetWindowBoundsInScreen());
-  const gfx::Screen* screen = Shell::GetScreen();
+  const gfx::Screen* screen = gfx::Screen::GetScreen();
   gfx::Display display =
       screen->GetDisplayNearestWindow(Shell::GetPrimaryRootWindow());
   ASSERT_NE(-1, display.id());
@@ -1770,35 +1780,6 @@ TEST_F(ShelfLayoutManagerTest, MAYBE_SetAlignment) {
       display.GetWorkAreaInsets().right());
   EXPECT_EQ(ShelfLayoutManager::kAutoHideSize,
       display.bounds().right() - display.work_area().right());
-
-  shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_NEVER);
-  shelf->SetAlignment(SHELF_ALIGNMENT_TOP);
-  display = screen->GetDisplayNearestWindow(Shell::GetPrimaryRootWindow());
-  shelf_bounds = GetShelfWidget()->GetWindowBoundsInScreen();
-  display = screen->GetDisplayNearestWindow(Shell::GetPrimaryRootWindow());
-  ASSERT_NE(-1, display.id());
-  EXPECT_EQ(shelf->GetIdealBounds().height(),
-            display.GetWorkAreaInsets().top());
-  EXPECT_GE(shelf_bounds.height(),
-            GetShelfWidget()->GetContentsView()->GetPreferredSize().height());
-  EXPECT_EQ(SHELF_ALIGNMENT_TOP, GetSystemTray()->shelf_alignment());
-  status_bounds = gfx::Rect(status_area_widget->GetWindowBoundsInScreen());
-  EXPECT_GE(status_bounds.height(),
-            status_area_widget->GetContentsView()->GetPreferredSize().height());
-  EXPECT_EQ(shelf->GetIdealBounds().height(),
-            display.GetWorkAreaInsets().top());
-  EXPECT_EQ(0, display.GetWorkAreaInsets().right());
-  EXPECT_EQ(0, display.GetWorkAreaInsets().bottom());
-  EXPECT_EQ(0, display.GetWorkAreaInsets().left());
-  EXPECT_EQ(display.work_area().y(), shelf_bounds.bottom());
-  EXPECT_EQ(display.bounds().x(), shelf_bounds.x());
-  EXPECT_EQ(display.bounds().width(), shelf_bounds.width());
-  shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
-  display = screen->GetDisplayNearestWindow(Shell::GetPrimaryRootWindow());
-  EXPECT_EQ(ShelfLayoutManager::kAutoHideSize,
-      display.GetWorkAreaInsets().top());
-  EXPECT_EQ(ShelfLayoutManager::kAutoHideSize,
-            display.work_area().y() - display.bounds().y());
 }
 
 TEST_F(ShelfLayoutManagerTest, GestureEdgeSwipe) {
@@ -2139,7 +2120,7 @@ TEST_F(ShelfLayoutManagerTest, WorkAreaChangeWorkspace) {
 // shelf is not autohidden.
 TEST_F(ShelfLayoutManagerTest, Dimming) {
   GetShelfLayoutManager()->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_NEVER);
-  scoped_ptr<aura::Window> w1(CreateTestWindow());
+  std::unique_ptr<aura::Window> w1(CreateTestWindow());
   w1->Show();
   wm::ActivateWindow(w1.get());
 
@@ -2220,14 +2201,14 @@ TEST_F(ShelfLayoutManagerTest, BubbleEnlargesShelfMouseHitArea) {
 TEST_F(ShelfLayoutManagerTest, ShelfBackgroundColor) {
   EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget()->GetBackgroundType());
 
-  scoped_ptr<aura::Window> w1(CreateTestWindow());
+  std::unique_ptr<aura::Window> w1(CreateTestWindow());
   w1->Show();
   wm::ActivateWindow(w1.get());
   EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget()->GetBackgroundType());
   w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
   EXPECT_EQ(SHELF_BACKGROUND_MAXIMIZED, GetShelfWidget()->GetBackgroundType());
 
-  scoped_ptr<aura::Window> w2(CreateTestWindow());
+  std::unique_ptr<aura::Window> w2(CreateTestWindow());
   w2->Show();
   wm::ActivateWindow(w2.get());
   // Overlaps with shelf.
@@ -2253,7 +2234,7 @@ TEST_F(ShelfLayoutManagerTest, ShelfBackgroundColorAutoHide) {
   EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget ()->GetBackgroundType());
 
   GetShelfLayoutManager()->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
-  scoped_ptr<aura::Window> w1(CreateTestWindow());
+  std::unique_ptr<aura::Window> w1(CreateTestWindow());
   w1->Show();
   wm::ActivateWindow(w1.get());
   EXPECT_EQ(SHELF_BACKGROUND_OVERLAP, GetShelfWidget()->GetBackgroundType());
@@ -2332,7 +2313,7 @@ TEST_F(ShelfLayoutManagerTest, ShutdownHandlesWindowActivation) {
   window1->SetBounds(gfx::Rect(0, 0, 100, 100));
   window1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
   window1->Show();
-  scoped_ptr<aura::Window> window2(CreateTestWindowInShellWithId(0));
+  std::unique_ptr<aura::Window> window2(CreateTestWindowInShellWithId(0));
   window2->SetBounds(gfx::Rect(0, 0, 100, 100));
   window2->Show();
   wm::ActivateWindow(window1);
@@ -2351,15 +2332,15 @@ TEST_F(ShelfLayoutManagerTest, ShelfLayoutInUnifiedDesktop) {
     return;
   Shell::GetInstance()->display_manager()->SetUnifiedDesktopEnabled(true);
 
-  UpdateDisplay("500x500, 500x500");
+  UpdateDisplay("500x400, 500x400");
 
   StatusAreaWidget* status_area_widget =
       Shell::GetPrimaryRootWindowController()->shelf()->status_area_widget();
   EXPECT_TRUE(status_area_widget->IsVisible());
   // Shelf should be in the first display's area.
-  // TODO: make this test more robust against changes in font, font size.
-  EXPECT_EQ("353,453 147x47",
-            status_area_widget->GetWindowBoundsInScreen().ToString());
+  gfx::Rect status_area_bounds(status_area_widget->GetWindowBoundsInScreen());
+  EXPECT_TRUE(gfx::Rect(0, 0, 500, 400).Contains(status_area_bounds));
+  EXPECT_EQ(gfx::Point(500, 400), status_area_bounds.bottom_right());
 }
 
 }  // namespace ash

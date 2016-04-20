@@ -14,7 +14,9 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/memory/discardable_memory.h"
+#include "base/memory/ptr_util.h"
 #include "base/numerics/safe_math.h"
+#include "base/process/memory.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
@@ -39,8 +41,9 @@ namespace {
 
 class DiscardableMemoryImpl : public base::DiscardableMemory {
  public:
-  DiscardableMemoryImpl(scoped_ptr<base::DiscardableSharedMemory> shared_memory,
-                        const base::Closure& deleted_callback)
+  DiscardableMemoryImpl(
+      std::unique_ptr<base::DiscardableSharedMemory> shared_memory,
+      const base::Closure& deleted_callback)
       : shared_memory_(std::move(shared_memory)),
         deleted_callback_(deleted_callback),
         is_locked_(true) {}
@@ -87,7 +90,7 @@ class DiscardableMemoryImpl : public base::DiscardableMemory {
   }
 
  private:
-  scoped_ptr<base::DiscardableSharedMemory> shared_memory_;
+  std::unique_ptr<base::DiscardableSharedMemory> shared_memory_;
   const base::Closure deleted_callback_;
   bool is_locked_;
 
@@ -153,7 +156,7 @@ base::StaticAtomicSequenceNumber g_next_discardable_shared_memory_id;
 }  // namespace
 
 HostDiscardableSharedMemoryManager::MemorySegment::MemorySegment(
-    scoped_ptr<base::DiscardableSharedMemory> memory)
+    std::unique_ptr<base::DiscardableSharedMemory> memory)
     : memory_(std::move(memory)) {}
 
 HostDiscardableSharedMemoryManager::MemorySegment::~MemorySegment() {
@@ -187,9 +190,12 @@ HostDiscardableSharedMemoryManager::current() {
   return g_discardable_shared_memory_manager.Pointer();
 }
 
-scoped_ptr<base::DiscardableMemory>
+std::unique_ptr<base::DiscardableMemory>
 HostDiscardableSharedMemoryManager::AllocateLockedDiscardableMemory(
     size_t size) {
+  // TODO(reveman): Temporary diagnostics for http://crbug.com/577786.
+  CHECK_NE(size, 0u);
+
   DiscardableSharedMemoryId new_id =
       g_next_discardable_shared_memory_id.GetNext();
   base::ProcessHandle current_process_handle = base::GetCurrentProcessHandle();
@@ -200,13 +206,13 @@ HostDiscardableSharedMemoryManager::AllocateLockedDiscardableMemory(
   AllocateLockedDiscardableSharedMemory(current_process_handle,
                                         ChildProcessHost::kInvalidUniqueID,
                                         size, new_id, &handle);
-  CHECK(base::SharedMemory::IsHandleValid(handle));
-  scoped_ptr<base::DiscardableSharedMemory> memory(
+  std::unique_ptr<base::DiscardableSharedMemory> memory(
       new base::DiscardableSharedMemory(handle));
-  CHECK(memory->Map(size));
+  if (!memory->Map(size))
+    base::TerminateBecauseOutOfMemory(size);
   // Close file descriptor to avoid running out.
   memory->Close();
-  return make_scoped_ptr(new DiscardableMemoryImpl(
+  return base::WrapUnique(new DiscardableMemoryImpl(
       std::move(memory),
       base::Bind(
           &HostDiscardableSharedMemoryManager::DeletedDiscardableSharedMemory,
@@ -360,7 +366,7 @@ void HostDiscardableSharedMemoryManager::AllocateLockedDiscardableSharedMemory(
   if (bytes_allocated_ > limit)
     ReduceMemoryUsageUntilWithinLimit(limit);
 
-  scoped_ptr<base::DiscardableSharedMemory> memory(
+  std::unique_ptr<base::DiscardableSharedMemory> memory(
       new base::DiscardableSharedMemory);
   if (!memory->CreateAndMap(size)) {
     *shared_memory_handle = base::SharedMemory::NULLHandle();

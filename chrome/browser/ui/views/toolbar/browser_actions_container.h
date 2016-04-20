@@ -7,12 +7,12 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/observer_list.h"
-#include "chrome/browser/extensions/extension_keybinding_registry.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar_delegate.h"
-#include "chrome/browser/ui/views/extensions/extension_keybinding_registry_views.h"
 #include "chrome/browser/ui/views/toolbar/chevron_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_action_view.h"
 #include "ui/gfx/animation/animation_delegate.h"
@@ -32,7 +32,7 @@ class Extension;
 }
 
 namespace views {
-class BubbleDelegateView;
+class BubbleDialogDelegateView;
 class ResizeArea;
 }
 
@@ -124,14 +124,12 @@ class ResizeArea;
 // growing the container.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class BrowserActionsContainer
-    : public views::View,
-      public ToolbarActionsBarDelegate,
-      public views::ResizeAreaDelegate,
-      public gfx::AnimationDelegate,
-      public ToolbarActionView::Delegate,
-      public views::WidgetObserver,
-      public extensions::ExtensionKeybindingRegistry::Delegate {
+class BrowserActionsContainer : public views::View,
+                                public ToolbarActionsBarDelegate,
+                                public views::ResizeAreaDelegate,
+                                public gfx::AnimationDelegate,
+                                public ToolbarActionView::Delegate,
+                                public views::WidgetObserver {
  public:
   // Constructs a BrowserActionContainer for a particular |browser| object. For
   // documentation of |main_container|, see class comments.
@@ -153,11 +151,6 @@ class BrowserActionsContainer
 
   ToolbarActionsBar* toolbar_actions_bar() {
     return toolbar_actions_bar_.get();
-  }
-
-  // The class that registers for keyboard shortcuts for extension commands.
-  extensions::ExtensionKeybindingRegistry* extension_keybinding_registry() {
-    return extension_keybinding_registry_.get();
   }
 
   // Get a particular toolbar action view.
@@ -189,10 +182,6 @@ class BrowserActionsContainer
   // animating to a new size, or (if not animating) the currently visible icons.
   size_t VisibleBrowserActionsAfterAnimation() const;
 
-  // Executes |command| registered by |extension|.
-  void ExecuteExtensionCommand(const extensions::Extension* extension,
-                               const extensions::Command& command);
-
   // Returns the preferred width given the limit of |max_width|. (Unlike most
   // views, since we don't want to show part of an icon or a large space after
   // the omnibox, this is probably *not* |max_width|).
@@ -203,7 +192,6 @@ class BrowserActionsContainer
   int GetHeightForWidth(int width) const override;
   gfx::Size GetMinimumSize() const override;
   void Layout() override;
-  void OnMouseEntered(const ui::MouseEvent& event) override;
   bool GetDropFormats(
       int* formats,
       std::set<ui::Clipboard::FormatType>* format_types) override;
@@ -236,7 +224,6 @@ class BrowserActionsContainer
   bool ShownInsideMenu() const override;
   void OnToolbarActionViewDragDone() override;
   views::MenuButton* GetOverflowReferenceView() override;
-  void OnMouseEnteredToolbarActionView() override;
 
   // ToolbarActionsBarDelegate:
   void AddViewForAction(ToolbarActionViewController* action,
@@ -252,19 +239,14 @@ class BrowserActionsContainer
   bool IsAnimating() const override;
   void StopAnimating() override;
   int GetChevronWidth() const override;
-  void ShowExtensionMessageBubble(
-      scoped_ptr<extensions::ExtensionMessageBubbleController> controller,
-      ToolbarActionViewController* anchor_action) override;
+  void ShowToolbarActionBubble(
+      std::unique_ptr<ToolbarActionsBarBubbleDelegate> controller) override;
 
   // views::WidgetObserver:
   void OnWidgetClosing(views::Widget* widget) override;
   void OnWidgetDestroying(views::Widget* widget) override;
 
-  // Overridden from extension::ExtensionKeybindingRegistry::Delegate:
-  extensions::ActiveTabPermissionGranter* GetActiveTabPermissionGranter()
-      override;
-
-  views::BubbleDelegateView* active_bubble() { return active_bubble_; }
+  views::BubbleDialogDelegateView* active_bubble() { return active_bubble_; }
 
   ChevronMenuButton* chevron_for_testing() { return chevron_; }
 
@@ -295,7 +277,7 @@ class BrowserActionsContainer
   bool in_overflow_mode() const { return main_container_ != NULL; }
 
   // The controlling ToolbarActionsBar, which handles most non-view logic.
-  scoped_ptr<ToolbarActionsBar> toolbar_actions_bar_;
+  std::unique_ptr<ToolbarActionsBar> toolbar_actions_bar_;
 
   // The vector of toolbar actions (icons/image buttons for each action).
   ToolbarActionViews toolbar_action_views_;
@@ -316,20 +298,17 @@ class BrowserActionsContainer
   ChevronMenuButton* chevron_;
 
   // The painter used when we are highlighting a subset of extensions.
-  scoped_ptr<views::Painter> info_highlight_painter_;
-  scoped_ptr<views::Painter> warning_highlight_painter_;
+  std::unique_ptr<views::Painter> info_highlight_painter_;
+  std::unique_ptr<views::Painter> warning_highlight_painter_;
 
   // The animation that happens when the container snaps to place.
-  scoped_ptr<gfx::SlideAnimation> resize_animation_;
+  std::unique_ptr<gfx::SlideAnimation> resize_animation_;
 
   // Don't show the chevron while animating.
   bool suppress_chevron_;
 
   // True if the container has been added to the parent view.
   bool added_to_view_;
-
-  // Whether or not the info bubble has been shown, if it should be.
-  bool shown_bubble_;
 
   // When the container is resizing, this is the width at which it started.
   // If the container is not resizing, -1.
@@ -346,13 +325,10 @@ class BrowserActionsContainer
 
   // The DropPosition for the current drag-and-drop operation, or NULL if there
   // is none.
-  scoped_ptr<DropPosition> drop_position_;
-
-  // The class that registers for keyboard shortcuts for extension commands.
-  scoped_ptr<ExtensionKeybindingRegistryViews> extension_keybinding_registry_;
+  std::unique_ptr<DropPosition> drop_position_;
 
   // The extension bubble that is actively showing, if any.
-  views::BubbleDelegateView* active_bubble_;
+  views::BubbleDialogDelegateView* active_bubble_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserActionsContainer);
 };

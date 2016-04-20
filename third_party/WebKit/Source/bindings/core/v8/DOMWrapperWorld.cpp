@@ -85,7 +85,6 @@ private:
 };
 
 unsigned DOMWrapperWorld::isolatedWorldCount = 0;
-DOMWrapperWorld* DOMWrapperWorld::worldOfInitializingWindow = 0;
 
 PassRefPtr<DOMWrapperWorld> DOMWrapperWorld::create(v8::Isolate* isolate, int worldId, int extensionGroup)
 {
@@ -176,7 +175,7 @@ PassRefPtr<DOMWrapperWorld> DOMWrapperWorld::ensureIsolatedWorld(v8::Isolate* is
     ASSERT(isIsolatedWorldId(worldId));
 
     WorldMap& map = isolatedWorldMap();
-    WorldMap::AddResult result = map.add(worldId, 0);
+    WorldMap::AddResult result = map.add(worldId, nullptr);
     RefPtr<DOMWrapperWorld> world = result.storedValue->value;
     if (world) {
         ASSERT(world->worldId() == worldId);

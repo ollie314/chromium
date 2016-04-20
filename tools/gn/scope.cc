@@ -5,7 +5,7 @@
 #include "tools/gn/scope.h"
 
 #include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/memory/ptr_util.h"
 #include "tools/gn/parse_tree.h"
 #include "tools/gn/template.h"
 
@@ -25,6 +25,15 @@ bool IsPrivateVar(const base::StringPiece& name) {
 
 }  // namespace
 
+// Defaults to all false, which are the things least likely to cause errors.
+Scope::MergeOptions::MergeOptions()
+    : clobber_existing(false),
+      skip_private_vars(false),
+      mark_dest_used(false) {
+}
+
+Scope::MergeOptions::~MergeOptions() {
+}
 
 Scope::ProgrammaticProvider::~ProgrammaticProvider() {
   scope_->RemoveProvider(this);
@@ -55,8 +64,6 @@ Scope::Scope(const Scope* parent)
 }
 
 Scope::~Scope() {
-  STLDeleteContainerPairSecondPointers(target_defaults_.begin(),
-                                       target_defaults_.end());
 }
 
 const Value* Scope::GetValue(const base::StringPiece& ident,
@@ -249,17 +256,23 @@ bool Scope::NonRecursiveMergeTo(Scope* dest,
                                 Err* err) const {
   // Values.
   for (const auto& pair : values_) {
-    if (options.skip_private_vars && IsPrivateVar(pair.first))
+    const base::StringPiece& current_name = pair.first;
+    if (options.skip_private_vars && IsPrivateVar(current_name))
       continue;  // Skip this private var.
+    if (!options.excluded_values.empty() &&
+        options.excluded_values.find(current_name.as_string()) !=
+            options.excluded_values.end()) {
+      continue;  // Skip this excluded value.
+    }
 
     const Value& new_value = pair.second.value;
     if (!options.clobber_existing) {
-      const Value* existing_value = dest->GetValue(pair.first);
+      const Value* existing_value = dest->GetValue(current_name);
       if (existing_value && new_value != *existing_value) {
         // Value present in both the source and the dest.
         std::string desc_string(desc_for_err);
         *err = Err(node_for_err, "Value collision.",
-            "This " + desc_string + " contains \"" + pair.first.as_string() +
+            "This " + desc_string + " contains \"" + current_name.as_string() +
             "\"");
         err->AppendSubErr(Err(pair.second.value, "defined here.",
             "Which would clobber the one in your current scope"));
@@ -269,23 +282,30 @@ bool Scope::NonRecursiveMergeTo(Scope* dest,
         return false;
       }
     }
-    dest->values_[pair.first] = pair.second;
+    dest->values_[current_name] = pair.second;
 
     if (options.mark_dest_used)
-      dest->MarkUsed(pair.first);
+      dest->MarkUsed(current_name);
   }
 
   // Target defaults are owning pointers.
   for (const auto& pair : target_defaults_) {
+    const std::string& current_name = pair.first;
+    if (!options.excluded_values.empty() &&
+        options.excluded_values.find(current_name) !=
+            options.excluded_values.end()) {
+      continue;  // Skip the excluded value.
+    }
+
     if (!options.clobber_existing) {
-      if (dest->GetTargetDefaults(pair.first)) {
+      if (dest->GetTargetDefaults(current_name)) {
         // TODO(brettw) it would be nice to know the origin of a
         // set_target_defaults so we can give locations for the colliding target
         // defaults.
         std::string desc_string(desc_for_err);
         *err = Err(node_for_err, "Target defaults collision.",
             "This " + desc_string + " contains target defaults for\n"
-            "\"" + pair.first + "\" which would clobber one for the\n"
+            "\"" + current_name + "\" which would clobber one for the\n"
             "same target type in your current scope. It's unfortunate that I'm "
             "too stupid\nto tell you the location of where the target defaults "
             "were set. Usually\nthis happens in the BUILDCONFIG.gn file.");
@@ -293,12 +313,9 @@ bool Scope::NonRecursiveMergeTo(Scope* dest,
       }
     }
 
-    // Be careful to delete any pointer we're about to clobber.
-    Scope** dest_scope = &dest->target_defaults_[pair.first];
-    if (*dest_scope)
-      delete *dest_scope;
-    *dest_scope = new Scope(settings_);
-    pair.second->NonRecursiveMergeTo(*dest_scope, options, node_for_err,
+    std::unique_ptr<Scope>& dest_scope = dest->target_defaults_[current_name];
+    dest_scope = base::WrapUnique(new Scope(settings_));
+    pair.second->NonRecursiveMergeTo(dest_scope.get(), options, node_for_err,
                                      "<SHOULDN'T HAPPEN>", err);
   }
 
@@ -320,11 +337,17 @@ bool Scope::NonRecursiveMergeTo(Scope* dest,
 
   // Templates.
   for (const auto& pair : templates_) {
-    if (options.skip_private_vars && IsPrivateVar(pair.first))
+    const std::string& current_name = pair.first;
+    if (options.skip_private_vars && IsPrivateVar(current_name))
       continue;  // Skip this private template.
+    if (!options.excluded_values.empty() &&
+        options.excluded_values.find(current_name) !=
+            options.excluded_values.end()) {
+      continue;  // Skip the excluded value.
+    }
 
     if (!options.clobber_existing) {
-      const Template* existing_template = dest->GetTemplate(pair.first);
+      const Template* existing_template = dest->GetTemplate(current_name);
       // Since templates are refcounted, we can check if it's the same one by
       // comparing pointers.
       if (existing_template && pair.second.get() != existing_template) {
@@ -333,7 +356,7 @@ bool Scope::NonRecursiveMergeTo(Scope* dest,
         std::string desc_string(desc_for_err);
         *err = Err(node_for_err, "Template collision.",
             "This " + desc_string + " contains a template \"" +
-            pair.first + "\"");
+            current_name + "\"");
         err->AppendSubErr(Err(pair.second->GetDefinitionRange(),
             "defined here.",
             "Which would clobber the one in your current scope"));
@@ -346,14 +369,14 @@ bool Scope::NonRecursiveMergeTo(Scope* dest,
     }
 
     // Be careful to delete any pointer we're about to clobber.
-    dest->templates_[pair.first] = pair.second;
+    dest->templates_[current_name] = pair.second;
   }
 
   return true;
 }
 
-scoped_ptr<Scope> Scope::MakeClosure() const {
-  scoped_ptr<Scope> result;
+std::unique_ptr<Scope> Scope::MakeClosure() const {
+  std::unique_ptr<Scope> result;
   if (const_containing_) {
     // We reached the top of the mutable scope stack. The result scope just
     // references the const scope (which will never change).
@@ -384,19 +407,19 @@ Scope* Scope::MakeTargetDefaults(const std::string& target_type) {
   if (GetTargetDefaults(target_type))
     return nullptr;
 
-  Scope** dest = &target_defaults_[target_type];
-  if (*dest) {
+  std::unique_ptr<Scope>& dest = target_defaults_[target_type];
+  if (dest) {
     NOTREACHED();  // Already set.
-    return *dest;
+    return dest.get();
   }
-  *dest = new Scope(settings_);
-  return *dest;
+  dest = base::WrapUnique(new Scope(settings_));
+  return dest.get();
 }
 
 const Scope* Scope::GetTargetDefaults(const std::string& target_type) const {
   NamedScopeMap::const_iterator found = target_defaults_.find(target_type);
   if (found != target_defaults_.end())
-    return found->second;
+    return found->second.get();
   if (containing())
     return containing()->GetTargetDefaults(target_type);
   return nullptr;

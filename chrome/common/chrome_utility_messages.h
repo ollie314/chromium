@@ -9,17 +9,17 @@
 #endif  // defined(OS_WIN)
 
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "base/files/file_path.h"
 #include "base/strings/string16.h"
-#include "base/tuple.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
+#include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
 
 #if defined(FULL_SAFE_BROWSING)
 #include "chrome/common/safe_browsing/ipc_protobuf_message_macros.h"
@@ -32,9 +32,9 @@
 #define CHROME_COMMON_CHROME_UTILITY_MESSAGES_H_
 
 #if defined(OS_WIN)
-// A vector of filters, each being a Tuple containing a display string (i.e.
+// A vector of filters, each being a tuple containing a display string (i.e.
 // "Text Files") and a filter pattern (i.e. "*.txt").
-typedef std::vector<base::Tuple<base::string16, base::string16>>
+typedef std::vector<std::tuple<base::string16, base::string16>>
     GetOpenFileNameFilter;
 #endif  // OS_WIN
 
@@ -140,20 +140,6 @@ IPC_STRUCT_END()
 // Utility process messages:
 // These are messages from the browser to the utility process.
 
-// Tell the utility process to decode the given image data.
-IPC_MESSAGE_CONTROL3(ChromeUtilityMsg_DecodeImage,
-                     std::vector<unsigned char> /* encoded image contents */,
-                     bool /* shrink image if needed for IPC msg limit */,
-                     int /* delegate id */)
-
-#if defined(OS_CHROMEOS)
-// Tell the utility process to decode the given JPEG image data with a robust
-// libjpeg codec.
-IPC_MESSAGE_CONTROL2(ChromeUtilityMsg_RobustJPEGDecodeImage,
-                     std::vector<unsigned char> /* encoded image contents*/,
-                     int /* delegate id */)
-#endif  // defined(OS_CHROMEOS)
-
 // Tell the utility process to patch the given |input_file| using |patch_file|
 // and place the output in |output_file|. The patch should use the bsdiff
 // algorithm (Courgette's version).
@@ -177,11 +163,6 @@ IPC_MESSAGE_CONTROL3(ChromeUtilityMsg_CreateZipFile,
                      std::vector<base::FilePath> /* src_relative_paths */,
                      base::FileDescriptor /* dest_fd */)
 #endif  // defined(OS_CHROMEOS)
-
-// Requests the utility process to respond with a
-// ChromeUtilityHostMsg_ProcessStarted message once it has started.  This may
-// be used if the host process needs a handle to the running utility process.
-IPC_MESSAGE_CONTROL0(ChromeUtilityMsg_StartupPing)
 
 #if defined(FULL_SAFE_BROWSING)
 // Tells the utility process to analyze a zip file for malicious download
@@ -236,15 +217,6 @@ IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_GetSaveFileName,
 IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_UnpackWebResource_Failed,
                      std::string /* error_message, if any */)
 
-// Reply when the utility process has succeeded in decoding the image.
-IPC_MESSAGE_CONTROL2(ChromeUtilityHostMsg_DecodeImage_Succeeded,
-                     SkBitmap /* decoded image */,
-                     int /* delegate id */)
-
-// Reply when an error occurred decoding the image.
-IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_DecodeImage_Failed,
-                     int /* delegate id */)
-
 // Reply when a file has been patched.
 IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_PatchFile_Finished, int /* result */)
 
@@ -255,9 +227,6 @@ IPC_MESSAGE_CONTROL0(ChromeUtilityHostMsg_CreateZipFile_Succeeded)
 // Reply when an error occured in creating the zip file.
 IPC_MESSAGE_CONTROL0(ChromeUtilityHostMsg_CreateZipFile_Failed)
 #endif  // defined(OS_CHROMEOS)
-
-// Reply when the utility process has started.
-IPC_MESSAGE_CONTROL0(ChromeUtilityHostMsg_ProcessStarted)
 
 #if defined(FULL_SAFE_BROWSING)
 // Reply when a zip file has been analyzed for malicious download protection.
@@ -282,6 +251,4 @@ IPC_MESSAGE_CONTROL0(ChromeUtilityHostMsg_GetSaveFileName_Failed)
 IPC_MESSAGE_CONTROL2(ChromeUtilityHostMsg_GetSaveFileName_Result,
                      base::FilePath /* path */,
                      int /* one_based_filter_index  */)
-IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_BuildDirectWriteFontCache,
-                     base::FilePath /* cache file path */)
 #endif  // defined(OS_WIN)

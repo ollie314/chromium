@@ -67,6 +67,7 @@ struct NaClResourcePrefetchResult {
 // Parameters sent to the NaCl process when we start it.
 struct NaClStartParams {
   NaClStartParams();
+  NaClStartParams(const NaClStartParams& other);
   ~NaClStartParams();
 
   IPC::PlatformFileForTransit nexe_file;
@@ -74,9 +75,6 @@ struct NaClStartParams {
   base::FilePath nexe_file_path_metadata;
 
   IPC::PlatformFileForTransit irt_handle;
-#if defined(OS_MACOSX)
-  IPC::PlatformFileForTransit mac_shm_fd;
-#endif
 #if defined(OS_POSIX)
   IPC::PlatformFileForTransit debug_stub_server_bound_socket;
 #endif
@@ -128,6 +126,7 @@ struct NaClLaunchParams {
                    uint32_t permission_bits,
                    bool uses_nonsfi_mode,
                    NaClAppProcessType process_type);
+  NaClLaunchParams(const NaClLaunchParams& other);
   ~NaClLaunchParams();
 
   std::string manifest_url;

@@ -102,7 +102,11 @@ Resource* ResourcePool::AcquireResource(const gfx::Size& size,
   for (ResourceDeque::iterator it = unused_resources_.begin();
        it != unused_resources_.end(); ++it) {
     ScopedResource* resource = it->get();
-    DCHECK(resource_provider_->CanLockForWrite(resource->id()));
+    // TODO(ccameron): The allowance for IsInUseByMacOSWindowServer should not
+    // be needed.
+    // http://crbug.com/577121
+    DCHECK(resource_provider_->CanLockForWrite(resource->id()) ||
+           resource_provider_->IsInUseByMacOSWindowServer(resource->id()));
 
     if (resource->format() != format)
       continue;
@@ -117,7 +121,7 @@ Resource* ResourcePool::AcquireResource(const gfx::Size& size,
     return resource;
   }
 
-  scoped_ptr<PoolResource> pool_resource =
+  std::unique_ptr<PoolResource> pool_resource =
       PoolResource::Create(resource_provider_);
 
   if (use_gpu_memory_buffers_) {
@@ -143,16 +147,20 @@ Resource* ResourcePool::AcquireResource(const gfx::Size& size,
 Resource* ResourcePool::TryAcquireResourceWithContentId(uint64_t content_id) {
   DCHECK(content_id);
 
-  auto it =
-      std::find_if(unused_resources_.begin(), unused_resources_.end(),
-                   [content_id](const scoped_ptr<PoolResource>& pool_resource) {
-                     return pool_resource->content_id() == content_id;
-                   });
+  auto it = std::find_if(
+      unused_resources_.begin(), unused_resources_.end(),
+      [content_id](const std::unique_ptr<PoolResource>& pool_resource) {
+        return pool_resource->content_id() == content_id;
+      });
   if (it == unused_resources_.end())
     return nullptr;
 
   Resource* resource = it->get();
-  DCHECK(resource_provider_->CanLockForWrite(resource->id()));
+  // TODO(ccameron): The allowance for IsInUseByMacOSWindowServer should not
+  // be needed.
+  // http://crbug.com/577121
+  DCHECK(resource_provider_->CanLockForWrite(resource->id()) ||
+         resource_provider_->IsInUseByMacOSWindowServer(resource->id()));
 
   // Transfer resource to |in_use_resources_|.
   in_use_resources_[resource->id()] = std::move(*it);
@@ -163,8 +171,43 @@ Resource* ResourcePool::TryAcquireResourceWithContentId(uint64_t content_id) {
 }
 
 void ResourcePool::ReleaseResource(Resource* resource, uint64_t content_id) {
+  // Ensure that the provided resource is valid.
+  // TODO(ericrk): Remove this once we've investigated further.
+  // crbug.com/598286.
+  CHECK(resource);
+  CHECK(resource->id());
+
   auto it = in_use_resources_.find(resource->id());
-  DCHECK(it != in_use_resources_.end());
+  if (it == in_use_resources_.end()) {
+    // We should never hit this. Do some digging to try to determine the cause.
+    // TODO(ericrk): Remove this once we've investigated further.
+    // crbug.com/598286.
+
+    // Maybe this is a double free - see if the resource exists in our busy
+    // list.
+    auto found_busy = std::find_if(
+        busy_resources_.begin(), busy_resources_.end(),
+        [resource](const std::unique_ptr<PoolResource>& busy_resource) {
+          return busy_resource->id() == resource->id();
+        });
+    CHECK(found_busy == busy_resources_.end());
+
+    // Also check if the resource exists in our unused resources list.
+    auto found_unused = std::find_if(
+        unused_resources_.begin(), unused_resources_.end(),
+        [resource](const std::unique_ptr<PoolResource>& pool_resource) {
+          return pool_resource->id() == resource->id();
+        });
+    CHECK(found_unused == unused_resources_.end());
+
+    // Resource doesn't exist in any of our lists. CHECK.
+    CHECK(false);
+  }
+
+  // Also ensure that the resource wasn't null in our list.
+  // TODO(ericrk): Remove this once we've investigated further.
+  // crbug.com/598286.
+  CHECK(it->second.get());
 
   PoolResource* pool_resource = it->second.get();
   pool_resource->set_content_id(content_id);
@@ -213,7 +256,7 @@ bool ResourcePool::ResourceUsageTooHigh() {
   return false;
 }
 
-void ResourcePool::DeleteResource(scoped_ptr<PoolResource> resource) {
+void ResourcePool::DeleteResource(std::unique_ptr<PoolResource> resource) {
   size_t resource_bytes = ResourceUtil::UncheckedSizeInBytes<size_t>(
       resource->size(), resource->format());
   total_memory_usage_bytes_ -= resource_bytes;
@@ -238,7 +281,8 @@ void ResourcePool::CheckBusyResources() {
   }
 }
 
-void ResourcePool::DidFinishUsingResource(scoped_ptr<PoolResource> resource) {
+void ResourcePool::DidFinishUsingResource(
+    std::unique_ptr<PoolResource> resource) {
   unused_resources_.push_front(std::move(resource));
 }
 

@@ -42,8 +42,13 @@
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/MediaError.h"
 #include "core/html/TimeRanges.h"
+#include "core/html/track/AudioTrack.h"
+#include "core/html/track/AudioTrackList.h"
+#include "core/html/track/VideoTrack.h"
+#include "core/html/track/VideoTrackList.h"
 #include "core/streams/Stream.h"
 #include "modules/mediasource/MediaSource.h"
+#include "modules/mediasource/SourceBufferTrackBaseSupplement.h"
 #include "platform/Logging.h"
 #include "platform/TraceEvent.h"
 #include "public/platform/WebSourceBuffer.h"
@@ -99,7 +104,8 @@ SourceBuffer* SourceBuffer::create(PassOwnPtr<WebSourceBuffer> webSourceBuffer, 
 }
 
 SourceBuffer::SourceBuffer(PassOwnPtr<WebSourceBuffer> webSourceBuffer, MediaSource* source, GenericEventQueue* asyncEventQueue)
-    : ActiveDOMObject(source->executionContext())
+    : ActiveScriptWrappable(this)
+    , ActiveDOMObject(source->getExecutionContext())
     , m_webSourceBuffer(webSourceBuffer)
     , m_source(source)
     , m_trackDefaults(TrackDefaultList::create())
@@ -121,32 +127,34 @@ SourceBuffer::SourceBuffer(PassOwnPtr<WebSourceBuffer> webSourceBuffer, MediaSou
 {
     ASSERT(m_webSourceBuffer);
     ASSERT(m_source);
+    ASSERT(m_source->mediaElement());
+    ThreadState::current()->registerPreFinalizer(this);
+    m_audioTracks = AudioTrackList::create(*m_source->mediaElement());
+    m_videoTracks = VideoTrackList::create(*m_source->mediaElement());
     m_webSourceBuffer->setClient(this);
 }
 
 SourceBuffer::~SourceBuffer()
 {
-    // Oilpan: a SourceBuffer might be finalized without having been
-    // explicitly removed first, hence the asserts below will not
-    // hold.
-#if !ENABLE(OILPAN)
-    ASSERT(isRemoved());
-    ASSERT(!m_loader);
-    ASSERT(!m_stream);
-    ASSERT(!m_webSourceBuffer);
-#endif
     WTF_LOG(Media, "SourceBuffer(%p)::~SourceBuffer", this);
+}
+
+void SourceBuffer::dispose()
+{
+    // Promptly clears a raw reference from content/ to an on-heap object
+    // so that content/ doesn't access it in a lazy sweeping phase.
+    m_webSourceBuffer.clear();
 }
 
 const AtomicString& SourceBuffer::segmentsKeyword()
 {
-    DEFINE_STATIC_LOCAL(const AtomicString, segments, ("segments", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(const AtomicString, segments, ("segments"));
     return segments;
 }
 
 const AtomicString& SourceBuffer::sequenceKeyword()
 {
-    DEFINE_STATIC_LOCAL(const AtomicString, sequence, ("sequence", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(const AtomicString, sequence, ("sequence"));
     return sequence;
 }
 
@@ -227,6 +235,18 @@ void SourceBuffer::setTimestampOffset(double offset, ExceptionState& exceptionSt
     m_timestampOffset = offset;
 }
 
+AudioTrackList& SourceBuffer::audioTracks()
+{
+    ASSERT(RuntimeEnabledFeatures::audioVideoTracksEnabled());
+    return *m_audioTracks;
+}
+
+VideoTrackList& SourceBuffer::videoTracks()
+{
+    ASSERT(RuntimeEnabledFeatures::audioVideoTracksEnabled());
+    return *m_videoTracks;
+}
+
 double SourceBuffer::appendWindowStart() const
 {
     return m_appendWindowStart;
@@ -290,7 +310,7 @@ void SourceBuffer::setAppendWindowEnd(double end, ExceptionState& exceptionState
     m_appendWindowEnd = end;
 }
 
-void SourceBuffer::appendBuffer(PassRefPtr<DOMArrayBuffer> data, ExceptionState& exceptionState)
+void SourceBuffer::appendBuffer(DOMArrayBuffer* data, ExceptionState& exceptionState)
 {
     WTF_LOG(Media, "SourceBuffer(%p)::appendBuffer size=%u", this, data->byteLength());
     // Section 3.2 appendBuffer()
@@ -298,7 +318,7 @@ void SourceBuffer::appendBuffer(PassRefPtr<DOMArrayBuffer> data, ExceptionState&
     appendBufferInternal(static_cast<const unsigned char*>(data->data()), data->byteLength(), exceptionState);
 }
 
-void SourceBuffer::appendBuffer(PassRefPtr<DOMArrayBufferView> data, ExceptionState& exceptionState)
+void SourceBuffer::appendBuffer(DOMArrayBufferView* data, ExceptionState& exceptionState)
 {
     WTF_LOG(Media, "SourceBuffer(%p)::appendBuffer size=%u", this, data->byteLength());
     // Section 3.2 appendBuffer()
@@ -470,17 +490,73 @@ void SourceBuffer::removedFromMediaSource()
     m_asyncEventQueue = nullptr;
 }
 
-void SourceBuffer::initializationSegmentReceived()
+template<class T>
+T* findExistingTrackById(const TrackListBase<T>& trackList, const String& id)
 {
-    WTF_LOG(Media, "SourceBuffer::initializationSegmentReceived %p", this);
+    // According to MSE specification (https://w3c.github.io/media-source/#sourcebuffer-init-segment-received) step 3.1:
+    // > If more than one track for a single type are present (ie 2 audio tracks), then the Track IDs match the ones in the first initialization segment.
+    // I.e. we only need to search by TrackID if there is more than one track, otherwise we can assume that the only
+    // track of the given type is the same one that we had in previous init segments.
+    if (trackList.length() == 1)
+        return trackList.anonymousIndexedGetter(0);
+    return trackList.getTrackById(id);
+}
+
+WebVector<WebMediaPlayer::TrackId> SourceBuffer::initializationSegmentReceived(const WebVector<MediaTrackInfo>& newTracks)
+{
+    WTF_LOG(Media, "SourceBuffer::initializationSegmentReceived %p tracks=%zu", this, newTracks.size());
     ASSERT(m_source);
+    ASSERT(m_source->mediaElement());
     ASSERT(m_updating);
 
-    // https://dvcs.w3.org/hg/html-media/raw-file/tip/media-source/media-source.html#sourcebuffer-init-segment-received
-    // FIXME: Make steps 1-7 synchronous with this call.
-    // FIXME: Augment the interface to this method to implement compliant steps 4-7 here.
-    // Step 3 (if the first initialization segment received flag is true) is
-    // implemented by caller.
+    // TODO(servolk): Implement proper 'initialization segment received' algorithm according to MSE spec:
+    // https://w3c.github.io/media-source/#sourcebuffer-init-segment-received
+    WebVector<WebMediaPlayer::TrackId> result(newTracks.size());
+    unsigned resultIdx = 0;
+    for (const auto& trackInfo : newTracks) {
+        if (!RuntimeEnabledFeatures::audioVideoTracksEnabled()) {
+            static WebMediaPlayer::TrackId nextTrackId = 0;
+            result[resultIdx++] = ++nextTrackId;
+            continue;
+        }
+
+        const TrackBase* trackBase = nullptr;
+        if (trackInfo.trackType == WebMediaPlayer::AudioTrack) {
+            AudioTrack* audioTrack = nullptr;
+            if (!m_firstInitializationSegmentReceived) {
+                audioTrack = AudioTrack::create(trackInfo.byteStreamTrackId, trackInfo.kind, trackInfo.label, trackInfo.language, false);
+                SourceBufferTrackBaseSupplement::setSourceBuffer(*audioTrack, this);
+                audioTracks().add(audioTrack);
+                m_source->mediaElement()->audioTracks().add(audioTrack);
+            } else {
+                audioTrack = findExistingTrackById(audioTracks(), trackInfo.byteStreamTrackId);
+                ASSERT(audioTrack);
+            }
+            trackBase = audioTrack;
+            result[resultIdx++] = audioTrack->trackId();
+        } else if (trackInfo.trackType == WebMediaPlayer::VideoTrack) {
+            VideoTrack* videoTrack = nullptr;
+            if (!m_firstInitializationSegmentReceived) {
+                videoTrack = VideoTrack::create(trackInfo.byteStreamTrackId, trackInfo.kind, trackInfo.label, trackInfo.language, false);
+                SourceBufferTrackBaseSupplement::setSourceBuffer(*videoTrack, this);
+                videoTracks().add(videoTrack);
+                m_source->mediaElement()->videoTracks().add(videoTrack);
+            } else {
+                videoTrack = findExistingTrackById(videoTracks(), trackInfo.byteStreamTrackId);
+                ASSERT(videoTrack);
+            }
+            trackBase = videoTrack;
+            result[resultIdx++] = videoTrack->trackId();
+        } else {
+            NOTREACHED();
+        }
+        (void)trackBase;
+#if !LOG_DISABLED
+        const char* logActionStr = m_firstInitializationSegmentReceived ? "using existing" : "added";
+        const char* logTrackTypeStr = (trackInfo.trackType == WebMediaPlayer::AudioTrack) ? "audio" : "video";
+        WTF_LOG(Media, "Tracks (sb=%p): %s %sTrack %p trackId=%d id=%s label=%s lang=%s", this, logActionStr, logTrackTypeStr, trackBase, trackBase->trackId(), trackBase->id().utf8().data(), trackBase->label().utf8().data(), trackBase->language().utf8().data());
+#endif
+    }
 
     if (!m_firstInitializationSegmentReceived) {
         // 5. If active track flag equals true, then run the following steps:
@@ -492,6 +568,8 @@ void SourceBuffer::initializationSegmentReceived()
         // 6. Set first initialization segment received flag to true.
         m_firstInitializationSegmentReceived = true;
     }
+
+    return result;
 }
 
 bool SourceBuffer::hasPendingActivity() const
@@ -520,9 +598,9 @@ void SourceBuffer::stop()
     m_appendStreamAsyncPartRunner->stop();
 }
 
-ExecutionContext* SourceBuffer::executionContext() const
+ExecutionContext* SourceBuffer::getExecutionContext() const
 {
-    return ActiveDOMObject::executionContext();
+    return ActiveDOMObject::getExecutionContext();
 }
 
 const AtomicString& SourceBuffer::interfaceName() const
@@ -539,10 +617,10 @@ void SourceBuffer::scheduleEvent(const AtomicString& eventName)
 {
     ASSERT(m_asyncEventQueue);
 
-    RefPtrWillBeRawPtr<Event> event = Event::create(eventName);
+    Event* event = Event::create(eventName);
     event->setTarget(this);
 
-    m_asyncEventQueue->enqueueEvent(event.release());
+    m_asyncEventQueue->enqueueEvent(event);
 }
 
 bool SourceBuffer::prepareAppend(size_t newDataSize, ExceptionState& exceptionState)
@@ -758,7 +836,7 @@ void SourceBuffer::appendStreamAsyncPart()
 
     // Steps 3-11 are handled by m_loader.
     // Note: Passing 0 here signals that maxSize was not set. (i.e. Read all the data in the stream).
-    m_loader->start(executionContext(), *m_stream, m_streamMaxSizeValid ? m_streamMaxSize : 0);
+    m_loader->start(getExecutionContext(), *m_stream, m_streamMaxSizeValid ? m_streamMaxSize : 0);
 }
 
 void SourceBuffer::appendStreamDone(bool success)
@@ -872,7 +950,9 @@ DEFINE_TRACE(SourceBuffer)
     visitor->trace(m_removeAsyncPartRunner);
     visitor->trace(m_appendStreamAsyncPartRunner);
     visitor->trace(m_stream);
-    RefCountedGarbageCollectedEventTargetWithInlineData<SourceBuffer>::trace(visitor);
+    visitor->trace(m_audioTracks);
+    visitor->trace(m_videoTracks);
+    EventTargetWithInlineData::trace(visitor);
     ActiveDOMObject::trace(visitor);
 }
 

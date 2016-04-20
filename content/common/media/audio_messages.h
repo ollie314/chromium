@@ -17,6 +17,7 @@
 #include "media/audio/audio_input_ipc.h"
 #include "media/audio/audio_output_ipc.h"
 #include "media/audio/audio_parameters.h"
+#include "media/gpu/ipc/common/media_param_traits.h"
 #include "url/origin.h"
 
 #undef IPC_MESSAGE_EXPORT
@@ -48,10 +49,11 @@ IPC_STRUCT_END()
 // Tell the renderer process that an audio output device has been authorized
 // for a given stream. The renderer is given the output parameters for the
 // authorized device.
-IPC_MESSAGE_CONTROL3(AudioMsg_NotifyDeviceAuthorized,
+IPC_MESSAGE_CONTROL4(AudioMsg_NotifyDeviceAuthorized,
                      int /* stream id */,
                      media::OutputDeviceStatus /* device_status */,
-                     media::AudioParameters /* output parameters */)
+                     media::AudioParameters /* output parameters */,
+                     std::string /* matched_device_id */)
 
 // Tell the renderer process that an audio stream has been created.
 // The renderer process is given a shared memory handle for the audio data

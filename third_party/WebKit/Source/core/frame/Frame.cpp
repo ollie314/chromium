@@ -43,40 +43,18 @@
 #include "core/loader/FrameLoaderClient.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
+#include "platform/Histogram.h"
+#include "platform/UserGestureIndicator.h"
 #include "wtf/PassOwnPtr.h"
-#include "wtf/RefCountedLeakCounter.h"
 
 namespace blink {
 
 using namespace HTMLNames;
 
-namespace {
-
-int64_t generateFrameID()
-{
-    // Initialize to the current time to reduce the likelihood of generating
-    // identifiers that overlap with those from past/future browser sessions.
-    static int64_t next = static_cast<int64_t>(currentTime() * 1000000.0);
-    return ++next;
-}
-
-#ifndef NDEBUG
-WTF::RefCountedLeakCounter& frameCounter()
-{
-    DEFINE_STATIC_LOCAL(WTF::RefCountedLeakCounter, staticFrameCounter, ("Frame"));
-    return staticFrameCounter;
-}
-#endif
-
-} // namespace
-
 Frame::~Frame()
 {
     InstanceCounters::decrementCounter(InstanceCounters::FrameCounter);
     ASSERT(!m_owner);
-#ifndef NDEBUG
-    frameCounter().decrement();
-#endif
 }
 
 DEFINE_TRACE(Frame)
@@ -102,7 +80,7 @@ void Frame::detach(FrameDetachType type)
 
 void Frame::detachChildren()
 {
-    typedef WillBeHeapVector<RefPtrWillBeMember<Frame>> FrameVector;
+    typedef HeapVector<Member<Frame>> FrameVector;
     FrameVector childrenToDetach;
     childrenToDetach.reserveCapacity(tree().childCount());
     for (Frame* child = tree().firstChild(); child; child = child->tree().nextSibling())
@@ -114,10 +92,9 @@ void Frame::detachChildren()
 void Frame::disconnectOwnerElement()
 {
     if (m_owner) {
-        if (m_owner->isLocal())
-            toHTMLFrameOwnerElement(m_owner)->clearContentFrame();
+        m_owner->clearContentFrame();
+        m_owner = nullptr;
     }
-    m_owner = nullptr;
 }
 
 Page* Frame::page() const
@@ -155,8 +132,8 @@ HTMLFrameOwnerElement* Frame::deprecatedLocalOwner() const
 
 static ChromeClient& emptyChromeClient()
 {
-    DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<EmptyChromeClient>, client, (EmptyChromeClient::create()));
-    return *client;
+    DEFINE_STATIC_LOCAL(EmptyChromeClient, client, (EmptyChromeClient::create()));
+    return client;
 }
 
 ChromeClient& Frame::chromeClient() const
@@ -183,7 +160,7 @@ static bool canAccessAncestor(const SecurityOrigin& activeSecurityOrigin, const 
 
     const bool isLocalActiveOrigin = activeSecurityOrigin.isLocal();
     for (const Frame* ancestorFrame = targetFrame; ancestorFrame; ancestorFrame = ancestorFrame->tree().parent()) {
-        const SecurityOrigin* ancestorSecurityOrigin = ancestorFrame->securityContext()->securityOrigin();
+        const SecurityOrigin* ancestorSecurityOrigin = ancestorFrame->securityContext()->getSecurityOrigin();
         if (activeSecurityOrigin.canAccess(ancestorSecurityOrigin))
             return true;
 
@@ -199,10 +176,29 @@ static bool canAccessAncestor(const SecurityOrigin& activeSecurityOrigin, const 
 
 bool Frame::canNavigate(const Frame& targetFrame)
 {
-    // Frame-busting is generally allowed, but blocked for sandboxed frames lacking the 'allow-top-navigation' flag.
-    if (!securityContext()->isSandboxed(SandboxTopNavigation) && targetFrame == tree().top())
-        return true;
+    String errorReason;
+    bool isAllowedNavigation = canNavigateWithoutFramebusting(targetFrame, errorReason);
 
+    // Frame-busting is generally allowed, but blocked for sandboxed frames lacking the 'allow-top-navigation' flag.
+    if (targetFrame != this && !securityContext()->isSandboxed(SandboxTopNavigation) && targetFrame == tree().top()) {
+        DEFINE_STATIC_LOCAL(EnumerationHistogram, framebustHistogram, ("WebCore.Framebust", 4));
+        const unsigned userGestureBit = 0x1;
+        const unsigned allowedBit = 0x2;
+        unsigned framebustParams = 0;
+        if (UserGestureIndicator::processingUserGesture())
+            framebustParams |= userGestureBit;
+        if (isAllowedNavigation)
+            framebustParams |= allowedBit;
+        framebustHistogram.count(framebustParams);
+        return true;
+    }
+    if (!isAllowedNavigation && !errorReason.isNull())
+        printNavigationErrorMessage(targetFrame, errorReason.latin1().data());
+    return isAllowedNavigation;
+}
+
+bool Frame::canNavigateWithoutFramebusting(const Frame& targetFrame, String& reason)
+{
     if (securityContext()->isSandboxed(SandboxNavigation)) {
         // Sandboxed frames can navigate their own children.
         if (targetFrame.tree().isDescendantOf(this))
@@ -213,16 +209,15 @@ bool Frame::canNavigate(const Frame& targetFrame)
             return true;
 
         // Otherwise, block the navigation.
-        const char* reason = "The frame attempting navigation is sandboxed, and is therefore disallowed from navigating its ancestors.";
         if (securityContext()->isSandboxed(SandboxTopNavigation) && targetFrame == tree().top())
             reason = "The frame attempting navigation of the top-level window is sandboxed, but the 'allow-top-navigation' flag is not set.";
-
-        printNavigationErrorMessage(targetFrame, reason);
+        else
+            reason = "The frame attempting navigation is sandboxed, and is therefore disallowed from navigating its ancestors.";
         return false;
     }
 
-    ASSERT(securityContext()->securityOrigin());
-    SecurityOrigin& origin = *securityContext()->securityOrigin();
+    ASSERT(securityContext()->getSecurityOrigin());
+    SecurityOrigin& origin = *securityContext()->getSecurityOrigin();
 
     // This is the normal case. A document can navigate its decendant frames,
     // or, more generally, a document can navigate a frame if the document is
@@ -252,7 +247,7 @@ bool Frame::canNavigate(const Frame& targetFrame)
             return true;
     }
 
-    printNavigationErrorMessage(targetFrame, "The frame attempting navigation is neither same-origin with the target, nor is it the target's parent or opener.");
+    reason = "The frame attempting navigation is neither same-origin with the target, nor is it the target's parent or opener.";
     return false;
 }
 
@@ -262,7 +257,7 @@ Frame* Frame::findUnsafeParentScrollPropagationBoundary()
     Frame* ancestorFrame = tree().parent();
 
     while (ancestorFrame) {
-        if (!ancestorFrame->securityContext()->securityOrigin()->canAccess(securityContext()->securityOrigin()))
+        if (!ancestorFrame->securityContext()->getSecurityOrigin()->canAccess(securityContext()->getSecurityOrigin()))
             return currentFrame;
         currentFrame = ancestorFrame;
         ancestorFrame = ancestorFrame->tree().parent();
@@ -298,23 +293,16 @@ Frame::Frame(FrameClient* client, FrameHost* host, FrameOwner* owner)
     , m_host(host)
     , m_owner(owner)
     , m_client(client)
-    , m_frameID(generateFrameID())
     , m_isLoading(false)
 {
     InstanceCounters::incrementCounter(InstanceCounters::FrameCounter);
 
     ASSERT(page());
 
-#ifndef NDEBUG
-    frameCounter().increment();
-#endif
-
-    if (m_owner) {
-        if (m_owner->isLocal())
-            toHTMLFrameOwnerElement(m_owner)->setContentFrame(*this);
-    } else {
+    if (m_owner)
+        m_owner->setContentFrame(*this);
+    else
         page()->setMainFrame(this);
-    }
 }
 
 } // namespace blink

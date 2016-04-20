@@ -29,7 +29,6 @@
  */
 
 [
-    WillBeGarbageCollected,
     NoInterfaceObject
 ] interface InspectorOverlayHost {
     void resume();

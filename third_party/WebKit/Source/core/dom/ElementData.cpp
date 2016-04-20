@@ -36,9 +36,9 @@
 
 namespace blink {
 
-struct SameSizeAsElementData : public RefCountedWillBeGarbageCollectedFinalized<SameSizeAsElementData> {
+struct SameSizeAsElementData : public GarbageCollectedFinalized<SameSizeAsElementData> {
     unsigned bitfield;
-    RawPtrWillBeMember<void*> willbeMember;
+    Member<void*> willbeMember;
     void* pointers[2];
 };
 
@@ -79,7 +79,6 @@ ElementData::ElementData(const ElementData& other, bool isUnique)
     // NOTE: The inline style is copied by the subclass copy constructor since we don't know what to do with it here.
 }
 
-#if ENABLE(OILPAN)
 void ElementData::finalizeGarbageCollectedObject()
 {
     if (m_isUnique)
@@ -87,21 +86,12 @@ void ElementData::finalizeGarbageCollectedObject()
     else
         toShareableElementData(this)->~ShareableElementData();
 }
-#else
-void ElementData::destroy()
-{
-    if (m_isUnique)
-        delete toUniqueElementData(this);
-    else
-        delete toShareableElementData(this);
-}
-#endif
 
-PassRefPtrWillBeRawPtr<UniqueElementData> ElementData::makeUniqueCopy() const
+UniqueElementData* ElementData::makeUniqueCopy() const
 {
     if (isUnique())
-        return adoptRefWillBeNoop(new UniqueElementData(toUniqueElementData(*this)));
-    return adoptRefWillBeNoop(new UniqueElementData(toShareableElementData(*this)));
+        return new UniqueElementData(toUniqueElementData(*this));
+    return new UniqueElementData(toShareableElementData(*this));
 }
 
 bool ElementData::isEquivalent(const ElementData* other) const
@@ -151,7 +141,7 @@ ShareableElementData::~ShareableElementData()
 ShareableElementData::ShareableElementData(const UniqueElementData& other)
     : ElementData(other, false)
 {
-    ASSERT(!other.m_presentationAttributeStyle);
+    DCHECK(!other.m_presentationAttributeStyle);
 
     if (other.m_inlineStyle) {
         m_inlineStyle = other.m_inlineStyle->immutableCopyIfNeeded();
@@ -161,14 +151,10 @@ ShareableElementData::ShareableElementData(const UniqueElementData& other)
         new (&m_attributeArray[i]) Attribute(other.m_attributeVector.at(i));
 }
 
-PassRefPtrWillBeRawPtr<ShareableElementData> ShareableElementData::createWithAttributes(const Vector<Attribute>& attributes)
+ShareableElementData* ShareableElementData::createWithAttributes(const Vector<Attribute>& attributes)
 {
-#if ENABLE(OILPAN)
-    void* slot = Heap::allocate<ElementData>(sizeForShareableElementDataWithAttributeCount(attributes.size()));
-#else
-    void* slot = WTF::Partitions::fastMalloc(sizeForShareableElementDataWithAttributeCount(attributes.size()), WTF_HEAP_PROFILER_TYPE_NAME(ShareableElementData));
-#endif
-    return adoptRefWillBeNoop(new (slot) ShareableElementData(attributes));
+    void* slot = ThreadHeap::allocate<ElementData>(sizeForShareableElementDataWithAttributeCount(attributes.size()));
+    return new (slot) ShareableElementData(attributes);
 }
 
 UniqueElementData::UniqueElementData()
@@ -187,7 +173,7 @@ UniqueElementData::UniqueElementData(const ShareableElementData& other)
     : ElementData(other, true)
 {
     // An ShareableElementData should never have a mutable inline StylePropertySet attached.
-    ASSERT(!other.m_inlineStyle || !other.m_inlineStyle->isMutable());
+    DCHECK(!other.m_inlineStyle || !other.m_inlineStyle->isMutable());
     m_inlineStyle = other.m_inlineStyle;
 
     unsigned length = other.attributes().size();
@@ -196,19 +182,15 @@ UniqueElementData::UniqueElementData(const ShareableElementData& other)
         m_attributeVector.uncheckedAppend(other.m_attributeArray[i]);
 }
 
-PassRefPtrWillBeRawPtr<UniqueElementData> UniqueElementData::create()
+UniqueElementData* UniqueElementData::create()
 {
-    return adoptRefWillBeNoop(new UniqueElementData);
+    return new UniqueElementData;
 }
 
-PassRefPtrWillBeRawPtr<ShareableElementData> UniqueElementData::makeShareableCopy() const
+ShareableElementData* UniqueElementData::makeShareableCopy() const
 {
-#if ENABLE(OILPAN)
-    void* slot = Heap::allocate<ElementData>(sizeForShareableElementDataWithAttributeCount(m_attributeVector.size()));
-#else
-    void* slot = WTF::Partitions::fastMalloc(sizeForShareableElementDataWithAttributeCount(m_attributeVector.size()), WTF_HEAP_PROFILER_TYPE_NAME(ShareableElementData));
-#endif
-    return adoptRefWillBeNoop(new (slot) ShareableElementData(*this));
+    void* slot = ThreadHeap::allocate<ElementData>(sizeForShareableElementDataWithAttributeCount(m_attributeVector.size()));
+    return new (slot) ShareableElementData(*this);
 }
 
 DEFINE_TRACE_AFTER_DISPATCH(UniqueElementData)

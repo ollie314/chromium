@@ -64,9 +64,7 @@ using content::RenderViewHost;
 // Flaky on Mac ASAN:
 //    http://crbug.com/428670
 
-#if defined(DISABLE_NACL) || \
-    (defined(OS_MACOSX) && defined(ADDRESS_SANITIZER)) || \
-    defined(DISABLE_NACL_BROWSERTESTS)
+#if defined(DISABLE_NACL) || (defined(OS_MACOSX) && defined(ADDRESS_SANITIZER))
 
 #define MAYBE_PPAPI_NACL(test_name) DISABLED_##test_name
 
@@ -243,24 +241,19 @@ TEST_PPAPI_NACL(Graphics2D_BindNull)
 // These tests fail with the test compositor which is what's used by default for
 // browser tests on Windows Aura. Renable when the software compositor is
 // available.
-#define MAYBE_IN_Graphics3D DISABLED_Graphics3D
 #define MAYBE_OUT_Graphics3D DISABLED_Graphics3D
 #define MAYBE_NACL_Graphics3D DISABLED_Graphics3D
 #else  // defined(USE_AURA)
-// In-process and NaCl tests are having flaky failures on Win: crbug.com/242252
-#define MAYBE_IN_Graphics3D DISABLED_Graphics3D
+// NaCl tests are having flaky failures on Win: crbug.com/242252
 #define MAYBE_OUT_Graphics3D Graphics3D
 #define MAYBE_NACL_Graphics3D DISABLED_Graphics3D
 #endif  // defined(USE_AURA)
 #elif defined(OS_MACOSX)
 // These tests fail when using the legacy software mode. Reenable when the
 // software compositor is enabled crbug.com/286038
-#define MAYBE_IN_Graphics3D DISABLED_Graphics3D
 #define MAYBE_OUT_Graphics3D DISABLED_Graphics3D
 #define MAYBE_NACL_Graphics3D DISABLED_Graphics3D
 #else
-// The tests are failing in-process. crbug.com/280282
-#define MAYBE_IN_Graphics3D DISABLED_Graphics3D
 #define MAYBE_OUT_Graphics3D Graphics3D
 #define MAYBE_NACL_Graphics3D Graphics3D
 #endif
@@ -1105,6 +1098,7 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClNonSfiTest, MAYBE_PNACL_NONSFI(View)) {
   RunTest( \
       LIST_TEST(FlashMessageLoop_Basics) \
       LIST_TEST(FlashMessageLoop_RunWithoutQuit) \
+      LIST_TEST(FlashMessageLoop_SuspendScriptCallbackWhileRunning) \
   )
 
 #if defined(OS_LINUX)  // Disabled due to flakiness http://crbug.com/316925
@@ -1170,7 +1164,13 @@ TEST_PPAPI_NACL(NetworkProxy)
 
 TEST_PPAPI_NACL(TrueTypeFont)
 
-TEST_PPAPI_NACL(VideoDecoder)
+// TODO(crbug.com/602875), TODO(crbug.com/602876) Flaky on Win and CrOS.
+#if defined(OS_CHROMEOS) || defined(OS_WIN)
+#define MAYBE_VideoDecoder DISABLED_VideoDecoder
+#else
+#define MAYBE_VideoDecoder VideoDecoder
+#endif
+TEST_PPAPI_NACL(MAYBE_VideoDecoder)
 
 TEST_PPAPI_NACL(VideoEncoder)
 
@@ -1290,8 +1290,13 @@ IN_PROC_BROWSER_TEST_F(NewlibPackagedAppTest,
   RunTests("packaged_app");
 }
 
-IN_PROC_BROWSER_TEST_F(NonSfiPackagedAppTest,
-                       MAYBE_PNACL_NONSFI(SuccessfulLoad)) {
+#if defined(OS_LINUX)
+// http://crbug.com/579804
+#define MAYBE_SuccessfulLoad DISABLED_SuccessfulLoad
+#else
+#define MAYBE_SuccessfulLoad MAYBE_PNACL_NONSFI(SuccessfulLoad)
+#endif
+IN_PROC_BROWSER_TEST_F(NonSfiPackagedAppTest, MAYBE_SuccessfulLoad) {
   RunTests("packaged_app");
 }
 

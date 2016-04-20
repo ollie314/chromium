@@ -2,14 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/sessions/session_service.h"
+
 #include <stddef.h>
+
+#include <memory>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -22,8 +25,9 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_test_helper.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
@@ -183,7 +187,7 @@ class SessionServiceTest : public BrowserWithTestWindowTest,
   base::FilePath path_;
 
   SessionServiceTestHelper helper_;
-  scoped_ptr<TestingProfileManager> profile_manager_;
+  std::unique_ptr<TestingProfileManager> profile_manager_;
 };
 
 TEST_F(SessionServiceTest, Basic) {
@@ -428,14 +432,13 @@ TEST_F(SessionServiceTest, LockingWindowRemembersAll) {
   CreateAndWriteSessionWithTwoWindows(
       window2_id, tab1_id, tab2_id, &nav1, &nav2);
 
-  ASSERT_TRUE(service()->profile() != NULL);
-  ASSERT_TRUE(g_browser_process->profile_manager() != NULL);
-  ProfileInfoCache& profile_info =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
-  size_t profile_index = profile_info.GetIndexOfProfileWithPath(
-      service()->profile()->GetPath());
-  ASSERT_NE(std::string::npos, profile_index);
-  profile_info.SetProfileSigninRequiredAtIndex(profile_index, true);
+  ASSERT_TRUE(service()->profile());
+  ProfileManager* manager = g_browser_process->profile_manager();
+  ASSERT_TRUE(manager);
+  ProfileAttributesEntry* entry;
+  ASSERT_TRUE(manager->GetProfileAttributesStorage().
+      GetProfileAttributesWithPath(service()->profile()->GetPath(), &entry));
+  entry->SetIsSigninRequired(true);
 
   service()->WindowClosing(window_id);
   service()->WindowClosed(window_id);

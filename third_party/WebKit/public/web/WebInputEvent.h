@@ -139,7 +139,8 @@ public:
         TouchMove,
         TouchEnd,
         TouchCancel,
-        TouchTypeLast = TouchCancel,
+        TouchScrollStarted,
+        TouchTypeLast = TouchScrollStarted,
 
         TypeLast = TouchTypeLast
     };
@@ -513,6 +514,14 @@ public:
             // If true, this event will skip hit testing to find a scroll
             // target and instead just scroll the viewport.
             bool targetViewport;
+            // If true, this event comes after a non-inertial gesture
+            // scroll sequence; OSX has unique phases for normal and
+            // momentum scroll events. Should always be false for touch based
+            // input as it generates GestureFlingStart instead.
+            bool inertial;
+            // True if this event was synthesized in order to force a hit test; avoiding scroll
+            // latching behavior until crbug.com/526463 is fully implemented.
+            bool synthetic;
         } scrollBegin;
 
         struct {
@@ -531,6 +540,22 @@ public:
             // Default initialized to ScrollUnits::PrecisePixels.
             ScrollUnits deltaUnits;
         } scrollUpdate;
+
+        struct {
+            // The original delta units the scrollBegin and scrollUpdates
+            // were sent as.
+            ScrollUnits deltaUnits;
+            // If true, this event comes after an inertial gesture
+            // scroll sequence; OSX has unique phases for normal and
+            // momentum scroll events. Should always be false for touch based
+            // input as it generates GestureFlingStart instead.
+            bool inertial;
+            // True if this event was synthesized in order to generate the proper
+            // GSB/GSU/GSE matching sequences. This is a temporary so that a future
+            // GSB will generate a hit test so latching behavior is avoided
+            // until crbug.com/526463 is fully implemented.
+            bool synthetic;
+        } scrollEnd;
 
         struct {
             float velocityX;
@@ -582,12 +607,10 @@ public:
     // must wait for an ACK for this event. If false then no ACK IPC is expected.
     bool cancelable;
 
-    // Whether the event will produce scroll-inducing events if uncanceled. This
-    // will be true for touchmove events after the platform slop region has been
-    // exceeded and fling-generating touchend events. Note that this doesn't
-    // necessarily mean content will scroll, only that scroll events will be
-    // generated.
-    bool causesScrollingIfUncanceled;
+    // For a single touch, this is true after the touch-point has moved beyond
+    // the platform slop region. For a multitouch, this is true after any
+    // touch-point has moved (by whatever amount).
+    bool movedBeyondSlopRegion;
 
     // A unique identifier for the touch event.
     uint32_t uniqueTouchEventId;
@@ -596,7 +619,7 @@ public:
         : WebInputEvent(sizeof(WebTouchEvent))
         , touchesLength(0)
         , cancelable(true)
-        , causesScrollingIfUncanceled(false)
+        , movedBeyondSlopRegion(false)
         , uniqueTouchEventId(0)
     {
     }

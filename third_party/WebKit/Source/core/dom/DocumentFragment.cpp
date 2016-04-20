@@ -33,9 +33,9 @@ DocumentFragment::DocumentFragment(Document* document, ConstructionType construc
 {
 }
 
-PassRefPtrWillBeRawPtr<DocumentFragment> DocumentFragment::create(Document& document)
+DocumentFragment* DocumentFragment::create(Document& document)
 {
-    return adoptRefWillBeNoop(new DocumentFragment(&document, Node::CreateDocumentFragment));
+    return new DocumentFragment(&document, Node::CreateDocumentFragment);
 }
 
 String DocumentFragment::nodeName() const
@@ -43,7 +43,7 @@ String DocumentFragment::nodeName() const
     return "#document-fragment";
 }
 
-Node::NodeType DocumentFragment::nodeType() const
+Node::NodeType DocumentFragment::getNodeType() const
 {
     return DOCUMENT_FRAGMENT_NODE;
 }
@@ -62,12 +62,12 @@ bool DocumentFragment::childTypeAllowed(NodeType type) const
     }
 }
 
-PassRefPtrWillBeRawPtr<Node> DocumentFragment::cloneNode(bool deep)
+Node* DocumentFragment::cloneNode(bool deep)
 {
-    RefPtrWillBeRawPtr<DocumentFragment> clone = create(document());
+    DocumentFragment* clone = create(document());
     if (deep)
-        cloneChildNodes(clone.get());
-    return clone.release();
+        cloneChildNodes(clone);
+    return clone;
 }
 
 void DocumentFragment::parseHTML(const String& source, Element* contextElement, ParserContentPolicy parserContentPolicy)

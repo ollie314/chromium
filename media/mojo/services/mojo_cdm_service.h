@@ -7,10 +7,11 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "media/base/media_keys.h"
 #include "media/mojo/interfaces/content_decryption_module.mojom.h"
@@ -35,7 +36,7 @@ class MojoCdmService : public interfaces::ContentDecryptionModule {
   // render frame the caller is associated with. In the future, we should move
   // all out-of-process media players into the MojoMediaApplicaiton so that we
   // can use MojoCdmServiceContext (per render frame) to get the CDM.
-  static scoped_refptr<MediaKeys> GetCdm(int cdm_id);
+  static scoped_refptr<MediaKeys> LegacyGetCdm(int cdm_id);
 
   // Constructs a MojoCdmService and strongly binds it to the |request|.
   MojoCdmService(
@@ -79,8 +80,8 @@ class MojoCdmService : public interfaces::ContentDecryptionModule {
       const mojo::Callback<void(interfaces::CdmPromiseResultPtr)>& callback)
       final;
 
-  // Get CdmContext to be used by the media pipeline.
-  CdmContext* GetCdmContext();
+  // Get CDM to be used by the media pipeline.
+  scoped_refptr<MediaKeys> GetCdm();
 
  private:
   // Callback for CdmFactory::Create().
@@ -118,7 +119,7 @@ class MojoCdmService : public interfaces::ContentDecryptionModule {
   CdmFactory* cdm_factory_;
   scoped_refptr<MediaKeys> cdm_;
 
-  scoped_ptr<MojoDecryptorService> decryptor_;
+  std::unique_ptr<MojoDecryptorService> decryptor_;
 
   // Set to a valid CDM ID if the |cdm_| is successfully created.
   int cdm_id_;

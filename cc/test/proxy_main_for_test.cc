@@ -6,17 +6,33 @@
 
 #include "cc/animation/animation_events.h"
 #include "cc/test/threaded_channel_for_test.h"
+#include "cc/trees/remote_channel_main.h"
 
 namespace cc {
 
-scoped_ptr<ProxyMain> ProxyMainForTest::CreateThreaded(
+std::unique_ptr<ProxyMainForTest> ProxyMainForTest::CreateThreaded(
     TestHooks* test_hooks,
     LayerTreeHost* host,
     TaskRunnerProvider* task_runner_provider) {
-  scoped_ptr<ProxyMain> proxy_main(
+  std::unique_ptr<ProxyMainForTest> proxy_main(
       new ProxyMainForTest(test_hooks, host, task_runner_provider));
-  proxy_main->SetChannel(ThreadedChannelForTest::Create(
-      test_hooks, proxy_main.get(), task_runner_provider));
+  std::unique_ptr<ThreadedChannelForTest> channel =
+      ThreadedChannelForTest::Create(test_hooks, proxy_main.get(),
+                                     task_runner_provider);
+  proxy_main->threaded_channel_for_test_ = channel.get();
+  proxy_main->SetChannel(std::move(channel));
+  return proxy_main;
+}
+
+std::unique_ptr<ProxyMainForTest> ProxyMainForTest::CreateRemote(
+    TestHooks* test_hooks,
+    RemoteProtoChannel* remote_proto_channel,
+    LayerTreeHost* host,
+    TaskRunnerProvider* task_runner_provider) {
+  std::unique_ptr<ProxyMainForTest> proxy_main(
+      new ProxyMainForTest(test_hooks, host, task_runner_provider));
+  proxy_main->SetChannel(RemoteChannelMain::Create(
+      remote_proto_channel, proxy_main.get(), task_runner_provider));
   return proxy_main;
 }
 
@@ -25,7 +41,9 @@ ProxyMainForTest::~ProxyMainForTest() {}
 ProxyMainForTest::ProxyMainForTest(TestHooks* test_hooks,
                                    LayerTreeHost* host,
                                    TaskRunnerProvider* task_runner_provider)
-    : ProxyMain(host, task_runner_provider), test_hooks_(test_hooks) {}
+    : ProxyMain(host, task_runner_provider),
+      test_hooks_(test_hooks),
+      threaded_channel_for_test_(nullptr) {}
 
 void ProxyMainForTest::SetNeedsUpdateLayers() {
   ProxyMain::SetNeedsUpdateLayers();
@@ -53,7 +71,8 @@ void ProxyMainForTest::DidCommitAndDrawFrame() {
   ProxyMain::DidCommitAndDrawFrame();
 }
 
-void ProxyMainForTest::SetAnimationEvents(scoped_ptr<AnimationEvents> events) {
+void ProxyMainForTest::SetAnimationEvents(
+    std::unique_ptr<AnimationEvents> events) {
   test_hooks_->ReceivedSetAnimationEvents();
   ProxyMain::SetAnimationEvents(std::move(events));
 }
@@ -80,16 +99,8 @@ void ProxyMainForTest::DidCompletePageScaleAnimation() {
   ProxyMain::DidCompletePageScaleAnimation();
 }
 
-void ProxyMainForTest::PostFrameTimingEventsOnMain(
-    scoped_ptr<FrameTimingTracker::CompositeTimingSet> composite_events,
-    scoped_ptr<FrameTimingTracker::MainFrameTimingSet> main_frame_events) {
-  test_hooks_->ReceivedPostFrameTimingEventsOnMain();
-  ProxyMain::PostFrameTimingEventsOnMain(std::move(composite_events),
-                                         std::move(main_frame_events));
-}
-
 void ProxyMainForTest::BeginMainFrame(
-    scoped_ptr<BeginMainFrameAndCommitState> begin_main_frame_state) {
+    std::unique_ptr<BeginMainFrameAndCommitState> begin_main_frame_state) {
   test_hooks_->ReceivedBeginMainFrame();
   ProxyMain::BeginMainFrame(std::move(begin_main_frame_state));
 }

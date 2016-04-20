@@ -5,13 +5,14 @@
 #include "net/http/transport_security_state.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/base64.h"
 #include "base/build_time.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/sha1.h"
@@ -22,6 +23,7 @@
 #include "base/values.h"
 #include "crypto/sha2.h"
 #include "net/base/host_port_pair.h"
+#include "net/cert/ct_policy_status.h"
 #include "net/cert/x509_cert_types.h"
 #include "net/cert/x509_certificate.h"
 #include "net/dns/dns_util.h"
@@ -39,6 +41,11 @@ const size_t kMaxHPKPReportCacheEntries = 50;
 const int kTimeToRememberHPKPReportsMins = 60;
 const size_t kReportCacheKeyLength = 16;
 
+void RecordUMAForHPKPReportFailure(const GURL& report_uri, int net_error) {
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Net.PublicKeyPinReportSendingFailure",
+                              net_error);
+}
+
 std::string TimeToISO8601(const base::Time& t) {
   base::Time::Exploded exploded;
   t.UTCExplode(&exploded);
@@ -48,16 +55,16 @@ std::string TimeToISO8601(const base::Time& t) {
       exploded.millisecond);
 }
 
-scoped_ptr<base::ListValue> GetPEMEncodedChainAsList(
+std::unique_ptr<base::ListValue> GetPEMEncodedChainAsList(
     const net::X509Certificate* cert_chain) {
   if (!cert_chain)
-    return make_scoped_ptr(new base::ListValue());
+    return base::WrapUnique(new base::ListValue());
 
-  scoped_ptr<base::ListValue> result(new base::ListValue());
+  std::unique_ptr<base::ListValue> result(new base::ListValue());
   std::vector<std::string> pem_encoded_chain;
   cert_chain->GetPEMEncodedChain(&pem_encoded_chain);
   for (const std::string& cert : pem_encoded_chain)
-    result->Append(make_scoped_ptr(new base::StringValue(cert)));
+    result->Append(base::WrapUnique(new base::StringValue(cert)));
 
   return result;
 }
@@ -93,16 +100,16 @@ bool GetHPKPReport(const HostPortPair& host_port_pair,
   report.SetBoolean("include-subdomains", pkp_state.include_subdomains);
   report.SetString("noted-hostname", pkp_state.domain);
 
-  scoped_ptr<base::ListValue> served_certificate_chain_list =
+  std::unique_ptr<base::ListValue> served_certificate_chain_list =
       GetPEMEncodedChainAsList(served_certificate_chain);
-  scoped_ptr<base::ListValue> validated_certificate_chain_list =
+  std::unique_ptr<base::ListValue> validated_certificate_chain_list =
       GetPEMEncodedChainAsList(validated_certificate_chain);
   report.Set("served-certificate-chain",
              std::move(served_certificate_chain_list));
   report.Set("validated-certificate-chain",
              std::move(validated_certificate_chain_list));
 
-  scoped_ptr<base::ListValue> known_pin_list(new base::ListValue());
+  std::unique_ptr<base::ListValue> known_pin_list(new base::ListValue());
   for (const auto& hash_value : pkp_state.spki_hashes) {
     std::string known_pin;
 
@@ -123,7 +130,7 @@ bool GetHPKPReport(const HostPortPair& host_port_pair,
     known_pin += "\"" + base64_value + "\"";
 
     known_pin_list->Append(
-        scoped_ptr<base::Value>(new base::StringValue(known_pin)));
+        std::unique_ptr<base::Value>(new base::StringValue(known_pin)));
   }
 
   report.Set("known-pins", std::move(known_pin_list));
@@ -596,6 +603,7 @@ TransportSecurityState::TransportSecurityState()
       report_sender_(nullptr),
       enable_static_pins_(true),
       enable_static_expect_ct_(true),
+      expect_ct_reporter_(nullptr),
       sent_reports_cache_(kMaxHPKPReportCacheEntries) {
 // Static pinning is only enabled for official builds to make sure that
 // others don't end up with pins that cannot be easily updated.
@@ -687,6 +695,14 @@ void TransportSecurityState::SetReportSender(
     TransportSecurityState::ReportSender* report_sender) {
   DCHECK(CalledOnValidThread());
   report_sender_ = report_sender;
+  if (report_sender_)
+    report_sender_->SetErrorCallback(base::Bind(RecordUMAForHPKPReportFailure));
+}
+
+void TransportSecurityState::SetExpectCTReporter(
+    ExpectCTReporter* expect_ct_reporter) {
+  DCHECK(CalledOnValidThread());
+  expect_ct_reporter_ = expect_ct_reporter;
 }
 
 void TransportSecurityState::AddHSTSInternal(
@@ -818,6 +834,27 @@ bool TransportSecurityState::CheckPinsAndMaybeSendReport(
 
   report_sender_->Send(pkp_state.report_uri, serialized_report);
   return false;
+}
+
+bool TransportSecurityState::GetStaticExpectCTState(
+    const std::string& host,
+    ExpectCTState* expect_ct_state) const {
+  DCHECK(CalledOnValidThread());
+
+  if (!IsBuildTimely())
+    return false;
+
+  PreloadResult result;
+  if (!DecodeHSTSPreload(host, &result))
+    return false;
+
+  if (!enable_static_expect_ct_ || !result.expect_ct)
+    return false;
+
+  expect_ct_state->domain = host.substr(result.hostname_offset);
+  expect_ct_state->report_uri =
+      GURL(kExpectCTReportURIs[result.expect_ct_report_uri_id]);
+  return true;
 }
 
 bool TransportSecurityState::DeleteDynamicDataForHost(const std::string& host) {
@@ -993,6 +1030,36 @@ bool TransportSecurityState::ProcessHPKPReportOnlyHeader(
   return true;
 }
 
+void TransportSecurityState::ProcessExpectCTHeader(
+    const std::string& value,
+    const HostPortPair& host_port_pair,
+    const SSLInfo& ssl_info) {
+  DCHECK(CalledOnValidThread());
+
+  if (!expect_ct_reporter_)
+    return;
+
+  if (value != "preload")
+    return;
+
+  if (!IsBuildTimely())
+    return;
+
+  if (!ssl_info.is_issued_by_known_root ||
+      !ssl_info.ct_compliance_details_available ||
+      ssl_info.ct_cert_policy_compliance ==
+          ct::CertPolicyCompliance::CERT_POLICY_COMPLIES_VIA_SCTS) {
+    return;
+  }
+
+  ExpectCTState state;
+  if (!GetStaticExpectCTState(host_port_pair.host(), &state))
+    return;
+
+  expect_ct_reporter_->OnExpectCTFailed(host_port_pair, state.report_uri,
+                                        ssl_info);
+}
+
 // static
 void TransportSecurityState::ReportUMAOnPinFailure(const std::string& host) {
   PreloadResult result;
@@ -1009,18 +1076,9 @@ void TransportSecurityState::ReportUMAOnPinFailure(const std::string& host) {
 
 // static
 bool TransportSecurityState::IsBuildTimely() {
-  // If the build metadata aren't embedded in the binary then we can't use the
-  // build time to determine if the build is timely, return true by default. If
-  // we're building an official build then keep using the build time, even if
-  // it's invalid it'd be a date in the past and this function will return
-  // false.
-#if defined(DONT_EMBED_BUILD_METADATA) && !defined(OFFICIAL_BUILD)
-  return true;
-#else
   const base::Time build_time = base::GetBuildTime();
   // We consider built-in information to be timely for 10 weeks.
   return (base::Time::Now() - build_time).InDays() < 70 /* 10 weeks */;
-#endif
 }
 
 bool TransportSecurityState::CheckPublicKeyPinsImpl(
@@ -1117,27 +1175,6 @@ bool TransportSecurityState::IsGooglePinnedHost(const std::string& host) const {
     return false;
 
   return kPinsets[result.pinset_id].accepted_pins == kGoogleAcceptableCerts;
-}
-
-bool TransportSecurityState::GetStaticExpectCTState(
-    const std::string& host,
-    ExpectCTState* expect_ct_state) const {
-  DCHECK(CalledOnValidThread());
-
-  if (!IsBuildTimely())
-    return false;
-
-  PreloadResult result;
-  if (!DecodeHSTSPreload(host, &result))
-    return false;
-
-  if (!enable_static_expect_ct_ || !result.expect_ct)
-    return false;
-
-  expect_ct_state->domain = host.substr(result.hostname_offset);
-  expect_ct_state->report_uri =
-      GURL(kExpectCTReportURIs[result.expect_ct_report_uri_id]);
-  return true;
 }
 
 bool TransportSecurityState::GetDynamicSTSState(const std::string& host,
@@ -1264,6 +1301,8 @@ TransportSecurityState::STSStateIterator::~STSStateIterator() {
 
 TransportSecurityState::PKPState::PKPState() : include_subdomains(false) {
 }
+
+TransportSecurityState::PKPState::PKPState(const PKPState& other) = default;
 
 TransportSecurityState::PKPState::~PKPState() {
 }

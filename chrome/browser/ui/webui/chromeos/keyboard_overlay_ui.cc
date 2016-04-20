@@ -13,7 +13,6 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
@@ -22,6 +21,7 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -135,6 +135,7 @@ struct I18nContentToMessage {
     IDS_KEYBOARD_OVERLAY_CLEAR_BROWSING_DATA_DIALOG },
   { "keyboardOverlayCloseTab", IDS_KEYBOARD_OVERLAY_CLOSE_TAB },
   { "keyboardOverlayCloseWindow", IDS_KEYBOARD_OVERLAY_CLOSE_WINDOW },
+  { "keyboardOverlayContextMenu", IDS_KEYBOARD_OVERLAY_CONTEXT_MENU },
   { "keyboardOverlayCopy", IDS_KEYBOARD_OVERLAY_COPY },
   { "keyboardOverlayCut", IDS_KEYBOARD_OVERLAY_CUT },
   { "keyboardOverlayCycleThroughInputMethods",
@@ -221,8 +222,8 @@ struct I18nContentToMessage {
   { "keyboardOverlayPrint", IDS_KEYBOARD_OVERLAY_PRINT },
   { "keyboardOverlayReloadCurrentPage",
     IDS_KEYBOARD_OVERLAY_RELOAD_CURRENT_PAGE },
-  { "keyboardOverlayReloadIgnoringCache",
-    IDS_KEYBOARD_OVERLAY_RELOAD_IGNORING_CACHE },
+  { "keyboardOverlayReloadBypassingCache",
+    IDS_KEYBOARD_OVERLAY_RELOAD_BYPASSING_CACHE },
   { "keyboardOverlayReopenLastClosedTab",
     IDS_KEYBOARD_OVERLAY_REOPEN_LAST_CLOSED_TAB },
   { "keyboardOverlayReportIssue", IDS_KEYBOARD_OVERLAY_REPORT_ISSUE },
@@ -232,6 +233,8 @@ struct I18nContentToMessage {
   { "keyboardOverlaySave", IDS_KEYBOARD_OVERLAY_SAVE },
   { "keyboardOverlayScreenshotRegion",
     IDS_KEYBOARD_OVERLAY_SCREENSHOT_REGION },
+  { "keyboardOverlayScreenshotWindow",
+    IDS_KEYBOARD_OVERLAY_SCREENSHOT_WINDOW },
   { "keyboardOverlayScrollUpOnePage",
     IDS_KEYBOARD_OVERLAY_SCROLL_UP_ONE_PAGE },
   { "keyboardOverlaySelectAll", IDS_KEYBOARD_OVERLAY_SELECT_ALL },
@@ -267,6 +270,14 @@ struct I18nContentToMessage {
   { "keyboardOverlayZoomScreenOut", IDS_KEYBOARD_OVERLAY_ZOOM_SCREEN_OUT },
 };
 
+bool TopRowKeysAreFunctionKeys(Profile* profile) {
+  if (!profile)
+    return false;
+
+  const PrefService* prefs = profile->GetPrefs();
+  return prefs ? prefs->GetBoolean(prefs::kLanguageSendFunctionKeys) : false;
+}
+
 std::string ModifierKeyToLabel(ModifierKey modifier) {
   for (size_t i = 0; i < arraysize(kModifierToLabels); ++i) {
     if (modifier == kModifierToLabels[i].modifier) {
@@ -276,7 +287,7 @@ std::string ModifierKeyToLabel(ModifierKey modifier) {
   return "";
 }
 
-content::WebUIDataSource* CreateKeyboardOverlayUIHTMLSource() {
+content::WebUIDataSource* CreateKeyboardOverlayUIHTMLSource(Profile* profile) {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIKeyboardOverlayHost);
 
@@ -290,6 +301,8 @@ content::WebUIDataSource* CreateKeyboardOverlayUIHTMLSource() {
   source->AddBoolean("keyboardOverlayHasChromeOSDiamondKey",
                      base::CommandLine::ForCurrentProcess()->HasSwitch(
                          chromeos::switches::kHasChromeOSDiamondKey));
+  source->AddBoolean("keyboardOverlayTopRowKeysAreFunctionKeys",
+                     TopRowKeysAreFunctionKeys(profile));
   ash::Shell* shell = ash::Shell::GetInstance();
   ash::DisplayManager* display_manager = shell->display_manager();
   source->AddBoolean("keyboardOverlayIsDisplayUIScalingEnabled",
@@ -409,5 +422,6 @@ KeyboardOverlayUI::KeyboardOverlayUI(content::WebUI* web_ui)
   web_ui->AddMessageHandler(handler);
 
   // Set up the chrome://keyboardoverlay/ source.
-  content::WebUIDataSource::Add(profile, CreateKeyboardOverlayUIHTMLSource());
+  content::WebUIDataSource::Add(profile,
+                                CreateKeyboardOverlayUIHTMLSource(profile));
 }

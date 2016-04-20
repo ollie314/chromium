@@ -15,11 +15,11 @@
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/omnibox/browser/autocomplete_i18n.h"
@@ -28,8 +28,10 @@
 #include "components/omnibox/browser/autocomplete_provider_client.h"
 #include "components/omnibox/browser/autocomplete_result.h"
 #include "components/omnibox/browser/history_provider.h"
+#include "components/omnibox/browser/match_compare.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/url_prefix.h"
+#include "components/prefs/pref_service.h"
 #include "components/url_formatter/url_fixer.h"
 #include "url/third_party/mozilla/url_parse.h"
 
@@ -46,6 +48,51 @@ class DestinationURLEqualsURL {
   const GURL url_;
 };
 
+// ShortcutMatch holds sufficient information about a single match from the
+// shortcut database to allow for destination deduping and relevance sorting.
+// After those stages the top matches are converted to the more heavyweight
+// AutocompleteMatch struct.  Avoiding constructing the larger struct for
+// every such match can save significant time when there are many shortcut
+// matches to process.
+struct ShortcutMatch {
+  ShortcutMatch(int relevance,
+                const GURL& stripped_destination_url,
+                const ShortcutsDatabase::Shortcut* shortcut)
+      : relevance(relevance),
+        stripped_destination_url(stripped_destination_url),
+        shortcut(shortcut),
+        contents(shortcut->match_core.contents),
+        type(static_cast<AutocompleteMatch::Type>(shortcut->match_core.type)) {}
+
+  int relevance;
+  GURL stripped_destination_url;
+  const ShortcutsDatabase::Shortcut* shortcut;
+  base::string16 contents;
+  AutocompleteMatch::Type type;
+};
+
+// Sorts |matches| by destination, taking into account demotions based on
+// |page_classification| when resolving ties about which of several
+// duplicates to keep.  The matches are also deduplicated.
+void SortAndDedupMatches(
+    metrics::OmniboxEventProto::PageClassification page_classification,
+    std::vector<ShortcutMatch>* matches) {
+  // Sort matches such that duplicate matches are consecutive.
+  std::sort(matches->begin(), matches->end(),
+            DestinationSort<ShortcutMatch>(page_classification));
+
+  // Erase duplicate matches. Duplicate matches are those with
+  // stripped_destination_url fields equal and non empty.
+  matches->erase(
+      std::unique(matches->begin(), matches->end(),
+                  [](const ShortcutMatch& elem1, const ShortcutMatch& elem2) {
+                    return !elem1.stripped_destination_url.is_empty() &&
+                           (elem1.stripped_destination_url ==
+                            elem2.stripped_destination_url);
+                  }),
+      matches->end());
+}
+
 }  // namespace
 
 const int ShortcutsProvider::kShortcutsProviderDefaultMaxRelevance = 1199;
@@ -53,7 +100,6 @@ const int ShortcutsProvider::kShortcutsProviderDefaultMaxRelevance = 1199;
 ShortcutsProvider::ShortcutsProvider(AutocompleteProviderClient* client)
     : AutocompleteProvider(AutocompleteProvider::TYPE_SHORTCUTS),
       client_(client),
-      languages_(client_->GetAcceptLanguages()),
       initialized_(false) {
   scoped_refptr<ShortcutsBackend> backend = client_->GetShortcutsBackend();
   if (backend.get()) {
@@ -65,6 +111,7 @@ ShortcutsProvider::ShortcutsProvider(AutocompleteProviderClient* client)
 
 void ShortcutsProvider::Start(const AutocompleteInput& input,
                               bool minimal_changes) {
+  TRACE_EVENT0("omnibox", "ShortcutsProvider::Start");
   matches_.clear();
 
   if (input.from_omnibox_focus() ||
@@ -136,6 +183,8 @@ void ShortcutsProvider::GetMatches(const AutocompleteInput& input) {
     max_relevance = kShortcutsProviderDefaultMaxRelevance;
   TemplateURLService* template_url_service = client_->GetTemplateURLService();
   const base::string16 fixed_up_input(FixupUserInput(input).second);
+
+  std::vector<ShortcutMatch> shortcut_matches;
   for (ShortcutsBackend::ShortcutMap::const_iterator it =
            FindFirstMatch(term_string, backend.get());
        it != backend->shortcuts_map().end() &&
@@ -145,16 +194,18 @@ void ShortcutsProvider::GetMatches(const AutocompleteInput& input) {
     // Don't return shortcuts with zero relevance.
     int relevance = CalculateScore(term_string, it->second, max_relevance);
     if (relevance) {
-      matches_.push_back(
-          ShortcutToACMatch(it->second, relevance, input, fixed_up_input));
-      matches_.back().ComputeStrippedDestinationURL(
-          input, client_->GetAcceptLanguages(), template_url_service);
+      const ShortcutsDatabase::Shortcut& shortcut = it->second;
+      GURL stripped_destination_url(AutocompleteMatch::GURLToStrippedGURL(
+          shortcut.match_core.destination_url, input, template_url_service,
+          shortcut.match_core.keyword));
+      shortcut_matches.push_back(
+          ShortcutMatch(relevance, stripped_destination_url, &it->second));
     }
   }
   // Remove duplicates.  This is important because it's common to have multiple
   // shortcuts pointing to the same URL, e.g., ma, mai, and mail all pointing
   // to mail.google.com, so typing "m" will return them all.  If we then simply
-  // clamp to kMaxMatches and let the AutocompleteResult take care of
+  // clamp to kMaxMatches and let the SortAndDedupMatches take care of
   // collapsing the duplicates, we'll effectively only be returning one match,
   // instead of several possibilities.
   //
@@ -162,23 +213,36 @@ void ShortcutsProvider::GetMatches(const AutocompleteInput& input) {
   // |duplicate_matches| field--duplicates don't need to be preserved in the
   // matches because they are only used for deletions, and this provider
   // deletes matches based on the URL.
-  AutocompleteResult::DedupMatchesByDestination(
-      input.current_page_classification(), false, &matches_);
+  SortAndDedupMatches(input.current_page_classification(), &shortcut_matches);
+
   // Find best matches.
   std::partial_sort(
-      matches_.begin(),
-      matches_.begin() +
-          std::min(AutocompleteProvider::kMaxMatches, matches_.size()),
-      matches_.end(), &AutocompleteMatch::MoreRelevant);
-  if (matches_.size() > AutocompleteProvider::kMaxMatches) {
-    matches_.erase(matches_.begin() + AutocompleteProvider::kMaxMatches,
-                   matches_.end());
+      shortcut_matches.begin(),
+      shortcut_matches.begin() +
+          std::min(AutocompleteProvider::kMaxMatches, shortcut_matches.size()),
+      shortcut_matches.end(),
+      [](const ShortcutMatch& elem1, const ShortcutMatch& elem2) {
+        // Ensure a stable sort by sorting equal-relevance matches
+        // alphabetically.
+        return elem1.relevance == elem2.relevance
+                   ? elem1.contents < elem2.contents
+                   : elem1.relevance > elem2.relevance;
+      });
+  if (shortcut_matches.size() > AutocompleteProvider::kMaxMatches) {
+    shortcut_matches.erase(
+        shortcut_matches.begin() + AutocompleteProvider::kMaxMatches,
+        shortcut_matches.end());
   }
-  // Guarantee that all scores are decreasing (but do not assign any scores
-  // below 1).
-  for (ACMatches::iterator it = matches_.begin(); it != matches_.end(); ++it) {
-    max_relevance = std::min(max_relevance, it->relevance);
-    it->relevance = max_relevance;
+  // Create and initialize autocomplete matches from shortcut matches.
+  // Also guarantee that all relevance scores are decreasing (but do not assign
+  // any scores below 1).
+  WordMap terms_map(CreateWordMapForString(term_string));
+  matches_.reserve(shortcut_matches.size());
+  for (ShortcutMatch& match : shortcut_matches) {
+    max_relevance = std::min(max_relevance, match.relevance);
+    matches_.push_back(ShortcutToACMatch(*match.shortcut, max_relevance, input,
+                                         fixed_up_input, term_string,
+                                         terms_map));
     if (max_relevance > 1)
       --max_relevance;
   }
@@ -188,7 +252,9 @@ AutocompleteMatch ShortcutsProvider::ShortcutToACMatch(
     const ShortcutsDatabase::Shortcut& shortcut,
     int relevance,
     const AutocompleteInput& input,
-    const base::string16& fixed_up_input_text) {
+    const base::string16& fixed_up_input_text,
+    const base::string16 term_string,
+    const WordMap& terms_map) {
   DCHECK(!input.text().empty());
   AutocompleteMatch match;
   match.provider = this;
@@ -244,14 +310,11 @@ AutocompleteMatch ShortcutsProvider::ShortcutToACMatch(
           match.inline_autocompletion.empty();
     }
   }
-  match.EnsureUWYTIsAllowedToBeDefault(input,
-                                       client_->GetAcceptLanguages(),
-                                       client_->GetTemplateURLService());
+
+  match.EnsureUWYTIsAllowedToBeDefault(input, client_->GetTemplateURLService());
 
   // Try to mark pieces of the contents and description as matches if they
   // appear in |input.text()|.
-  const base::string16 term_string = base::i18n::ToLower(input.text());
-  WordMap terms_map(CreateWordMapForString(term_string));
   if (!terms_map.empty()) {
     match.contents_class = ClassifyAllMatchesInString(
         term_string, terms_map, match.contents, match.contents_class);

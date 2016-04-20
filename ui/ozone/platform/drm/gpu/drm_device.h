@@ -18,7 +18,6 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/overlay_transform.h"
-#include "ui/ozone/ozone_export.h"
 #include "ui/ozone/platform/drm/common/scoped_drm_types.h"
 #include "ui/ozone/platform/drm/gpu/hardware_display_plane_manager.h"
 
@@ -39,7 +38,7 @@ struct GammaRampRGBEntry;
 // Wraps DRM calls into a nice interface. Used to provide different
 // implementations of the DRM calls. For the actual implementation the DRM API
 // would be called. In unit tests this interface would be stubbed.
-class OZONE_EXPORT DrmDevice : public base::RefCountedThreadSafe<DrmDevice> {
+class DrmDevice : public base::RefCountedThreadSafe<DrmDevice> {
  public:
   typedef base::Callback<void(unsigned int /* frame */,
                               unsigned int /* seconds */,
@@ -164,6 +163,11 @@ class OZONE_EXPORT DrmDevice : public base::RefCountedThreadSafe<DrmDevice> {
   // Set the gamma ramp for |crtc_id| to reflect the ramps in |lut|.
   virtual bool SetGammaRamp(uint32_t crtc_id,
                             const std::vector<GammaRampRGBEntry>& lut);
+  virtual bool SetColorCorrection(
+      uint32_t crtc_id,
+      const std::vector<GammaRampRGBEntry>& degamma_lut,
+      const std::vector<GammaRampRGBEntry>& gamma_lut,
+      const std::vector<float>& correction_matrix);
 
   virtual bool SetCapability(uint64_t capability, uint64_t value);
 
@@ -182,7 +186,7 @@ class OZONE_EXPORT DrmDevice : public base::RefCountedThreadSafe<DrmDevice> {
 
   virtual ~DrmDevice();
 
-  scoped_ptr<HardwareDisplayPlaneManager> plane_manager_;
+  std::unique_ptr<HardwareDisplayPlaneManager> plane_manager_;
 
  private:
   class IOWatcher;
@@ -194,10 +198,10 @@ class OZONE_EXPORT DrmDevice : public base::RefCountedThreadSafe<DrmDevice> {
   // DRM device.
   base::File file_;
 
-  scoped_ptr<PageFlipManager> page_flip_manager_;
+  std::unique_ptr<PageFlipManager> page_flip_manager_;
 
   // Watcher for |fd_| listening for page flip events.
-  scoped_ptr<IOWatcher> watcher_;
+  std::unique_ptr<IOWatcher> watcher_;
 
   bool is_primary_device_;
 

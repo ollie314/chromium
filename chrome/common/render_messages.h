@@ -11,21 +11,23 @@
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "chrome/common/common_param_traits.h"
 #include "chrome/common/instant_types.h"
 #include "chrome/common/ntp_logging_events.h"
 #include "chrome/common/search_provider.h"
 #include "chrome/common/web_application_info.h"
-#include "components/error_page/common/offline_page_types.h"
+#include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/omnibox/common/omnibox_focus_state.h"
-#include "content/public/common/common_param_traits.h"
 #include "content/public/common/top_controls_state.h"
+#include "content/public/common/webplugininfo.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
 #include "third_party/WebKit/public/platform/modules/app_banner/WebAppBannerPromptReply.h"
-#include "third_party/WebKit/public/web/WebCache.h"
 #include "third_party/WebKit/public/web/WebConsoleMessage.h"
+#include "third_party/WebKit/public/web/WebWindowFeatures.h"
+#include "ui/base/window_open_disposition.h"
+#include "url/ipc/url_param_traits.h"
 
 // Singly-included section for enums and custom IPC traits.
 #ifndef CHROME_COMMON_RENDER_MESSAGES_H_
@@ -37,7 +39,6 @@ enum class ChromeViewHostMsg_GetPluginInfo_Status {
   kBlockedByPolicy,
   kDisabled,
   kNotFound,
-  kNPAPINotSupported,
   kOutdatedBlocked,
   kOutdatedDisallowed,
   kPlayImportantContent,
@@ -49,8 +50,10 @@ namespace IPC {
 template <>
 struct ParamTraits<ContentSettingsPattern> {
   typedef ContentSettingsPattern param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, base::PickleIterator* iter, param_type* r);
+  static void Write(base::Pickle* m, const param_type& p);
+  static bool Read(const base::Pickle* m,
+                   base::PickleIterator* iter,
+                   param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
@@ -77,9 +80,6 @@ IPC_ENUM_TRAITS_MAX_VALUE(blink::WebConsoleMessage::Level,
                           blink::WebConsoleMessage::LevelLast)
 IPC_ENUM_TRAITS_MAX_VALUE(content::TopControlsState,
                           content::TOP_CONTROLS_STATE_LAST)
-IPC_ENUM_TRAITS_MAX_VALUE(
-    error_page::OfflinePageStatus,
-    error_page::OfflinePageStatus::OFFLINE_PAGE_STATUS_LAST)
 
 // Output parameters for ChromeViewHostMsg_GetPluginInfo message.
 IPC_STRUCT_BEGIN(ChromeViewHostMsg_GetPluginInfo_Output)
@@ -160,14 +160,6 @@ IPC_STRUCT_TRAITS_BEGIN(ThemeBackgroundInfo)
   IPC_STRUCT_TRAITS_MEMBER(logo_alternate)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(blink::WebCache::UsageStats)
-  IPC_STRUCT_TRAITS_MEMBER(minDeadCapacity)
-  IPC_STRUCT_TRAITS_MEMBER(maxDeadCapacity)
-  IPC_STRUCT_TRAITS_MEMBER(capacity)
-  IPC_STRUCT_TRAITS_MEMBER(liveSize)
-  IPC_STRUCT_TRAITS_MEMBER(deadSize)
-IPC_STRUCT_TRAITS_END()
-
 IPC_ENUM_TRAITS_MAX_VALUE(NTPLoggingEventType,
                           NTP_EVENT_TYPE_LAST)
 
@@ -196,7 +188,7 @@ IPC_ENUM_TRAITS_MAX_VALUE(blink::WebAppBannerPromptReply,
 // RenderView messages
 // These are messages sent from the browser to the renderer process.
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
 // For WebUI testing, this message requests JavaScript to be executed at a time
 // which is late enough to not be thrown out, and early enough to be before
 // onload events are fired.
@@ -327,10 +319,10 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetCanShowNetworkDiagnosticsDialog,
                     bool /* can_show_network_diagnostics_dialog */)
 
 #if defined(OS_ANDROID)
-// Tells the renderer about the status of the offline pages. This is used to
+// Tells the renderer whether or not offline pages exist. This is used to
 // decide if offline related button will be provided on certain error page.
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetOfflinePageInfo,
-                    error_page::OfflinePageStatus /* offline_page_status */)
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetHasOfflinePages,
+                    bool /* has_offline_pages */)
 #endif  // defined(OS_ANDROID)
 
 // Provides the information needed by the renderer process to contact a
@@ -349,18 +341,18 @@ IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_RunNetworkDiagnostics,
 // Message sent from the renderer to the browser to show the UI for offline
 // pages.
 IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_ShowOfflinePages)
-
-// Message sent from the renderer to the browser to load the offline copy of
-// the page that fails to load due to no network connectivity.
-IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_LoadOfflineCopy, GURL /* url */)
 #endif  // defined(OS_ANDROID)
 
 //-----------------------------------------------------------------------------
 // Misc messages
 // These are messages sent from the renderer to the browser process.
 
-IPC_MESSAGE_CONTROL1(ChromeViewHostMsg_UpdatedCacheStats,
-                     blink::WebCache::UsageStats /* stats */)
+IPC_MESSAGE_CONTROL5(ChromeViewHostMsg_UpdatedCacheStats,
+                     uint64_t /* min_dead_capacity */,
+                     uint64_t /* max_dead_capacity */,
+                     uint64_t /* capacity */,
+                     uint64_t /* live_size */,
+                     uint64_t /* dead_size */)
 
 // Sent by the renderer process to check whether access to FileSystem is
 // granted by content settings.
@@ -539,11 +531,10 @@ IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_SearchBoxDeleteMostVisitedItem,
 
 // Tells InstantExtended to navigate the active tab to a possibly privileged
 // URL.
-IPC_MESSAGE_ROUTED4(ChromeViewHostMsg_SearchBoxNavigate,
+IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_SearchBoxNavigate,
                     int /* page_seq_no */,
                     GURL /* destination */,
-                    WindowOpenDisposition /* disposition */,
-                    bool /*is_most_visited_item_url*/)
+                    WindowOpenDisposition /* disposition */)
 
 // Tells InstantExtended to undo all most visited item deletions.
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_SearchBoxUndoAllMostVisitedDeletions,

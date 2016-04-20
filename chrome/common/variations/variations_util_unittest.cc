@@ -4,6 +4,7 @@
 
 #include "chrome/common/variations/variations_util.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/feature_list.h"
@@ -47,6 +48,13 @@ TEST_F(VariationsUtilTest, AssociateParamsFromString) {
   EXPECT_TRUE(variations::GetVariationParams(kTrialName, &params));
   EXPECT_EQ(1U, params.size());
   EXPECT_EQ("/", params["a"]);
+}
+
+TEST_F(VariationsUtilTest, AssociateParamsFromStringWithSameStudy) {
+  const std::string kTrialName = "AssociateVariationParams";
+  const std::string kVariationsString =
+      "AssociateVariationParams.A:a/10/b/test,AssociateVariationParams.A:a/x";
+  ASSERT_FALSE(AssociateParamsFromString(kVariationsString));
 }
 
 TEST_F(VariationsUtilTest, AssociateParamsFromFieldTrialConfig) {
@@ -96,7 +104,7 @@ TEST_F(VariationsUtilTest, AssociateFeaturesFromFieldTrialConfig) {
   };
 
   base::FeatureList::ClearInstanceForTesting();
-  scoped_ptr<base::FeatureList> feature_list(new base::FeatureList);
+  std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
   AssociateParamsFromFieldTrialConfig(kConfig, feature_list.get());
   base::FeatureList::SetInstance(std::move(feature_list));
 

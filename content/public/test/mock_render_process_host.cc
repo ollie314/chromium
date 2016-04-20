@@ -172,7 +172,7 @@ bool MockRenderProcessHost::FastShutdownStarted() const {
 }
 
 base::ProcessHandle MockRenderProcessHost::GetHandle() const {
-  // Return the current-process handle for the IPC::GetFileHandleForProcess
+  // Return the current-process handle for the IPC::GetPlatformFileForTransit
   // function.
   if (process_handle)
     return *process_handle;
@@ -256,14 +256,20 @@ base::TimeDelta MockRenderProcessHost::GetChildProcessIdleTime() const {
   return base::TimeDelta::FromMilliseconds(0);
 }
 
-void MockRenderProcessHost::ResumeRequestsForView(int route_id) {
-}
-
 void MockRenderProcessHost::NotifyTimezoneChange(const std::string& zone_id) {
 }
 
 ServiceRegistry* MockRenderProcessHost::GetServiceRegistry() {
   return service_registry_.get();
+}
+
+shell::Connection* MockRenderProcessHost::GetChildConnection() {
+  return nullptr;
+}
+
+std::unique_ptr<base::SharedPersistentMemoryAllocator>
+MockRenderProcessHost::TakeMetricsAllocator() {
+  return nullptr;
 }
 
 const base::TimeTicks& MockRenderProcessHost::GetInitTimeForNavigationMetrics()
@@ -315,8 +321,7 @@ void MockRenderProcessHost::EnableAudioDebugRecordings(
     const base::FilePath& file) {
 }
 
-void MockRenderProcessHost::DisableAudioDebugRecordings() {
-}
+void MockRenderProcessHost::DisableAudioDebugRecordings() {}
 
 void MockRenderProcessHost::EnableEventLogRecordings(
     const base::FilePath& file) {}
@@ -326,6 +331,8 @@ void MockRenderProcessHost::DisableEventLogRecordings() {}
 void MockRenderProcessHost::SetWebRtcLogMessageCallback(
     base::Callback<void(const std::string&)> callback) {
 }
+
+void MockRenderProcessHost::ClearWebRtcLogMessageCallback() {}
 
 RenderProcessHost::WebRtcStopRtpDumpCallback
 MockRenderProcessHost::StartRtpDump(

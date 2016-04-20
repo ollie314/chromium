@@ -39,10 +39,7 @@
 #include "core/layout/line/RootInlineBox.h"
 #include "platform/geometry/FloatQuad.h"
 #include "wtf/text/CString.h"
-
-#ifndef NDEBUG
-#include <stdio.h>
-#endif
+#include <ostream> // NOLINT
 
 namespace blink {
 
@@ -65,6 +62,7 @@ VisiblePositionTemplate<Strategy> VisiblePositionTemplate<Strategy>::create(cons
     const PositionTemplate<Strategy> deepPosition = canonicalPositionOf(positionWithAffinity.position());
     if (deepPosition.isNull())
         return VisiblePositionTemplate<Strategy>();
+    DCHECK(positionWithAffinity.position().inShadowIncludingDocument()) << positionWithAffinity;
     const PositionWithAffinityTemplate<Strategy> downstreamPosition(deepPosition);
     if (positionWithAffinity.affinity() == TextAffinity::Downstream)
         return VisiblePositionTemplate<Strategy>(downstreamPosition);
@@ -87,25 +85,14 @@ VisiblePosition createVisiblePosition(const PositionWithAffinity& positionWithAf
     return VisiblePosition::create(positionWithAffinity);
 }
 
-VisiblePositionInComposedTree createVisiblePosition(const PositionInComposedTree& position, TextAffinity affinity)
+VisiblePositionInFlatTree createVisiblePosition(const PositionInFlatTree& position, TextAffinity affinity)
 {
-    return VisiblePositionInComposedTree::create(PositionInComposedTreeWithAffinity(position, affinity));
+    return VisiblePositionInFlatTree::create(PositionInFlatTreeWithAffinity(position, affinity));
 }
 
-VisiblePositionInComposedTree createVisiblePosition(const PositionInComposedTreeWithAffinity& positionWithAffinity)
+VisiblePositionInFlatTree createVisiblePosition(const PositionInFlatTreeWithAffinity& positionWithAffinity)
 {
-    return VisiblePositionInComposedTree::create(positionWithAffinity);
-}
-
-VisiblePosition createVisiblePositionInDOMTree(const Position& position, TextAffinity affinity)
-{
-    return createVisiblePosition(position, affinity);
-}
-
-VisiblePosition createVisiblePositionInDOMTree(const PositionInComposedTree& position, TextAffinity affinity)
-{
-    const VisiblePositionInComposedTree visiblePosition = createVisiblePosition(position);
-    return createVisiblePosition(toPositionInDOMTree(visiblePosition.deepEquivalent()), affinity);
+    return VisiblePositionInFlatTree::create(positionWithAffinity);
 }
 
 #ifndef NDEBUG
@@ -135,7 +122,17 @@ void VisiblePositionTemplate<Strategy>::showTreeForThis() const
 #endif
 
 template class CORE_TEMPLATE_EXPORT VisiblePositionTemplate<EditingStrategy>;
-template class CORE_TEMPLATE_EXPORT VisiblePositionTemplate<EditingInComposedTreeStrategy>;
+template class CORE_TEMPLATE_EXPORT VisiblePositionTemplate<EditingInFlatTreeStrategy>;
+
+std::ostream& operator<<(std::ostream& ostream, const VisiblePosition& position)
+{
+    return ostream << position.deepEquivalent() << '/' << position.affinity();
+}
+
+std::ostream& operator<<(std::ostream& ostream, const VisiblePositionInFlatTree& position)
+{
+    return ostream << position.deepEquivalent() << '/' << position.affinity();
+}
 
 } // namespace blink
 
@@ -143,10 +140,11 @@ template class CORE_TEMPLATE_EXPORT VisiblePositionTemplate<EditingInComposedTre
 
 void showTree(const blink::VisiblePosition* vpos)
 {
-    if (vpos)
+    if (vpos) {
         vpos->showTreeForThis();
-    else
-        fprintf(stderr, "Cannot showTree for (nil) VisiblePosition.\n");
+        return;
+    }
+    DVLOG(0) << "Cannot showTree for (nil) VisiblePosition.";
 }
 
 void showTree(const blink::VisiblePosition& vpos)

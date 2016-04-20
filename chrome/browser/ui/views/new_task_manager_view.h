@@ -8,17 +8,17 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/task_manager/task_manager_table_model.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/models/table_model.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/label_button.h"
-#include "ui/views/controls/link_listener.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/table/table_grouper.h"
 #include "ui/views/controls/table/table_view_observer.h"
 #include "ui/views/window/dialog_delegate.h"
+
+class Browser;
 
 namespace views {
 class LabelButton;
@@ -38,7 +38,6 @@ class NewTaskManagerView
       public views::DialogDelegateView,
       public views::TableGrouper,
       public views::TableViewObserver,
-      public views::LinkListener,
       public views::ContextMenuController,
       public ui::SimpleMenuModel::Delegate {
  public:
@@ -86,9 +85,6 @@ class NewTaskManagerView
   void OnDoubleClick() override;
   void OnKeyDown(ui::KeyboardCode keycode) override;
 
-  // views::LinkListener:
-  void LinkClicked(views::Link* source, int event_flags) override;
-
   // views::ContextMenuController:
   void ShowContextMenuForView(views::View* source,
                               const gfx::Point& point,
@@ -104,7 +100,7 @@ class NewTaskManagerView
  private:
   friend class NewTaskManagerViewTest;
 
-  explicit NewTaskManagerView(chrome::HostDesktopType desktop_type);
+  NewTaskManagerView();
 
   static NewTaskManagerView* GetInstanceForTests();
 
@@ -120,23 +116,19 @@ class NewTaskManagerView
   // Restores saved "always on top" state from a previous session.
   void RetriveSavedAlwaysOnTopState();
 
-  scoped_ptr<TaskManagerTableModel> table_model_;
+  std::unique_ptr<TaskManagerTableModel> table_model_;
 
-  scoped_ptr<views::MenuRunner> menu_runner_;
+  std::unique_ptr<views::MenuRunner> menu_runner_;
 
   // We need to own the text of the menu, the Windows API does not copy it.
   base::string16 always_on_top_menu_text_;
 
   views::LabelButton* kill_button_;
-  views::Link* about_memory_link_;
   views::TableView* tab_table_;
   views::View* tab_table_parent_;
 
   // all possible columns, not necessarily visible
   std::vector<ui::TableColumn> columns_;
-
-  // The host desktop type this task manager belongs to.
-  const chrome::HostDesktopType desktop_type_;
 
   // True when the Task Manager window should be shown on top of other windows.
   bool is_always_on_top_;

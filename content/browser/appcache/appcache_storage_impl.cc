@@ -82,7 +82,7 @@ void ClearSessionOnlyOrigins(
     AppCacheDatabase* database,
     scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy,
     bool force_keep_session_state) {
-  scoped_ptr<AppCacheDatabase> database_to_delete(database);
+  std::unique_ptr<AppCacheDatabase> database_to_delete(database);
 
   // If saving session state, only delete the database.
   if (force_keep_session_state)
@@ -837,11 +837,7 @@ void AppCacheStorageImpl::StoreGroupAndCacheTask::CancelCompletion() {
 
 // Helpers for FindMainResponseTask::Run()
 namespace {
-class SortByCachePreference
-    : public std::binary_function<
-        AppCacheDatabase::EntryRecord,
-        AppCacheDatabase::EntryRecord,
-        bool> {
+class SortByCachePreference {
  public:
   SortByCachePreference(int64_t preferred_id,
                         const std::set<int64_t>& in_use_ids)
@@ -1423,12 +1419,10 @@ AppCacheStorageImpl::AppCacheStorageImpl(AppCacheServiceImpl* service)
 }
 
 AppCacheStorageImpl::~AppCacheStorageImpl() {
-  std::for_each(pending_quota_queries_.begin(),
-                pending_quota_queries_.end(),
-                std::mem_fun(&DatabaseTask::CancelCompletion));
-  std::for_each(scheduled_database_tasks_.begin(),
-                scheduled_database_tasks_.end(),
-                std::mem_fun(&DatabaseTask::CancelCompletion));
+  for (auto* task : pending_quota_queries_)
+    task->CancelCompletion();
+  for (auto* task : scheduled_database_tasks_)
+    task->CancelCompletion();
 
   if (database_ &&
       !db_thread_->PostTask(
@@ -1740,22 +1734,20 @@ void AppCacheStorageImpl::StoreEvictionTimes(AppCacheGroup* group) {
 
 AppCacheResponseReader* AppCacheStorageImpl::CreateResponseReader(
     const GURL& manifest_url,
-    int64_t group_id,
     int64_t response_id) {
-  return new AppCacheResponseReader(response_id, group_id, disk_cache());
+  return new AppCacheResponseReader(response_id, disk_cache()->GetWeakPtr());
 }
 
 AppCacheResponseWriter* AppCacheStorageImpl::CreateResponseWriter(
-    const GURL& manifest_url,
-    int64_t group_id) {
-  return new AppCacheResponseWriter(NewResponseId(), group_id, disk_cache());
+    const GURL& manifest_url) {
+  return new AppCacheResponseWriter(NewResponseId(),
+                                    disk_cache()->GetWeakPtr());
 }
 
 AppCacheResponseMetadataWriter*
-AppCacheStorageImpl::CreateResponseMetadataWriter(int64_t group_id,
-                                                  int64_t response_id) {
-  return new AppCacheResponseMetadataWriter(response_id, group_id,
-                                            disk_cache());
+AppCacheStorageImpl::CreateResponseMetadataWriter(int64_t response_id) {
+  return new AppCacheResponseMetadataWriter(response_id,
+                                            disk_cache()->GetWeakPtr());
 }
 
 void AppCacheStorageImpl::DoomResponses(

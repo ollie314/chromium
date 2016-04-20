@@ -12,7 +12,6 @@
 #include "base/i18n/case_conversion.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -313,17 +312,38 @@ base::string16 FieldName(const WebInputElement& input_field,
   return field_name.empty() ? base::ASCIIToUTF16(dummy_name) : field_name;
 }
 
-bool FormContainsVisiblePasswordFields(const SyntheticForm& form) {
+// Helper function that checks the presence of visible password and username
+// fields in |form.control_elements|.
+// Iff a visible password found, then |*found_visible_password| is set to true.
+// Iff a visible password found AND there is a visible username before it, then
+// |*found_visible_username_before_visible_password| is set to true.
+void FoundVisiblePasswordAndVisibleUsernameBeforePassword(
+    const SyntheticForm& form,
+    bool* found_visible_password,
+    bool* found_visible_username_before_visible_password) {
+  DCHECK(found_visible_password);
+  DCHECK(found_visible_username_before_visible_password);
+  *found_visible_password = false;
+  *found_visible_username_before_visible_password = false;
+
+  bool found_visible_username = false;
   for (auto& control_element : form.control_elements) {
     const WebInputElement* input_element = toWebInputElement(&control_element);
-    if (!input_element || !input_element->isEnabled())
+    if (!input_element || !input_element->isEnabled() ||
+        !input_element->isTextField())
       continue;
 
-    if (input_element->isPasswordField() &&
-        form_util::IsWebNodeVisible(*input_element))
-      return true;
+    if (!form_util::IsWebNodeVisible(*input_element))
+      continue;
+
+    if (input_element->isPasswordField()) {
+      *found_visible_password = true;
+      *found_visible_username_before_visible_password = found_visible_username;
+      break;
+    } else {
+      found_visible_username = true;
+    }
   }
-  return false;
 }
 
 // Get information about a login form encapsulated in a PasswordForm struct.
@@ -357,22 +377,41 @@ bool GetPasswordForm(const SyntheticForm& form,
                           &predicted_elements);
   }
 
+  // Check the presence of visible password and username fields.
+  // If there is a visible password field, then ignore invisible password
+  // fields. If there is a visible username before visible password, then ignore
+  // invisible username fields.
+  // If there is no visible password field, don't ignore any elements (i.e. use
+  // the latest username field just before selected password field).
+  bool ignore_invisible_passwords = false;
+  bool ignore_invisible_usernames = false;
+  FoundVisiblePasswordAndVisibleUsernameBeforePassword(
+      form, &ignore_invisible_passwords, &ignore_invisible_usernames);
   std::string layout_sequence;
   layout_sequence.reserve(form.control_elements.size());
-  bool ignore_invisible_fields = FormContainsVisiblePasswordFields(form);
+  size_t number_of_non_empty_text_non_password_fields = 0;
   for (size_t i = 0; i < form.control_elements.size(); ++i) {
     WebFormControlElement control_element = form.control_elements[i];
 
     WebInputElement* input_element = toWebInputElement(&control_element);
     if (!input_element || !input_element->isEnabled())
       continue;
-    if (ignore_invisible_fields && !form_util::IsWebNodeVisible(*input_element))
-      continue;
+
+    bool element_is_invisible = !form_util::IsWebNodeVisible(*input_element);
     if (input_element->isTextField()) {
-      if (input_element->isPasswordField())
+      if (input_element->isPasswordField()) {
+        if (element_is_invisible && ignore_invisible_passwords)
+          continue;
         layout_sequence.push_back('P');
-      else
+      } else {
+        if (nonscript_modified_values &&
+            nonscript_modified_values->find(*input_element) !=
+                nonscript_modified_values->end())
+          ++number_of_non_empty_text_non_password_fields;
+        if (element_is_invisible && ignore_invisible_usernames)
+          continue;
         layout_sequence.push_back('N');
+      }
     }
 
     bool password_marked_by_autocomplete_attribute =
@@ -560,6 +599,14 @@ bool GetPasswordForm(const SyntheticForm& form,
   password_form->blacklisted_by_user = false;
   password_form->type = PasswordForm::TYPE_MANUAL;
 
+  // The password form is considered that it looks like SignUp form if it has
+  // more than 1 text field with user input or it has a new password field and
+  // no current password field.
+  password_form->does_look_like_signup_form =
+      number_of_non_empty_text_non_password_fields > 1 ||
+      (number_of_non_empty_text_non_password_fields == 1 &&
+       password_form->password_element.empty() &&
+       !password_form->new_password_element.empty());
   return true;
 }
 
@@ -598,17 +645,17 @@ bool IsGaiaReauthenticationForm(
   return has_rart_field && has_continue_field;
 }
 
-scoped_ptr<PasswordForm> CreatePasswordFormFromWebForm(
+std::unique_ptr<PasswordForm> CreatePasswordFormFromWebForm(
     const WebFormElement& web_form,
     const ModifiedValues* nonscript_modified_values,
     const FormsPredictionsMap* form_predictions) {
   if (web_form.isNull())
-    return scoped_ptr<PasswordForm>();
+    return std::unique_ptr<PasswordForm>();
 
-  scoped_ptr<PasswordForm> password_form(new PasswordForm());
+  std::unique_ptr<PasswordForm> password_form(new PasswordForm());
   password_form->action = form_util::GetCanonicalActionForForm(web_form);
   if (!password_form->action.is_valid())
-    return scoped_ptr<PasswordForm>();
+    return std::unique_ptr<PasswordForm>();
 
   SyntheticForm synthetic_form;
   PopulateSyntheticFormFromWebForm(web_form, &synthetic_form);
@@ -619,12 +666,12 @@ scoped_ptr<PasswordForm> CreatePasswordFormFromWebForm(
 
   if (!GetPasswordForm(synthetic_form, password_form.get(),
                        nonscript_modified_values, form_predictions))
-    return scoped_ptr<PasswordForm>();
+    return std::unique_ptr<PasswordForm>();
 
   return password_form;
 }
 
-scoped_ptr<PasswordForm> CreatePasswordFormFromUnownedInputElements(
+std::unique_ptr<PasswordForm> CreatePasswordFormFromUnownedInputElements(
     const WebFrame& frame,
     const ModifiedValues* nonscript_modified_values,
     const FormsPredictionsMap* form_predictions) {
@@ -634,16 +681,16 @@ scoped_ptr<PasswordForm> CreatePasswordFormFromUnownedInputElements(
   synthetic_form.document = frame.document();
 
   if (synthetic_form.control_elements.empty())
-    return scoped_ptr<PasswordForm>();
+    return std::unique_ptr<PasswordForm>();
 
-  scoped_ptr<PasswordForm> password_form(new PasswordForm());
+  std::unique_ptr<PasswordForm> password_form(new PasswordForm());
   UnownedPasswordFormElementsAndFieldSetsToFormData(
       synthetic_form.fieldsets, synthetic_form.control_elements, nullptr,
       frame.document(), form_util::EXTRACT_NONE, &password_form->form_data,
       nullptr /* FormFieldData */);
   if (!GetPasswordForm(synthetic_form, password_form.get(),
                        nonscript_modified_values, form_predictions))
-    return scoped_ptr<PasswordForm>();
+    return std::unique_ptr<PasswordForm>();
 
   // No actual action on the form, so use the the origin as the action.
   password_form->action = password_form->origin;

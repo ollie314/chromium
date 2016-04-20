@@ -4,12 +4,12 @@
 
 #include "chrome/browser/search/hotword_service.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/command_line.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
-#include "base/prefs/pref_service.h"
 #include "base/test/test_simple_task_runner.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -22,6 +22,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/history/core/browser/web_history_service.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
@@ -64,7 +65,7 @@ class MockAudioHistoryHandler : public HotwordAudioHistoryHandler {
 
  private:
   int get_audio_history_calls_;
-  scoped_ptr<history::WebHistoryService> web_history_;
+  std::unique_ptr<history::WebHistoryService> web_history_;
 };
 
 class MockHotwordService : public HotwordService {
@@ -80,12 +81,12 @@ class MockHotwordService : public HotwordService {
   }
 
   void InstallHotwordExtensionFromWebstore(int num_tries) override {
-    scoped_ptr<base::DictionaryValue> manifest =
+    std::unique_ptr<base::DictionaryValue> manifest =
         extensions::DictionaryBuilder()
-        .Set("name", "Hotword Test Extension")
-        .Set("version", "1.0")
-        .Set("manifest_version", 2)
-        .Build();
+            .Set("name", "Hotword Test Extension")
+            .Set("version", "1.0")
+            .Set("manifest_version", 2)
+            .Build();
     scoped_refptr<extensions::Extension> extension =
         extensions::ExtensionBuilder()
             .SetManifest(std::move(manifest))
@@ -114,9 +115,9 @@ class MockHotwordService : public HotwordService {
   std::string extension_id_;
 };
 
-scoped_ptr<KeyedService> BuildMockHotwordService(
+std::unique_ptr<KeyedService> BuildMockHotwordService(
     content::BrowserContext* context) {
-  return make_scoped_ptr(
+  return base::WrapUnique(
       new MockHotwordService(static_cast<Profile*>(context)));
 }
 
@@ -166,7 +167,7 @@ INSTANTIATE_TEST_CASE_P(HotwordServiceTests,
 // Disabled due to http://crbug.com/503963.
 TEST_P(HotwordServiceTest, DISABLED_IsHotwordAllowedLocale) {
   TestingProfile::Builder profile_builder;
-  scoped_ptr<TestingProfile> profile = profile_builder.Build();
+  std::unique_ptr<TestingProfile> profile = profile_builder.Build();
 
 #if defined(ENABLE_HOTWORDING)
   bool hotwording_enabled = true;

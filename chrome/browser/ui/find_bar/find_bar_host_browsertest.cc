@@ -7,7 +7,6 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -33,6 +32,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -85,13 +85,6 @@ class FindInPageControllerTest : public InProcessBrowserTest {
  public:
   FindInPageControllerTest() {
     chrome::DisableFindBarAnimationsDuringTesting(true);
-  }
-
-  // Disable new downloads UI as it is very very slow. https://crbug.com/526577
-  // TODO(dbeam): remove this once the downloads UI is not slow.
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kDisableMaterialDesignDownloads);
   }
 
  protected:
@@ -343,6 +336,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, MAYBE_SearchWithinSpecialURL) {
 
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIDownloadsURL));
   FlushHistoryService();
+  ASSERT_TRUE(content::ExecuteScript(web_contents, "Polymer.dom.flush();"));
   EXPECT_EQ(1, FindInPageASCII(web_contents, download_url.spec(),
                                kFwd, kIgnoreCase, NULL));
 }
@@ -1324,8 +1318,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, MAYBE_NoIncognitoPrepopulate) {
   // Open a new incognito window and navigate to the same page.
   Profile* incognito_profile = browser()->profile()->GetOffTheRecordProfile();
   Browser* incognito_browser =
-      new Browser(Browser::CreateParams(incognito_profile,
-                                        browser()->host_desktop_type()));
+      new Browser(Browser::CreateParams(incognito_profile));
   content::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::NotificationService::AllSources());
@@ -1386,8 +1379,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, ActivateLinkNavigatesPage) {
 }
 
 IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FitWindow) {
-  Browser::CreateParams params(Browser::TYPE_POPUP, browser()->profile(),
-                               browser()->host_desktop_type());
+  Browser::CreateParams params(Browser::TYPE_POPUP, browser()->profile());
   params.initial_bounds = gfx::Rect(0, 0, 250, 500);
   Browser* popup = new Browser(params);
   content::WindowedNotificationObserver observer(

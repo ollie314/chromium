@@ -33,13 +33,15 @@
 
 #include "platform/heap/Handle.h"
 #include "public/web/WebSettings.h"
+#include "web/WebExport.h"
+#include "wtf/Compiler.h"
 
 namespace blink {
 
 class DevToolsEmulator;
 class Settings;
 
-class WebSettingsImpl final : public WebSettings {
+class WEB_EXPORT WebSettingsImpl final : WTF_NON_EXPORTED_BASE(public WebSettings) {
 public:
     WebSettingsImpl(Settings*, DevToolsEmulator*);
     virtual ~WebSettingsImpl() { }
@@ -58,6 +60,7 @@ public:
     void setAllowDisplayOfInsecureContent(bool) override;
     void setAllowFileAccessFromFileURLs(bool) override;
     void setAllowCustomScrollbarInMainFrame(bool) override;
+    void setAllowGeolocationOnInsecureOrigins(bool) override;
     void setAllowRunningOfInsecureContent(bool) override;
     void setAllowScriptsToCloseWindows(bool) override;
     void setAllowUniversalAccessFromFileURLs(bool) override;
@@ -94,7 +97,6 @@ public:
     void setExperimentalWebGLEnabled(bool) override;
     void setFantasyFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) override;
     void setFixedFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) override;
-    void setReportWheelOverscroll(bool) override;
     void setForceZeroLayoutHeight(bool) override;
     void setFullscreenSupported(bool) override;
     void setHyperlinkAuditingEnabled(bool) override;
@@ -102,23 +104,25 @@ public:
     void setImageAnimationPolicy(ImageAnimationPolicy) override;
     void setImagesEnabled(bool) override;
     void setInlineTextBoxAccessibilityEnabled(bool) override;
+    void setInertVisualViewport(bool) override;
     void setJavaScriptCanAccessClipboard(bool) override;
     void setJavaScriptCanOpenWindowsAutomatically(bool) override;
     void setJavaScriptEnabled(bool) override;
     void setLoadsImagesAutomatically(bool) override;
     void setLoadWithOverviewMode(bool) override;
+    void setShouldReuseGlobalForUnownedMainFrame(bool) override;
     void setLocalStorageEnabled(bool) override;
     void setMainFrameClipsContent(bool) override;
     void setMainFrameResizesAreOrientationChanges(bool) override;
     void setMaxTouchPoints(int) override;
     void setMediaControlsOverlayPlayButtonEnabled(bool) override;
     void setMediaPlaybackRequiresUserGesture(bool) override;
+    void setPresentationRequiresUserGesture(bool) override;
     void setMinimumAccelerated2dCanvasSize(int) override;
     void setMinimumFontSize(int) override;
     void setMinimumLogicalFontSize(int) override;
     void setMockScrollbarsEnabled(bool) override;
     void setOfflineWebApplicationCacheEnabled(bool) override;
-    void setOpenGLMultisamplingEnabled(bool) override;
     void setPasswordEchoDurationInSeconds(double) override;
     void setPasswordEchoEnabled(bool) override;
     void setPerTilePaintingEnabled(bool) override;
@@ -164,16 +168,16 @@ public:
     void setTextTrackFontFamily(const WebString&) override;
     void setTextTrackFontStyle(const WebString&) override;
     void setTextTrackFontVariant(const WebString&) override;
+    void setTextTrackMarginPercentage(float) override;
     void setTextTrackTextColor(const WebString&) override;
     void setTextTrackTextShadow(const WebString&) override;
     void setTextTrackTextSize(const WebString&) override;
     void setThreadedScrollingEnabled(bool) override;
     void setTouchDragDropEnabled(bool) override;
     void setUnifiedTextCheckerEnabled(bool) override;
-    void setUnsafePluginPastingEnabled(bool) override;
     void setUsesEncodingDetector(bool) override;
     void setUseLegacyBackgroundSizeShorthandBehavior(bool) override;
-    void setUseMobileViewportStyle(bool) override;
+    void setViewportStyle(WebViewportStyle) override;
     void setUseSolidColorScrollbars(bool) override;
     void setUseWideViewport(bool) override;
     void setV8CacheOptions(V8CacheOptions) override;
@@ -184,9 +188,9 @@ public:
     void setViewportMetaMergeContentQuirk(bool) override;
     void setViewportMetaNonUserScalableQuirk(bool) override;
     void setViewportMetaZeroValuesQuirk(bool) override;
-    void setWebAudioEnabled(bool) override;
     void setWebGLErrorsToConsoleEnabled(bool) override;
     void setWebSecurityEnabled(bool) override;
+    void setWheelGesturesEnabled(bool) override;
     void setWideViewportQuirkEnabled(bool) override;
     void setXSSAuditorEnabled(bool) override;
 
@@ -204,10 +208,11 @@ public:
 
     void setMockGestureTapHighlightsEnabled(bool);
     bool mockGestureTapHighlightsEnabled() const;
+    bool wheelGesturesEnabled() const;
 
 private:
     Settings* m_settings;
-    RawPtrWillBeUntracedMember<DevToolsEmulator> m_devToolsEmulator;
+    UntracedMember<DevToolsEmulator> m_devToolsEmulator;
     bool m_showFPSCounter;
     bool m_showPaintRects;
     bool m_renderVSyncNotificationEnabled;
@@ -227,7 +232,6 @@ private:
     // the Android SDK prior to and including version 18. Presumably, this
     // can be removed any time after 2015. See http://crbug.com/313754.
     bool m_clobberUserAgentInitialScaleQuirk;
-    bool m_mainFrameResizesAreOrientationChanges;
 };
 
 } // namespace blink

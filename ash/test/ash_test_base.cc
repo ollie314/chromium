@@ -41,11 +41,10 @@
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #include "ui/platform_window/win/win_window.h"
-#include "win8/test/test_registrar_constants.h"
 #endif
 
 #if defined(USE_X11)
-#include "ui/gfx/x/x11_connection.h"
+#include "ui/gfx/x/x11_connection.h"  // nogncheck
 #endif
 
 namespace ash {
@@ -61,7 +60,7 @@ class AshEventGeneratorDelegate
   // aura::test::EventGeneratorDelegateAura overrides:
   aura::WindowTreeHost* GetHostAt(
       const gfx::Point& point_in_screen) const override {
-    gfx::Screen* screen = Shell::GetScreen();
+    gfx::Screen* screen = gfx::Screen::GetScreen();
     gfx::Display display = screen->GetDisplayNearestPoint(point_in_screen);
     return Shell::GetInstance()
         ->window_tree_host_manager()
@@ -244,8 +243,7 @@ aura::Window* AshTestBase::CreateTestWindowInShellWithDelegateAndType(
   if (bounds.IsEmpty()) {
     ParentWindowInPrimaryRootWindow(window);
   } else {
-    gfx::Display display =
-        Shell::GetScreen()->GetDisplayMatching(bounds);
+    gfx::Display display = gfx::Screen::GetScreen()->GetDisplayMatching(bounds);
     aura::Window* root = ash::Shell::GetInstance()
                              ->window_tree_host_manager()
                              ->GetRootWindowForDisplayId(display.id());

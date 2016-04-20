@@ -36,7 +36,8 @@
 #include "core/plugins/PluginView.h"
 #include "platform/Widget.h"
 #include "public/web/WebPluginContainer.h"
-
+#include "web/WebExport.h"
+#include "wtf/Compiler.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/Vector.h"
@@ -60,24 +61,23 @@ class Widget;
 struct WebPrintParams;
 struct WebPrintPresetOptions;
 
-class WebPluginContainerImpl final : public PluginView, public WebPluginContainer, public LocalFrameLifecycleObserver {
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(WebPluginContainerImpl);
-    WILL_BE_USING_PRE_FINALIZER(WebPluginContainerImpl, dispose);
+class WEB_EXPORT WebPluginContainerImpl final : public PluginView, WTF_NON_EXPORTED_BASE(public WebPluginContainer), public LocalFrameLifecycleObserver {
+    USING_GARBAGE_COLLECTED_MIXIN(WebPluginContainerImpl);
+    USING_PRE_FINALIZER(WebPluginContainerImpl, dispose);
 public:
-    static PassRefPtrWillBeRawPtr<WebPluginContainerImpl> create(HTMLPlugInElement* element, WebPlugin* webPlugin)
+    static WebPluginContainerImpl* create(HTMLPlugInElement* element, WebPlugin* webPlugin)
     {
-        return adoptRefWillBeNoop(new WebPluginContainerImpl(element, webPlugin));
+        return new WebPluginContainerImpl(element, webPlugin);
     }
 
     // PluginView methods
     WebLayer* platformLayer() const override;
     v8::Local<v8::Object> scriptableObject(v8::Isolate*) override;
-    bool getFormValue(String&) override;
     bool supportsKeyboardFocus() const override;
     bool supportsInputMethod() const override;
     bool canProcessDrag() const override;
     bool wantsWheelEvents() override;
-    void layoutIfNeeded() override;
+    void updateAllLifecyclePhases() override;
     void invalidatePaintIfNeeded() override { issuePaintInvalidations(); }
 
     // Widget methods
@@ -98,14 +98,12 @@ public:
     // WebPluginContainer methods
     WebElement element() override;
     void dispatchProgressEvent(const WebString& type, bool lengthComputable, unsigned long long loaded, unsigned long long total, const WebString& url) override;
+    void enqueueMessageEvent(const WebDOMMessageEvent&) override;
     void invalidate() override;
     void invalidateRect(const WebRect&) override;
     void scrollRect(const WebRect&) override;
-    void setNeedsLayout() override;
+    void scheduleAnimation() override;
     void reportGeometry() override;
-    void allowScriptObjects() override;
-    void clearScriptObjects() override;
-    NPObject* scriptableObjectForElement() override;
     v8::Local<v8::Object> v8ObjectForElement() override;
     WebString executeScriptURL(const WebURL&, bool popupsAllowed) override;
     void loadFrameRequest(const WebURLRequest&, const WebString& target) override;
@@ -193,7 +191,7 @@ private:
 
     friend class WebPluginContainerTest;
 
-    RawPtrWillBeMember<HTMLPlugInElement> m_element;
+    Member<HTMLPlugInElement> m_element;
     WebPlugin* m_webPlugin;
 
     WebLayer* m_webLayer;
@@ -203,7 +201,7 @@ private:
     TouchEventRequestType m_touchEventRequestType;
     bool m_wantsWheelEvents;
 
-    bool m_inDispose;
+    bool m_isDisposed;
 };
 
 DEFINE_TYPE_CASTS(WebPluginContainerImpl, Widget, widget, widget->isPluginContainer(), widget.isPluginContainer());

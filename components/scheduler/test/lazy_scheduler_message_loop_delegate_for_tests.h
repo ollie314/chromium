@@ -6,6 +6,7 @@
 #define COMPONENTS_SCHEDULER_TEST_LAZY_SCHEDULER_MESSAGE_LOOP_DELEGATE_FOR_TESTS_H_
 
 #include "base/macros.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/time/tick_clock.h"
 #include "components/scheduler/child/scheduler_tqm_delegate.h"
@@ -36,8 +37,6 @@ class LazySchedulerMessageLoopDelegateForTests : public SchedulerTqmDelegate {
   bool RunsTasksOnCurrentThread() const override;
   bool IsNested() const override;
   base::TimeTicks NowTicks() override;
-  void OnNoMoreImmediateWork() override;
-  double CurrentTimeSeconds() const override;
 
  private:
   LazySchedulerMessageLoopDelegateForTests();

@@ -5,19 +5,19 @@
 #ifndef CHROME_BROWSER_DEVTOOLS_DEVTOOLS_UI_BINDINGS_H_
 #define CHROME_BROWSER_DEVTOOLS_DEVTOOLS_UI_BINDINGS_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/pref_change_registrar.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/devtools/device/devtools_android_bridge.h"
 #include "chrome/browser/devtools/devtools_embedder_message_dispatcher.h"
 #include "chrome/browser/devtools/devtools_file_helper.h"
 #include "chrome/browser/devtools/devtools_file_system_indexer.h"
 #include "chrome/browser/devtools/devtools_targets_ui.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_frontend_host.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -42,8 +42,6 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
  public:
   static DevToolsUIBindings* ForWebContents(
       content::WebContents* web_contents);
-  static content::DevToolsExternalAgentProxyDelegate*
-      CreateWebSocketAPIChannel();
 
   class Delegate {
    public:
@@ -58,6 +56,7 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
 
     virtual void InspectedContentsClosing() = 0;
     virtual void OnLoadCompleted() = 0;
+    virtual void ReadyForTest() = 0;
     virtual InfoBarService* GetInfoBarService() = 0;
     virtual void RenderProcessGone(bool crashed) = 0;
   };
@@ -81,8 +80,6 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
   bool IsAttachedTo(content::DevToolsAgentHost* agent_host);
 
  private:
-  friend class WebSocketAPIChannel;
-
   void HandleMessageFromDevToolsFrontend(const std::string& message);
 
   // content::DevToolsAgentHostClient implementation.
@@ -141,12 +138,12 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
   void SendJsonRequest(const DispatchCallback& callback,
                        const std::string& browser_id,
                        const std::string& url) override;
-  void SendFrontendAPINotification(const std::string& message) override;
   void GetPreferences(const DispatchCallback& callback) override;
   void SetPreference(const std::string& name,
                      const std::string& value) override;
   void RemovePreference(const std::string& name) override;
   void ClearPreferences() override;
+  void ReadyForTest() override;
 
   // net::URLFetcherDelegate overrides.
   void OnURLFetchComplete(const net::URLFetcher* source) override;
@@ -202,15 +199,15 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
   void AddDevToolsExtensionsToClient();
 
   class FrontendWebContentsObserver;
-  scoped_ptr<FrontendWebContentsObserver> frontend_contents_observer_;
+  std::unique_ptr<FrontendWebContentsObserver> frontend_contents_observer_;
 
   Profile* profile_;
   DevToolsAndroidBridge* android_bridge_;
   content::WebContents* web_contents_;
-  scoped_ptr<Delegate> delegate_;
+  std::unique_ptr<Delegate> delegate_;
   scoped_refptr<content::DevToolsAgentHost> agent_host_;
-  scoped_ptr<content::DevToolsFrontendHost> frontend_host_;
-  scoped_ptr<DevToolsFileHelper> file_helper_;
+  std::unique_ptr<content::DevToolsFrontendHost> frontend_host_;
+  std::unique_ptr<DevToolsFileHelper> file_helper_;
   scoped_refptr<DevToolsFileSystemIndexer> file_system_indexer_;
   typedef std::map<
       int,
@@ -221,10 +218,11 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
   bool devices_updates_enabled_;
   bool frontend_loaded_;
   bool reattaching_;
-  scoped_ptr<DevToolsTargetsUIHandler> remote_targets_handler_;
-  scoped_ptr<PortForwardingStatusSerializer> port_status_serializer_;
+  std::unique_ptr<DevToolsTargetsUIHandler> remote_targets_handler_;
+  std::unique_ptr<PortForwardingStatusSerializer> port_status_serializer_;
   PrefChangeRegistrar pref_change_registrar_;
-  scoped_ptr<DevToolsEmbedderMessageDispatcher> embedder_message_dispatcher_;
+  std::unique_ptr<DevToolsEmbedderMessageDispatcher>
+      embedder_message_dispatcher_;
   GURL url_;
   using PendingRequestsMap = std::map<const net::URLFetcher*, DispatchCallback>;
   PendingRequestsMap pending_requests_;

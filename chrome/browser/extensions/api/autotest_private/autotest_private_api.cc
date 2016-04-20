@@ -29,6 +29,8 @@
 #include "chromeos/dbus/session_manager_client.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#include "ui/message_center/message_center.h"
+#include "ui/message_center/notification.h"
 #endif
 
 namespace extensions {
@@ -82,7 +84,7 @@ bool AutotestPrivateRestartFunction::RunSync() {
 }
 
 bool AutotestPrivateShutdownFunction::RunSync() {
-  scoped_ptr<api::autotest_private::Shutdown::Params> params(
+  std::unique_ptr<api::autotest_private::Shutdown::Params> params(
       api::autotest_private::Shutdown::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -227,7 +229,7 @@ bool AutotestPrivateSimulateAsanMemoryBugFunction::RunSync() {
 }
 
 bool AutotestPrivateSetTouchpadSensitivityFunction::RunSync() {
-  scoped_ptr<api::autotest_private::SetTouchpadSensitivity::Params> params(
+  std::unique_ptr<api::autotest_private::SetTouchpadSensitivity::Params> params(
       api::autotest_private::SetTouchpadSensitivity::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -241,7 +243,7 @@ bool AutotestPrivateSetTouchpadSensitivityFunction::RunSync() {
 }
 
 bool AutotestPrivateSetTapToClickFunction::RunSync() {
-  scoped_ptr<api::autotest_private::SetTapToClick::Params> params(
+  std::unique_ptr<api::autotest_private::SetTapToClick::Params> params(
       api::autotest_private::SetTapToClick::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -254,7 +256,7 @@ bool AutotestPrivateSetTapToClickFunction::RunSync() {
 }
 
 bool AutotestPrivateSetThreeFingerClickFunction::RunSync() {
-  scoped_ptr<api::autotest_private::SetThreeFingerClick::Params> params(
+  std::unique_ptr<api::autotest_private::SetThreeFingerClick::Params> params(
       api::autotest_private::SetThreeFingerClick::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -268,7 +270,7 @@ bool AutotestPrivateSetThreeFingerClickFunction::RunSync() {
 }
 
 bool AutotestPrivateSetTapDraggingFunction::RunSync() {
-  scoped_ptr<api::autotest_private::SetTapDragging::Params> params(
+  std::unique_ptr<api::autotest_private::SetTapDragging::Params> params(
       api::autotest_private::SetTapDragging::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -281,7 +283,7 @@ bool AutotestPrivateSetTapDraggingFunction::RunSync() {
 }
 
 bool AutotestPrivateSetNaturalScrollFunction::RunSync() {
-  scoped_ptr<api::autotest_private::SetNaturalScroll::Params> params(
+  std::unique_ptr<api::autotest_private::SetNaturalScroll::Params> params(
       api::autotest_private::SetNaturalScroll::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -295,7 +297,7 @@ bool AutotestPrivateSetNaturalScrollFunction::RunSync() {
 }
 
 bool AutotestPrivateSetMouseSensitivityFunction::RunSync() {
-  scoped_ptr<api::autotest_private::SetMouseSensitivity::Params> params(
+  std::unique_ptr<api::autotest_private::SetMouseSensitivity::Params> params(
       api::autotest_private::SetMouseSensitivity::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -309,7 +311,7 @@ bool AutotestPrivateSetMouseSensitivityFunction::RunSync() {
 }
 
 bool AutotestPrivateSetPrimaryButtonRightFunction::RunSync() {
-  scoped_ptr<api::autotest_private::SetPrimaryButtonRight::Params> params(
+  std::unique_ptr<api::autotest_private::SetPrimaryButtonRight::Params> params(
       api::autotest_private::SetPrimaryButtonRight::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -319,6 +321,47 @@ bool AutotestPrivateSetPrimaryButtonRightFunction::RunSync() {
   chromeos::system::InputDeviceSettings::Get()->SetPrimaryButtonRight(
       params->right);
 #endif
+  return true;
+}
+
+// static
+std::string AutotestPrivateGetVisibleNotificationsFunction::ConvertToString(
+    message_center::NotificationType type) {
+#if defined(OS_CHROMEOS)
+  switch (type) {
+    case message_center::NOTIFICATION_TYPE_SIMPLE:
+      return "simple";
+    case message_center::NOTIFICATION_TYPE_BASE_FORMAT:
+      return "base_format";
+    case message_center::NOTIFICATION_TYPE_IMAGE:
+      return "image";
+    case message_center::NOTIFICATION_TYPE_MULTIPLE:
+      return "multiple";
+    case message_center::NOTIFICATION_TYPE_PROGRESS:
+      return "progress";
+  }
+#endif
+  return "unknown";
+}
+
+bool AutotestPrivateGetVisibleNotificationsFunction::RunSync() {
+  DVLOG(1) << "AutotestPrivateGetVisibleNotificationsFunction";
+  base::ListValue* values = new base::ListValue;
+#if defined(OS_CHROMEOS)
+  for (auto notification :
+       message_center::MessageCenter::Get()->GetVisibleNotifications()) {
+    base::DictionaryValue* result(new base::DictionaryValue);
+    result->SetString("id", notification->id());
+    result->SetString("type", ConvertToString(notification->type()));
+    result->SetString("title", notification->title());
+    result->SetString("message", notification->message());
+    result->SetInteger("priority", notification->priority());
+    result->SetInteger("progress", notification->progress());
+    values->Append(result);
+  }
+
+#endif
+  SetResult(values);
   return true;
 }
 

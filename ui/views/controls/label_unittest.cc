@@ -322,7 +322,7 @@ TEST_F(LabelTest, TextChangeWithoutLayout) {
 
 TEST_F(LabelTest, EmptyLabelSizing) {
   Label label;
-  const gfx::Size expected_size(0, gfx::FontList().GetHeight());
+  const gfx::Size expected_size(0, label.font_list().GetHeight());
   EXPECT_EQ(expected_size, label.GetPreferredSize());
   label.SetMultiLine(!label.multi_line());
   EXPECT_EQ(expected_size, label.GetPreferredSize());
@@ -591,7 +591,8 @@ TEST_F(LabelTest, ResetRenderTextData) {
 
 #if !defined(OS_MACOSX)
 TEST_F(LabelTest, MultilineSupportedRenderText) {
-  scoped_ptr<gfx::RenderText> render_text(gfx::RenderText::CreateInstance());
+  std::unique_ptr<gfx::RenderText> render_text(
+      gfx::RenderText::CreateInstance());
   ASSERT_TRUE(render_text->MultilineSupported());
 
   Label label;

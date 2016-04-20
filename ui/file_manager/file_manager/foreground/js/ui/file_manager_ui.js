@@ -42,24 +42,24 @@ function FileManagerUI(providersModel, element, launchParam) {
 
   /**
    * Alert dialog.
-   * @type {!cr.ui.dialogs.AlertDialog}
+   * @type {!FilesAlertDialog}
    * @const
    */
-  this.alertDialog = new cr.ui.dialogs.AlertDialog(this.element);
+  this.alertDialog = new FilesAlertDialog(this.element);
 
   /**
    * Confirm dialog.
-   * @type {!cr.ui.dialogs.ConfirmDialog}
+   * @type {!FilesConfirmDialog}
    * @const
    */
-  this.confirmDialog = new cr.ui.dialogs.ConfirmDialog(this.element);
+  this.confirmDialog = new FilesConfirmDialog(this.element);
 
   /**
    * Confirm dialog for delete.
-   * @type {!cr.ui.dialogs.ConfirmDialog}
+   * @type {!FilesConfirmDialog}
    * @const
    */
-  this.deleteConfirmDialog = new cr.ui.dialogs.ConfirmDialog(this.element);
+  this.deleteConfirmDialog = new FilesConfirmDialog(this.element);
   this.deleteConfirmDialog.setOkLabel(str('DELETE_BUTTON_LABEL'));
 
   /**
@@ -136,8 +136,7 @@ function FileManagerUI(providersModel, element, launchParam) {
    */
   this.searchBox = new SearchBox(
       queryRequiredElement('#search-box', this.element),
-      queryRequiredElement('#search-button', this.element),
-      queryRequiredElement('#no-search-results', this.element));
+      queryRequiredElement('#search-button', this.element));
 
   /**
    * Empty folder UI.
@@ -161,6 +160,23 @@ function FileManagerUI(providersModel, element, launchParam) {
    */
   this.sortButton = util.queryDecoratedElement(
       '#sort-button', cr.ui.MenuButton);
+
+  /**
+   * The button to open the details panel.
+   * @type {!Element}
+   * @const
+   */
+  this.detailsButton = queryRequiredElement(
+      '#details-button', this.element);
+
+  /**
+   * Ripple effect of details button.
+   * @private {!FilesToggleRipple}
+   * @const
+   */
+  this.detailsButtonToggleRipple_ =
+      /** @type {!FilesToggleRipple} */ (queryRequiredElement(
+          'files-toggle-ripple', this.detailsButton));
 
   /**
    * Ripple effect of sort button.
@@ -213,6 +229,12 @@ function FileManagerUI(providersModel, element, launchParam) {
    * @type {ListContainer}
    */
   this.listContainer = null;
+
+  /**
+   * Details container.
+   * @type {DetailsContainer}
+   */
+  this.detailsContainer = null;
 
   /**
    * @type {!HTMLElement}
@@ -315,10 +337,12 @@ function FileManagerUI(providersModel, element, launchParam) {
  *
  * @param {!FileTable} table
  * @param {!FileGrid} grid
+ * @param {!SingleFileDetailsPanel} singlePanel
+ * @param {!MultiFileDetailsPanel} multiPanel
  * @param {!LocationLine} locationLine
  */
 FileManagerUI.prototype.initAdditionalUI = function(
-    table, grid, locationLine) {
+    table, grid, singlePanel, multiPanel, locationLine) {
   // List container.
   this.listContainer = new ListContainer(
       queryRequiredElement('#list-container', this.element), table, grid);
@@ -326,6 +350,25 @@ FileManagerUI.prototype.initAdditionalUI = function(
   // Splitter.
   this.decorateSplitter_(
       queryRequiredElement('#navigation-list-splitter', this.element));
+
+  // Details container.
+  var listDetailsSplitter =
+      queryRequiredElement('#list-details-splitter', this.element);
+  this.decorateSplitter_(listDetailsSplitter, true);
+  this.detailsContainer = new DetailsContainer(
+      queryRequiredElement('#details-container', this.element),
+      singlePanel,
+      multiPanel,
+      listDetailsSplitter,
+      this.detailsButton,
+      this.detailsButtonToggleRipple_);
+
+  chrome.commandLinePrivate.hasSwitch('enable-files-details-panel',
+      function(enabled) {
+    if (enabled) {
+      this.detailsButton.style.display = 'block';
+    }
+  }.bind(this));
 
   // Location line.
   this.locationLine = locationLine;
@@ -447,6 +490,17 @@ FileManagerUI.prototype.setCurrentListType = function(listType) {
 };
 
 /**
+ * Sets the details panel visibility
+ * @param {boolean} visibility True if the details panel is visible.
+ */
+FileManagerUI.prototype.setDetailsVisibility = function(visibility) {
+  if (this.detailsContainer) {
+    this.detailsContainer.setVisibility(visibility);
+    this.relayout();
+  }
+};
+
+/**
  * Overrides default handling for clicks on hyperlinks.
  * In a packaged apps links with targer='_blank' open in a new tab by
  * default, other links do not open at all.
@@ -465,9 +519,11 @@ FileManagerUI.prototype.onExternalLinkClick_ = function(event) {
 /**
  * Decorates the given splitter element.
  * @param {!HTMLElement} splitterElement
+ * @param {boolean=} opt_resizeNextElement
  * @private
  */
-FileManagerUI.prototype.decorateSplitter_ = function(splitterElement) {
+FileManagerUI.prototype.decorateSplitter_ = function(splitterElement,
+    opt_resizeNextElement) {
   var self = this;
   var Splitter = cr.ui.Splitter;
   var customSplitter = cr.ui.define('div');
@@ -492,4 +548,5 @@ FileManagerUI.prototype.decorateSplitter_ = function(splitterElement) {
   };
 
   customSplitter.decorate(splitterElement);
+  splitterElement.resizeNextElement = !!opt_resizeNextElement;
 };

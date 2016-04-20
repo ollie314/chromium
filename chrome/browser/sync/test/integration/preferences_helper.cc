@@ -4,15 +4,15 @@
 
 #include "chrome/browser/sync/test/integration/preferences_helper.h"
 
-#include "base/prefs/pref_change_registrar.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/multi_client_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
+#include "components/prefs/pref_change_registrar.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 
 using sync_datatype_helper::test;
 
@@ -266,7 +266,7 @@ const char* PrefMatchChecker::GetPath() const {
 }
 
 void PrefMatchChecker::RegisterPrefListener(PrefService* pref_service) {
-  scoped_ptr<PrefChangeRegistrar> registrar(new PrefChangeRegistrar());
+  std::unique_ptr<PrefChangeRegistrar> registrar(new PrefChangeRegistrar());
   registrar->Init(pref_service);
   registrar->Add(path_,
                  base::Bind(&PrefMatchChecker::CheckExitCondition,

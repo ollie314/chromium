@@ -35,8 +35,9 @@
 #include <windows.h>
 #endif
 
+#include "BlameContext.h"
+#include "UserMetricsAction.h"
 #include "WebAudioDevice.h"
-#include "WebBatteryStatusListener.h"
 #include "WebCommon.h"
 #include "WebData.h"
 #include "WebDeviceLightListener.h"
@@ -53,12 +54,13 @@
 #include "WebString.h"
 #include "WebURLError.h"
 #include "WebVector.h"
-#include "WebWaitableEvent.h"
+#include "base/metrics/user_metrics_action.h"
 
 class GrContext;
 
 namespace blink {
 
+class ServiceRegistry;
 class WebAudioBus;
 class WebBlobRegistry;
 class WebCanvasCaptureHandler;
@@ -67,7 +69,6 @@ class WebCompositorSupport;
 class WebCookieJar;
 class WebCrypto;
 class WebDatabaseObserver;
-class WebDiscardableMemory;
 class WebPlatformEventListener;
 class WebFallbackThemeEngine;
 class WebFileSystem;
@@ -77,16 +78,18 @@ class WebGeofencingProvider;
 class WebGestureCurve;
 class WebGraphicsContext3DProvider;
 class WebIDBFactory;
+class WebInstalledApp;
 class WebMIDIAccessor;
 class WebMIDIAccessorClient;
+class WebMediaPlayer;
 class WebMediaRecorderHandler;
+class WebMediaStream;
 class WebMediaStreamCenter;
 class WebMediaStreamCenterClient;
 class WebMediaStreamTrack;
 class WebMemoryDumpProvider;
 class WebMessagePortChannel;
 class WebMimeRegistry;
-class WebNavigatorConnectProvider;
 class WebNotificationManager;
 class WebPermissionClient;
 class WebPluginListBuilder;
@@ -100,8 +103,6 @@ class WebRTCPeerConnectionHandlerClient;
 class WebSandboxSupport;
 class WebScrollbarBehavior;
 class WebSecurityOrigin;
-class WebServicePortProvider;
-class WebServicePortProviderClient;
 class WebServiceWorkerCacheStorage;
 class WebSocketHandle;
 class WebSpeechSynthesizer;
@@ -111,13 +112,14 @@ class WebSyncProvider;
 struct WebFloatPoint;
 class WebThemeEngine;
 class WebThread;
-class WebURL;
+class WebTrialTokenValidator;
 class WebURLLoader;
-class WebUnitTestSupport;
-struct WebLocalizedString;
+class WebURLLoaderMockFactory;
+class WebURLResponse;
+class WebURLResponse;
 struct WebSize;
 
-class Platform {
+class BLINK_PLATFORM_EXPORT Platform {
 public:
     // HTML5 Database ------------------------------------------------------
 
@@ -127,9 +129,14 @@ public:
     typedef int FileHandle;
 #endif
 
-    BLINK_PLATFORM_EXPORT static void initialize(Platform*);
-    BLINK_PLATFORM_EXPORT static void shutdown();
-    BLINK_PLATFORM_EXPORT static Platform* current();
+    // Initialize platform and wtf. If you need to initialize the entire Blink,
+    // you should use blink::initialize.
+    static void initialize(Platform*);
+    static void shutdown();
+    static Platform* current();
+
+    // Used to switch the current platform only for testing.
+    static void setCurrentPlatformForTesting(Platform*);
 
     // May return null.
     virtual WebCookieJar* cookieJar() { return nullptr; }
@@ -163,7 +170,7 @@ public:
 
     // Creates a device for audio I/O.
     // Pass in (numberOfInputChannels > 0) if live/local audio input is desired.
-    virtual WebAudioDevice* createAudioDevice(size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfChannels, double sampleRate, WebAudioDevice::RenderCallback*, const WebString& deviceId) { return nullptr; }
+    virtual WebAudioDevice* createAudioDevice(size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfChannels, double sampleRate, WebAudioDevice::RenderCallback*, const WebString& deviceId, const WebSecurityOrigin&) { return nullptr; }
 
 
     // MIDI ----------------------------------------------------------------
@@ -194,11 +201,13 @@ public:
     virtual long long databaseGetFileSize(const WebString& vfsFileName) { return 0; }
 
     // Returns the space available for the given origin
-    virtual long long databaseGetSpaceAvailableForOrigin(const WebString& originIdentifier) { return 0; }
+    virtual long long databaseGetSpaceAvailableForOrigin(const WebSecurityOrigin& origin) { return 0; }
 
     // Set the size of the given database file
     virtual bool databaseSetFileSize(const WebString& vfsFileName, long long size) { return false; }
 
+    // Return a filename-friendly identifier for an origin.
+    virtual WebString databaseCreateOriginIdentifier(const WebSecurityOrigin& origin) { return WebString(); }
 
     // DOM Storage --------------------------------------------------
 
@@ -211,10 +220,12 @@ public:
     // Must return non-null.
     virtual WebFileSystem* fileSystem() { return nullptr; }
 
+    // Return a filename-friendly identifier for an origin.
+    virtual WebString fileSystemCreateOriginIdentifier(const WebSecurityOrigin& origin) { return WebString(); }
 
     // IDN conversion ------------------------------------------------------
 
-    virtual WebString convertIDNToUnicode(const WebString& host, const WebString& languages) { return host; }
+    virtual WebString convertIDNToUnicode(const WebString& host) { return host; }
 
 
     // IndexedDB ----------------------------------------------------------
@@ -226,7 +237,7 @@ public:
     // Cache Storage ----------------------------------------------------------
 
     // The caller is responsible for deleting the returned object.
-    virtual WebServiceWorkerCacheStorage* cacheStorage(const WebString& originIdentifier) { return nullptr; }
+    virtual WebServiceWorkerCacheStorage* cacheStorage(const WebSecurityOrigin&) { return nullptr; }
 
     // Gamepad -------------------------------------------------------------
 
@@ -256,31 +267,11 @@ public:
         return WebString();
     }
 
-    // Memory --------------------------------------------------------------
-
-    // Returns the current space allocated for the pagefile, in MB.
-    // That is committed size for Windows and virtual memory size for POSIX
-    virtual size_t memoryUsageMB() { return 0; }
-
     // Same as above, but always returns actual value, without any caches.
     virtual size_t actualMemoryUsageMB() { return 0; }
 
-    // Return the physical memory of the current machine, in MB.
-    virtual size_t physicalMemoryMB() { return 0; }
-
-    // Return the available virtual memory of the current machine, in MB. Or
-    // zero, if there is no limit.
-    virtual size_t virtualMemoryLimitMB() { return 0; }
-
     // Return the number of of processors of the current machine.
     virtual size_t numberOfProcessors() { return 0; }
-
-    // Allocates discardable memory. May return nullptr, even if the platform supports
-    // discardable memory. If nonzero, however, then the WebDiscardableMmeory is
-    // returned in an locked state. You may use its underlying data() member
-    // directly, taking care to unlock it when you are ready to let it become
-    // discardable.
-    virtual WebDiscardableMemory* allocateAndLockDiscardableMemory(size_t bytes) { return nullptr; }
 
     static const size_t noDecodedImageByteLimit = static_cast<size_t>(-1);
 
@@ -326,7 +317,9 @@ public:
 
     virtual bool isReservedIPAddress(const WebString& host) const { return false; }
 
-    virtual bool portAllowed(const WebURL&) const { return false; }
+    // Returns true and stores the position of the end of the headers to |*end|
+    // if the headers part ends in |bytes[0..size]|. Returns false otherwise.
+    virtual bool parseMultipartHeadersFromBody(const char* bytes, size_t /* size */, WebURLResponse*, size_t* end) const { return false; }
 
     // Plugins -------------------------------------------------------------
 
@@ -358,27 +351,9 @@ public:
     // embedder.
     virtual WebThread* currentThread() { return nullptr; }
 
-    // Yield the current thread so another thread can be scheduled.
-    virtual void yieldCurrentThread() { }
-
-    // WaitableEvent -------------------------------------------------------
-
-    // Creates an embedder-defined waitable event object.
-    WebWaitableEvent* createWaitableEvent() { return createWaitableEvent(WebWaitableEvent::ResetPolicy::Auto, WebWaitableEvent::InitialState::NonSignaled); }
-    virtual WebWaitableEvent* createWaitableEvent(WebWaitableEvent::ResetPolicy, WebWaitableEvent::InitialState) { return nullptr; }
-
-    // Waits on multiple events and returns the event object that has been
-    // signaled. This may return nullptr if it fails to wait events.
-    // Any event objects given to this method must not deleted while this
-    // wait is happening.
-    virtual WebWaitableEvent* waitMultipleEvents(const WebVector<WebWaitableEvent*>& events) { return nullptr; }
-
-
-    // Profiling -----------------------------------------------------------
-
-    virtual void decrementStatsCounter(const char* name) { }
-    virtual void incrementStatsCounter(const char* name) { }
-
+    // Returns a blame context for attributing top-level work which does not
+    // belong to a particular frame scope.
+    virtual BlameContext* topLevelBlameContext() { return nullptr; }
 
     // Resources -----------------------------------------------------------
 
@@ -415,16 +390,8 @@ public:
     // Returns a value such as "en-US".
     virtual WebString defaultLocale() { return WebString(); }
 
-    // Wall clock time in seconds since the epoch.
-    virtual double currentTimeSeconds() { return 0; }
-
-    // Monotonically increasing time in seconds from an arbitrary fixed point in the past.
-    // This function is expected to return at least millisecond-precision values. For this reason,
-    // it is recommended that the fixed point be no further in the past than the epoch.
-    virtual double monotonicallyIncreasingTimeSeconds() { return 0; }
-
     // Returns an interface to the main thread. Can be null if blink was initialized on a thread without a message loop.
-    BLINK_PLATFORM_EXPORT WebThread* mainThread() const;
+    WebThread* mainThread() const;
 
     // Returns an interface to the compositor thread. This can be null if the
     // renderer was created with threaded rendering desabled.
@@ -442,31 +409,29 @@ public:
 
     // Testing -------------------------------------------------------------
 
-    // Get a pointer to testing support interfaces. Will not be available in production builds.
-    virtual WebUnitTestSupport* unitTestSupport() { return nullptr; }
-
-    // Callbacks for reporting histogram data.
-    // CustomCounts histogram has exponential bucket sizes, so that min=1, max=1000000, bucketCount=50 would do.
-    virtual void histogramCustomCounts(const char* name, int sample, int min, int max, int bucketCount) { }
-    // Enumeration histogram buckets are linear, boundaryValue should be larger than any possible sample value.
-    virtual void histogramEnumeration(const char* name, int sample, int boundaryValue) { }
-    // Unlike enumeration histograms, sparse histograms only allocate memory for non-empty buckets.
-    virtual void histogramSparse(const char* name, int sample) { }
+    // Gets a pointer to URLLoaderMockFactory for testing. Will not be available in production builds.
+    virtual WebURLLoaderMockFactory* getURLLoaderMockFactory() { return nullptr; }
 
     // Record to a RAPPOR privacy-preserving metric, see: https://www.chromium.org/developers/design-documents/rappor.
     // recordRappor records a sample string, while recordRapporURL records the domain and registry of a url.
     virtual void recordRappor(const char* metric, const WebString& sample) { }
     virtual void recordRapporURL(const char* metric, const blink::WebURL& url) { }
 
+    // Record a UMA sequence action.  The UserMetricsAction construction must
+    // be on a single line for extract_actions.py to find it.  Please see
+    // that script for more details.  Intended use is:
+    // recordAction(UserMetricsAction("MyAction"))
+    virtual void recordAction(const UserMetricsAction&) { }
+
     // Registers a memory dump provider. The WebMemoryDumpProvider::onMemoryDump
     // method will be called on the same thread that called the
     // registerMemoryDumpProvider() method. |name| is used for debugging
     // (duplicates are allowed) and must be a long-lived C string.
     // See crbug.com/458295 for design docs.
-    virtual void registerMemoryDumpProvider(blink::WebMemoryDumpProvider*, const char* name) { }
+    virtual void registerMemoryDumpProvider(blink::WebMemoryDumpProvider*, const char* name);
 
     // Must be called on the thread that called registerMemoryDumpProvider().
-    virtual void unregisterMemoryDumpProvider(blink::WebMemoryDumpProvider*) { }
+    virtual void unregisterMemoryDumpProvider(blink::WebMemoryDumpProvider*);
 
     class TraceLogEnabledStateObserver {
     public:
@@ -479,9 +444,6 @@ public:
     virtual void addTraceLogEnabledStateObserver(TraceLogEnabledStateObserver*) {}
     virtual void removeTraceLogEnabledStateObserver(TraceLogEnabledStateObserver*) {}
 
-    // Returns a newly allocated WebProcessMemoryDump instance.
-    virtual blink::WebProcessMemoryDump* createProcessMemoryDump() { return nullptr; }
-
     typedef uint64_t WebMemoryAllocatorDumpGuid;
 
     // Returns guid corresponding to the given string (the hash value) for
@@ -490,15 +452,37 @@ public:
 
     // GPU ----------------------------------------------------------------
     //
-    // May return null if GPU is not supported.
-    // Returns newly allocated and initialized offscreen WebGraphicsContext3D instance.
-    // Passing an existing context to shareContext will create the new context in the same share group as the passed context.
-    virtual WebGraphicsContext3D* createOffscreenGraphicsContext3D(const WebGraphicsContext3D::Attributes&, WebGraphicsContext3D* shareContext) { return nullptr; }
-    virtual WebGraphicsContext3D* createOffscreenGraphicsContext3D(const WebGraphicsContext3D::Attributes&, WebGraphicsContext3D* shareContext, WebGraphicsContext3D::WebGraphicsInfo* glInfo) { return nullptr; }
-    virtual WebGraphicsContext3D* createOffscreenGraphicsContext3D(const WebGraphicsContext3D::Attributes&) { return nullptr; }
+    struct ContextAttributes {
+        bool failIfMajorPerformanceCaveat = false;
+        unsigned webGLVersion = 0;
+    };
+    struct GraphicsInfo {
+        unsigned vendorId = 0;
+        unsigned deviceId = 0;
+        unsigned processCrashCount = 0;
+        unsigned resetNotificationStrategy = 0;
+        bool sandboxed = false;
+        bool amdSwitchable = false;
+        bool optimus = false;
+        WebString vendorInfo;
+        WebString rendererInfo;
+        WebString driverVersion;
+        WebString errorMessage;
+    };
+    // Returns a newly allocated and initialized offscreen context provider,
+    // backed by an independent context. Returns null if the context cannot be
+    // created or initialized.
+    // Passing an existing provider to shareContext will create the new context
+    // in the same share group as the one passed.
+    virtual WebGraphicsContext3DProvider* createOffscreenGraphicsContext3DProvider(
+        const ContextAttributes&,
+        const WebURL& topDocumentURL,
+        WebGraphicsContext3DProvider* shareContext,
+        GraphicsInfo*) { return nullptr; }
 
-    // Returns a newly allocated and initialized offscreen context provider. The provider may return a null
-    // graphics context if GPU is not supported.
+    // Returns a newly allocated and initialized offscreen context provider,
+    // backed by the process-wide shared main thread context. Returns null if
+    // the context cannot be created or initialized.
     virtual WebGraphicsContext3DProvider* createSharedOffscreenGraphicsContext3DProvider() { return nullptr; }
 
     // Returns true if the platform is capable of producing an offscreen context suitable for accelerating 2d canvas.
@@ -529,14 +513,19 @@ public:
     // May return null if the functionality is not available or out of resources.
     virtual WebMediaRecorderHandler* createMediaRecorderHandler() { return nullptr; }
 
-    // May return null if WebRTC functionality is not avaliable or out of resources.
+    // May return null if WebRTC functionality is not available or out of resources.
     virtual WebRTCCertificateGenerator* createRTCCertificateGenerator() { return nullptr; }
 
-    // May return null if WebRTC functionality is not avaliable or out of resources.
+    // May return null if WebRTC functionality is not available or out of resources.
     virtual WebMediaStreamCenter* createMediaStreamCenter(WebMediaStreamCenterClient*) { return nullptr; }
 
     // Creates an WebCanvasCaptureHandler to capture Canvas output.
     virtual WebCanvasCaptureHandler* createCanvasCaptureHandler(const WebSize&, double, WebMediaStreamTrack*) { return nullptr; }
+
+    // Fills in the WebMediaStream to capture from the WebMediaPlayer identified
+    // by the second parameter.
+    virtual void createHTMLVideoElementCapturer(WebMediaStream*, WebMediaPlayer*) {}
+
     // WebWorker ----------------------------------------------------------
 
     virtual void didStartWorkerThread() { }
@@ -546,6 +535,9 @@ public:
 
     virtual WebCrypto* crypto() { return nullptr; }
 
+    // Mojo ---------------------------------------------------------------
+
+    virtual ServiceRegistry* serviceRegistry();
 
     // Platform events -----------------------------------------------------
     // Device Orientation, Device Motion, Device Light, Battery, Gamepad.
@@ -615,15 +607,6 @@ public:
     virtual WebPushProvider* pushProvider() { return nullptr; }
 
 
-    // navigator.connect --------------------------------------------------
-
-    virtual WebNavigatorConnectProvider* navigatorConnectProvider() { return nullptr; }
-
-    // Returns pointer to a new blink owned WebServicePortProvider instance,
-    // associated with a particular ServicePortCollection (identified by the
-    // WebServicePortProviderClient passed in).
-    virtual WebServicePortProvider* createServicePortProvider(WebServicePortProviderClient*) { return nullptr; }
-
     // Permissions --------------------------------------------------------
 
     virtual WebPermissionClient* permissionClient() { return nullptr; }
@@ -633,8 +616,12 @@ public:
 
     virtual WebSyncProvider* backgroundSyncProvider() { return nullptr; }
 
+    // Experimental Framework ----------------------------------------------
+
+    virtual WebTrialTokenValidator* trialTokenValidator() { return nullptr; }
+
 protected:
-    BLINK_PLATFORM_EXPORT Platform();
+    Platform();
     virtual ~Platform() { }
 
     WebThread* m_mainThread;

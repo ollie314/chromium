@@ -15,7 +15,6 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "ui/aura/scoped_window_targeter.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/cursor/cursor_loader_x11.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
@@ -37,7 +36,6 @@ class EventHandler;
 
 namespace views {
 class DesktopDragDropClientAuraX11;
-class DesktopDispatcherClient;
 class DesktopWindowTreeHostObserverX11;
 class X11DesktopWindowMoveClient;
 class X11WindowEventFilter;
@@ -82,29 +80,19 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   void RemoveObserver(views::DesktopWindowTreeHostObserverX11* observer);
 
   // Swaps the current handler for events in the non client view with |handler|.
-  void SwapNonClientEventHandler(scoped_ptr<ui::EventHandler> handler);
+  void SwapNonClientEventHandler(std::unique_ptr<ui::EventHandler> handler);
 
   // Runs the |func| callback for each content-window, and deallocates the
   // internal list of open windows.
   static void CleanUpWindowList(void (*func)(aura::Window* window));
-
-  // Disables event listening to make |dialog| modal.
-  void DisableEventListening(XID dialog);
-
-  // Enables event listening after closing |dialog|.
-  void EnableEventListening();
-
-  // Returns XID of dialog currently displayed. When it returns 0,
-  // there is no dialog on the host window.
-  XID GetModalDialog();
 
  protected:
   // Overridden from DesktopWindowTreeHost:
   void Init(aura::Window* content_window,
             const Widget::InitParams& params) override;
   void OnNativeWidgetCreated(const Widget::InitParams& params) override;
-  scoped_ptr<corewm::Tooltip> CreateTooltip() override;
-  scoped_ptr<aura::client::DragDropClient> CreateDragDropClient(
+  std::unique_ptr<corewm::Tooltip> CreateTooltip() override;
+  std::unique_ptr<aura::client::DragDropClient> CreateDragDropClient(
       DesktopNativeCursorManager* cursor_manager) override;
   void Close() override;
   void CloseNow() override;
@@ -312,8 +300,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
 
   DesktopDragDropClientAuraX11* drag_drop_client_;
 
-  scoped_ptr<ui::EventHandler> x11_non_client_event_filter_;
-  scoped_ptr<X11DesktopWindowMoveClient> x11_window_move_client_;
+  std::unique_ptr<ui::EventHandler> x11_non_client_event_filter_;
+  std::unique_ptr<X11DesktopWindowMoveClient> x11_window_move_client_;
 
   // TODO(beng): Consider providing an interface to DesktopNativeWidgetAura
   //             instead of providing this route back to Widget.
@@ -359,10 +347,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   bool activatable_;
 
   base::CancelableCallback<void()> delayed_resize_task_;
-
-  scoped_ptr<aura::ScopedWindowTargeter> targeter_for_modal_;
-
-  XID modal_dialog_xid_;
 
   base::WeakPtrFactory<DesktopWindowTreeHostX11> close_widget_factory_;
 

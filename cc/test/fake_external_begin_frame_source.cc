@@ -14,7 +14,6 @@ namespace cc {
 
 FakeExternalBeginFrameSource::FakeExternalBeginFrameSource(double refresh_rate)
     : milliseconds_per_frame_(1000.0 / refresh_rate),
-      is_ready_(false),
       weak_ptr_factory_(this) {
   DetachFromThread();
 }
@@ -23,32 +22,28 @@ FakeExternalBeginFrameSource::~FakeExternalBeginFrameSource() {
   DCHECK(CalledOnValidThread());
 }
 
-void FakeExternalBeginFrameSource::SetClientReady() {
-  DCHECK(CalledOnValidThread());
-  is_ready_ = true;
-}
-
-void FakeExternalBeginFrameSource::OnNeedsBeginFramesChange(
+void FakeExternalBeginFrameSource::OnNeedsBeginFramesChanged(
     bool needs_begin_frames) {
   DCHECK(CalledOnValidThread());
   if (needs_begin_frames) {
     PostTestOnBeginFrame();
+  } else {
+    begin_frame_task_.Cancel();
   }
 }
 
 void FakeExternalBeginFrameSource::TestOnBeginFrame() {
   DCHECK(CalledOnValidThread());
   CallOnBeginFrame(CreateBeginFrameArgsForTesting(BEGINFRAME_FROM_HERE));
-
-  if (NeedsBeginFrames()) {
-    PostTestOnBeginFrame();
-  }
+  PostTestOnBeginFrame();
 }
 
 void FakeExternalBeginFrameSource::PostTestOnBeginFrame() {
+  begin_frame_task_.Reset(
+      base::Bind(&FakeExternalBeginFrameSource::TestOnBeginFrame,
+                 weak_ptr_factory_.GetWeakPtr()));
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&FakeExternalBeginFrameSource::TestOnBeginFrame,
-                            weak_ptr_factory_.GetWeakPtr()),
+      FROM_HERE, begin_frame_task_.callback(),
       base::TimeDelta::FromMilliseconds(milliseconds_per_frame_));
 }
 

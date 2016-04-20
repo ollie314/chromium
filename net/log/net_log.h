@@ -7,19 +7,18 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
-
-#include "build/build_config.h"
 
 #include "base/atomicops.h"
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "net/base/net_export.h"
 #include "net/log/net_log_capture_mode.h"
 
@@ -74,7 +73,7 @@ class NET_EXPORT NetLog {
   // associated with an event.  If called, it will be called synchronously,
   // so it need not have owning references.  May be called more than once, or
   // not at all.  May return NULL.
-  typedef base::Callback<scoped_ptr<base::Value>(NetLogCaptureMode)>
+  typedef base::Callback<std::unique_ptr<base::Value>(NetLogCaptureMode)>
       ParametersCallback;
 
   // Identifies the entity that generated this log. The |id| field should
@@ -139,7 +138,7 @@ class NET_EXPORT NetLog {
 
     // Returns the parameters as a Value.  Returns NULL if there are no
     // parameters.  Caller takes ownership of returned Value.
-    scoped_ptr<base::Value> ParametersToValue() const;
+    std::unique_ptr<base::Value> ParametersToValue() const;
 
    private:
     const EntryData* const data_;
@@ -219,9 +218,6 @@ class NET_EXPORT NetLog {
   // Adds an observer and sets its log capture mode.  The observer must not be
   // watching any NetLog, including this one, when this is called.
   //
-  // NetLog implementations must call NetLog::OnAddObserver to update the
-  // observer's internal state.
-  //
   // DEPRECATED: The ability to watch the netlog stream is being phased out
   // (crbug.com/472693) as it can be misused in production code. Please consult
   // with a net/log OWNER before introducing a new dependency on this.
@@ -234,8 +230,7 @@ class NET_EXPORT NetLog {
   void SetObserverCaptureMode(ThreadSafeObserver* observer,
                               NetLogCaptureMode capture_mode);
 
-  // Removes an observer.  NetLog implementations must call
-  // NetLog::OnAddObserver to update the observer's internal state.
+  // Removes an observer.
   //
   // For thread safety reasons, it is recommended that this not be called in
   // an object's destructor.

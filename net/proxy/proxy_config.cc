@@ -42,6 +42,8 @@ ProxyConfig::ProxyRules::ProxyRules()
       type(TYPE_NO_RULES) {
 }
 
+ProxyConfig::ProxyRules::ProxyRules(const ProxyRules& other) = default;
+
 ProxyConfig::ProxyRules::~ProxyRules() {
 }
 
@@ -233,8 +235,8 @@ void ProxyConfig::ClearAutomaticSettings() {
   pac_url_ = GURL();
 }
 
-scoped_ptr<base::DictionaryValue> ProxyConfig::ToValue() const {
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+std::unique_ptr<base::DictionaryValue> ProxyConfig::ToValue() const {
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
 
   // Output the automatic settings.
   if (auto_detect_)
@@ -253,7 +255,8 @@ scoped_ptr<base::DictionaryValue> ProxyConfig::ToValue() const {
                             dict.get());
         break;
       case ProxyRules::TYPE_PROXY_PER_SCHEME: {
-        scoped_ptr<base::DictionaryValue> dict2(new base::DictionaryValue());
+        std::unique_ptr<base::DictionaryValue> dict2(
+            new base::DictionaryValue());
         AddProxyListToValue("http", proxy_rules_.proxies_for_http, dict2.get());
         AddProxyListToValue("https", proxy_rules_.proxies_for_https,
                             dict2.get());

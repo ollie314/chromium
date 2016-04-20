@@ -12,13 +12,10 @@
 #include "bindings/core/v8/V8ObjectConstructor.h"
 #include "core/animation/DocumentAnimation.h"
 #include "core/css/DocumentFontFaceSet.h"
-#include "core/dom/ContextFeatures.h"
 #include "core/dom/Document.h"
 #include "core/dom/DocumentFullscreen.h"
 #include "core/svg/SVGDocumentExtensions.h"
 #include "core/xml/DocumentXPathEvaluator.h"
-#include "platform/RuntimeEnabledFeatures.h"
-#include "platform/TraceEvent.h"
 #include "wtf/GetPtr.h"
 #include "wtf/RefPtr.h"
 
@@ -30,7 +27,7 @@ namespace blink {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo V8TestInterfaceDocument::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceDocument::domTemplate, V8TestInterfaceDocument::refObject, V8TestInterfaceDocument::derefObject, V8TestInterfaceDocument::trace, 0, 0, V8TestInterfaceDocument::preparePrototypeAndInterfaceObject, V8TestInterfaceDocument::installConditionallyEnabledProperties, "TestInterfaceDocument", &V8Document::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::NodeClassId, WrapperTypeInfo::InheritFromEventTarget, WrapperTypeInfo::Dependent, WrapperTypeInfo::WillBeGarbageCollectedObject };
+const WrapperTypeInfo V8TestInterfaceDocument::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceDocument::domTemplate, V8TestInterfaceDocument::trace, 0, 0, V8TestInterfaceDocument::preparePrototypeAndInterfaceObject, V8TestInterfaceDocument::installConditionallyEnabledProperties, "TestInterfaceDocument", &V8Document::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::NodeClassId, WrapperTypeInfo::InheritFromEventTarget, WrapperTypeInfo::Dependent };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
 #endif
@@ -51,30 +48,26 @@ static void locationAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& i
 
 static void locationAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestInterfaceDocumentV8Internal::locationAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void locationAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceDocument* proxyImpl = V8TestInterfaceDocument::toImpl(holder);
-    RefPtrWillBeRawPtr<Location> impl = WTF::getPtr(proxyImpl->location());
+    Location* impl = WTF::getPtr(proxyImpl->location());
     if (!impl)
         return;
     V8StringResource<> cppValue = v8Value;
     if (!cppValue.prepare())
         return;
-    impl->setHref(callingDOMWindow(info.GetIsolate()), enteredDOMWindow(info.GetIsolate()), cppValue);
+    impl->setHref(currentDOMWindow(info.GetIsolate()), enteredDOMWindow(info.GetIsolate()), cppValue);
 }
 
 static void locationAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestInterfaceDocumentV8Internal::locationAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 } // namespace TestInterfaceDocumentV8Internal
@@ -83,24 +76,23 @@ const V8DOMConfiguration::AccessorConfiguration V8TestInterfaceDocumentAccessors
     {"location", TestInterfaceDocumentV8Internal::locationAttributeGetterCallback, TestInterfaceDocumentV8Internal::locationAttributeSetterCallback, 0, 0, 0, v8::DEFAULT, static_cast<v8::PropertyAttribute>(v8::DontDelete), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnInstance, V8DOMConfiguration::CheckHolder},
 };
 
-static void installV8TestInterfaceDocumentTemplate(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+static void installV8TestInterfaceDocumentTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world, v8::Local<v8::FunctionTemplate> interfaceTemplate)
 {
-    functionTemplate->ReadOnlyPrototype();
-
-    v8::Local<v8::Signature> defaultSignature;
-    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "TestInterfaceDocument", V8Document::domTemplate(isolate), V8TestInterfaceDocument::internalFieldCount,
-        0, 0,
-        V8TestInterfaceDocumentAccessors, WTF_ARRAY_LENGTH(V8TestInterfaceDocumentAccessors),
-        0, 0);
-    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    // Initialize the interface object's template.
+    V8DOMConfiguration::initializeDOMInterfaceTemplate(isolate, interfaceTemplate, V8TestInterfaceDocument::wrapperTypeInfo.interfaceName, V8Document::domTemplate(isolate, world), V8TestInterfaceDocument::internalFieldCount);
+    v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
+    ALLOW_UNUSED_LOCAL(signature);
+    v8::Local<v8::ObjectTemplate> instanceTemplate = interfaceTemplate->InstanceTemplate();
     ALLOW_UNUSED_LOCAL(instanceTemplate);
-    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = interfaceTemplate->PrototypeTemplate();
     ALLOW_UNUSED_LOCAL(prototypeTemplate);
+    // Register DOM constants, attributes and operations.
+    V8DOMConfiguration::installAccessors(isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate, signature, V8TestInterfaceDocumentAccessors, WTF_ARRAY_LENGTH(V8TestInterfaceDocumentAccessors));
 }
 
-v8::Local<v8::FunctionTemplate> V8TestInterfaceDocument::domTemplate(v8::Isolate* isolate)
+v8::Local<v8::FunctionTemplate> V8TestInterfaceDocument::domTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world)
 {
-    return V8DOMConfiguration::domClassTemplate(isolate, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestInterfaceDocumentTemplate);
+    return V8DOMConfiguration::domClassTemplate(isolate, world, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestInterfaceDocumentTemplate);
 }
 
 bool V8TestInterfaceDocument::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
@@ -116,20 +108,6 @@ v8::Local<v8::Object> V8TestInterfaceDocument::findInstanceInPrototypeChain(v8::
 TestInterfaceDocument* V8TestInterfaceDocument::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
     return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
-}
-
-void V8TestInterfaceDocument::refObject(ScriptWrappable* scriptWrappable)
-{
-#if !ENABLE(OILPAN)
-    scriptWrappable->toImpl<TestInterfaceDocument>()->ref();
-#endif
-}
-
-void V8TestInterfaceDocument::derefObject(ScriptWrappable* scriptWrappable)
-{
-#if !ENABLE(OILPAN)
-    scriptWrappable->toImpl<TestInterfaceDocument>()->deref();
-#endif
 }
 
 } // namespace blink

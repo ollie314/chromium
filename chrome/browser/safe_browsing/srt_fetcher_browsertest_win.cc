@@ -4,11 +4,11 @@
 
 #include "chrome/browser/safe_browsing/srt_fetcher_win.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_service.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
@@ -16,6 +16,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/component_updater/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 
 namespace safe_browsing {
@@ -39,15 +40,15 @@ class SRTFetcherTest : public InProcessBrowserTest {
   }
 
   void RunReporter() {
-    RunSwReporter(base::FilePath(), "bla", task_runner_, task_runner_);
+    RunSwReporter(base::FilePath(), base::Version("1.2.3"), task_runner_,
+                  task_runner_);
   }
 
   void PromptTriggerForTesting(Browser* browser, const std::string& version) {
     prompt_trigger_called_ = true;
   }
 
-  int ReporterLauncherForTesting(const base::FilePath& exe_path,
-                       const std::string& version) {
+  int ReporterLauncherForTesting(const base::FilePath& exe_path) {
     reporter_launched_ = true;
     return exit_code_to_report_;
   }

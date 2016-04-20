@@ -23,6 +23,7 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "net/base/escape.h"
+#include "net/base/parse_number.h"
 #include "net/http/http_byte_range.h"
 #include "net/http/http_log_util.h"
 #include "net/http/http_util.h"
@@ -313,7 +314,7 @@ void HttpResponseHeaders::RemoveHeaderLine(const std::string& name,
 
   new_raw_headers.reserve(raw_headers_.size());
 
-  void* iter = NULL;
+  size_t iter = 0;
   std::string old_header_name;
   std::string old_header_value;
   while (EnumerateHeaderLines(&iter, &old_header_name, &old_header_value)) {
@@ -549,10 +550,10 @@ std::string HttpResponseHeaders::GetStatusText() const {
   return std::string(begin, end);
 }
 
-bool HttpResponseHeaders::EnumerateHeaderLines(void** iter,
+bool HttpResponseHeaders::EnumerateHeaderLines(size_t* iter,
                                                std::string* name,
                                                std::string* value) const {
-  size_t i = reinterpret_cast<size_t>(*iter);
+  size_t i = *iter;
   if (i == parsed_.size())
     return false;
 
@@ -567,18 +568,18 @@ bool HttpResponseHeaders::EnumerateHeaderLines(void** iter,
 
   value->assign(value_begin, value_end);
 
-  *iter = reinterpret_cast<void*>(i);
+  *iter = i;
   return true;
 }
 
-bool HttpResponseHeaders::EnumerateHeader(void** iter,
+bool HttpResponseHeaders::EnumerateHeader(size_t* iter,
                                           const base::StringPiece& name,
                                           std::string* value) const {
   size_t i;
   if (!iter || !*iter) {
     i = FindHeader(0, name);
   } else {
-    i = reinterpret_cast<size_t>(*iter);
+    i = *iter;
     if (i >= parsed_.size()) {
       i = std::string::npos;
     } else if (!parsed_[i].is_continuation()) {
@@ -592,7 +593,7 @@ bool HttpResponseHeaders::EnumerateHeader(void** iter,
   }
 
   if (iter)
-    *iter = reinterpret_cast<void*>(i + 1);
+    *iter = i + 1;
   value->assign(parsed_[i].value_begin, parsed_[i].value_end);
   return true;
 }
@@ -601,7 +602,7 @@ bool HttpResponseHeaders::HasHeaderValue(const base::StringPiece& name,
                                          const base::StringPiece& value) const {
   // The value has to be an exact match.  This is important since
   // 'cache-control: no-cache' != 'cache-control: no-cache="foo"'
-  void* iter = NULL;
+  size_t iter = 0;
   std::string temp;
   while (EnumerateHeader(&iter, name, &temp)) {
     if (base::EqualsCaseInsensitiveASCII(value, temp))
@@ -654,7 +655,7 @@ HttpVersion HttpResponseHeaders::ParseVersion(
   ++p;  // from / to first digit.
   ++dot;  // from . to second digit.
 
-  if (!(*p >= '0' && *p <= '9' && *dot >= '0' && *dot <= '9')) {
+  if (!(base::IsAsciiDigit(*p) && base::IsAsciiDigit(*dot))) {
     DVLOG(1) << "malformed version number";
     return HttpVersion();
   }
@@ -709,7 +710,7 @@ void HttpResponseHeaders::ParseStatusLine(
     ++p;
 
   std::string::const_iterator code = p;
-  while (p < line_end && *p >= '0' && *p <= '9')
+  while (p < line_end && base::IsAsciiDigit(*p))
     ++p;
 
   if (p == code) {
@@ -757,7 +758,7 @@ bool HttpResponseHeaders::GetCacheControlDirective(const StringPiece& directive,
 
   size_t directive_size = directive.size();
 
-  void* iter = NULL;
+  size_t iter = 0;
   while (EnumerateHeader(&iter, name, &value)) {
     if (value.size() > directive_size + 1 &&
         base::StartsWith(value, directive,
@@ -814,7 +815,7 @@ void HttpResponseHeaders::AddNonCacheableHeaders(HeaderSet* result) const {
   const size_t kPrefixLen = sizeof(kPrefix) - 1;
 
   std::string value;
-  void* iter = NULL;
+  size_t iter = 0;
   while (EnumerateHeader(&iter, kCacheControl, &value)) {
     // If the value is smaller than the prefix and a terminal quote, skip
     // it.
@@ -889,7 +890,7 @@ void HttpResponseHeaders::GetMimeTypeAndCharset(std::string* mime_type,
 
   bool had_charset = false;
 
-  void* iter = NULL;
+  size_t iter = 0;
   while (EnumerateHeader(&iter, name, &value))
     HttpUtil::ParseContentType(value, mime_type, charset, &had_charset, NULL);
 }
@@ -1152,11 +1153,23 @@ bool HttpResponseHeaders::GetMaxAgeValue(TimeDelta* result) const {
 
 bool HttpResponseHeaders::GetAgeValue(TimeDelta* result) const {
   std::string value;
-  if (!EnumerateHeader(NULL, "Age", &value))
+  if (!EnumerateHeader(nullptr, "Age", &value))
     return false;
 
-  int64_t seconds;
-  base::StringToInt64(value, &seconds);
+  // Parse the delta-seconds as 1*DIGIT.
+  uint32_t seconds;
+  ParseIntError error;
+  if (!ParseUint32(value, &seconds, &error)) {
+    if (error == ParseIntError::FAILED_OVERFLOW) {
+      // If the Age value cannot fit in a uint32_t, saturate it to a maximum
+      // value. This is similar to what RFC 2616 says in section 14.6 for how
+      // caches should transmit values that overflow.
+      seconds = std::numeric_limits<decltype(seconds)>::max();
+    } else {
+      return false;
+    }
+  }
+
   *result = TimeDelta::FromSeconds(seconds);
   return true;
 }
@@ -1181,7 +1194,7 @@ bool HttpResponseHeaders::GetStaleWhileRevalidateValue(
 bool HttpResponseHeaders::GetTimeValuedHeader(const std::string& name,
                                               Time* result) const {
   std::string value;
-  if (!EnumerateHeader(NULL, name, &value))
+  if (!EnumerateHeader(nullptr, name, &value))
     return false;
 
   // When parsing HTTP dates it's beneficial to default to GMT because:
@@ -1223,7 +1236,7 @@ bool HttpResponseHeaders::IsKeepAlive() const {
     return false;
 
   for (const char* header : kConnectionHeaders) {
-    void* iterator = nullptr;
+    size_t iterator = 0;
     std::string token;
     while (EnumerateHeader(&iterator, header, &token)) {
       for (const KeepAliveToken& keep_alive_token : kKeepAliveTokens) {
@@ -1237,15 +1250,24 @@ bool HttpResponseHeaders::IsKeepAlive() const {
 
 bool HttpResponseHeaders::HasStrongValidators() const {
   std::string etag_header;
-  EnumerateHeader(NULL, "etag", &etag_header);
+  EnumerateHeader(nullptr, "etag", &etag_header);
   std::string last_modified_header;
-  EnumerateHeader(NULL, "Last-Modified", &last_modified_header);
+  EnumerateHeader(nullptr, "Last-Modified", &last_modified_header);
   std::string date_header;
-  EnumerateHeader(NULL, "Date", &date_header);
+  EnumerateHeader(nullptr, "Date", &date_header);
   return HttpUtil::HasStrongValidators(GetHttpVersion(),
                                        etag_header,
                                        last_modified_header,
                                        date_header);
+}
+
+bool HttpResponseHeaders::HasValidators() const {
+  std::string etag_header;
+  EnumerateHeader(NULL, "etag", &etag_header);
+  std::string last_modified_header;
+  EnumerateHeader(NULL, "Last-Modified", &last_modified_header);
+  return HttpUtil::HasValidators(GetHttpVersion(), etag_header,
+                                 last_modified_header);
 }
 
 // From RFC 2616:
@@ -1256,7 +1278,7 @@ int64_t HttpResponseHeaders::GetContentLength() const {
 
 int64_t HttpResponseHeaders::GetInt64HeaderValue(
     const std::string& header) const {
-  void* iter = NULL;
+  size_t iter = 0;
   std::string content_length_val;
   if (!EnumerateHeader(&iter, header, &content_length_val))
     return -1;
@@ -1284,7 +1306,7 @@ int64_t HttpResponseHeaders::GetInt64HeaderValue(
 bool HttpResponseHeaders::GetContentRange(int64_t* first_byte_position,
                                           int64_t* last_byte_position,
                                           int64_t* instance_length) const {
-  void* iter = NULL;
+  size_t iter = 0;
   std::string content_range_spec;
   *first_byte_position = *last_byte_position = *instance_length = -1;
   if (!EnumerateHeader(&iter, kContentRange, &content_range_spec))
@@ -1389,12 +1411,12 @@ bool HttpResponseHeaders::GetContentRange(int64_t* first_byte_position,
   return true;
 }
 
-scoped_ptr<base::Value> HttpResponseHeaders::NetLogCallback(
+std::unique_ptr<base::Value> HttpResponseHeaders::NetLogCallback(
     NetLogCaptureMode capture_mode) const {
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   base::ListValue* headers = new base::ListValue();
-  headers->Append(new base::StringValue(GetStatusLine()));
-  void* iterator = NULL;
+  headers->Append(new base::StringValue(EscapeNonASCII(GetStatusLine())));
+  size_t iterator = 0;
   std::string name;
   std::string value;
   while (EnumerateHeaderLines(&iterator, &name, &value)) {

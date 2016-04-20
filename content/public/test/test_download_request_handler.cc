@@ -5,10 +5,12 @@
 #include "content/public/test/test_download_request_handler.h"
 
 #include <inttypes.h>
+
 #include <utility>
 
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
@@ -107,13 +109,13 @@ class TestDownloadRequestHandler::PartialResponseJob
   int ReadRawData(net::IOBuffer* buf, int buf_size) override;
 
  private:
-  PartialResponseJob(scoped_ptr<Parameters> parameters,
+  PartialResponseJob(std::unique_ptr<Parameters> parameters,
                      base::WeakPtr<Interceptor> interceptor,
                      net::URLRequest* url_request,
                      net::NetworkDelegate* network_delegate);
 
   ~PartialResponseJob() override;
-  void ReportCompletedRequest(int64_t transferred_byte_count);
+  void ReportCompletedRequest();
   static void OnStartResponseCallbackOnPossiblyIncorrectThread(
       base::WeakPtr<PartialResponseJob> job,
       const std::string& headers,
@@ -142,13 +144,14 @@ class TestDownloadRequestHandler::PartialResponseJob
   // re-entrancy.
   void NotifyHeadersCompleteAndPrepareToRead();
 
-  scoped_ptr<Parameters> parameters_;
+  std::unique_ptr<Parameters> parameters_;
 
   base::WeakPtr<Interceptor> interceptor_;
   net::HttpResponseInfo response_info_;
   int64_t offset_of_next_read_ = -1;
   int64_t requested_range_begin_ = -1;
   int64_t requested_range_end_ = -1;
+  int64_t read_byte_count_ = 0;
   base::WeakPtrFactory<PartialResponseJob> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PartialResponseJob);
@@ -204,12 +207,12 @@ net::URLRequestJob* TestDownloadRequestHandler::PartialResponseJob::Factory(
     net::URLRequest* request,
     net::NetworkDelegate* delegate,
     base::WeakPtr<Interceptor> interceptor) {
-  return new PartialResponseJob(make_scoped_ptr(new Parameters(parameters)),
+  return new PartialResponseJob(base::WrapUnique(new Parameters(parameters)),
                                 interceptor, request, delegate);
 }
 
 TestDownloadRequestHandler::PartialResponseJob::PartialResponseJob(
-    scoped_ptr<Parameters> parameters,
+    std::unique_ptr<Parameters> parameters,
     base::WeakPtr<Interceptor> interceptor,
     net::URLRequest* request,
     net::NetworkDelegate* network_delegate)
@@ -222,7 +225,9 @@ TestDownloadRequestHandler::PartialResponseJob::PartialResponseJob(
   DCHECK_NE(-1, parameters_->pattern_generator_seed);
 }
 
-TestDownloadRequestHandler::PartialResponseJob::~PartialResponseJob() {}
+TestDownloadRequestHandler::PartialResponseJob::~PartialResponseJob() {
+  ReportCompletedRequest();
+}
 
 void TestDownloadRequestHandler::PartialResponseJob::Start() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -272,7 +277,6 @@ int TestDownloadRequestHandler::PartialResponseJob::ReadRawData(
   // requested_range_begin_ == -1 implies that the body was empty.
   if (offset_of_next_read_ > requested_range_end_ ||
       requested_range_begin_ == -1) {
-    ReportCompletedRequest(requested_range_end_ - requested_range_begin_ + 1);
     DVLOG(1) << "Done reading.";
     return 0;
   }
@@ -285,9 +289,7 @@ int TestDownloadRequestHandler::PartialResponseJob::ReadRawData(
 
     if (offset_of_next_read_ == injected_error.offset) {
       int error = injected_error.error;
-      SetStatus(net::URLRequestStatus(net::URLRequestStatus::FAILED, error));
       DVLOG(1) << "Returning error " << net::ErrorToString(error);
-      ReportCompletedRequest(injected_error.offset - requested_range_begin_);
       parameters_->injected_errors.pop();
       return error;
     }
@@ -304,14 +306,14 @@ int TestDownloadRequestHandler::PartialResponseJob::ReadRawData(
   DVLOG(1) << "Read " << bytes_to_copy << " bytes at offset "
            << offset_of_next_read_;
   offset_of_next_read_ += bytes_to_copy;
+  read_byte_count_ += bytes_to_copy;
   return bytes_to_copy;
 }
 
-void TestDownloadRequestHandler::PartialResponseJob::ReportCompletedRequest(
-    int64_t transferred_byte_count) {
+void TestDownloadRequestHandler::PartialResponseJob::ReportCompletedRequest() {
   if (interceptor_.get()) {
     TestDownloadRequestHandler::CompletedRequest completed_request;
-    completed_request.transferred_byte_count = transferred_byte_count;
+    completed_request.transferred_byte_count = read_byte_count_;
     completed_request.request_headers = request()->extra_request_headers();
     interceptor_->AddCompletedRequest(completed_request);
   }
@@ -353,7 +355,6 @@ void TestDownloadRequestHandler::PartialResponseJob::OnStartResponseCallback(
 
 void TestDownloadRequestHandler::PartialResponseJob::HandleOnStartDefault() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  SetStatus(net::URLRequestStatus());
 
   const net::HttpRequestHeaders& extra_headers =
       request()->extra_request_headers();
@@ -367,8 +368,9 @@ void TestDownloadRequestHandler::PartialResponseJob::HandleOnStartDefault() {
   // ETag, then try to handle the range request.
   if (parameters_->support_byte_ranges &&
       extra_headers.GetHeader(net::HttpRequestHeaders::kIfRange, &value) &&
-      value == parameters_->etag && HandleRangeAssumingValidatorMatch())
+      value == parameters_->etag && HandleRangeAssumingValidatorMatch()) {
     return;
+  }
 
   if (parameters_->support_byte_ranges &&
       extra_headers.GetHeader("If-Match", &value)) {
@@ -485,7 +487,8 @@ TestDownloadRequestHandler::Interceptor::Register(
     const GURL& url,
     scoped_refptr<base::SequencedTaskRunner> client_task_runner) {
   DCHECK(url.is_valid());
-  scoped_ptr<Interceptor> interceptor(new Interceptor(url, client_task_runner));
+  std::unique_ptr<Interceptor> interceptor(
+      new Interceptor(url, client_task_runner));
   base::WeakPtr<Interceptor> weak_reference =
       interceptor->weak_ptr_factory_.GetWeakPtr();
   net::URLRequestFilter* filter = net::URLRequestFilter::GetInstance();
@@ -573,6 +576,7 @@ TestDownloadRequestHandler::Parameters::Parameters(Parameters&& that)
       content_type(std::move(that.content_type)),
       size(that.size),
       pattern_generator_seed(that.pattern_generator_seed),
+      support_byte_ranges(that.support_byte_ranges),
       on_start_handler(that.on_start_handler),
       injected_errors(std::move(that.injected_errors)) {}
 
@@ -583,8 +587,9 @@ operator=(Parameters&& that) {
   content_type = std::move(that.content_type);
   size = that.size;
   pattern_generator_seed = that.pattern_generator_seed;
+  support_byte_ranges = that.support_byte_ranges;
   on_start_handler = that.on_start_handler;
-  injected_errors.swap(that.injected_errors);
+  injected_errors = std::move(that.injected_errors);
   return *this;
 }
 

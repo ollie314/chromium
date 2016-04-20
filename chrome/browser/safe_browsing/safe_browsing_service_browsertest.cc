@@ -8,7 +8,6 @@
 
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 
-#include <algorithm>
 #include <utility>
 
 #include "base/bind.h"
@@ -16,10 +15,11 @@
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/field_trial.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
+#include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -35,10 +35,8 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
 #include "chrome/browser/safe_browsing/local_database_manager.h"
-#include "chrome/browser/safe_browsing/metadata.pb.h"
 #include "chrome/browser/safe_browsing/protocol_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_database.h"
-#include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
@@ -50,7 +48,9 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/bookmarks/browser/startup_task_runner_service.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/prefs/pref_service.h"
 #include "components/safe_browsing_db/database_manager.h"
+#include "components/safe_browsing_db/metadata.pb.h"
 #include "components/safe_browsing_db/util.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_entry.h"
@@ -107,12 +107,12 @@ class NeverCompletingHttpResponse : public net::test_server::HttpResponse {
   }
 };
 
-scoped_ptr<net::test_server::HttpResponse> HandleNeverCompletingRequests(
+std::unique_ptr<net::test_server::HttpResponse> HandleNeverCompletingRequests(
     const net::test_server::HttpRequest& request) {
   if (!base::StartsWith(request.relative_url, kNeverCompletesPath,
                           base::CompareCase::SENSITIVE))
     return nullptr;
-  return make_scoped_ptr(new NeverCompletingHttpResponse());
+  return base::WrapUnique(new NeverCompletingHttpResponse());
 }
 
 void InvokeFullHashCallback(
@@ -253,6 +253,9 @@ class TestSafeBrowsingDatabase : public SafeBrowsingDatabase {
   bool ContainsInclusionWhitelistedUrl(const GURL& url) override {
     return true;
   }
+  bool ContainsModuleWhitelistedString(const std::string& str) override {
+    return true;
+  }
   bool ContainsExtensionPrefixes(const std::vector<SBPrefix>& prefixes,
                                  std::vector<SBPrefix>* prefix_hits) override {
     return false;
@@ -260,13 +263,20 @@ class TestSafeBrowsingDatabase : public SafeBrowsingDatabase {
   bool ContainsMalwareIP(const std::string& ip_address) override {
     return true;
   }
+  bool ContainsResourceUrlPrefixes(
+      const std::vector<SBPrefix>& prefixes,
+      std::vector<SBPrefix>* prefix_hits) override {
+    prefix_hits->clear();
+    return ContainsUrlPrefixes(RESOURCEBLACKLIST, RESOURCEBLACKLIST,
+                               prefixes, prefix_hits);
+  }
   bool UpdateStarted(std::vector<SBListChunkRanges>* lists) override {
     ADD_FAILURE() << "Not implemented.";
     return false;
   }
   void InsertChunks(
       const std::string& list_name,
-      const std::vector<scoped_ptr<SBChunkData>>& chunks) override {
+      const std::vector<std::unique_ptr<SBChunkData>>& chunks) override {
     ADD_FAILURE() << "Not implemented.";
   }
   void DeleteChunks(const std::vector<SBChunkDelete>& chunk_deletes) override {
@@ -316,10 +326,8 @@ class TestSafeBrowsingDatabase : public SafeBrowsingDatabase {
         continue;
 
       std::vector<int> list_ids_for_url = badurls_it->second.list_ids;
-      if (std::find(list_ids_for_url.begin(), list_ids_for_url.end(), list_id0)
-              != list_ids_for_url.end() ||
-          std::find(list_ids_for_url.begin(), list_ids_for_url.end(), list_id1)
-              != list_ids_for_url.end()) {
+      if (ContainsValue(list_ids_for_url, list_id0) ||
+          ContainsValue(list_ids_for_url, list_id1)) {
         prefix_hits->insert(prefix_hits->end(),
                             badurls_it->second.prefix_hits.begin(),
                             badurls_it->second.prefix_hits.end());
@@ -377,7 +385,8 @@ class TestSafeBrowsingDatabaseFactory : public SafeBrowsingDatabaseFactory {
       bool enable_download_whitelist,
       bool enable_extension_blacklist,
       bool enable_ip_blacklist,
-      bool enabled_unwanted_software_list) override {
+      bool enabled_unwanted_software_list,
+      bool enable_module_whitelist) override {
     db_ = new TestSafeBrowsingDatabase();
     return db_;
   }
@@ -610,15 +619,13 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
 
   void CreateCSDService() {
 #if defined(SAFE_BROWSING_CSD)
-    ClientSideDetectionService* csd_service =
-        ClientSideDetectionService::Create(NULL);
     SafeBrowsingService* sb_service =
         g_browser_process->safe_browsing_service();
 
     // A CSD service should already exist.
-    EXPECT_TRUE(sb_service->csd_service_);
+    EXPECT_TRUE(sb_service->safe_browsing_detection_service());
 
-    sb_service->csd_service_.reset(csd_service);
+    sb_service->services_delegate_->InitializeCsdService(nullptr);
     sb_service->RefreshState();
 #endif
   }
@@ -668,43 +675,24 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
   }
 
  private:
-  scoped_ptr<TestSafeBrowsingServiceFactory> sb_factory_;
+  std::unique_ptr<TestSafeBrowsingServiceFactory> sb_factory_;
   TestSafeBrowsingDatabaseFactory db_factory_;
   TestSBProtocolManagerFactory pm_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingServiceTest);
 };
 
-enum MalwareMetadataTestType {
-  METADATA_NONE,
-  METADATA_LANDING,
-  METADATA_DISTRIBUTION,
-};
-
 class SafeBrowsingServiceMetadataTest
     : public SafeBrowsingServiceTest,
-      public ::testing::WithParamInterface<MalwareMetadataTestType> {
+      public ::testing::WithParamInterface<ThreatPatternType> {
  public:
   SafeBrowsingServiceMetadataTest() {}
 
   void GenUrlFullhashResultWithMetadata(const GURL& url,
                                         SBFullHashResult* full_hash) {
     GenUrlFullhashResult(url, MALWARE, full_hash);
-
-    MalwarePatternType proto;
-    switch (GetParam()) {
-      case METADATA_NONE:
-        full_hash->metadata = std::string();
-        break;
-      case METADATA_LANDING:
-        proto.set_pattern_type(MalwarePatternType::LANDING);
-        full_hash->metadata = proto.SerializeAsString();
-        break;
-      case METADATA_DISTRIBUTION:
-        proto.set_pattern_type(MalwarePatternType::DISTRIBUTION);
-        full_hash->metadata = proto.SerializeAsString();
-        break;
-    }
+    // We test with different threat_pattern_types.
+    full_hash->metadata.threat_pattern_type = GetParam();
   }
 
  private:
@@ -760,12 +748,12 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingServiceMetadataTest, MalwareImg) {
   SBFullHashResult malware_full_hash;
   GenUrlFullhashResultWithMetadata(img_url, &malware_full_hash);
   switch (GetParam()) {
-    case METADATA_NONE:  // Falls through.
-    case METADATA_DISTRIBUTION:
+    case ThreatPatternType::NONE:  // Falls through.
+    case ThreatPatternType::DISTRIBUTION:
       EXPECT_CALL(observer_, OnSafeBrowsingHit(IsUnsafeResourceFor(img_url)))
           .Times(1);
       break;
-    case METADATA_LANDING:
+    case ThreatPatternType::LANDING:
       // No interstitial shown, so no notifications expected.
       break;
   }
@@ -774,8 +762,8 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingServiceMetadataTest, MalwareImg) {
   // Subresource which is tagged as a landing page should not show an
   // interstitial, the other types should.
   switch (GetParam()) {
-    case METADATA_NONE:
-    case METADATA_DISTRIBUTION:
+    case ThreatPatternType::NONE:  // Falls through.
+    case ThreatPatternType::DISTRIBUTION:
       EXPECT_TRUE(ShowingInterstitialPage());
       EXPECT_TRUE(got_hit_report());
       EXPECT_EQ(img_url, hit_report().malicious_url);
@@ -783,7 +771,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingServiceMetadataTest, MalwareImg) {
       EXPECT_EQ(GURL(), hit_report().referrer_url);
       EXPECT_TRUE(hit_report().is_subresource);
       break;
-    case METADATA_LANDING:
+    case ThreatPatternType::LANDING:
       EXPECT_FALSE(ShowingInterstitialPage());
       EXPECT_FALSE(got_hit_report());
       break;
@@ -792,9 +780,9 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingServiceMetadataTest, MalwareImg) {
 
 INSTANTIATE_TEST_CASE_P(MaybeSetMetadata,
                         SafeBrowsingServiceMetadataTest,
-                        testing::Values(METADATA_NONE,
-                                        METADATA_LANDING,
-                                        METADATA_DISTRIBUTION));
+                        testing::Values(ThreatPatternType::NONE,
+                                        ThreatPatternType::LANDING,
+                                        ThreatPatternType::DISTRIBUTION));
 
 IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest, UnwantedImgIgnored) {
   GURL main_url = embedded_test_server()->GetURL(kMalwarePage);
@@ -1072,10 +1060,8 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest,
 IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest, SubResourceHitOnFreshTab) {
   // Allow popups.
   HostContentSettingsMapFactory::GetForProfile(browser()->profile())
-      ->SetContentSetting(ContentSettingsPattern::Wildcard(),
-                          ContentSettingsPattern::Wildcard(),
-                          CONTENT_SETTINGS_TYPE_POPUPS, std::string(),
-                          CONTENT_SETTING_ALLOW);
+      ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_POPUPS,
+                                 CONTENT_SETTING_ALLOW);
 
   // Add |kMalwareImg| to fake safebrowsing db.
   GURL img_url = embedded_test_server()->GetURL(kMalwareImg);
@@ -1137,6 +1123,8 @@ class TestSBClient : public base::RefCountedThreadSafe<TestSBClient>,
 
   SBThreatType GetThreatType() const { return threat_type_; }
 
+  std::string GetThreatHash() const { return threat_hash_; }
+
   void CheckDownloadUrl(const std::vector<GURL>& url_chain) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
@@ -1149,6 +1137,13 @@ class TestSBClient : public base::RefCountedThreadSafe<TestSBClient>,
         BrowserThread::IO, FROM_HERE,
         base::Bind(&TestSBClient::CheckBrowseUrlOnIOThread, this, url));
     content::RunMessageLoop();  // Will stop in OnCheckBrowseUrlResult.
+  }
+
+  void CheckResourceUrl(const GURL& url) {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&TestSBClient::CheckResourceUrlOnIOThread, this, url));
+    content::RunMessageLoop();  // Will stop in OnCheckResourceUrlResult.
   }
 
  private:
@@ -1178,6 +1173,16 @@ class TestSBClient : public base::RefCountedThreadSafe<TestSBClient>,
     }
   }
 
+  void CheckResourceUrlOnIOThread(const GURL& url) {
+    bool synchronous_safe_signal =
+        safe_browsing_service_->database_manager()->CheckResourceUrl(url, this);
+    if (synchronous_safe_signal) {
+      threat_type_ = SB_THREAT_TYPE_SAFE;
+      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                              base::Bind(&TestSBClient::CheckDone, this));
+    }
+  }
+
   // Called when the result of checking a download URL is known.
   void OnCheckDownloadUrlResult(const std::vector<GURL>& /* url_chain */,
                                 SBThreatType threat_type) override {
@@ -1189,8 +1194,18 @@ class TestSBClient : public base::RefCountedThreadSafe<TestSBClient>,
   // Called when the result of checking a browse URL is known.
   void OnCheckBrowseUrlResult(const GURL& /* url */,
                               SBThreatType threat_type,
-                              const std::string& /* metadata */) override {
+                              const ThreatMetadata& /* metadata */) override {
     threat_type_ = threat_type;
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(&TestSBClient::CheckDone, this));
+  }
+
+  // Called when the result of checking a resource URL is known.
+  void OnCheckResourceUrlResult(const GURL& /* url */,
+                                SBThreatType threat_type,
+                                const std::string& threat_hash) override {
+    threat_type_ = threat_type;
+    threat_hash_ = threat_hash;
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                             base::Bind(&TestSBClient::CheckDone, this));
   }
@@ -1198,6 +1213,7 @@ class TestSBClient : public base::RefCountedThreadSafe<TestSBClient>,
   void CheckDone() { base::MessageLoopForUI::current()->QuitWhenIdle(); }
 
   SBThreatType threat_type_;
+  std::string threat_hash_;
   SafeBrowsingService* safe_browsing_service_;
 
   DISALLOW_COPY_AND_ASSIGN(TestSBClient);
@@ -1333,6 +1349,47 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest, CheckDownloadUrlRedirects) {
   EXPECT_EQ(SB_THREAT_TYPE_BINARY_MALWARE_URL, client->GetThreatType());
 }
 
+IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest, CheckResourceUrl) {
+  const char* kBlacklistResource = "/blacklisted/script.js";
+  GURL blacklist_resource = embedded_test_server()->GetURL(kBlacklistResource);
+  std::string blacklist_resource_hash;
+  const char* kMaliciousResource = "/malware/script.js";
+  GURL malware_resource = embedded_test_server()->GetURL(kMaliciousResource);
+  std::string malware_resource_hash;
+
+  {
+    SBFullHashResult full_hash;
+    GenUrlFullhashResult(blacklist_resource, RESOURCEBLACKLIST, &full_hash);
+    SetupResponseForUrl(blacklist_resource, full_hash);
+    blacklist_resource_hash = std::string(full_hash.hash.full_hash,
+                                          full_hash.hash.full_hash + 32);
+  }
+  {
+    SBFullHashResult full_hash;
+    GenUrlFullhashResult(malware_resource, MALWARE, &full_hash);
+    SetupResponseForUrl(malware_resource, full_hash);
+    full_hash.list_id = RESOURCEBLACKLIST;
+    SetupResponseForUrl(malware_resource, full_hash);
+    malware_resource_hash = std::string(full_hash.hash.full_hash,
+                                        full_hash.hash.full_hash + 32);
+  }
+
+  scoped_refptr<TestSBClient> client(new TestSBClient);
+  client->CheckResourceUrl(blacklist_resource);
+  EXPECT_EQ(SB_THREAT_TYPE_BLACKLISTED_RESOURCE, client->GetThreatType());
+  EXPECT_EQ(blacklist_resource_hash, client->GetThreatHash());
+
+  // Since we're checking a resource url, we should receive result that it's
+  // a blacklisted resource, not a malware.
+  client = new TestSBClient;
+  client->CheckResourceUrl(malware_resource);
+  EXPECT_EQ(SB_THREAT_TYPE_BLACKLISTED_RESOURCE, client->GetThreatType());
+  EXPECT_EQ(malware_resource_hash, client->GetThreatHash());
+
+  client->CheckResourceUrl(embedded_test_server()->GetURL(kEmptyPage));
+  EXPECT_EQ(SB_THREAT_TYPE_SAFE, client->GetThreatType());
+}
+
 #if defined(OS_WIN)
 // http://crbug.com/396409
 #define MAYBE_CheckDownloadUrlTimedOut DISABLED_CheckDownloadUrlTimedOut
@@ -1389,7 +1446,7 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest, StartAndStop) {
 
   // Add a new Profile. SBS should keep running.
   ASSERT_TRUE(temp_profile_dir_.CreateUniqueTempDir());
-  scoped_ptr<Profile> profile2(Profile::CreateProfile(
+  std::unique_ptr<Profile> profile2(Profile::CreateProfile(
       temp_profile_dir_.path(), NULL, Profile::CREATE_MODE_SYNCHRONOUS));
   ASSERT_TRUE(profile2.get() != NULL);
   StartupTaskRunnerServiceFactory::GetForProfile(profile2.get())->
@@ -1617,7 +1674,7 @@ class SafeBrowsingDatabaseManagerCookieTest : public InProcessBrowserTest {
   scoped_refptr<SafeBrowsingService> sb_service_;
 
  private:
-  static scoped_ptr<net::test_server::HttpResponse> HandleRequest(
+  static std::unique_ptr<net::test_server::HttpResponse> HandleRequest(
       const net::test_server::HttpRequest& request) {
     if (!base::StartsWith(request.relative_url, "/testpath/",
                           base::CompareCase::SENSITIVE)) {
@@ -1645,7 +1702,7 @@ class SafeBrowsingDatabaseManagerCookieTest : public InProcessBrowserTest {
       return nullptr;
     }
 
-    scoped_ptr<net::test_server::BasicHttpResponse> http_response(
+    std::unique_ptr<net::test_server::BasicHttpResponse> http_response(
         new net::test_server::BasicHttpResponse());
     http_response->set_content("foo");
     http_response->set_content_type("text/plain");
@@ -1654,7 +1711,7 @@ class SafeBrowsingDatabaseManagerCookieTest : public InProcessBrowserTest {
     return std::move(http_response);
   }
 
-  scoped_ptr<TestSafeBrowsingServiceFactory> sb_factory_;
+  std::unique_ptr<TestSafeBrowsingServiceFactory> sb_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingDatabaseManagerCookieTest);
 };

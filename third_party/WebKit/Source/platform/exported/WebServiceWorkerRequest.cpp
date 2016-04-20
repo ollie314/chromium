@@ -9,6 +9,7 @@
 #include "public/platform/WebHTTPHeaderVisitor.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURLRequest.h"
+#include "wtf/RefCounted.h"
 
 namespace blink {
 
@@ -112,8 +113,12 @@ PassRefPtr<BlobDataHandle> WebServiceWorkerRequest::blobDataHandle() const
     return m_private->blobDataHandle;
 }
 
-void WebServiceWorkerRequest::setReferrer(const WebString& referrer, WebReferrerPolicy referrerPolicy)
+void WebServiceWorkerRequest::setReferrer(const WebString& webReferrer, WebReferrerPolicy referrerPolicy)
 {
+    // WebString doesn't have the distinction between empty and null. We use
+    // the null WTFString for referrer.
+    ASSERT(Referrer::noReferrer() == String());
+    String referrer = webReferrer.isEmpty() ? Referrer::noReferrer() : String(webReferrer);
     m_private->m_referrer = Referrer(referrer, static_cast<ReferrerPolicy>(referrerPolicy));
 }
 

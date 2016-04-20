@@ -4,6 +4,8 @@
 
 #include "net/cert/crl_set_storage.h"
 
+#include <memory>
+
 #include "base/base64.h"
 #include "base/format_macros.h"
 #include "base/json/json_reader.h"
@@ -125,14 +127,14 @@ static base::DictionaryValue* ReadHeader(base::StringPiece* data) {
   const base::StringPiece header_bytes(data->data(), header_len);
   data->remove_prefix(header_len);
 
-  scoped_ptr<base::Value> header =
+  std::unique_ptr<base::Value> header =
       base::JSONReader::Read(header_bytes, base::JSON_ALLOW_TRAILING_COMMAS);
   if (header.get() == NULL)
     return NULL;
 
   if (!header->IsType(base::Value::TYPE_DICTIONARY))
     return NULL;
-  return reinterpret_cast<base::DictionaryValue*>(header.release());
+  return static_cast<base::DictionaryValue*>(header.release());
 }
 
 // kCurrentFileVersion is the version of the CRLSet file format that we
@@ -292,7 +294,7 @@ static bool ReadDeltaCRL(base::StringPiece* data,
 // static
 bool CRLSetStorage::Parse(base::StringPiece data,
                           scoped_refptr<CRLSet>* out_crl_set) {
-  TRACE_EVENT0("CRLSet", "Parse");
+  TRACE_EVENT0("net", "CRLSetStorage::Parse");
   // Other parts of Chrome assume that we're little endian, so we don't lose
   // anything by doing this.
 #if defined(__BYTE_ORDER)
@@ -303,7 +305,7 @@ bool CRLSetStorage::Parse(base::StringPiece data,
   #error assumes little endian
 #endif
 
-  scoped_ptr<base::DictionaryValue> header_dict(ReadHeader(&data));
+  std::unique_ptr<base::DictionaryValue> header_dict(ReadHeader(&data));
   if (!header_dict.get())
     return false;
 
@@ -365,7 +367,7 @@ bool CRLSetStorage::ApplyDelta(const CRLSet* in_crl_set,
                                const base::StringPiece& delta_bytes,
                                scoped_refptr<CRLSet>* out_crl_set) {
   base::StringPiece data(delta_bytes);
-  scoped_ptr<base::DictionaryValue> header_dict(ReadHeader(&data));
+  std::unique_ptr<base::DictionaryValue> header_dict(ReadHeader(&data));
   if (!header_dict.get())
     return false;
 
@@ -460,7 +462,7 @@ bool CRLSetStorage::ApplyDelta(const CRLSet* in_crl_set,
 bool CRLSetStorage::GetIsDeltaUpdate(const base::StringPiece& bytes,
                                      bool* is_delta) {
   base::StringPiece data(bytes);
-  scoped_ptr<base::DictionaryValue> header_dict(ReadHeader(&data));
+  std::unique_ptr<base::DictionaryValue> header_dict(ReadHeader(&data));
   if (!header_dict.get())
     return false;
 

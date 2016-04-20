@@ -4,13 +4,14 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "build/build_config.h"
 #include "chrome/browser/local_discovery/test_service_discovery_client.h"
@@ -34,9 +35,9 @@
 #include "net/url_request/url_request_test_util.h"
 
 #if defined(OS_CHROMEOS)
-#include "base/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/prefs/pref_service.h"
 #endif
 
 using testing::InvokeWithoutArgs;
@@ -226,19 +227,19 @@ const char kResponseInfoWithID[] = "{"
 
 const char kResponseRegisterStart[] = "{"
     "     \"action\": \"start\","
-    "     \"user\": \"user@host.com\""
+    "     \"user\": \"user@consumer.example.com\""
     "}";
 
 const char kResponseRegisterClaimTokenNoConfirm[] = "{"
     "    \"action\": \"getClaimToken\","
-    "    \"user\": \"user@host.com\","
+    "    \"user\": \"user@consumer.example.com\","
     "    \"error\": \"pending_user_action\","
     "    \"timeout\": 1"
     "}";
 
 const char kResponseRegisterClaimTokenConfirm[] = "{"
     "    \"action\": \"getClaimToken\","
-    "    \"user\": \"user@host.com\","
+    "    \"user\": \"user@consumer.example.com\","
     "    \"token\": \"MySampleToken\","
     "    \"claim_url\": \"http://someurl.com/\""
     "}";
@@ -247,7 +248,7 @@ const char kResponseCloudPrintConfirm[] = "{ \"success\": true }";
 
 const char kResponseRegisterComplete[] = "{"
     "    \"action\": \"complete\","
-    "    \"user\": \"user@host.com\","
+    "    \"user\": \"user@consumer.example.com\","
     "    \"device_id\": \"my_id\""
     "}";
 
@@ -264,20 +265,22 @@ const char kResponseGaiaId[] = "{"
 const char kURLInfo[] = "http://1.2.3.4:8888/privet/info";
 
 const char kURLRegisterStart[] =
-    "http://1.2.3.4:8888/privet/register?action=start&user=user%40host.com";
+    "http://1.2.3.4:8888/privet/register?action=start&"
+    "user=user%40consumer.example.com";
 
 const char kURLRegisterClaimToken[] =
     "http://1.2.3.4:8888/privet/register?action=getClaimToken&"
-    "user=user%40host.com";
+    "user=user%40consumer.example.com";
 
 const char kURLCloudPrintConfirm[] =
     "https://www.google.com/cloudprint/confirm?token=MySampleToken";
 
 const char kURLRegisterComplete[] =
-    "http://1.2.3.4:8888/privet/register?action=complete&user=user%40host.com";
+    "http://1.2.3.4:8888/privet/register?action=complete&"
+    "user=user%40consumer.example.com";
 
 const char kSampleGaiaId[] = "12345";
-const char kSampleUser[] = "user@host.com";
+const char kSampleUser[] = "user@consumer.example.com";
 
 class TestMessageLoopCondition {
  public:
@@ -323,14 +326,14 @@ class MockableFakeURLFetcherCreator {
 
   MOCK_METHOD1(OnCreateFakeURLFetcher, void(const std::string& url));
 
-  scoped_ptr<net::FakeURLFetcher> CreateFakeURLFetcher(
+  std::unique_ptr<net::FakeURLFetcher> CreateFakeURLFetcher(
       const GURL& url,
       net::URLFetcherDelegate* delegate,
       const std::string& response_data,
       net::HttpStatusCode response_code,
       net::URLRequestStatus::Status status) {
     OnCreateFakeURLFetcher(url.spec());
-    return scoped_ptr<net::FakeURLFetcher>(new net::FakeURLFetcher(
+    return std::unique_ptr<net::FakeURLFetcher>(new net::FakeURLFetcher(
         url, delegate, response_data, response_code, status));
   }
 

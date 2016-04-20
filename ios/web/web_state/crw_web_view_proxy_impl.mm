@@ -109,8 +109,17 @@ UIView* GetFirstResponderSubview(UIView* view) {
   return [_contentView gestureRecognizers];
 }
 
-- (web::WebViewType)webViewType {
-  return [_webController webViewType];
+- (BOOL)shouldUseInsetForTopPadding {
+  SEL shouldUseInsetSelector = @selector(shouldUseInsetForTopPadding);
+  return [_contentView respondsToSelector:shouldUseInsetSelector] &&
+         [_contentView shouldUseInsetForTopPadding];
+}
+
+- (void)setShouldUseInsetForTopPadding:(BOOL)shouldUseInsetForTopPadding {
+  if ([_contentView
+          respondsToSelector:@selector(setShouldUseInsetForTopPadding:)]) {
+    [_contentView setShouldUseInsetForTopPadding:shouldUseInsetForTopPadding];
+  }
 }
 
 - (void)registerInsets:(UIEdgeInsets)insets forCaller:(id)caller {
@@ -164,14 +173,8 @@ UIView* GetFirstResponderSubview(UIView* view) {
 }
 #endif
 
-- (BOOL)keyboardDisplayRequiresUserAction {
-  return [_webController keyboardDisplayRequiresUserAction];
-}
-
-- (void)setKeyboardDisplayRequiresUserAction:
-        (BOOL)keyboardDisplayRequiresUserAction {
-  [_webController
-      setKeyboardDisplayRequiresUserAction:keyboardDisplayRequiresUserAction];
+- (BOOL)becomeFirstResponder {
+  return [_contentView becomeFirstResponder];
 }
 
 @end

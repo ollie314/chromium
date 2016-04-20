@@ -10,12 +10,20 @@
 #include <memory>
 #include <vector>
 
+#include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "media/base/bitstream_buffer.h"
+#include "media/base/surface_manager.h"
 #include "media/base/video_decoder_config.h"
 #include "media/video/picture.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/gfx/gpu_memory_buffer.h"
 
 typedef unsigned int GLenum;
+
+namespace base {
+class SingleThreadTaskRunner;
+}
 
 namespace media {
 
@@ -32,11 +40,13 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
     VideoCodecProfile profile;
     gfx::Size max_resolution;
     gfx::Size min_resolution;
+    bool encrypted_only;
   };
   using SupportedProfiles = std::vector<SupportedProfile>;
 
   struct MEDIA_EXPORT Capabilities {
     Capabilities();
+    Capabilities(const Capabilities& other);
     ~Capabilities();
 
     std::string AsHumanReadableString() const;
@@ -55,6 +65,15 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
       // client must return PictureBuffers to be sure that new frames will be
       // provided via PictureReady.
       NEEDS_ALL_PICTURE_BUFFERS_TO_DECODE = 1 << 0,
+
+      // Whether the VDA supports being configured with an output surface for
+      // it to render frames to. For example, SurfaceViews on Android.
+      SUPPORTS_EXTERNAL_OUTPUT_SURFACE = 1 << 1,
+
+      // If set, the VDA will use deferred initialization if the config
+      // indicates that the client supports it as well.  Refer to
+      // NotifyInitializationComplete for more details.
+      SUPPORTS_DEFERRED_INITIALIZATION = 1 << 2,
     };
 
     SupportedProfiles supported_profiles;
@@ -77,11 +96,24 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
     // failures, GPU library failures, browser programming errors, and so on.
     PLATFORM_FAILURE,
     // Largest used enum. This should be adjusted when new errors are added.
-    LARGEST_ERROR_ENUM,
+    ERROR_MAX = PLATFORM_FAILURE,
   };
 
   // Config structure contains parameters required for the VDA initialization.
   struct MEDIA_EXPORT Config {
+    enum { kNoSurfaceID = SurfaceManager::kNoSurfaceID };
+
+    // Specifies the allocation and handling mode for output PictureBuffers.
+    // When set to ALLOCATE, the VDA is expected to allocate backing memory
+    // for PictureBuffers at the time of AssignPictureBuffers() call.
+    // When set to IMPORT, the VDA will not allocate, but after receiving
+    // AssignPictureBuffers() call, it will expect a call to
+    // ImportBufferForPicture() for each PictureBuffer before use.
+    enum class OutputMode {
+      ALLOCATE,
+      IMPORT,
+    };
+
     Config() = default;
     Config(VideoCodecProfile profile);
     Config(const VideoDecoderConfig& video_decoder_config);
@@ -93,6 +125,20 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
 
     // The flag indicating whether the stream is encrypted.
     bool is_encrypted = false;
+
+    // The flag indicating whether the client supports deferred initialization
+    // or not.
+    bool is_deferred_initialization_allowed = false;
+
+    // An optional graphics surface that the VDA should render to. For setting
+    // an output SurfaceView on Android. It's only valid when not equal to
+    // |kNoSurfaceID|.
+    int surface_id = kNoSurfaceID;
+
+    // Coded size of the video frame hint, subject to change.
+    gfx::Size initial_expected_coded_size;
+
+    OutputMode output_mode = OutputMode::ALLOCATE;
   };
 
   // Interface for collaborating with picture interface to provide memory for
@@ -103,15 +149,20 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
   // implements.
   class MEDIA_EXPORT Client {
    public:
-    // SetCdm completion callback to indicate whether the CDM is successfully
-    // attached to the decoder. The default implementation is a no-op since most
-    // VDAs don't support encrypted video.
-    virtual void NotifyCdmAttached(bool success);
+    // Notify the client that deferred initialization has completed successfully
+    // or not.  This is required if and only if deferred initialization is
+    // supported by the VDA (see Capabilities), and it is supported by the
+    // client (see Config::is_deferred_initialization_allowed), and the initial
+    // call to VDA::Initialize returns true.
+    // The default implementation is a NOTREACHED, since deferred initialization
+    // is not supported by default.
+    virtual void NotifyInitializationComplete(bool success);
 
     // Callback to tell client how many and what size of buffers to provide.
     // Note that the actual count provided through AssignPictureBuffers() can be
     // larger than the value requested.
     virtual void ProvidePictureBuffers(uint32_t requested_num_of_buffers,
+                                       uint32_t textures_per_buffer,
                                        const gfx::Size& dimensions,
                                        uint32_t texture_target) = 0;
 
@@ -144,7 +195,16 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
 
   // Initializes the video decoder with specific configuration.  Called once per
   // decoder construction.  This call is synchronous and returns true iff
-  // initialization is successful.
+  // initialization is successful, unless deferred initialization is used.
+  //
+  // By default, deferred initialization is not used.  However, if Config::
+  // is_deferred_initialization_allowed is set by the client, and if
+  // Capabilities::Flags::SUPPORTS_DEFERRED_INITIALIZATION is set by the VDA,
+  // and if VDA::Initialize returns true, then the client can expect a call to
+  // NotifyInitializationComplete with the actual success / failure of
+  // initialization.  Note that a return value of false from VDA::Initialize
+  // indicates that initialization definitely failed, and no callback is needed.
+  // TODO(liberato): should we say that encrypted video requires deferred?
   //
   // For encrpyted video, the decoder needs a CDM to be able to decode encrypted
   // buffers. SetCdm() should be called after Initialize() to set such a CDM.
@@ -184,6 +244,19 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
   virtual void AssignPictureBuffers(
       const std::vector<PictureBuffer>& buffers) = 0;
 
+  // Imports |gpu_memory_buffer_handles| as backing memory for picture buffer
+  // associated with |picture_buffer_id|. The n-th element in
+  // |gpu_memory_buffer_handles| should be a handle to a GpuMemoryBuffer backing
+  // the n-th plane of the PictureBuffer. This can only be be used if the VDA
+  // has been Initialize()d with config.output_mode = IMPORT, and should be
+  // preceded by a call to AssignPictureBuffers() to set up the number of
+  // PictureBuffers and their details.
+  // After this call, the VDA becomes the owner of the GpuMemoryBufferHandles,
+  // and is responsible for closing them after use, also on import failure.
+  virtual void ImportBufferForPicture(
+      int32_t picture_buffer_id,
+      const std::vector<gfx::GpuMemoryBufferHandle>& gpu_memory_buffer_handles);
+
   // Sends picture buffers to be reused by the decoder. This needs to be called
   // for each buffer that has been processed so that decoder may know onto which
   // picture buffers it can write the output to.
@@ -210,20 +283,47 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
   // unconditionally, so make sure to drop all pointers to it!
   virtual void Destroy() = 0;
 
-  // GPU PROCESS ONLY.  Implementations of this interface in the
-  // content/common/gpu/media should implement this, and implementations in
-  // other processes should not override the default implementation.
-  // Returns true if VDA::Decode and VDA::Client callbacks can run on the IO
-  // thread. Otherwise they will run on the GPU child thread. The purpose of
-  // running Decode on the IO thread is to reduce decode latency. Note Decode
-  // should return as soon as possible and not block on the IO thread. Also,
-  // PictureReady should be run on the child thread if a picture is delivered
-  // the first time so it can be cleared.
-  virtual bool CanDecodeOnIOThread();
+  // TO BE CALLED IN THE SAME PROCESS AS THE VDA IMPLEMENTATION ONLY.
+  //
+  // A decode "task" is a sequence that includes a Decode() call from Client,
+  // as well as corresponding callbacks to return the input BitstreamBuffer
+  // after use, and the resulting output Picture(s).
+  //
+  // If the Client can support running these three calls on a separate thread,
+  // it may call this method to try to set up the VDA implementation to do so.
+  // If the VDA can support this as well, return true, otherwise return false.
+  // If true is returned, the client may submit each Decode() call (but no other
+  // calls) on |decode_task_runner|, and should then expect that
+  // NotifyEndOfBitstreamBuffer() and PictureReady() callbacks may come on
+  // |decode_task_runner| as well, called on |decode_client|, instead of client
+  // provided to Initialize().
+  //
+  // This method may be called at any time.
+  //
+  // NOTE 1: some callbacks may still have to come on the main thread and the
+  // Client should handle both callbacks coming on main and |decode_task_runner|
+  // thread.
+  //
+  // NOTE 2: VDA implementations of Decode() must return as soon as possible and
+  // never block, as |decode_task_runner| may be a latency critical thread
+  // (such as the GPU IO thread).
+  //
+  // One application of this is offloading the GPU Child thread. In general,
+  // calls to VDA in GPU process have to be done on the GPU Child thread, as
+  // they may require GL context to be current. However, some VDAs may be able
+  // to run decode operations without GL context, which helps reduce latency and
+  // offloads the GPU Child thread.
+  virtual bool TryToSetupDecodeOnSeparateThread(
+      const base::WeakPtr<Client>& decode_client,
+      const scoped_refptr<base::SingleThreadTaskRunner>& decode_task_runner);
 
   // Windows creates a BGRA texture.
   // TODO(dshwang): after moving to D3D11, remove this. crbug.com/438691
   virtual GLenum GetSurfaceInternalFormat() const;
+
+  // In IMPORT OutputMode, if supported by the VDA, return the format that it
+  // requires for imported picture buffers.
+  virtual VideoPixelFormat GetOutputFormat() const;
 
  protected:
   // Do not delete directly; use Destroy() or own it with a scoped_ptr, which

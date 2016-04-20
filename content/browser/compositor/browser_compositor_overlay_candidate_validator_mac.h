@@ -5,8 +5,9 @@
 #ifndef CONTENT_BROWSER_COMPOSITOR_OVERLAY_CANDIDATE_VALIDATOR_MAC_H_
 #define CONTENT_BROWSER_COMPOSITOR_OVERLAY_CANDIDATE_VALIDATOR_MAC_H_
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "content/browser/compositor/browser_compositor_overlay_candidate_validator.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -15,8 +16,7 @@ namespace content {
 class CONTENT_EXPORT BrowserCompositorOverlayCandidateValidatorMac
     : public BrowserCompositorOverlayCandidateValidator {
  public:
-  explicit BrowserCompositorOverlayCandidateValidatorMac(
-      gfx::AcceleratedWidget widget);
+  BrowserCompositorOverlayCandidateValidatorMac();
   ~BrowserCompositorOverlayCandidateValidatorMac() override;
 
   // cc::OverlayCandidateValidator implementation.

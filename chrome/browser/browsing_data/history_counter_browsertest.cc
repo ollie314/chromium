@@ -4,7 +4,6 @@
 
 #include "chrome/browser/browsing_data/history_counter.h"
 
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/web_history_service_factory.h"
@@ -17,6 +16,7 @@
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/web_history_service.h"
 #include "components/history/core/test/fake_web_history_service.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "net/http/http_status_code.h"
@@ -80,7 +80,7 @@ class HistoryCounterTest : public SyncTest {
     return has_synced_visits_;
   }
 
-  void Callback(scoped_ptr<BrowsingDataCounter::Result> result) {
+  void Callback(std::unique_ptr<BrowsingDataCounter::Result> result) {
     finished_ = result->Finished();
 
     if (finished_) {
@@ -110,7 +110,7 @@ class HistoryCounterTest : public SyncTest {
   }
 
  private:
-  scoped_ptr<base::RunLoop> run_loop_;
+  std::unique_ptr<base::RunLoop> run_loop_;
   history::HistoryService* service_;
   base::Time time_;
 
@@ -239,7 +239,7 @@ IN_PROC_BROWSER_TEST_F(HistoryCounterTest, PeriodChanged) {
 IN_PROC_BROWSER_TEST_F(HistoryCounterTest, Synced) {
   // WebHistoryService makes network requests, so we need to use a fake one
   // for testing.
-  scoped_ptr<history::FakeWebHistoryService> service(
+  std::unique_ptr<history::FakeWebHistoryService> service(
       new history::FakeWebHistoryService(
           ProfileOAuth2TokenServiceFactory::GetForProfile(browser()->profile()),
           SigninManagerFactory::GetForProfile(browser()->profile()),
@@ -325,7 +325,7 @@ IN_PROC_BROWSER_TEST_F(HistoryCounterTest, DISABLED_RestartOnSyncChange) {
   Profile* profile = GetProfile(kFirstProfileIndex);
 
   // Set up the fake web history service and the counter.
-  scoped_ptr<history::FakeWebHistoryService> web_history_service(
+  std::unique_ptr<history::FakeWebHistoryService> web_history_service(
       new history::FakeWebHistoryService(
           ProfileOAuth2TokenServiceFactory::GetForProfile(browser()->profile()),
           SigninManagerFactory::GetForProfile(browser()->profile()),

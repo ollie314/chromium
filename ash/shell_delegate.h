@@ -12,17 +12,15 @@
 #include "base/callback.h"
 #include "base/strings/string16.h"
 
+class GURL;
+
 namespace app_list {
+class AppListPresenter;
 class AppListViewDelegate;
 }
 
 namespace aura {
-class RootWindow;
 class Window;
-}
-
-namespace content {
-class BrowserContext;
 }
 
 namespace gfx {
@@ -31,10 +29,6 @@ class Image;
 
 namespace ui {
 class MenuModel;
-}
-
-namespace views {
-class Widget;
 }
 
 namespace keyboard {
@@ -48,10 +42,10 @@ class MediaDelegate;
 class NewWindowDelegate;
 class SessionStateDelegate;
 class ShelfDelegate;
-class ShelfItemDelegate;
 class ShelfModel;
 class SystemTrayDelegate;
 class UserWallpaperDelegate;
+class Shelf;
 struct ShelfItem;
 
 class ASH_EXPORT VirtualKeyboardStateObserver {
@@ -116,9 +110,11 @@ class ASH_EXPORT ShellDelegate {
   virtual void RemoveVirtualKeyboardStateObserver(
       VirtualKeyboardStateObserver* observer) = 0;
 
-  // Get the AppListViewDelegate, creating one if it does not yet exist.
-  // Ownership stays with Chrome's AppListService, or the ShellDelegate.
-  virtual app_list::AppListViewDelegate* GetAppListViewDelegate() = 0;
+  // Opens the |url| in a new browser tab.
+  virtual void OpenUrl(const GURL& url) = 0;
+
+  // Get the AppListPresenter. Ownership stays with Chrome.
+  virtual app_list::AppListPresenter* GetAppListPresenter() = 0;
 
   // Creates a new ShelfDelegate. Shell takes ownership of the returned
   // value.
@@ -142,13 +138,10 @@ class ASH_EXPORT ShellDelegate {
   // Creates a media delegate. Shell takes ownership of the delegate.
   virtual MediaDelegate* CreateMediaDelegate() = 0;
 
-  // Creates a menu model of the context for the |root_window|.
-  // When a ContextMenu is used for an item created by ShelfWindowWatcher,
-  // passes its ShelfItemDelegate and ShelfItem.
-  virtual ui::MenuModel* CreateContextMenu(
-      aura::Window* root_window,
-      ash::ShelfItemDelegate* item_delegate,
-      ash::ShelfItem* item) = 0;
+  // Creates a menu model for the |shelf| and optional shelf |item|.
+  // If |item| is null, this creates a context menu for the desktop or shelf.
+  virtual ui::MenuModel* CreateContextMenu(ash::Shelf* shelf,
+                                           const ash::ShelfItem* item) = 0;
 
   // Creates a GPU support object. Shell takes ownership of the object.
   virtual GPUSupport* CreateGPUSupport() = 0;

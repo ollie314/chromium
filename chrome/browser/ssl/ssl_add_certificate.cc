@@ -64,7 +64,7 @@ class SSLAddCertificateInfoBarDelegate : public ConfirmInfoBarDelegate {
 void SSLAddCertificateInfoBarDelegate::Create(InfoBarService* infobar_service,
                                               net::X509Certificate* cert) {
   infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
-      scoped_ptr<ConfirmInfoBarDelegate>(
+      std::unique_ptr<ConfirmInfoBarDelegate>(
           new SSLAddCertificateInfoBarDelegate(cert))));
 }
 
@@ -212,8 +212,8 @@ void SSLAddCertificate(
   } else {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(&ShowSuccessInfoBar,
-                   render_process_id, render_frame_id, cert));
+        base::Bind(&ShowSuccessInfoBar, render_process_id, render_frame_id,
+                   base::RetainedRef(cert)));
   }
 }
 

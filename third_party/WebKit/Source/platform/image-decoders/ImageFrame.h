@@ -113,20 +113,15 @@ public:
     // succeeded.
     bool setSize(int newWidth, int newHeight);
 
-    // Returns a caller-owned pointer to the underlying native image data.
-    // (Actual use: This pointer will be owned by BitmapImage and freed in
-    // FrameData::clear()).
-    const SkBitmap& bitmap() const;
-
     bool hasAlpha() const;
     const IntRect& originalFrameRect() const { return m_originalFrameRect; }
-    Status status() const { return m_status; }
+    Status getStatus() const { return m_status; }
     unsigned duration() const { return m_duration; }
-    DisposalMethod disposalMethod() const { return m_disposalMethod; }
-    AlphaBlendSource alphaBlendSource() const { return m_alphaBlendSource; }
+    DisposalMethod getDisposalMethod() const { return m_disposalMethod; }
+    AlphaBlendSource getAlphaBlendSource() const { return m_alphaBlendSource; }
     bool premultiplyAlpha() const { return m_premultiplyAlpha; }
     SkBitmap::Allocator* allocator() const { return m_allocator; }
-    const SkBitmap& getSkBitmap() const { return m_bitmap; }
+    const SkBitmap& bitmap() const { return m_bitmap; }
     // Returns true if the pixels changed, but the bitmap has not yet been notified.
     bool pixelsChanged() const { return m_pixelsChanged; }
     size_t requiredPreviousFrameIndex() const { return m_requiredPreviousFrameIndex; }
@@ -198,6 +193,8 @@ private:
     {
         return m_bitmap.height();
     }
+
+    SkAlphaType computeAlphaType() const;
 
     SkBitmap m_bitmap;
     SkBitmap::Allocator* m_allocator;

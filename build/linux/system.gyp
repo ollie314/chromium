@@ -592,6 +592,27 @@
         },
       ],
     }],
+    ['ozone_platform_wayland==1', {
+      'targets': [
+        {
+          'target_name': 'wayland-egl',
+          'type': 'none',
+          'direct_dependent_settings': {
+            'cflags': [
+              '<!@(<(pkg-config) --cflags wayland-egl)',
+            ],
+          },
+          'link_settings': {
+            'ldflags': [
+              '<!@(<(pkg-config) --libs-only-L --libs-only-other wayland-egl)',
+            ],
+            'libraries': [
+              '<!@(<(pkg-config) --libs-only-l wayland-egl)',
+            ],
+          },
+        },
+      ],
+    }],
     ['use_udev==1', {
       'targets': [
         {
@@ -780,7 +801,14 @@
       'target_name': 'freetype2',
       'type': 'none',
       'conditions': [
-        ['_toolset=="target"', {
+        ['chromecast==1', {
+          'dependencies': [
+            '../../third_party/freetype-android/freetype.gyp:ft2',
+          ],
+          'export_dependent_settings' : [
+            '../../third_party/freetype-android/freetype.gyp:ft2',
+          ],
+        }, '_toolset=="target"', {
           'direct_dependent_settings': {
             'cflags': [
               '<!@(<(pkg-config) --cflags freetype2)',
@@ -1183,29 +1211,29 @@
             ['_toolset=="target"', {
               'direct_dependent_settings': {
                 'cflags': [
-                  '<!@(<(pkg-config) --cflags pangocairo pangoft2)',
+                  '<!@(<(pkg-config) --cflags pangocairo)',
                 ],
               },
               'link_settings': {
                 'ldflags': [
-                  '<!@(<(pkg-config) --libs-only-L --libs-only-other pangocairo pangoft2)',
+                  '<!@(<(pkg-config) --libs-only-L --libs-only-other pangocairo)',
                 ],
                 'libraries': [
-                  '<!@(<(pkg-config) --libs-only-l pangocairo pangoft2)',
+                  '<!@(<(pkg-config) --libs-only-l pangocairo)',
                 ],
               },
             }, {
               'direct_dependent_settings': {
                 'cflags': [
-                  '<!@(<(pkg-config) --cflags pangocairo pangoft2)',
+                  '<!@(<(pkg-config) --cflags pangocairo)',
                 ],
               },
               'link_settings': {
                 'ldflags': [
-                  '<!@(<(pkg-config) --libs-only-L --libs-only-other pangocairo pangoft2)',
+                  '<!@(<(pkg-config) --libs-only-L --libs-only-other pangocairo)',
                 ],
                 'libraries': [
-                  '<!@(<(pkg-config) --libs-only-l pangocairo pangoft2)',
+                  '<!@(<(pkg-config) --libs-only-l pangocairo)',
                 ],
               },
             }],

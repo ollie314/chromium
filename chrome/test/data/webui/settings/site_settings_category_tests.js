@@ -13,28 +13,34 @@ cr.define('site_settings_category', function() {
       var testElement;
 
       /**
+       * The mock proxy object to use during test.
+       * @type {TestSiteSettingsPrefsBrowserProxy}
+       */
+      var browserProxy = null;
+
+      /**
        * An example pref where the location category is disabled.
+       * @type {SiteSettingsPref}
        */
       var prefsLocationDisabled = {
-        profile: {
-          default_content_setting_values: {
-            geolocation: {
-              value: 2,
-            }
-          },
+        defaults: {
+          geolocation: 'block',
+        },
+        exceptions: {
+          geolocation: [],
         },
       };
 
       /**
        * An example pref where the location category is enabled.
+       * @type {SiteSettingsPref}
        */
       var prefsLocationEnabled = {
-        profile: {
-          default_content_setting_values: {
-            geolocation: {
-              value: 3,
-            }
-          }
+        defaults: {
+          geolocation: 'allow',
+        },
+        exceptions: {
+          geolocation: [],
         },
       };
 
@@ -46,48 +52,80 @@ cr.define('site_settings_category', function() {
 
       // Initialize a site-settings-category before each test.
       setup(function() {
+        browserProxy = new TestSiteSettingsPrefsBrowserProxy();
+        settings.SiteSettingsPrefsBrowserProxyImpl.instance_ = browserProxy;
         PolymerTest.clearBody();
         testElement = document.createElement('site-settings-category');
         document.body.appendChild(testElement);
       });
 
-      test('categoryEnabled correctly represents prefs', function() {
+      test('getDefaultValueForContentType API used', function() {
         testElement.category = settings.ContentSettingsTypes.GEOLOCATION;
+        return browserProxy.whenCalled('getDefaultValueForContentType').then(
+            function(contentType) {
+              assertEquals(
+                  settings.ContentSettingsTypes.GEOLOCATION, contentType);
+            });
+      });
 
-        testElement.prefs = prefsLocationEnabled;
-        assertTrue(testElement.categoryEnabled);
-        MockInteractions.tap(testElement.$.toggle);
-        assertFalse(testElement.categoryEnabled);
+      function testCategoryEnabled(testElement, enabled) {
+        browserProxy.setPrefs(
+            enabled ? prefsLocationEnabled : prefsLocationDisabled);
 
-        testElement.prefs = prefsLocationDisabled;
-        assertFalse(testElement.categoryEnabled);
-        MockInteractions.tap(testElement.$.toggle);
-        assertTrue(testElement.categoryEnabled);
+        testElement.category = settings.ContentSettingsTypes.GEOLOCATION;
+        return browserProxy.whenCalled('getDefaultValueForContentType').then(
+          function(contentType) {
+            assertEquals(
+                settings.ContentSettingsTypes.GEOLOCATION, contentType);
+            assertEquals(enabled, testElement.categoryEnabled);
+            MockInteractions.tap(testElement.$.toggle);
+            return browserProxy.whenCalled(
+                'setDefaultValueForContentType').then(
+              function(arguments) {
+                  assertEquals(
+                      settings.ContentSettingsTypes.GEOLOCATION, arguments[0]);
+                assertEquals(
+                    enabled ? settings.PermissionValues.BLOCK :
+                        settings.PermissionValues.ASK,
+                    arguments[1]);
+                assertNotEquals(enabled, testElement.categoryEnabled);
+              });
+          });
+      }
+
+      test('categoryEnabled correctly represents prefs (enabled)', function() {
+        return testCategoryEnabled(testElement, true);
+      });
+
+      test('categoryEnabled correctly represents prefs (disabled)', function() {
+        return testCategoryEnabled(testElement, false);
       });
 
       test('basic category tests', function() {
         for (var key in settings.ContentSettingsTypes) {
           var category = settings.ContentSettingsTypes[key];
 
-          // All categories have a textId, an icon, a title, and pref names.
-          assertNotEquals('', testElement.computeCategoryTextId(category));
+          // All top-level categories must have category text ids and
+          // descriptions. Categories that only appear under Site Details don't
+          // need that.
+          if (category != settings.ContentSettingsTypes.FULLSCREEN) {
+            assertNotEquals('', testElement.computeCategoryTextId(category));
+
+            assertNotEquals(
+                '', testElement.computeCategoryDesc(category, true, true));
+            assertNotEquals(
+                '', testElement.computeCategoryDesc(category, true, false));
+            assertNotEquals(
+                '', testElement.computeCategoryDesc(category, false, true));
+            assertNotEquals(
+                '', testElement.computeCategoryDesc(category, false, false));
+          }
+
+          // All categories have an icon and a title.
           assertNotEquals(
               '', testElement.computeIconForContentCategory(category));
           assertNotEquals(
               '', testElement.computeTitleForContentCategory(category));
-          assertNotEquals(
-              '', testElement.computeCategoryPrefName(category));
-          assertNotEquals(
-              '', testElement.computeCategoryExceptionsPrefName(category));
-
-          assertNotEquals(
-              '', testElement.computeCategoryDesc(category, true, true));
-          assertNotEquals(
-              '', testElement.computeCategoryDesc(category, true, false));
-          assertNotEquals(
-              '', testElement.computeCategoryDesc(category, false, true));
-          assertNotEquals(
-              '', testElement.computeCategoryDesc(category, false, false));
         }
       });
     });

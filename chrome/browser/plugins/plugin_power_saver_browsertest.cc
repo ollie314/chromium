@@ -52,7 +52,7 @@ const int kComparisonHeight = 600;
 // Different platforms have slightly different pixel output, due to different
 // graphics implementations. Slightly different pixels (in BGR space) are still
 // counted as a matching pixel by this simple manhattan distance threshold.
-const int kPixelManhattanDistanceTolerance = 20;
+const int kPixelManhattanDistanceTolerance = 25;
 
 std::string RunTestScript(base::StringPiece test_script,
                           content::WebContents* contents,
@@ -147,10 +147,10 @@ void VerifyPluginMarkedEssential(content::WebContents* contents,
   EXPECT_TRUE(PluginLoaded(contents, element_id));
 }
 
-scoped_ptr<net::test_server::HttpResponse> RespondWithHTML(
+std::unique_ptr<net::test_server::HttpResponse> RespondWithHTML(
     const std::string& html,
     const net::test_server::HttpRequest& request) {
-  scoped_ptr<net::test_server::BasicHttpResponse> response(
+  std::unique_ptr<net::test_server::BasicHttpResponse> response(
       new net::test_server::BasicHttpResponse());
   response->set_content_type("text/html");
   response->set_content(html);
@@ -190,10 +190,10 @@ bool SnapshotMatches(const base::FilePath& reference, const SkBitmap& bitmap) {
   SkAutoLockPixels lock_image(bitmap);
   int32_t* pixels = static_cast<int32_t*>(bitmap.getPixels());
 
-  int stride = bitmap.rowBytes();
+  bool success = true;
   for (int y = 0; y < kComparisonHeight; ++y) {
     for (int x = 0; x < kComparisonWidth; ++x) {
-      int32_t pixel = pixels[y * stride / sizeof(int32_t) + x];
+      int32_t pixel = pixels[y * bitmap.rowBytes() / sizeof(int32_t) + x];
       int pixel_b = pixel & 0xFF;
       int pixel_g = (pixel >> 8) & 0xFF;
       int pixel_r = (pixel >> 16) & 0xFF;
@@ -210,12 +210,12 @@ bool SnapshotMatches(const base::FilePath& reference, const SkBitmap& bitmap) {
       if (manhattan_distance > kPixelManhattanDistanceTolerance) {
         ADD_FAILURE() << "Pixel test failed on (" << x << ", " << y << "). " <<
             "Pixel manhattan distance: " << manhattan_distance << ".";
-        return false;
+        success = false;
       }
     }
   }
 
-  return true;
+  return success;
 }
 
 // |snapshot_matches| is set to true if the snapshot matches the reference and
@@ -230,11 +230,9 @@ void CompareSnapshotToReference(const base::FilePath& reference,
 
   *snapshot_matches = SnapshotMatches(reference, bitmap);
 
-  // When rebaselining the pixel test, the test will fail, and we will
-  // overwrite the reference file. On the next try through, the test will then
-  // pass, since we just overwrote the reference file. A bit wonky.
-  if (!(*snapshot_matches) &&
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
+  // When rebaselining the pixel test, the test may fail. However, the
+  // reference file will still be overwritten.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kRebaselinePixelTests)) {
     SkBitmap clipped_bitmap;
     bitmap.extractSubset(&clipped_bitmap,
@@ -283,11 +281,9 @@ class PluginPowerSaverBrowserTest : public InProcessBrowserTest {
     // Allows us to use the same reference image on HiDPI/Retina displays.
     command_line->AppendSwitchASCII(switches::kForceDeviceScaleFactor, "1");
 
-#if !defined(OS_CHROMEOS)
-    // These pixel tests are flaky on MSan bots with hardware rendering.
-    // However, ChromeOS does not support software compositing.
-    command_line->AppendSwitch(switches::kDisableGpu);
-#endif
+    // The pixel tests run more reliably in software mode.
+    if (PixelTestsEnabled())
+      command_line->AppendSwitch(switches::kDisableGpu);
   }
 
  protected:
@@ -295,7 +291,7 @@ class PluginPowerSaverBrowserTest : public InProcessBrowserTest {
     if (PixelTestsEnabled()) {
       gfx::Rect bounds(gfx::Rect(0, 0, kBrowserWidth, kBrowserHeight));
       gfx::Rect screen_bounds =
-          gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().bounds();
+          gfx::Screen::GetScreen()->GetPrimaryDisplay().bounds();
       ASSERT_GT(screen_bounds.width(), kBrowserWidth);
       ASSERT_GT(screen_bounds.height(), kBrowserHeight);
       browser()->window()->SetBounds(bounds);
@@ -373,10 +369,9 @@ class PluginPowerSaverBrowserTest : public InProcessBrowserTest {
 #if defined(OS_WIN) || defined(ADDRESS_SANITIZER)
     // Flaky on Windows and Asan bots. See crbug.com/549285.
     return false;
-#elif defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)
-    // Because we cannot use hardware OpenGL under MSan, but also cannot use
-    // software rendering under ChromeOS, we skip this portion of the test.
-    // See crbug.com/512140
+#elif defined(OS_CHROMEOS)
+    // Because ChromeOS cannot use software rendering and the pixel tests
+    // continue to flake with hardware acceleration, disable these on ChromeOS.
     return false;
 #else
     return true;
@@ -384,19 +379,45 @@ class PluginPowerSaverBrowserTest : public InProcessBrowserTest {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, SmallSameOrigin) {
+IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, EssentialPlugins) {
   LoadHTML(
-      "<object id='plugin' data='fake.swf' "
+      "<object id='small_same_origin' data='fake.swf' "
       "    type='application/x-ppapi-tests' width='400' height='100'>"
       "</object>"
-      "<object id='plugin_poster' data='fake.swf' poster='click_me.png' "
-      "    type='application/x-ppapi-tests' width='400' height='100'>"
+      "<object id='small_same_origin_poster' data='fake.swf' "
+      "    type='application/x-ppapi-tests' width='400' height='100' "
+      "    poster='click_me.png'>"
+      "</object>"
+      "<object id='tiny_cross_origin_1' data='http://a.com/fake.swf' "
+      "    type='application/x-ppapi-tests' width='3' height='3'>"
+      "</object>"
+      "<object id='tiny_cross_origin_2' data='http://a.com/fake.swf' "
+      "    type='application/x-ppapi-tests' width='1' height='1'>"
+      "</object>"
+      "<object id='large_cross_origin' data='http://b.com/fake.swf' "
+      "    type='application/x-ppapi-tests' width='400' height='500'>"
+      "</object>"
+      "<object id='medium_16_9_cross_origin' data='http://c.com/fake.swf' "
+      "    type='application/x-ppapi-tests' width='480' height='270'>"
       "</object>");
-  VerifyPluginMarkedEssential(GetActiveWebContents(), "plugin");
-  VerifyPluginMarkedEssential(GetActiveWebContents(), "plugin_poster");
+
+  VerifyPluginMarkedEssential(GetActiveWebContents(), "small_same_origin");
+  VerifyPluginMarkedEssential(GetActiveWebContents(),
+                              "small_same_origin_poster");
+  VerifyPluginMarkedEssential(GetActiveWebContents(), "tiny_cross_origin_1");
+  VerifyPluginMarkedEssential(GetActiveWebContents(), "tiny_cross_origin_2");
+  VerifyPluginMarkedEssential(GetActiveWebContents(), "large_cross_origin");
+  VerifyPluginMarkedEssential(GetActiveWebContents(),
+                              "medium_16_9_cross_origin");
 }
 
-IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, SmallCrossOrigin) {
+// Flaky on WebKit Mac dbg bots: crbug.com/599484.
+#if defined(OS_MACOSX)
+#define MAYBE_SmallCrossOrigin DISABLED_SmallCrossOrigin
+#else
+#define MAYBE_SmallCrossOrigin SmallCrossOrigin
+#endif
+IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, MAYBE_SmallCrossOrigin) {
   LoadHTML(
       "<object id='plugin' data='http://otherorigin.com/fake.swf' "
       "    type='application/x-ppapi-tests' width='400' height='100'>"
@@ -415,18 +436,6 @@ IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, SmallCrossOrigin) {
 
   SimulateClickAndAwaitMarkedEssential("plugin", gfx::Point(50, 50));
   SimulateClickAndAwaitMarkedEssential("plugin_poster", gfx::Point(50, 150));
-}
-
-IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, LargeCrossOrigin) {
-  LoadHTML(
-      "<object id='large' data='http://otherorigin.com/fake.swf' "
-      "    type='application/x-ppapi-tests' width='400' height='500'>"
-      "</object>"
-      "<object id='medium_16_9' data='http://otherorigin.com/fake.swf' "
-      "    type='application/x-ppapi-tests' width='480' height='270'>"
-      "</object>");
-  VerifyPluginMarkedEssential(GetActiveWebContents(), "large");
-  VerifyPluginMarkedEssential(GetActiveWebContents(), "medium_16_9");
 }
 
 IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, SmallerThanPlayIcon) {
@@ -449,7 +458,13 @@ IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, SmallerThanPlayIcon) {
       VerifySnapshot(FILE_PATH_LITERAL("smaller_than_play_icon_expected.png")));
 }
 
-IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, PosterTests) {
+// Flaky on WebKit Mac dbg bots: crbug.com/599484.
+#if defined(OS_MACOSX)
+#define MAYBE_PosterTests DISABLED_PosterTests
+#else
+#define MAYBE_PosterTests PosterTests
+#endif
+IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, MAYBE_PosterTests) {
   // This test simultaneously verifies the varied supported poster syntaxes,
   // as well as verifies that the poster is rendered correctly with various
   // mismatched aspect ratios and sizes, following the same rules as VIDEO.
@@ -517,6 +532,9 @@ IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, PosterTests) {
   VerifyPluginIsPosterOnly("poster_obscured");
 
   EXPECT_TRUE(VerifySnapshot(FILE_PATH_LITERAL("poster_tests_expected.png")));
+
+  // Test that posters can be unthrottled via click.
+  SimulateClickAndAwaitMarkedEssential("plugin_src", gfx::Point(50, 50));
 }
 
 IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, LargePostersNotThrottled) {
@@ -542,16 +560,6 @@ IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, LargePostersNotThrottled) {
   VerifyPluginMarkedEssential(GetActiveWebContents(),
                               "plugin_whitelisted_origin");
   VerifyPluginMarkedEssential(GetActiveWebContents(), "poster_large");
-}
-
-IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest,
-                       PluginMarkedEssentialAfterPosterClicked) {
-  LoadHTML(
-      "<object id='plugin' type='application/x-ppapi-tests' "
-      "    width='400' height='100' poster='snapshot1x.png'></object>");
-  VerifyPluginIsPosterOnly("plugin");
-
-  SimulateClickAndAwaitMarkedEssential("plugin", gfx::Point(50, 50));
 }
 
 // Flaky on ASAN bots: crbug.com/560765.

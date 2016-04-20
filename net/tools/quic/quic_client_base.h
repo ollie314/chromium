@@ -8,15 +8,16 @@
 #ifndef NET_TOOLS_QUIC_QUIC_CLIENT_BASE_H_
 #define NET_TOOLS_QUIC_QUIC_CLIENT_BASE_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/base/ip_endpoint.h"
 #include "net/log/net_log.h"
 #include "net/quic/crypto/crypto_handshake.h"
 #include "net/quic/crypto/quic_crypto_client_config.h"
 #include "net/quic/quic_bandwidth.h"
+#include "net/quic/quic_client_push_promise_index.h"
 #include "net/quic/quic_config.h"
 #include "net/quic/quic_connection.h"
 #include "net/quic/quic_packet_writer.h"
@@ -28,8 +29,6 @@ namespace net {
 
 class ProofVerifier;
 class QuicServerId;
-
-namespace tools {
 
 class QuicClientBase {
  public:
@@ -121,6 +120,11 @@ class QuicClientBase {
   // connection.
   void UpdateStats();
 
+  // The number of server config updates received.  We assume no
+  // updates can be sent during a previously, statelessly rejected
+  // connection, so only the latest session is taken into account.
+  int GetNumReceivedServerConfigUpdates();
+
   // Returns any errors that occurred at the connection-level (as
   // opposed to the session-level).  When a stateless reject occurs,
   // the error of the last session may not reflect the overall state
@@ -152,6 +156,12 @@ class QuicClientBase {
 
   ProofVerifier* proof_verifier() const;
 
+  void set_session(QuicClientSession* session) { session_.reset(session); }
+
+  QuicClientPushPromiseIndex* push_promise_index() {
+    return &push_promise_index_;
+  }
+
  protected:
   virtual QuicClientSession* CreateQuicClientSession(
       QuicConnection* connection);
@@ -171,6 +181,14 @@ class QuicClientBase {
 
   QuicConnectionHelperInterface* helper() { return helper_.get(); }
 
+  void set_num_sent_client_hellos(int num_sent_client_hellos) {
+    num_sent_client_hellos_ = num_sent_client_hellos;
+  }
+
+  void set_num_stateless_rejects_received(int num_stateless_rejects_received) {
+    num_stateless_rejects_received_ = num_stateless_rejects_received;
+  }
+
  private:
   // |server_id_| is a tuple (hostname, port, is_https) of the server.
   QuicServerId server_id_;
@@ -181,14 +199,14 @@ class QuicClientBase {
   QuicCryptoClientConfig crypto_config_;
 
   // Helper to be used by created connections. Needs to outlive |session_|.
-  scoped_ptr<QuicConnectionHelperInterface> helper_;
+  std::unique_ptr<QuicConnectionHelperInterface> helper_;
 
   // Writer used to actually send packets to the wire. Needs to outlive
   // |session_|.
-  scoped_ptr<QuicPacketWriter> writer_;
+  std::unique_ptr<QuicPacketWriter> writer_;
 
   // Session which manages streams.
-  scoped_ptr<QuicClientSession> session_;
+  std::unique_ptr<QuicClientSession> session_;
 
   // This vector contains QUIC versions which we currently support.
   // This should be ordered such that the highest supported version is the first
@@ -222,10 +240,11 @@ class QuicClientBase {
   // to the previous client-level connection.
   bool connected_or_attempting_connect_;
 
+  QuicClientPushPromiseIndex push_promise_index_;
+
   DISALLOW_COPY_AND_ASSIGN(QuicClientBase);
 };
 
-}  // namespace tools
 }  // namespace net
 
 #endif  // NET_TOOLS_QUIC_QUIC_CLIENT_BASE_H_

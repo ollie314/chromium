@@ -23,6 +23,7 @@
 #include "base/synchronization/lock.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
+#include "ipc/attachment_broker.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_message.h"
@@ -237,7 +238,7 @@ bool CreateWindowStationAndDesktop(ScopedSid logon_sid,
 
 UnprivilegedProcessDelegate::UnprivilegedProcessDelegate(
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-    scoped_ptr<base::CommandLine> target_command)
+    std::unique_ptr<base::CommandLine> target_command)
     : io_task_runner_(io_task_runner),
       target_command_(std::move(target_command)),
       event_handler_(nullptr) {}
@@ -255,7 +256,7 @@ void UnprivilegedProcessDelegate::LaunchProcess(
 
   event_handler_ = event_handler;
 
-  scoped_ptr<IPC::ChannelProxy> server;
+  std::unique_ptr<IPC::ChannelProxy> server;
 
   // Create a restricted token that will be used to run the worker process.
   ScopedHandle token;
@@ -336,6 +337,9 @@ void UnprivilegedProcessDelegate::LaunchProcess(
   }
 
   channel_ = std::move(server);
+  IPC::AttachmentBroker::GetGlobal()->RegisterCommunicationChannel(
+      channel_.get(), io_task_runner_);
+
   ReportProcessLaunched(std::move(worker_process));
 }
 
@@ -352,13 +356,18 @@ void UnprivilegedProcessDelegate::Send(IPC::Message* message) {
 void UnprivilegedProcessDelegate::CloseChannel() {
   DCHECK(CalledOnValidThread());
 
+  if (!channel_)
+    return;
+
+  IPC::AttachmentBroker::GetGlobal()->DeregisterCommunicationChannel(
+      channel_.get());
   channel_.reset();
 }
 
 void UnprivilegedProcessDelegate::KillProcess() {
   DCHECK(CalledOnValidThread());
 
-  channel_.reset();
+  CloseChannel();
   event_handler_ = nullptr;
 
   if (worker_process_.IsValid()) {
@@ -398,7 +407,7 @@ void UnprivilegedProcessDelegate::OnChannelError() {
 void UnprivilegedProcessDelegate::ReportFatalError() {
   DCHECK(CalledOnValidThread());
 
-  channel_.reset();
+  CloseChannel();
 
   WorkerProcessLauncher* event_handler = event_handler_;
   event_handler_ = nullptr;

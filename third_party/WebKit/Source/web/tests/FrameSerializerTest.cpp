@@ -38,9 +38,10 @@
 #include "public/platform/WebString.h"
 #include "public/platform/WebThread.h"
 #include "public/platform/WebURL.h"
+#include "public/platform/WebURLLoaderMockFactory.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/WebURLResponse.h"
-#include "public/platform/WebUnitTestSupport.h"
+#include "public/web/WebCache.h"
 #include "public/web/WebSettings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "web/WebLocalFrameImpl.h"
@@ -73,7 +74,8 @@ protected:
 
     void TearDown() override
     {
-        Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
+        Platform::current()->getURLLoaderMockFactory()->unregisterAllURLs();
+        WebCache::clear();
     }
 
     void setBaseFolder(const char* folder)
@@ -107,7 +109,7 @@ protected:
         response.setMIMEType("text/html");
         response.setHTTPStatusCode(statusCode);
 
-        Platform::current()->unitTestSupport()->registerMockedErrorURL(KURL(m_baseUrl, file), response, error);
+        Platform::current()->getURLLoaderMockFactory()->registerErrorURL(KURL(m_baseUrl, file), response, error);
     }
 
     void registerRewriteURL(const char* fromURL, const char* toURL)
@@ -117,7 +119,7 @@ protected:
 
     void serialize(const char* url)
     {
-        FrameTestHelpers::loadFrame(m_helper.webView()->mainFrame(), KURL(m_baseUrl, url).string().utf8().data());
+        FrameTestHelpers::loadFrame(m_helper.webView()->mainFrame(), KURL(m_baseUrl, url).getString().utf8().data());
         FrameSerializer serializer(m_resources, *this);
         Frame* frame = m_helper.webViewImpl()->mainFrameImpl()->frame();
         for (; frame; frame = frame->tree().traverseNext()) {
@@ -132,13 +134,13 @@ protected:
         return m_resources;
     }
 
-    const SerializedResource* getResource(const char* url, const char* mimeType)
+    const SerializedResource* getResource(const char* urlString, const char* mimeType)
     {
-        KURL kURL = KURL(m_baseUrl, url);
+        const KURL url(m_baseUrl, urlString);
         String mime(mimeType);
         for (size_t i = 0; i < m_resources.size(); ++i) {
             const SerializedResource& resource = m_resources[i];
-            if (resource.url == kURL && !resource.data->isEmpty()
+            if (resource.url == url && !resource.data->isEmpty()
                 && (mime.isNull() || equalIgnoringCase(resource.mimeType, mime)))
                 return &resource;
         }

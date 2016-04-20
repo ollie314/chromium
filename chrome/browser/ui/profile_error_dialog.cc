@@ -14,7 +14,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 void ShowProfileErrorDialog(ProfileErrorType type, int message_id) {
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if defined(OS_ANDROID)
   NOTIMPLEMENTED();
 #else
   UMA_HISTOGRAM_ENUMERATION("Profile.ProfileError", type, PROFILE_ERROR_END);
@@ -25,10 +25,9 @@ void ShowProfileErrorDialog(ProfileErrorType type, int message_id) {
   static bool is_showing_profile_error_dialog = false;
   if (!is_showing_profile_error_dialog) {
     base::AutoReset<bool> resetter(&is_showing_profile_error_dialog, true);
-    chrome::ShowMessageBox(NULL,
-                           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
-                           l10n_util::GetStringUTF16(message_id),
-                           chrome::MESSAGE_BOX_TYPE_WARNING);
+    chrome::ShowWarningMessageBox(NULL,
+                                  l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
+                                  l10n_util::GetStringUTF16(message_id));
   }
 #endif
 }

@@ -7,13 +7,12 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/quic/quic_packet_writer.h"
 
 namespace net {
-
-namespace tools {
 
 // Wraps a writer object to allow dynamically extending functionality. Use
 // cases: replace writer while dispatcher and connections hold on to the
@@ -28,8 +27,9 @@ class QuicPacketWriterWrapper : public QuicPacketWriter {
   // to |writer_|.
   WriteResult WritePacket(const char* buffer,
                           size_t buf_len,
-                          const IPAddressNumber& self_address,
-                          const IPEndPoint& peer_address) override;
+                          const IPAddress& self_address,
+                          const IPEndPoint& peer_address,
+                          PerPacketOptions* options) override;
   bool IsWriteBlockedDataBuffered() const override;
   bool IsWriteBlocked() const override;
   void SetWritable() override;
@@ -39,12 +39,11 @@ class QuicPacketWriterWrapper : public QuicPacketWriter {
   void set_writer(QuicPacketWriter* writer);
 
  private:
-  scoped_ptr<QuicPacketWriter> writer_;
+  std::unique_ptr<QuicPacketWriter> writer_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicPacketWriterWrapper);
 };
 
-}  // namespace tools
 }  // namespace net
 
 #endif  // NET_TOOLS_QUIC_QUIC_PACKET_WRITER_WRAPPER_H_

@@ -7,34 +7,32 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/containers/hash_tables.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "chrome/browser/android/data_usage/tab_data_use_entry.h"
 #include "components/sessions/core/session_id.h"
+#include "url/gurl.h"
 
 namespace base {
 class SingleThreadTaskRunner;
 class TickClock;
 }
 
-class GURL;
-
 namespace chrome {
 
 namespace android {
 
 class DataUseMatcher;
-class ExternalDataUseObserver;
+class ExternalDataUseObserverBridge;
 
 // Models tracking and labeling of data usage within each Tab. Within each tab,
 // the model tracks the data use of a sequence of navigations in a "tracking
@@ -85,11 +83,13 @@ class DataUseTabModel {
 
   DataUseTabModel();
 
-  // Initializes |this| on UI thread. |external_data_use_observer| is the weak
-  // pointer to ExternalDataUseObserver object that owns |this|.
+  // Initializes |this| on UI thread. |external_data_use_observer_bridge| is the
+  // pointer to ExternalDataUseObserverBridge object. DataUseTabModel and
+  // ExternalDataUseObserverBridge objects are owned by ExternalDataUseObserver
+  // and DataUseTabModel is destroyed first followed by
+  // ExternalDataUseObserverBridge.
   void InitOnUIThread(
-      const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
-      const base::WeakPtr<ExternalDataUseObserver>& external_data_use_observer);
+      const ExternalDataUseObserverBridge* external_data_use_observer_bridge);
 
   virtual ~DataUseTabModel();
 
@@ -110,7 +110,8 @@ class DataUseTabModel {
   void OnTabCloseEvent(SessionID::id_type tab_id);
 
   // Notifies the DataUseTabModel that tracking label |label| is removed. Any
-  // active tracking sessions with the label are ended.
+  // active tracking sessions with the label are ended, without notifying any of
+  // the TabDataUseObserver.
   virtual void OnTrackingLabelRemoved(std::string label);
 
   // Gets the label for the tab with id |tab_id| at time |timestamp|.
@@ -140,8 +141,9 @@ class DataUseTabModel {
                           const std::vector<std::string>& domain_path_regex,
                           const std::vector<std::string>& label);
 
-  // Notifies the DataUseTabModel that the external control app is installed.
-  void OnControlAppInstalled();
+  // Notifies the DataUseTabModel that the external control app is installed or
+  // uninstalled. |is_control_app_installed| is true if app is installed.
+  void OnControlAppInstallStateChange(bool is_control_app_installed);
 
   // Returns the maximum number of tracking sessions to maintain per tab.
   size_t max_sessions_per_tab() const { return max_sessions_per_tab_; }
@@ -173,6 +175,7 @@ class DataUseTabModel {
 
  private:
   friend class DataUseTabModelTest;
+  friend class ExternalDataUseObserverTest;
   friend class TabDataUseEntryTest;
   friend class TestDataUseTabModel;
   FRIEND_TEST_ALL_PREFIXES(DataUseTabModelTest,
@@ -180,16 +183,44 @@ class DataUseTabModel {
   FRIEND_TEST_ALL_PREFIXES(DataUseTabModelTest,
                            ExpiredInactiveTabEntryRemovaltimeHistogram);
   FRIEND_TEST_ALL_PREFIXES(DataUseTabModelTest,
+                           MatchingRuleClearedOnControlAppUninstall);
+  FRIEND_TEST_ALL_PREFIXES(DataUseTabModelTest,
                            MultipleObserverMultipleStartEndEvents);
   FRIEND_TEST_ALL_PREFIXES(DataUseTabModelTest, ObserverStartEndEvents);
+  FRIEND_TEST_ALL_PREFIXES(DataUseTabModelTest,
+                           ProcessBufferedNavigationEventsAfterRuleFetch);
   FRIEND_TEST_ALL_PREFIXES(DataUseTabModelTest, TabCloseEvent);
   FRIEND_TEST_ALL_PREFIXES(DataUseTabModelTest, TabCloseEventEndsTracking);
   FRIEND_TEST_ALL_PREFIXES(DataUseTabModelTest,
                            UnexpiredTabEntryRemovaltimeHistogram);
   FRIEND_TEST_ALL_PREFIXES(ExternalDataUseObserverTest,
                            MatchingRuleFetchOnControlAppInstall);
+  FRIEND_TEST_ALL_PREFIXES(
+      ExternalDataUseObserverTest,
+      ProcessBufferedNavigationEventsAfterControlAppNotInstalled);
+  FRIEND_TEST_ALL_PREFIXES(ExternalDataUseObserverTest,
+                           ProcessBufferedNavigationEventsAfterRuleFetch);
+  FRIEND_TEST_ALL_PREFIXES(ExternalDataUseObserverTest,
+                           ProcessBufferedNavigationEventsAfterMaxLimit);
 
   typedef base::hash_map<SessionID::id_type, TabDataUseEntry> TabEntryMap;
+
+  // Contains the details of a single UI navigation event.
+  struct DataUseUINavigationEvent {
+    DataUseUINavigationEvent(SessionID::id_type tab_id,
+                             TransitionType transition_type,
+                             GURL url,
+                             std::string package)
+        : tab_id(tab_id),
+          transition_type(transition_type),
+          url(url),
+          package(package) {}
+
+    const SessionID::id_type tab_id;
+    const TransitionType transition_type;
+    const GURL url;
+    const std::string package;
+  };
 
   // Gets the current label of a tab, and the new label if a navigation event
   // occurs in the tab. |tab_id| is the source tab of the generated event,
@@ -226,6 +257,11 @@ class DataUseTabModel {
   // size is |kMaxTabEntries|.
   void CompactTabEntries();
 
+  // Processes the UI navigation events buffered in |data_use_ui_navigations_|
+  // and deletes the vector in |data_use_ui_navigations_| so that navigation
+  // events will not be buffered any more.
+  void ProcessBufferedNavigationEvents();
+
   // Collection of observers that receive tracking session start and end
   // notifications. Notifications are posted on UI thread.
   base::ObserverList<TabDataUseObserver> observers_;
@@ -245,13 +281,23 @@ class DataUseTabModel {
   const base::TimeDelta open_tab_expiration_duration_;
 
   // TickClock used for obtaining the current time.
-  scoped_ptr<base::TickClock> tick_clock_;
+  std::unique_ptr<base::TickClock> tick_clock_;
 
   // Stores the matching patterns.
-  scoped_ptr<DataUseMatcher> data_use_matcher_;
+  std::unique_ptr<DataUseMatcher> data_use_matcher_;
 
   // True if the external control app is installed.
   bool is_control_app_installed_;
+
+  // Buffer of UI navigation events that occurred until the first rule fetch is
+  // complete or the control app not installed callback was received or until
+  // |kDefaultMaxNavigationEventsBuffered| navigation events were buffered,
+  // whichever occurs first. Existence of the vector in scoped_ptr indicates if
+  // the UI navigation events need to be buffered. If the scoped_ptr contains a
+  // vector all navigation events will be added to it. Otherwise all navigation
+  // events will be processed immediately.
+  std::unique_ptr<std::vector<DataUseUINavigationEvent>>
+      data_use_ui_navigations_;
 
   base::ThreadChecker thread_checker_;
 

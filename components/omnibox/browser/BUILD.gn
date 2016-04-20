@@ -50,6 +50,7 @@ source_set("browser") {
     "keyword_extensions_delegate.h",
     "keyword_provider.cc",
     "keyword_provider.h",
+    "match_compare.h",
     "omnibox_client.h",
     "omnibox_controller.cc",
     "omnibox_controller.h",
@@ -105,19 +106,19 @@ source_set("browser") {
   public_deps = [
     "//components/history/core/browser",
     "//components/metrics/proto",
+    "//components/omnibox/common",
   ]
   deps = [
     ":in_memory_url_index_cache_proto",
     "//base",
     "//base:i18n",
-    "//base:prefs",
     "//components/bookmarks/browser",
     "//components/data_use_measurement/core",
     "//components/keyed_service/core",
     "//components/metrics",
-    "//components/omnibox/common",
     "//components/open_from_clipboard",
     "//components/pref_registry",
+    "//components/prefs",
     "//components/query_parser",
     "//components/resources",
     "//components/search",
@@ -142,6 +143,13 @@ source_set("browser") {
 }
 
 if (is_android) {
+  # GYP: //component/omnibox.gypi:autocomplete_match_java
+  java_cpp_enum("autocomplete_match_javagen") {
+    sources = [
+      "autocomplete_match.h",
+    ]
+  }
+
   # GYP: //component/omnibox.gypi:autocomplete_match_type_java
   java_cpp_enum("autocomplete_match_type_javagen") {
     sources = [
@@ -159,8 +167,14 @@ proto_library("in_memory_url_index_cache_proto") {
 static_library("test_support") {
   testonly = true
   sources = [
+    "history_index_restore_observer.cc",
+    "history_index_restore_observer.h",
+    "in_memory_url_index_test_util.cc",
+    "in_memory_url_index_test_util.h",
     "mock_autocomplete_provider_client.cc",
     "mock_autocomplete_provider_client.h",
+    "shortcuts_provider_test_util.cc",
+    "shortcuts_provider_test_util.h",
     "test_scheme_classifier.cc",
     "test_scheme_classifier.h",
   ]
@@ -168,10 +182,27 @@ static_library("test_support") {
   deps = [
     ":browser",
     "//base",
+    "//components/history/core/browser",
     "//components/metrics/proto",
     "//components/search_engines",
     "//net",
     "//testing/gmock",
+    "//testing/gtest",
+  ]
+}
+
+bundle_data("unit_tests_bundle_data") {
+  visibility = [ ":unit_tests" ]
+  testonly = true
+  sources = [
+    "//components/test/data/omnibox/Shortcuts.no_fill_into_edit.sql",
+    "//components/test/data/omnibox/Shortcuts.v0.sql",
+    "//components/test/data/omnibox/in_memory_url_index_test.db.txt",
+    "//components/test/data/omnibox/in_memory_url_index_test_limited.db.txt",
+  ]
+  outputs = [
+    "{{bundle_resources_dir}}/" +
+        "{{source_root_relative_dir}}/{{source_file_part}}",
   ]
 }
 
@@ -185,14 +216,21 @@ source_set("unit_tests") {
     "autocomplete_result_unittest.cc",
     "base_search_provider_unittest.cc",
     "bookmark_provider_unittest.cc",
+    "builtin_provider_unittest.cc",
     "clipboard_url_provider_unittest.cc",
+    "history_quick_provider_unittest.cc",
+    "history_url_provider_unittest.cc",
     "in_memory_url_index_types_unittest.cc",
+    "in_memory_url_index_unittest.cc",
     "keyword_provider_unittest.cc",
+    "omnibox_edit_unittest.cc",
     "omnibox_field_trial_unittest.cc",
     "omnibox_popup_model_unittest.cc",
     "omnibox_view_unittest.cc",
     "scored_history_match_unittest.cc",
+    "shortcuts_backend_unittest.cc",
     "shortcuts_database_unittest.cc",
+    "shortcuts_provider_unittest.cc",
     "suggestion_answer_unittest.cc",
     "zero_suggest_provider_unittest.cc",
   ]
@@ -200,14 +238,19 @@ source_set("unit_tests") {
   deps = [
     ":browser",
     ":test_support",
+    ":unit_tests_bundle_data",
     "//base",
-    "//base:prefs",
-    "//base:prefs_test_support",
+    "//base/test:test_support",
     "//components/bookmarks/browser",
     "//components/bookmarks/test",
+    "//components/history/core/test",
     "//components/open_from_clipboard:test_support",
+    "//components/prefs:test_support",
     "//components/search",
     "//components/search_engines",
+    "//components/sessions",
+    "//components/toolbar:test_support",
+    "//components/url_formatter",
     "//components/variations",
     "//net:test_support",
     "//sql",

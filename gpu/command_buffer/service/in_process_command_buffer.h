@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "base/atomic_sequence_num.h"
@@ -17,13 +18,15 @@
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "gpu/command_buffer/client/gpu_control.h"
 #include "gpu/command_buffer/common/command_buffer.h"
+#include "gpu/command_buffer/service/gpu_preferences.h"
+#include "gpu/config/gpu_driver_bug_workarounds.h"
 #include "gpu/gpu_export.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/native_widget_types.h"
@@ -40,15 +43,6 @@ class GLShareGroup;
 class GLSurface;
 class Size;
 }
-
-#if defined(OS_ANDROID)
-namespace gfx {
-class SurfaceTexture;
-}
-namespace gpu {
-class StreamTextureManagerInProcess;
-}
-#endif
 
 namespace gpu {
 class SyncPointClient;
@@ -67,7 +61,7 @@ class SubscriptionRefSet;
 
 class CommandBufferServiceBase;
 class GpuMemoryBufferManager;
-class GpuScheduler;
+class CommandExecutor;
 class ImageFactory;
 class TransferBufferManagerInterface;
 
@@ -82,7 +76,7 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   explicit InProcessCommandBuffer(const scoped_refptr<Service>& service);
   ~InProcessCommandBuffer() override;
 
-  // If |surface| is not NULL, use it directly; in this case, the command
+  // If |surface| is not null, use it directly; in this case, the command
   // buffer gpu thread must be the same as the client thread. Otherwise create
   // a new GLSurface.
   bool Initialize(scoped_refptr<gfx::GLSurface> surface,
@@ -91,11 +85,9 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
                   const gfx::Size& size,
                   const std::vector<int32_t>& attribs,
                   gfx::GpuPreference gpu_preference,
-                  const base::Closure& context_lost_callback,
                   InProcessCommandBuffer* share_group,
                   GpuMemoryBufferManager* gpu_memory_buffer_manager,
                   ImageFactory* image_factory);
-  void Destroy();
 
   // CommandBuffer implementation:
   bool Initialize() override;
@@ -112,6 +104,8 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   gpu::error::Error GetLastError() override;
 
   // GpuControl implementation:
+  // NOTE: The GpuControlClient will be called on the client thread.
+  void SetGpuControlClient(GpuControlClient*) override;
   gpu::Capabilities GetCapabilities() override;
   int32_t CreateImage(ClientBuffer buffer,
                       size_t width,
@@ -122,17 +116,12 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
                                      size_t height,
                                      unsigned internalformat,
                                      unsigned usage) override;
-  uint32_t InsertSyncPoint() override;
-  uint32_t InsertFutureSyncPoint() override;
-  void RetireSyncPoint(uint32_t sync_point) override;
-  void SignalSyncPoint(uint32_t sync_point,
-                       const base::Closure& callback) override;
   void SignalQuery(uint32_t query_id, const base::Closure& callback) override;
   void SetLock(base::Lock*) override;
   bool IsGpuChannelLost() override;
   void EnsureWorkVisible() override;
   CommandBufferNamespace GetNamespaceID() const override;
-  uint64_t GetCommandBufferID() const override;
+  CommandBufferId GetCommandBufferID() const override;
   int32_t GetExtraCommandBufferData() const override;
   uint64_t GenerateFenceSyncRelease() override;
   bool IsFenceSyncRelease(uint64_t release) override;
@@ -146,6 +135,7 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   class Service {
    public:
     Service();
+    Service(const gpu::GpuPreferences& gpu_preferences);
     virtual ~Service();
 
     virtual void AddRef() const = 0;
@@ -164,6 +154,8 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
     virtual scoped_refptr<gles2::FramebufferCompletenessCache>
     framebuffer_completeness_cache() = 0;
     virtual SyncPointManager* sync_point_manager() = 0;
+    const GpuPreferences& gpu_preferences();
+    const GpuDriverBugWorkarounds& gpu_driver_bug_workarounds();
     scoped_refptr<gfx::GLShareGroup> share_group();
     scoped_refptr<gles2::MailboxManager> mailbox_manager();
     scoped_refptr<gles2::SubscriptionRefSet> subscription_ref_set();
@@ -171,17 +163,14 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
     gpu::gles2::ProgramCache* program_cache();
 
    private:
+    const GpuPreferences gpu_preferences_;
+    const GpuDriverBugWorkarounds gpu_driver_bug_workarounds_;
     scoped_refptr<gfx::GLShareGroup> share_group_;
     scoped_refptr<gles2::MailboxManager> mailbox_manager_;
     scoped_refptr<gles2::SubscriptionRefSet> subscription_ref_set_;
     scoped_refptr<gpu::ValueStateMap> pending_valuebuffer_state_;
-    scoped_ptr<gpu::gles2::ProgramCache> program_cache_;
+    std::unique_ptr<gpu::gles2::ProgramCache> program_cache_;
   };
-
-#if defined(OS_ANDROID)
-  scoped_refptr<gfx::SurfaceTexture> GetSurfaceTexture(uint32_t stream_id);
-  uint32_t CreateStreamTexture(uint32_t texture_id);
-#endif
 
  private:
   struct InitializeOnGpuThreadParams {
@@ -213,20 +202,18 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   };
 
   bool InitializeOnGpuThread(const InitializeOnGpuThreadParams& params);
+  void Destroy();
   bool DestroyOnGpuThread();
   void FlushOnGpuThread(int32_t put_offset, uint32_t order_num);
   void ScheduleDelayedWorkOnGpuThread();
-  uint32_t CreateStreamTextureOnGpuThread(uint32_t client_texture_id);
   bool MakeCurrent();
   base::Closure WrapCallback(const base::Closure& callback);
   State GetStateFast();
   void QueueTask(const base::Closure& task) { service_->ScheduleTask(task); }
   void CheckSequencedThread();
-  void RetireSyncPointOnGpuThread(uint32_t sync_point);
-  bool WaitSyncPointOnGpuThread(uint32_t sync_point);
   void FenceSyncReleaseOnGpuThread(uint64_t release);
   bool WaitFenceSyncOnGpuThread(gpu::CommandBufferNamespace namespace_id,
-                                uint64_t command_buffer_id,
+                                gpu::CommandBufferId command_buffer_id,
                                 uint64_t release);
   void SignalSyncTokenOnGpuThread(const SyncToken& sync_token,
                                   const base::Closure& callback);
@@ -242,29 +229,35 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   void DestroyImageOnGpuThread(int32_t id);
   void SetGetBufferOnGpuThread(int32_t shm_id, base::WaitableEvent* completion);
 
-  // Callbacks:
+  // Callbacks on the gpu thread.
+  void OnContextLostOnGpuThread();
+  void PumpCommandsOnGpuThread();
+  void PerformDelayedWorkOnGpuThread();
+  // Callback implementations on the client thread.
   void OnContextLost();
-  bool GetBufferChanged(int32_t transfer_buffer_id);
-  void PumpCommands();
-  void PerformDelayedWork();
 
-  const uint64_t command_buffer_id_;
+  const CommandBufferId command_buffer_id_;
 
   // Members accessed on the gpu thread (possibly with the exception of
   // creation):
-  bool context_lost_;
+  scoped_refptr<base::SingleThreadTaskRunner> origin_task_runner_;
   scoped_refptr<TransferBufferManagerInterface> transfer_buffer_manager_;
-  scoped_ptr<GpuScheduler> gpu_scheduler_;
-  scoped_ptr<gles2::GLES2Decoder> decoder_;
+  std::unique_ptr<CommandExecutor> executor_;
+  std::unique_ptr<gles2::GLES2Decoder> decoder_;
   scoped_refptr<gfx::GLContext> context_;
   scoped_refptr<gfx::GLSurface> surface_;
   scoped_refptr<SyncPointOrderData> sync_point_order_data_;
-  scoped_ptr<SyncPointClient> sync_point_client_;
+  std::unique_ptr<SyncPointClient> sync_point_client_;
   base::Closure context_lost_callback_;
-  bool delayed_work_pending_;  // Used to throttle PerformDelayedWork.
+  // Used to throttle PerformDelayedWorkOnGpuThread.
+  bool delayed_work_pending_;
   ImageFactory* image_factory_;
 
   // Members accessed on the client thread:
+  GpuControlClient* gpu_control_client_;
+#if DCHECK_IS_ON()
+  bool context_lost_;
+#endif
   State last_state_;
   int32_t last_put_offset_;
   gpu::Capabilities capabilities_;
@@ -274,7 +267,7 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   uint64_t flushed_fence_sync_release_;
 
   // Accessed on both threads:
-  scoped_ptr<CommandBufferServiceBase> command_buffer_;
+  std::unique_ptr<CommandBufferServiceBase> command_buffer_;
   base::Lock command_buffer_lock_;
   base::WaitableEvent flush_event_;
   scoped_refptr<Service> service_;
@@ -283,15 +276,13 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   scoped_refptr<gfx::GLShareGroup> gl_share_group_;
   base::WaitableEvent fence_sync_wait_event_;
 
-#if defined(OS_ANDROID)
-  scoped_ptr<StreamTextureManagerInProcess> stream_texture_manager_;
-#endif
-
   // Only used with explicit scheduling and the gpu thread is the same as
   // the client thread.
-  scoped_ptr<base::SequenceChecker> sequence_checker_;
+  std::unique_ptr<base::SequenceChecker> sequence_checker_;
 
+  base::WeakPtr<InProcessCommandBuffer> client_thread_weak_ptr_;
   base::WeakPtr<InProcessCommandBuffer> gpu_thread_weak_ptr_;
+  base::WeakPtrFactory<InProcessCommandBuffer> client_thread_weak_ptr_factory_;
   base::WeakPtrFactory<InProcessCommandBuffer> gpu_thread_weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(InProcessCommandBuffer);

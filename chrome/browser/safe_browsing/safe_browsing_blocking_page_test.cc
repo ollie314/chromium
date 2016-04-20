@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
@@ -24,7 +23,6 @@
 #include "chrome/browser/safe_browsing/local_database_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "chrome/browser/safe_browsing/threat_details.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -35,8 +33,10 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/prefs/pref_service.h"
 #include "components/safe_browsing_db/database_manager.h"
 #include "components/safe_browsing_db/test_database_manager.h"
+#include "components/safe_browsing_db/util.h"
 #include "components/security_interstitials/core/controller_client.h"
 #include "components/security_interstitials/core/metrics_helper.h"
 #include "content/public/browser/interstitial_page.h"
@@ -510,7 +510,7 @@ class SafeBrowsingBlockingPageBrowserTest
     if (!rfh)
       return VISIBILITY_ERROR;
 
-    scoped_ptr<base::Value> value = content::ExecuteScriptAndGetValue(
+    std::unique_ptr<base::Value> value = content::ExecuteScriptAndGetValue(
         rfh, "var node = document.getElementById('" + node_id +
                  "');\n"
                  "if (node)\n"

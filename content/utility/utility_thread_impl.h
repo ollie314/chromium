@@ -5,18 +5,18 @@
 #ifndef CONTENT_UTILITY_UTILITY_THREAD_IMPL_H_
 #define CONTENT_UTILITY_UTILITY_THREAD_IMPL_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "content/child/child_thread_impl.h"
 #include "content/common/content_export.h"
 #include "content/common/process_control.mojom.h"
 #include "content/public/utility/utility_thread.h"
-#include "mojo/common/weak_binding_set.h"
+#include "mojo/public/cpp/bindings/binding_set.h"
 
 namespace base {
 class FilePath;
@@ -56,23 +56,19 @@ class UtilityThreadImpl : public UtilityThread,
   void OnBatchModeStarted();
   void OnBatchModeFinished();
 
-#if defined(OS_POSIX) && defined(ENABLE_PLUGINS)
-  void OnLoadPlugins(const std::vector<base::FilePath>& plugin_paths);
-#endif
-
   void BindProcessControlRequest(
-      mojo::InterfaceRequest<content::ProcessControl> request);
+      mojo::InterfaceRequest<content::mojom::ProcessControl> request);
 
   // True when we're running in batch mode.
   bool batch_mode_;
 
-  scoped_ptr<UtilityBlinkPlatformImpl> blink_platform_impl_;
+  std::unique_ptr<UtilityBlinkPlatformImpl> blink_platform_impl_;
 
   // Process control for Mojo application hosting.
-  scoped_ptr<UtilityProcessControlImpl> process_control_;
+  std::unique_ptr<UtilityProcessControlImpl> process_control_;
 
-  // Bindings to the ProcessControl impl.
-  mojo::WeakBindingSet<ProcessControl> process_control_bindings_;
+  // Bindings to the mojom::ProcessControl impl.
+  mojo::BindingSet<mojom::ProcessControl> process_control_bindings_;
 
   DISALLOW_COPY_AND_ASSIGN(UtilityThreadImpl);
 };

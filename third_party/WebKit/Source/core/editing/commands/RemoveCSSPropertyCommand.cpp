@@ -33,20 +33,20 @@
 
 namespace blink {
 
-RemoveCSSPropertyCommand::RemoveCSSPropertyCommand(Document& document, PassRefPtrWillBeRawPtr<Element> element, CSSPropertyID property)
+RemoveCSSPropertyCommand::RemoveCSSPropertyCommand(Document& document, Element* element, CSSPropertyID property)
     : SimpleEditCommand(document)
     , m_element(element)
     , m_property(property)
     , m_important(false)
 {
-    ASSERT(m_element);
+    DCHECK(m_element);
 }
 
 RemoveCSSPropertyCommand::~RemoveCSSPropertyCommand()
 {
 }
 
-void RemoveCSSPropertyCommand::doApply()
+void RemoveCSSPropertyCommand::doApply(EditingState*)
 {
     const StylePropertySet* style = m_element->inlineStyle();
     if (!style)

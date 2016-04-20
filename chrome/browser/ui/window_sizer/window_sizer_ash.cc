@@ -7,6 +7,7 @@
 #include "ash/shell.h"
 #include "ash/wm/window_positioner.h"
 #include "ash/wm/window_state.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "ui/aura/window.h"
@@ -15,8 +16,7 @@
 
 bool WindowSizer::GetBrowserBoundsAsh(gfx::Rect* bounds,
                                       ui::WindowShowState* show_state) const {
-  if (!browser_ ||
-      browser_->host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH)
+  if (!chrome::ShouldOpenAshOnStartup() || !browser_)
     return false;
 
   bool determined = false;
@@ -109,10 +109,6 @@ void WindowSizer::GetTabbedBrowserBoundsAsh(
       browser_->window() ? browser_->window()->GetNativeWindow() : NULL;
 
   ash::WindowPositioner::GetBoundsAndShowStateForNewWindow(
-      screen_,
-      browser_window,
-      is_saved_bounds,
-      passed_show_state,
-      bounds_in_screen,
-      show_state);
+      ash::wm::WmWindowAura::Get(browser_window), is_saved_bounds,
+      passed_show_state, bounds_in_screen, show_state);
 }

@@ -11,9 +11,9 @@
 
 namespace blink {
 
-PassOwnPtrWillBeRawPtr<HTMLImportTreeRoot> HTMLImportTreeRoot::create(Document* document)
+HTMLImportTreeRoot* HTMLImportTreeRoot::create(Document* document)
 {
-    return adoptPtrWillBeNoop(new HTMLImportTreeRoot(document));
+    return new HTMLImportTreeRoot(document);
 }
 
 HTMLImportTreeRoot::HTMLImportTreeRoot(Document* document)
@@ -26,9 +26,6 @@ HTMLImportTreeRoot::HTMLImportTreeRoot(Document* document)
 
 HTMLImportTreeRoot::~HTMLImportTreeRoot()
 {
-#if !ENABLE(OILPAN)
-    dispose();
-#endif
 }
 
 void HTMLImportTreeRoot::dispose()
@@ -67,18 +64,13 @@ void HTMLImportTreeRoot::stateDidChange()
 
 void HTMLImportTreeRoot::scheduleRecalcState()
 {
-#if ENABLE(OILPAN)
     ASSERT(m_document);
     if (m_recalcTimer.isActive() || !m_document->isActive())
         return;
-#else
-    if (m_recalcTimer.isActive() || !m_document)
-        return;
-#endif
     m_recalcTimer.startOneShot(0, BLINK_FROM_HERE);
 }
 
-HTMLImportChild* HTMLImportTreeRoot::add(PassOwnPtrWillBeRawPtr<HTMLImportChild> child)
+HTMLImportChild* HTMLImportTreeRoot::add(HTMLImportChild* child)
 {
     m_imports.append(child);
     return m_imports.last().get();
@@ -98,7 +90,6 @@ HTMLImportChild* HTMLImportTreeRoot::find(const KURL& url) const
 void HTMLImportTreeRoot::recalcTimerFired(Timer<HTMLImportTreeRoot>*)
 {
     ASSERT(m_document);
-    RefPtrWillBeRawPtr<Document> protectDocument(m_document.get());
     HTMLImport::recalcTreeState(this);
 }
 
@@ -109,4 +100,4 @@ DEFINE_TRACE(HTMLImportTreeRoot)
     HTMLImport::trace(visitor);
 }
 
-}
+} // namespace blink

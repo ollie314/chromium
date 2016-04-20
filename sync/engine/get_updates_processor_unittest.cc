@@ -28,7 +28,7 @@ namespace syncer {
 
 namespace {
 
-scoped_ptr<InvalidationInterface> BuildInvalidation(
+std::unique_ptr<InvalidationInterface> BuildInvalidation(
     int64_t version,
     const std::string& payload) {
   return MockInvalidation::Build(version, payload);
@@ -55,9 +55,9 @@ class GetUpdatesProcessorTest : public ::testing::Test {
     return enabled_types_;
   }
 
-  scoped_ptr<GetUpdatesProcessor> BuildGetUpdatesProcessor(
+  std::unique_ptr<GetUpdatesProcessor> BuildGetUpdatesProcessor(
       const GetUpdatesDelegate& delegate) {
-    return scoped_ptr<GetUpdatesProcessor>(
+    return std::unique_ptr<GetUpdatesProcessor>(
         new GetUpdatesProcessor(&update_handler_map_, delegate));
   }
 
@@ -78,13 +78,6 @@ class GetUpdatesProcessorTest : public ::testing::Test {
     response->set_changes_remaining(0);
   }
 
-  const UpdateHandler* GetHandler(ModelType type) {
-    UpdateHandlerMap::iterator it = update_handler_map_.find(type);
-    if (it == update_handler_map_.end())
-      return NULL;
-    return it->second;
-  }
-
   const base::TimeTicks kTestStartTime;
 
  protected:
@@ -101,7 +94,7 @@ class GetUpdatesProcessorTest : public ::testing::Test {
   ModelTypeSet enabled_types_;
   UpdateHandlerMap update_handler_map_;
   STLValueDeleter<UpdateHandlerMap> update_handler_deleter_;
-  scoped_ptr<GetUpdatesProcessor> get_updates_processor_;
+  std::unique_ptr<GetUpdatesProcessor> get_updates_processor_;
 
   DISALLOW_COPY_AND_ASSIGN(GetUpdatesProcessorTest);
 };
@@ -113,7 +106,7 @@ TEST_F(GetUpdatesProcessorTest, BookmarkNudge) {
 
   sync_pb::ClientToServerMessage message;
   NormalGetUpdatesDelegate normal_delegate(nudge_tracker);
-  scoped_ptr<GetUpdatesProcessor> processor(
+  std::unique_ptr<GetUpdatesProcessor> processor(
       BuildGetUpdatesProcessor(normal_delegate));
   processor->PrepareGetUpdates(enabled_types(), &message);
 
@@ -161,7 +154,7 @@ TEST_F(GetUpdatesProcessorTest, NotifyMany) {
 
   sync_pb::ClientToServerMessage message;
   NormalGetUpdatesDelegate normal_delegate(nudge_tracker);
-  scoped_ptr<GetUpdatesProcessor> processor(
+  std::unique_ptr<GetUpdatesProcessor> processor(
       BuildGetUpdatesProcessor(normal_delegate));
   processor->PrepareGetUpdates(enabled_types(), &message);
 
@@ -201,7 +194,7 @@ TEST_F(GetUpdatesProcessorTest, InitialSyncRequest) {
 
   sync_pb::ClientToServerMessage message;
   NormalGetUpdatesDelegate normal_delegate(nudge_tracker);
-  scoped_ptr<GetUpdatesProcessor> processor(
+  std::unique_ptr<GetUpdatesProcessor> processor(
       BuildGetUpdatesProcessor(normal_delegate));
   processor->PrepareGetUpdates(enabled_types(), &message);
 
@@ -233,7 +226,7 @@ TEST_F(GetUpdatesProcessorTest, ConfigureTest) {
   sync_pb::ClientToServerMessage message;
   ConfigureGetUpdatesDelegate configure_delegate(
       sync_pb::GetUpdatesCallerInfo::RECONFIGURATION);
-  scoped_ptr<GetUpdatesProcessor> processor(
+  std::unique_ptr<GetUpdatesProcessor> processor(
       BuildGetUpdatesProcessor(configure_delegate));
   processor->PrepareGetUpdates(enabled_types(), &message);
 
@@ -254,7 +247,7 @@ TEST_F(GetUpdatesProcessorTest, ConfigureTest) {
 TEST_F(GetUpdatesProcessorTest, PollTest) {
   sync_pb::ClientToServerMessage message;
   PollGetUpdatesDelegate poll_delegate;
-  scoped_ptr<GetUpdatesProcessor> processor(
+  std::unique_ptr<GetUpdatesProcessor> processor(
       BuildGetUpdatesProcessor(poll_delegate));
   processor->PrepareGetUpdates(enabled_types(), &message);
 
@@ -284,7 +277,7 @@ TEST_F(GetUpdatesProcessorTest, RetryTest) {
 
   sync_pb::ClientToServerMessage message;
   NormalGetUpdatesDelegate normal_delegate(nudge_tracker);
-  scoped_ptr<GetUpdatesProcessor> processor(
+  std::unique_ptr<GetUpdatesProcessor> processor(
       BuildGetUpdatesProcessor(normal_delegate));
   processor->PrepareGetUpdates(enabled_types(), &message);
 
@@ -318,7 +311,7 @@ TEST_F(GetUpdatesProcessorTest, NudgeWithRetryTest) {
 
   sync_pb::ClientToServerMessage message;
   NormalGetUpdatesDelegate normal_delegate(nudge_tracker);
-  scoped_ptr<GetUpdatesProcessor> processor(
+  std::unique_ptr<GetUpdatesProcessor> processor(
       BuildGetUpdatesProcessor(normal_delegate));
   processor->PrepareGetUpdates(enabled_types(), &message);
 
@@ -342,7 +335,7 @@ TEST_F(GetUpdatesProcessorTest, InvalidResponse) {
   sessions::NudgeTracker nudge_tracker;
   NormalGetUpdatesDelegate normal_delegate(nudge_tracker);
   sessions::StatusController status;
-  scoped_ptr<GetUpdatesProcessor> processor(
+  std::unique_ptr<GetUpdatesProcessor> processor(
       BuildGetUpdatesProcessor(normal_delegate));
   SyncerError error = processor->ProcessResponse(gu_response,
                                                  enabled_types(),
@@ -359,7 +352,7 @@ TEST_F(GetUpdatesProcessorTest, MoreToDownloadResponse) {
   sessions::NudgeTracker nudge_tracker;
   NormalGetUpdatesDelegate normal_delegate(nudge_tracker);
   sessions::StatusController status;
-  scoped_ptr<GetUpdatesProcessor> processor(
+  std::unique_ptr<GetUpdatesProcessor> processor(
       BuildGetUpdatesProcessor(normal_delegate));
   SyncerError error = processor->ProcessResponse(gu_response,
                                                  enabled_types(),
@@ -376,7 +369,7 @@ TEST_F(GetUpdatesProcessorTest, NormalResponseTest) {
   sessions::NudgeTracker nudge_tracker;
   NormalGetUpdatesDelegate normal_delegate(nudge_tracker);
   sessions::StatusController status;
-  scoped_ptr<GetUpdatesProcessor> processor(
+  std::unique_ptr<GetUpdatesProcessor> processor(
       BuildGetUpdatesProcessor(normal_delegate));
   SyncerError error = processor->ProcessResponse(gu_response,
                                                  enabled_types(),
@@ -420,7 +413,7 @@ class GetUpdatesProcessorApplyUpdatesTest : public GetUpdatesProcessorTest {
 TEST_F(GetUpdatesProcessorApplyUpdatesTest, Normal) {
   sessions::NudgeTracker nudge_tracker;
   NormalGetUpdatesDelegate normal_delegate(nudge_tracker);
-  scoped_ptr<GetUpdatesProcessor> processor(
+  std::unique_ptr<GetUpdatesProcessor> processor(
       BuildGetUpdatesProcessor(normal_delegate));
 
   EXPECT_EQ(0, GetNonAppliedHandler()->GetApplyUpdatesCount());
@@ -434,6 +427,8 @@ TEST_F(GetUpdatesProcessorApplyUpdatesTest, Normal) {
 
   EXPECT_EQ(0, GetNonAppliedHandler()->GetPassiveApplyUpdatesCount());
   EXPECT_EQ(0, GetAppliedHandler()->GetPassiveApplyUpdatesCount());
+
+  EXPECT_TRUE(status.get_updates_request_types().Equals(GetGuTypes()));
 }
 
 // Verify that a configure cycle applies updates passively to the specified
@@ -441,7 +436,7 @@ TEST_F(GetUpdatesProcessorApplyUpdatesTest, Normal) {
 TEST_F(GetUpdatesProcessorApplyUpdatesTest, Configure) {
   ConfigureGetUpdatesDelegate configure_delegate(
       sync_pb::GetUpdatesCallerInfo::RECONFIGURATION);
-  scoped_ptr<GetUpdatesProcessor> processor(
+  std::unique_ptr<GetUpdatesProcessor> processor(
       BuildGetUpdatesProcessor(configure_delegate));
 
   EXPECT_EQ(0, GetNonAppliedHandler()->GetPassiveApplyUpdatesCount());
@@ -455,13 +450,15 @@ TEST_F(GetUpdatesProcessorApplyUpdatesTest, Configure) {
 
   EXPECT_EQ(0, GetNonAppliedHandler()->GetApplyUpdatesCount());
   EXPECT_EQ(0, GetAppliedHandler()->GetApplyUpdatesCount());
+
+  EXPECT_TRUE(status.get_updates_request_types().Equals(GetGuTypes()));
 }
 
 // Verify that a poll cycle applies updates non-passively to the specified
 // types.
 TEST_F(GetUpdatesProcessorApplyUpdatesTest, Poll) {
   PollGetUpdatesDelegate poll_delegate;
-  scoped_ptr<GetUpdatesProcessor> processor(
+  std::unique_ptr<GetUpdatesProcessor> processor(
       BuildGetUpdatesProcessor(poll_delegate));
 
   EXPECT_EQ(0, GetNonAppliedHandler()->GetApplyUpdatesCount());
@@ -475,6 +472,8 @@ TEST_F(GetUpdatesProcessorApplyUpdatesTest, Poll) {
 
   EXPECT_EQ(0, GetNonAppliedHandler()->GetPassiveApplyUpdatesCount());
   EXPECT_EQ(0, GetAppliedHandler()->GetPassiveApplyUpdatesCount());
+
+  EXPECT_TRUE(status.get_updates_request_types().Equals(GetGuTypes()));
 }
 
 class DownloadUpdatesDebugInfoTest : public ::testing::Test {

@@ -38,8 +38,7 @@ class TickClock;
 
 namespace media {
 
-// VideoRendererImpl creates its own thread for the sole purpose of timing frame
-// presentation.  It handles reading from the VideoFrameStream and stores the
+// VideoRendererImpl handles reading from a VideoFrameStream storing the
 // results in a queue of decoded frames and executing a callback when a frame is
 // ready for rendering.
 class MEDIA_EXPORT VideoRendererImpl
@@ -66,7 +65,7 @@ class MEDIA_EXPORT VideoRendererImpl
   // VideoRenderer implementation.
   void Initialize(DemuxerStream* stream,
                   const PipelineStatusCB& init_cb,
-                  const SetCdmReadyCB& set_cdm_ready_cb,
+                  CdmContext* cdm_context,
                   const StatisticsCB& statistics_cb,
                   const BufferingStateCB& buffering_state_cb,
                   const base::Closure& ended_cb,
@@ -145,12 +144,12 @@ class MEDIA_EXPORT VideoRendererImpl
   // value of |time_progressing_|.  When called from Render() on the sink
   // callback thread, the inverse of |render_first_frame_and_stop_| should be
   // used as a proxy for |time_progressing_|.
-  //
-  // Returns algorithm_->EffectiveFramesQueued().
-  size_t MaybeFireEndedCallback_Locked(bool time_progressing);
+  void MaybeFireEndedCallback_Locked(bool time_progressing);
 
   // Helper method for converting a single media timestamp to wall clock time.
   base::TimeTicks ConvertMediaTimestamp(base::TimeDelta media_timestamp);
+
+  base::TimeTicks GetCurrentMediaTimeAsWallClockTime();
 
   // Helper method for checking if a frame timestamp plus the frame's expected
   // duration is before |start_timestamp_|.

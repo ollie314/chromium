@@ -23,6 +23,7 @@
 #include "ash/wm/root_window_layout_manager.h"
 #include "ash/wm/window_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -350,20 +351,20 @@ TEST_F(ShellTest, IsScreenLocked) {
 
 TEST_F(ShellTest, LockScreenClosesActiveMenu) {
   SimpleMenuDelegate menu_delegate;
-  scoped_ptr<ui::SimpleMenuModel> menu_model(
+  std::unique_ptr<ui::SimpleMenuModel> menu_model(
       new ui::SimpleMenuModel(&menu_delegate));
   menu_model->AddItem(0, base::ASCIIToUTF16("Menu item"));
   views::Widget* widget = ash::Shell::GetPrimaryRootWindowController()->
       wallpaper_controller()->widget();
-  scoped_ptr<views::MenuRunner> menu_runner(
+  std::unique_ptr<views::MenuRunner> menu_runner(
       new views::MenuRunner(menu_model.get(), views::MenuRunner::CONTEXT_MENU));
 
   // When MenuRunner runs a nested loop the LockScreenAndVerifyMenuClosed
   // command will fire, check the menu state and ensure the nested menu loop
   // is exited so that the test will terminate.
-  base::MessageLoopForUI::current()->PostTask(FROM_HERE,
-      base::Bind(&ShellTest::LockScreenAndVerifyMenuClosed,
-                 base::Unretained(this)));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&ShellTest::LockScreenAndVerifyMenuClosed,
+                            base::Unretained(this)));
 
   EXPECT_EQ(views::MenuRunner::NORMAL_EXIT,
             menu_runner->RunMenuAt(widget,
@@ -445,7 +446,7 @@ TEST_F(ShellTest, FullscreenWindowHidesShelf) {
 // Various assertions around SetShelfAutoHideBehavior() and
 // GetShelfAutoHideBehavior().
 TEST_F(ShellTest, ToggleAutoHide) {
-  scoped_ptr<aura::Window> window(new aura::Window(NULL));
+  std::unique_ptr<aura::Window> window(new aura::Window(NULL));
   window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
   window->SetType(ui::wm::WINDOW_TYPE_NORMAL);
   window->Init(ui::LAYER_TEXTURED);
@@ -517,7 +518,7 @@ class ShellTest2 : public test::AshTestBase {
   ~ShellTest2() override {}
 
  protected:
-  scoped_ptr<aura::Window> window_;
+  std::unique_ptr<aura::Window> window_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ShellTest2);

@@ -4,7 +4,8 @@
 
 #include "content/test/test_render_view_host.h"
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
@@ -48,7 +49,7 @@ void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
   params->security_info = std::string();
   params->gesture = NavigationGestureUser;
   params->was_within_same_page = false;
-  params->is_post = false;
+  params->method = "GET";
   params->page_state = PageState::CreateFromURL(url);
 }
 
@@ -171,11 +172,6 @@ bool TestRenderWidgetHostView::IsSpeaking() const {
 void TestRenderWidgetHostView::StopSpeaking() {
 }
 
-bool TestRenderWidgetHostView::PostProcessEventForPluginIme(
-    const NativeWebKeyboardEvent& event) {
-  return false;
-}
-
 #endif
 
 bool TestRenderWidgetHostView::GetScreenColorProfile(
@@ -190,7 +186,7 @@ gfx::Rect TestRenderWidgetHostView::GetBoundsInRootWindow() {
 
 void TestRenderWidgetHostView::OnSwapCompositorFrame(
     uint32_t output_surface_id,
-    scoped_ptr<cc::CompositorFrame> frame) {
+    std::unique_ptr<cc::CompositorFrame> frame) {
   did_swap_compositor_frame_ = true;
 }
 
@@ -201,22 +197,12 @@ bool TestRenderWidgetHostView::LockMouse() {
 void TestRenderWidgetHostView::UnlockMouse() {
 }
 
-#if defined(OS_WIN)
-void TestRenderWidgetHostView::SetParentNativeViewAccessible(
-    gfx::NativeViewAccessible accessible_parent) {
-}
-
-gfx::NativeViewId TestRenderWidgetHostView::GetParentForWindowlessPlugin()
-    const {
-  return 0;
-}
-#endif
-
-TestRenderViewHost::TestRenderViewHost(SiteInstance* instance,
-                                       scoped_ptr<RenderWidgetHostImpl> widget,
-                                       RenderViewHostDelegate* delegate,
-                                       int32_t main_frame_routing_id,
-                                       bool swapped_out)
+TestRenderViewHost::TestRenderViewHost(
+    SiteInstance* instance,
+    std::unique_ptr<RenderWidgetHostImpl> widget,
+    RenderViewHostDelegate* delegate,
+    int32_t main_frame_routing_id,
+    bool swapped_out)
     : RenderViewHostImpl(instance,
                          std::move(widget),
                          delegate,

@@ -7,12 +7,14 @@
 
 #include "core/CoreExport.h"
 #include "core/animation/InterpolableValue.h"
-#include "platform/heap/Handle.h"
+#include "wtf/Forward.h"
+#include "wtf/RefCounted.h"
 
 namespace blink {
 
 class PropertyHandle;
 
+// Represents an animation's effect between an adjacent pair of PropertySpecificKeyframes.
 class CORE_EXPORT Interpolation : public RefCounted<Interpolation> {
     WTF_MAKE_NONCOPYABLE(Interpolation);
 public:
@@ -23,9 +25,9 @@ public:
     virtual bool isStyleInterpolation() const { return false; }
     virtual bool isInvalidatableInterpolation() const { return false; }
     virtual bool isLegacyStyleInterpolation() const { return false; }
-    virtual bool isSVGInterpolation() const { return false; }
 
-    virtual PropertyHandle property() const = 0;
+    virtual PropertyHandle getProperty() const = 0;
+    virtual bool dependsOnUnderlyingValue() const { return false; }
 
 protected:
     const OwnPtr<InterpolableValue> m_start;
@@ -44,8 +46,6 @@ private:
     friend class AnimationInterpolationEffectTest;
     friend class AnimationDoubleStyleInterpolationTest;
     friend class AnimationVisibilityStyleInterpolationTest;
-    friend class AnimationColorStyleInterpolationTest;
-    friend class AnimationSVGStrokeDasharrayStyleInterpolationTest;
 };
 
 using ActiveInterpolations = Vector<RefPtr<Interpolation>, 1>;

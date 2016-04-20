@@ -9,7 +9,8 @@
 #include "base/process/process.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_management/task_manager_observer.h"
 #include "content/public/common/result_codes.h"
@@ -44,12 +45,12 @@ Task::~Task() {
 // static
 base::string16 Task::GetProfileNameFromProfile(Profile* profile) {
   DCHECK(profile);
-  ProfileInfoCache& cache =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
-  size_t index =
-      cache.GetIndexOfProfileWithPath(profile->GetOriginalProfile()->GetPath());
-  if (index != std::string::npos)
-    return cache.GetNameOfProfileAtIndex(index);
+  ProfileAttributesEntry* entry;
+  if (g_browser_process->profile_manager()->GetProfileAttributesStorage().
+      GetProfileAttributesWithPath(profile->GetOriginalProfile()->GetPath(),
+                                   &entry)) {
+    return entry->GetName();
+  }
 
   return base::string16();
 }
@@ -85,8 +86,21 @@ void Task::OnNetworkBytesRead(int64_t bytes_read) {
   current_byte_count_ += bytes_read;
 }
 
+void Task::GetTerminationStatus(base::TerminationStatus* out_status,
+                                int* out_error_code) const {
+  DCHECK(out_status);
+  DCHECK(out_error_code);
+
+  *out_status = base::TERMINATION_STATUS_STILL_RUNNING;
+  *out_error_code = 0;
+}
+
 base::string16 Task::GetProfileName() const {
   return base::string16();
+}
+
+int Task::GetTabId() const {
+  return -1;
 }
 
 bool Task::ReportsSqliteMemory() const {

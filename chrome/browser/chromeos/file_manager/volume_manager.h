@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_CHROMEOS_FILE_MANAGER_VOLUME_MANAGER_H_
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -14,16 +15,15 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/file_system_provider/observer.h"
 #include "chrome/browser/chromeos/file_system_provider/service.h"
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "components/storage_monitor/removable_storage_observer.h"
 #include "device/media_transfer_protocol/mtp_storage_info.pb.h"
 
@@ -311,7 +311,7 @@ class VolumeManager : public KeyedService,
       file_system_provider_service_;  // Not owned by this class.
   GetMtpStorageInfoCallback get_mtp_storage_info_callback_;
   std::map<std::string, linked_ptr<Volume>> mounted_volumes_;
-  scoped_ptr<SnapshotManager> snapshot_manager_;
+  std::unique_ptr<SnapshotManager> snapshot_manager_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

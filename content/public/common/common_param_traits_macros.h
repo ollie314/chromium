@@ -22,12 +22,14 @@
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebReferrerPolicy.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h"
 #include "third_party/WebKit/public/web/WebWindowFeatures.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/ax_tree_update.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
+#include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
 
 #undef IPC_MESSAGE_EXPORT
 #define IPC_MESSAGE_EXPORT CONTENT_EXPORT
@@ -44,6 +46,8 @@ IPC_ENUM_TRAITS_MAX_VALUE(content::SecurityStyle,
                           content::SECURITY_STYLE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebReferrerPolicy,
                           blink::WebReferrerPolicyLast)
+IPC_ENUM_TRAITS_MAX_VALUE(blink::mojom::PermissionStatus,
+                          blink::mojom::PermissionStatus::LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(content::EditingBehavior,
                           content::EDITING_BEHAVIOR_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(WindowOpenDisposition,
@@ -60,6 +64,9 @@ IPC_ENUM_TRAITS_MIN_MAX_VALUE(ui::HoverType,
 IPC_ENUM_TRAITS_MIN_MAX_VALUE(content::ImageAnimationPolicy,
                               content::IMAGE_ANIMATION_POLICY_ALLOWED,
                               content::IMAGE_ANIMATION_POLICY_NO_ANIMATION)
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(content::ViewportStyle,
+                              content::ViewportStyle::DEFAULT,
+                              content::ViewportStyle::LAST)
 
 IPC_STRUCT_TRAITS_BEGIN(blink::WebPoint)
   IPC_STRUCT_TRAITS_MEMBER(x)
@@ -142,21 +149,22 @@ IPC_STRUCT_TRAITS_BEGIN(content::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(hyperlink_auditing_enabled)
   IPC_STRUCT_TRAITS_MEMBER(allow_universal_access_from_file_urls)
   IPC_STRUCT_TRAITS_MEMBER(allow_file_access_from_file_urls)
-  IPC_STRUCT_TRAITS_MEMBER(webaudio_enabled)
   IPC_STRUCT_TRAITS_MEMBER(experimental_webgl_enabled)
   IPC_STRUCT_TRAITS_MEMBER(pepper_3d_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(inert_visual_viewport)
+  IPC_STRUCT_TRAITS_MEMBER(record_whole_document)
   IPC_STRUCT_TRAITS_MEMBER(pinch_overlay_scrollbar_thickness)
   IPC_STRUCT_TRAITS_MEMBER(use_solid_color_scrollbars)
   IPC_STRUCT_TRAITS_MEMBER(flash_3d_enabled)
   IPC_STRUCT_TRAITS_MEMBER(flash_stage3d_enabled)
   IPC_STRUCT_TRAITS_MEMBER(flash_stage3d_baseline_enabled)
-  IPC_STRUCT_TRAITS_MEMBER(gl_multisampling_enabled)
   IPC_STRUCT_TRAITS_MEMBER(privileged_webgl_extensions_enabled)
   IPC_STRUCT_TRAITS_MEMBER(webgl_errors_to_console_enabled)
   IPC_STRUCT_TRAITS_MEMBER(mock_scrollbars_enabled)
   IPC_STRUCT_TRAITS_MEMBER(unified_textchecker_enabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_2d_canvas_enabled)
   IPC_STRUCT_TRAITS_MEMBER(minimum_accelerated_2d_canvas_size)
+  IPC_STRUCT_TRAITS_MEMBER(disable_2d_canvas_copy_on_write)
   IPC_STRUCT_TRAITS_MEMBER(antialiased_2d_canvas_disabled)
   IPC_STRUCT_TRAITS_MEMBER(antialiased_clips_2d_canvas_enabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_2d_canvas_msaa_sample_count)
@@ -168,6 +176,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(disable_reading_from_canvas)
   IPC_STRUCT_TRAITS_MEMBER(strict_mixed_content_checking)
   IPC_STRUCT_TRAITS_MEMBER(strict_powerful_feature_restrictions)
+  IPC_STRUCT_TRAITS_MEMBER(allow_geolocation_on_insecure_origins)
   IPC_STRUCT_TRAITS_MEMBER(strictly_block_blockable_mixed_content)
   IPC_STRUCT_TRAITS_MEMBER(block_mixed_plugin_content)
   IPC_STRUCT_TRAITS_MEMBER(enable_scroll_animator)
@@ -190,6 +199,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(supports_multiple_windows)
   IPC_STRUCT_TRAITS_MEMBER(viewport_enabled)
   IPC_STRUCT_TRAITS_MEMBER(viewport_meta_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(viewport_style)
   IPC_STRUCT_TRAITS_MEMBER(main_frame_resizes_are_orientation_changes)
   IPC_STRUCT_TRAITS_MEMBER(initialize_at_minimum_page_scale)
   IPC_STRUCT_TRAITS_MEMBER(smart_insert_delete_enabled)
@@ -199,6 +209,8 @@ IPC_STRUCT_TRAITS_BEGIN(content::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(v8_cache_options)
   IPC_STRUCT_TRAITS_MEMBER(pepper_accelerated_video_decode_enabled)
   IPC_STRUCT_TRAITS_MEMBER(animation_policy)
+  IPC_STRUCT_TRAITS_MEMBER(user_gesture_required_for_presentation)
+  IPC_STRUCT_TRAITS_MEMBER(text_track_margin_percentage)
 #if defined(OS_ANDROID)
   IPC_STRUCT_TRAITS_MEMBER(text_autosizing_enabled)
   IPC_STRUCT_TRAITS_MEMBER(font_scale_factor)
@@ -220,7 +232,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(clobber_user_agent_initial_scale_quirk)
   IPC_STRUCT_TRAITS_MEMBER(ignore_main_frame_overflow_hidden_quirk)
   IPC_STRUCT_TRAITS_MEMBER(report_screen_size_in_physical_pixels_quirk)
-  IPC_STRUCT_TRAITS_MEMBER(record_whole_document)
+  IPC_STRUCT_TRAITS_MEMBER(resue_global_for_unowned_main_frame)
   IPC_STRUCT_TRAITS_MEMBER(autoplay_experiment_mode)
 #endif
   IPC_STRUCT_TRAITS_MEMBER(default_minimum_page_scale_factor)

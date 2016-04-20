@@ -11,8 +11,8 @@
 #include "content/browser/renderer_host/p2p/socket_host_udp.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/public/browser/browser_thread.h"
-#include "third_party/libjingle/source/talk/media/base/rtputils.h"
-#include "third_party/libjingle/source/talk/media/base/turnutils.h"
+#include "third_party/webrtc/media/base/rtputils.h"
+#include "third_party/webrtc/media/base/turnutils.h"
 
 namespace {
 
@@ -222,7 +222,7 @@ void P2PSocketHost::DumpRtpPacket(const char* packet,
     return;
   }
 
-  scoped_ptr<uint8_t[]> header_buffer(new uint8_t[header_length]);
+  std::unique_ptr<uint8_t[]> header_buffer(new uint8_t[header_length]);
   memcpy(header_buffer.get(), packet, header_length);
 
   // Posts to the IO thread as the data members should be accessed on the IO
@@ -234,10 +234,11 @@ void P2PSocketHost::DumpRtpPacket(const char* packet,
                  header_length, rtp_packet_length, incoming));
 }
 
-void P2PSocketHost::DumpRtpPacketOnIOThread(scoped_ptr<uint8_t[]> packet_header,
-                                            size_t header_length,
-                                            size_t packet_length,
-                                            bool incoming) {
+void P2PSocketHost::DumpRtpPacketOnIOThread(
+    std::unique_ptr<uint8_t[]> packet_header,
+    size_t header_length,
+    size_t packet_length,
+    bool incoming) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if ((incoming && !dump_incoming_rtp_packet_) ||

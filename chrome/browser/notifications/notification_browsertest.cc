@@ -41,7 +41,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
-#include "net/base/net_util.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/window_open_disposition.h"
@@ -388,8 +387,7 @@ bool NotificationsTest::CheckOriginInSetting(
 }
 
 void NotificationsTest::DropOriginPreference(const GURL& origin) {
-  DesktopNotificationProfileUtil::ClearSetting(browser()->profile(),
-      ContentSettingsPattern::FromURLNoWildcard(origin));
+  DesktopNotificationProfileUtil::ClearSetting(browser()->profile(), origin);
 }
 
 // Flaky on Windows, Mac, Linux: http://crbug.com/437414.
@@ -741,7 +739,7 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest, TestLastUsage) {
   HostContentSettingsMap* settings_map =
       HostContentSettingsMapFactory::GetForProfile(browser()->profile());
   base::SimpleTestClock* clock = new base::SimpleTestClock();
-  settings_map->SetPrefClockForTesting(scoped_ptr<base::Clock>(clock));
+  settings_map->SetPrefClockForTesting(std::unique_ptr<base::Clock>(clock));
   clock->SetNow(base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(10));
 
   // Creates a simple notification.

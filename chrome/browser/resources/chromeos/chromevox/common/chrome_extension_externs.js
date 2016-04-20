@@ -298,6 +298,9 @@ chrome.automation.getTree = function(tabId, callback) {};
 /** @param {function(!chrome.automation.AutomationNode):void} callback */
 chrome.automation.getDesktop = function(callback) {};
 
+/** @param {function(!chrome.automation.AutomationNode):void} callback */
+chrome.automation.getFocus = function(callback) {};
+
 /**
  * @param {string} filter
  * @param {function(chrome.automation.TreeChange) : void}
@@ -430,7 +433,7 @@ chrome.automation.AutomationNode.prototype.children;
 
 
 /**
- * @type {{top: number, left: number, height: number, width: number}}
+ * @type {{top: number, left: number, height: number, width: number}|undefined}
  */
 chrome.automation.AutomationNode.prototype.location;
 
@@ -536,6 +539,14 @@ chrome.automation.AutomationNode.prototype.inputType;
 chrome.automation.AutomationNode.prototype.anchorObject;
 
 /**
+ * @param {{anchorObject: !chrome.automation.AutomationNode,
+ *          anchorOffset: number,
+ *          focusObject: !chrome.automation.AutomationNode,
+ *          focusOffset: number}} selectionParams
+ */
+chrome.automation.setDocumentSelection = function(selectionParams) {};
+
+/**
  * @type {(number|undefined)}
  */
 chrome.automation.anchorOffset;
@@ -554,3 +565,6 @@ chrome.automation.AutomationNode.prototype.lineBreaks;
  * @type {(number|undefined)}
  */
 chrome.automation.focusOffset;
+
+/** @type {function() : !Object} */
+chrome.app.getDetails;

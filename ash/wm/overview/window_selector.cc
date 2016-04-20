@@ -23,6 +23,7 @@
 #include "ash/wm/overview/window_selector_item.h"
 #include "ash/wm/panels/panel_layout_manager.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
 #include "base/auto_reset.h"
 #include "base/command_line.h"
@@ -73,8 +74,7 @@ const unsigned char kTextFilterOpacity = 180;
 const int kTextFilterCornerRadius = 1;
 
 // A comparator for locating a grid with a given root window.
-struct RootWindowGridComparator
-    : public std::unary_function<WindowGrid*, bool> {
+struct RootWindowGridComparator {
   explicit RootWindowGridComparator(const aura::Window* root_window)
       : root_window_(root_window) {
   }
@@ -87,8 +87,7 @@ struct RootWindowGridComparator
 };
 
 // A comparator for locating a selectable window given a targeted window.
-struct WindowSelectorItemTargetComparator
-    : public std::unary_function<WindowSelectorItem*, bool> {
+struct WindowSelectorItemTargetComparator {
   explicit WindowSelectorItemTargetComparator(const aura::Window* target_window)
       : target(target_window) {
   }
@@ -101,8 +100,7 @@ struct WindowSelectorItemTargetComparator
 };
 
 // A comparator for locating a selector item for a given root.
-struct WindowSelectorItemForRoot
-    : public std::unary_function<WindowSelectorItem*, bool> {
+struct WindowSelectorItemForRoot {
   explicit WindowSelectorItemForRoot(const aura::Window* root)
       : root_window(root) {
   }
@@ -284,7 +282,7 @@ void WindowSelector::Init(const WindowList& windows) {
         Shell::GetContainer(*iter, kShellWindowId_PanelContainer)
             ->layout_manager())->SetShowCalloutWidgets(false);
 
-    scoped_ptr<WindowGrid> grid(new WindowGrid(*iter, windows, this));
+    std::unique_ptr<WindowGrid> grid(new WindowGrid(*iter, windows, this));
     if (grid->empty())
       continue;
     num_items_ += grid->size();
@@ -321,7 +319,7 @@ void WindowSelector::Init(const WindowList& windows) {
 
   shell->activation_client()->AddObserver(this);
 
-  shell->GetScreen()->AddObserver(this);
+  gfx::Screen::GetScreen()->AddObserver(this);
   shell->metrics()->RecordUserMetricsAction(UMA_WINDOW_OVERVIEW);
   // Send an a11y alert.
   shell->accessibility_delegate()->TriggerAccessibilityAlert(
@@ -385,7 +383,7 @@ void WindowSelector::RemoveAllObservers() {
     window->RemoveObserver(this);
 
   shell->activation_client()->RemoveObserver(this);
-  shell->GetScreen()->RemoveObserver(this);
+  gfx::Screen::GetScreen()->RemoveObserver(this);
   if (restore_focus_window_)
     restore_focus_window_->RemoveObserver(this);
 }

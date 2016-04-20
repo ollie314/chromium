@@ -45,11 +45,12 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNTLM : public HttpAuthHandler {
 
     int CreateAuthHandler(HttpAuthChallengeTokenizer* challenge,
                           HttpAuth::Target target,
+                          const SSLInfo& ssl_info,
                           const GURL& origin,
                           CreateReason reason,
                           int digest_nonce_count,
                           const BoundNetLog& net_log,
-                          scoped_ptr<HttpAuthHandler>* handler) override;
+                          std::unique_ptr<HttpAuthHandler>* handler) override;
 #if defined(NTLM_SSPI)
     // Set the SSPILibrary to use. Typically the only callers which need to use
     // this are unit tests which pass in a mocked-out version of the SSPI
@@ -63,7 +64,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNTLM : public HttpAuthHandler {
 #if defined(NTLM_SSPI)
     ULONG max_token_length_;
     bool is_unsupported_;
-    scoped_ptr<SSPILibrary> sspi_library_;
+    std::unique_ptr<SSPILibrary> sspi_library_;
 #endif  // defined(NTLM_SSPI)
   };
 
@@ -117,7 +118,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNTLM : public HttpAuthHandler {
   // It does nothing in the portable implementation.
   int InitializeBeforeFirstChallenge();
 
-  bool Init(HttpAuthChallengeTokenizer* tok) override;
+  bool Init(HttpAuthChallengeTokenizer* tok, const SSLInfo& ssl_info) override;
 
   int GenerateAuthTokenImpl(const AuthCredentials* credentials,
                             const HttpRequestInfo* request,
@@ -159,6 +160,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNTLM : public HttpAuthHandler {
 
   base::string16 domain_;
   AuthCredentials credentials_;
+  std::string channel_bindings_;
 
   // The base64-encoded string following "NTLM" in the "WWW-Authenticate" or
   // "Proxy-Authenticate" response header.

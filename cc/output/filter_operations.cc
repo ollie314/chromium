@@ -7,10 +7,12 @@
 #include <stddef.h>
 
 #include <cmath>
+#include <numeric>
 
 #include "base/trace_event/trace_event_argument.h"
 #include "base/values.h"
 #include "cc/output/filter_operation.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace cc {
 
@@ -56,6 +58,14 @@ static int SpreadForStdDeviation(float std_deviation) {
   return static_cast<int>(ceilf(d * 3.f / 2.f));
 }
 
+gfx::Rect FilterOperations::MapRect(const gfx::Rect& rect) const {
+  auto accumulate_rect = [](const gfx::Rect& rect, const FilterOperation& op) {
+    return op.MapRect(rect);
+  };
+  return std::accumulate(operations_.begin(), operations_.end(), rect,
+                         accumulate_rect);
+}
+
 void FilterOperations::GetOutsets(int* top,
                                   int* right,
                                   int* bottom,
@@ -68,9 +78,7 @@ void FilterOperations::GetOutsets(int* top,
       if (!op.image_filter())
         continue;
       SkIRect src = SkIRect::MakeWH(0, 0);
-      SkIRect dst;
-      bool result = op.image_filter()->filterBounds(src, SkMatrix::I(), &dst);
-      DCHECK(result);
+      SkIRect dst = op.image_filter()->filterBounds(src, SkMatrix::I());
       *top += std::max(0, -dst.top());
       *right += std::max(0, dst.right());
       *bottom += std::max(0, dst.bottom());

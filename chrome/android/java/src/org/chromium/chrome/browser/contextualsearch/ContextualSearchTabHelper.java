@@ -25,13 +25,7 @@ public class ContextualSearchTabHelper extends EmptyTabObserver {
     /**
      * Notification handler for Contextual Search events.
      */
-    private final TemplateUrlServiceObserver mTemplateUrlObserver =
-            new TemplateUrlServiceObserver() {
-                @Override
-                public void onTemplateURLServiceChanged() {
-                    onContextualSearchPrefChanged();
-                }
-            };
+    private TemplateUrlServiceObserver mTemplateUrlObserver;
 
     /**
      * The current ContentViewCore for the Tab which this helper is monitoring.
@@ -70,7 +64,7 @@ public class ContextualSearchTabHelper extends EmptyTabObserver {
         mBaseContentViewCore = tab.getContentViewCore();
         // Add Contextual Search here in case it couldn't get added in onContentChanged() due to
         // being too early in initialization of Chrome (ContextualSearchManager being null).
-        setContextualSearchHooks(mBaseContentViewCore);
+        updateContextualSearchHooks(mBaseContentViewCore);
 
         ContextualSearchManager manager = getContextualSearchManager();
         if (manager != null) {
@@ -85,6 +79,16 @@ public class ContextualSearchTabHelper extends EmptyTabObserver {
         if (mNativeHelper == 0) {
             mNativeHelper = nativeInit(tab.getProfile());
         }
+        if (mTemplateUrlObserver == null) {
+            mTemplateUrlObserver =
+                    new TemplateUrlServiceObserver() {
+                        @Override
+                        public void onTemplateURLServiceChanged() {
+                            updateContextualSearchHooks(mBaseContentViewCore);
+                        }
+                    };
+            TemplateUrlService.getInstance().addObserver(mTemplateUrlObserver);
+        }
         updateHooksForNewContentViewCore(tab);
     }
 
@@ -98,6 +102,9 @@ public class ContextualSearchTabHelper extends EmptyTabObserver {
         if (mNativeHelper != 0) {
             nativeDestroy(mNativeHelper);
             mNativeHelper = 0;
+        }
+        if (mTemplateUrlObserver != null) {
+            TemplateUrlService.getInstance().removeObserver(mTemplateUrlObserver);
         }
         removeContextualSearchHooks(mBaseContentViewCore);
         mBaseContentViewCore = null;
@@ -119,15 +126,15 @@ public class ContextualSearchTabHelper extends EmptyTabObserver {
     private void updateHooksForNewContentViewCore(Tab tab) {
         removeContextualSearchHooks(mBaseContentViewCore);
         mBaseContentViewCore = tab.getContentViewCore();
-        setContextualSearchHooks(mBaseContentViewCore);
+        updateContextualSearchHooks(mBaseContentViewCore);
     }
 
     /**
-     * Sets up the Contextual Search hooks, adding or removing them depending on whether it is
+     * Updates the Contextual Search hooks, adding or removing them depending on whether it is
      * currently active.
      * @param cvc The content view core to attach the gesture state listener to.
      */
-    private void setContextualSearchHooks(ContentViewCore cvc) {
+    private void updateContextualSearchHooks(ContentViewCore cvc) {
         if (cvc == null) return;
 
         if (isContextualSearchActive(cvc)) {
@@ -146,7 +153,6 @@ public class ContextualSearchTabHelper extends EmptyTabObserver {
             mGestureStateListener = getContextualSearchManager().getGestureStateListener();
             cvc.addGestureStateListener(mGestureStateListener);
             cvc.setContextualSearchClient(getContextualSearchManager());
-            TemplateUrlService.getInstance().addObserver(mTemplateUrlObserver);
         }
     }
 
@@ -161,7 +167,6 @@ public class ContextualSearchTabHelper extends EmptyTabObserver {
             cvc.removeGestureStateListener(mGestureStateListener);
             mGestureStateListener = null;
             cvc.setContextualSearchClient(null);
-            TemplateUrlService.getInstance().removeObserver(mTemplateUrlObserver);
         }
     }
 
@@ -195,7 +200,14 @@ public class ContextualSearchTabHelper extends EmptyTabObserver {
 
     @CalledByNative
     private void onContextualSearchPrefChanged() {
-        setContextualSearchHooks(mBaseContentViewCore);
+        updateContextualSearchHooks(mBaseContentViewCore);
+
+        ContextualSearchManager manager = getContextualSearchManager();
+        if (manager != null) {
+            boolean isEnabled = !PrefServiceBridge.getInstance().isContextualSearchDisabled()
+                    && !PrefServiceBridge.getInstance().isContextualSearchUninitialized();
+            manager.onContextualSearchPrefChanged(isEnabled);
+        }
     }
 
     private native long nativeInit(Profile profile);

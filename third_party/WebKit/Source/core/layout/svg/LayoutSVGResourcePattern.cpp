@@ -44,9 +44,7 @@ public:
 LayoutSVGResourcePattern::LayoutSVGResourcePattern(SVGPatternElement* node)
     : LayoutSVGResourcePaintServer(node)
     , m_shouldCollectPatternAttributes(true)
-#if ENABLE(OILPAN)
     , m_attributesWrapper(PatternAttributesWrapper::create())
-#endif
 {
 }
 
@@ -130,11 +128,7 @@ SVGPaintServer LayoutSVGResourcePattern::preparePaintServer(const LayoutObject& 
     if (m_shouldCollectPatternAttributes) {
         patternElement->synchronizeAnimatedSVGAttribute(anyQName());
 
-#if ENABLE(OILPAN)
         m_attributesWrapper->set(PatternAttributes());
-#else
-        m_attributes = PatternAttributes();
-#endif
         patternElement->collectPatternAttributes(mutableAttributes());
         m_shouldCollectPatternAttributes = false;
     }
@@ -179,7 +173,7 @@ const LayoutSVGResourceContainer* LayoutSVGResourcePattern::resolveContentElemen
     return this;
 }
 
-PassRefPtr<const SkPicture> LayoutSVGResourcePattern::asPicture(const FloatRect& tileBounds,
+PassRefPtr<SkPicture> LayoutSVGResourcePattern::asPicture(const FloatRect& tileBounds,
     const AffineTransform& tileTransform) const
 {
     ASSERT(!m_shouldCollectPatternAttributes);
@@ -205,4 +199,4 @@ PassRefPtr<const SkPicture> LayoutSVGResourcePattern::asPicture(const FloatRect&
     return pictureBuilder.endRecording();
 }
 
-}
+} // namespace blink

@@ -71,7 +71,7 @@ WebContents* CreateRestoredTab(
   extensions::TabHelper::CreateForWebContents(web_contents);
   extensions::TabHelper::FromWebContents(web_contents)->
       SetExtensionAppById(extension_app_id);
-  std::vector<scoped_ptr<NavigationEntry>> entries =
+  std::vector<std::unique_ptr<NavigationEntry>> entries =
       ContentSerializedNavigationBuilder::ToNavigationEntries(
           navigations, browser->profile());
   web_contents->SetUserAgentOverride(user_agent_override);
@@ -123,7 +123,7 @@ content::WebContents* AddRestoredTab(
     // location calculations to be incorrect even after a new layout with
     // proper view dimensions. TabStripModel::AddWebContents() contains similar
     // logic.
-    gfx::Size size = browser->window()->GetBounds().size();
+    gfx::Size size = browser->window()->GetContentsSize();
     // Fallback to the restore bounds if it's empty as the window is not shown
     // yet and the bounds may not be available on all platforms.
     if (size.IsEmpty())

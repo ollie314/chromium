@@ -2,12 +2,21 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//mojo/public/tools/bindings/mojom.gni")
 import("//testing/test.gni")
 
 group("common") {
   public_deps = [
     ":common_base",
+    ":common_custom_types",
     ":url_type_converters",
+  ]
+}
+
+# GYP version: mojo/mojo_base.gyp:mojo_common_custom_types
+mojom("common_custom_types") {
+  sources = [
+    "common_custom_types.mojom",
   ]
 }
 
@@ -25,8 +34,6 @@ component("common_base") {
     "data_pipe_utils.h",
     "user_agent.cc",
     "user_agent.h",
-    "weak_binding_set.h",
-    "weak_interface_ptr_set.h",
   ]
 
   defines = [ "MOJO_COMMON_IMPLEMENTATION" ]
@@ -38,11 +45,9 @@ component("common_base") {
   deps = [
     "//base",
     "//base/third_party/dynamic_annotations",
-    "//mojo/environment:chromium",
     "//mojo/message_pump",
     "//mojo/public/c/system:for_component",
     "//mojo/public/cpp/bindings",
-    "//mojo/public/cpp/environment",
   ]
 }
 
@@ -53,8 +58,6 @@ source_set("url_type_converters") {
     "url_type_converters.h",
   ]
 
-  include_dirs = [ "//third_party/mojo/src/" ]
-
   deps = [
     ":common_base",
     "//base",
@@ -64,12 +67,13 @@ source_set("url_type_converters") {
   ]
 }
 
-# TODO(GYP): Delete this after we've converted everything to GN.
-# The _run targets exist only for compatibility w/ GYP.
-group("mojo_common_unittests_run") {
-  testonly = true
-  deps = [
-    ":mojo_common_unittests",
+# GYP version: mojo/mojo_base.gyp:mojo_test_common_custom_types
+mojom("test_common_custom_types") {
+  sources = [
+    "test_common_custom_types.mojom",
+  ]
+  public_deps = [
+    ":common_custom_types",
   ]
 }
 
@@ -77,16 +81,17 @@ group("mojo_common_unittests_run") {
 test("mojo_common_unittests") {
   deps = [
     ":common",
+    ":common_custom_types",
+    ":test_common_custom_types",
     "//base",
     "//base:message_loop_tests",
     "//base/test:test_support",
-    "//mojo/environment:chromium",
+    "//mojo/edk/test:run_all_unittests",
+    "//mojo/edk/test:test_support",
     "//mojo/message_pump",
     "//mojo/public/cpp/bindings",
     "//mojo/public/cpp/test_support:test_utils",
     "//testing/gtest",
-    "//third_party/mojo/src/mojo/edk/test:run_all_unittests",
-    "//third_party/mojo/src/mojo/edk/test:test_support",
     "//url",
   ]
 
@@ -95,6 +100,7 @@ test("mojo_common_unittests") {
     # that we put them here.
     "../message_pump/handle_watcher_unittest.cc",
     "../message_pump/message_pump_mojo_unittest.cc",
+    "common_custom_types_unittest.cc",
     "common_type_converters_unittest.cc",
   ]
 
@@ -109,11 +115,10 @@ test("mojo_common_perftests") {
   deps = [
     ":common",
     "//base",
-    "//mojo/environment:chromium",
+    "//mojo/edk/test:run_all_perftests",
     "//mojo/message_pump",
     "//mojo/public/cpp/test_support:test_utils",
     "//testing/gtest",
-    "//third_party/mojo/src/mojo/edk/test:run_all_perftests",
   ]
 
   sources = [

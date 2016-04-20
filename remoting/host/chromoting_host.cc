@@ -12,6 +12,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "remoting/base/constants.h"
@@ -20,7 +21,6 @@
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/host_config.h"
 #include "remoting/host/input_injector.h"
-#include "remoting/host/video_frame_recorder.h"
 #include "remoting/protocol/client_stub.h"
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/ice_connection_to_client.h"
@@ -65,29 +65,19 @@ const net::BackoffEntry::Policy kDefaultBackoffPolicy = {
 
 ChromotingHost::ChromotingHost(
     DesktopEnvironmentFactory* desktop_environment_factory,
-    scoped_ptr<protocol::SessionManager> session_manager,
+    std::unique_ptr<protocol::SessionManager> session_manager,
     scoped_refptr<protocol::TransportContext> transport_context,
     scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner)
+    scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner)
     : desktop_environment_factory_(desktop_environment_factory),
       session_manager_(std::move(session_manager)),
       transport_context_(transport_context),
       audio_task_runner_(audio_task_runner),
-      input_task_runner_(input_task_runner),
-      video_capture_task_runner_(video_capture_task_runner),
       video_encode_task_runner_(video_encode_task_runner),
-      network_task_runner_(network_task_runner),
-      ui_task_runner_(ui_task_runner),
       started_(false),
       login_backoff_(&kDefaultBackoffPolicy),
       enable_curtaining_(false),
       weak_factory_(this) {
-  DCHECK(network_task_runner_->BelongsToCurrentThread());
-
   jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
 }
 
@@ -131,18 +121,18 @@ void ChromotingHost::RemoveStatusObserver(HostStatusObserver* observer) {
   status_observers_.RemoveObserver(observer);
 }
 
-void ChromotingHost::AddExtension(scoped_ptr<HostExtension> extension) {
+void ChromotingHost::AddExtension(std::unique_ptr<HostExtension> extension) {
   extensions_.push_back(extension.release());
 }
 
 void ChromotingHost::SetAuthenticatorFactory(
-    scoped_ptr<protocol::AuthenticatorFactory> authenticator_factory) {
+    std::unique_ptr<protocol::AuthenticatorFactory> authenticator_factory) {
   DCHECK(CalledOnValidThread());
   session_manager_->set_authenticator_factory(std::move(authenticator_factory));
 }
 
 void ChromotingHost::SetEnableCurtaining(bool enable) {
-  DCHECK(network_task_runner_->BelongsToCurrentThread());
+  DCHECK(CalledOnValidThread());
 
   if (enable_curtaining_ == enable)
     return;
@@ -273,23 +263,23 @@ void ChromotingHost::OnIncomingSession(
 
   // Create either IceConnectionToClient or WebrtcConnectionToClient.
   // TODO(sergeyu): Move this logic to the protocol layer.
-  scoped_ptr<protocol::ConnectionToClient> connection;
+  std::unique_ptr<protocol::ConnectionToClient> connection;
   if (session->config().protocol() ==
       protocol::SessionConfig::Protocol::WEBRTC) {
     connection.reset(new protocol::WebrtcConnectionToClient(
-        make_scoped_ptr(session), transport_context_));
+        base::WrapUnique(session), transport_context_,
+        video_encode_task_runner_));
   } else {
     connection.reset(new protocol::IceConnectionToClient(
-        make_scoped_ptr(session), transport_context_,
+        base::WrapUnique(session), transport_context_,
         video_encode_task_runner_));
   }
 
   // Create a ClientSession object.
-  ClientSession* client = new ClientSession(
-      this, audio_task_runner_, input_task_runner_, video_capture_task_runner_,
-      video_encode_task_runner_, network_task_runner_, ui_task_runner_,
-      std::move(connection), desktop_environment_factory_,
-      max_session_duration_, pairing_registry_, extensions_.get());
+  ClientSession* client =
+      new ClientSession(this, audio_task_runner_, std::move(connection),
+                        desktop_environment_factory_, max_session_duration_,
+                        pairing_registry_, extensions_.get());
 
   clients_.push_back(client);
 }

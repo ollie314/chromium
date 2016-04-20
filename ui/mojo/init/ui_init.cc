@@ -26,7 +26,6 @@ class GestureConfigurationMojo : public ui::GestureConfiguration {
     set_gesture_begin_end_types_enabled(true);
     set_min_gesture_bounds_length(default_radius());
     set_min_pinch_update_span_delta(0);
-    set_min_scaling_touch_major(default_radius() * 2);
     set_velocity_tracker_strategy(
         ui::VelocityTracker::Strategy::LSQ2_RESTRICTED);
     set_span_slop(max_touch_move_in_pixels_for_click() * 2);
@@ -43,7 +42,7 @@ class GestureConfigurationMojo : public ui::GestureConfiguration {
 
 UIInit::UIInit(const std::vector<gfx::Display>& displays)
     : screen_(new ScreenMojo(displays)) {
-  gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, screen_.get());
+  gfx::Screen::SetScreenInstance(screen_.get());
 #if defined(OS_ANDROID)
   gesture_configuration_.reset(new GestureConfigurationMojo);
   ui::GestureConfiguration::SetInstance(gesture_configuration_.get());
@@ -51,7 +50,7 @@ UIInit::UIInit(const std::vector<gfx::Display>& displays)
 }
 
 UIInit::~UIInit() {
-  gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, nullptr);
+  gfx::Screen::SetScreenInstance(nullptr);
 #if defined(OS_ANDROID)
   ui::GestureConfiguration::SetInstance(nullptr);
 #endif

@@ -6,6 +6,7 @@
 #define CHROME_RENDERER_EXTENSIONS_CAST_STREAMING_NATIVE_HANDLER_H_
 
 #include <map>
+#include <memory>
 
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
@@ -84,9 +85,9 @@ class CastStreamingNativeHandler : public ObjectBackedNativeHandler {
 
   // Helper method to call the v8 callback function after a session is
   // created.
-  void CallCreateCallback(scoped_ptr<CastRtpStream> stream1,
-                          scoped_ptr<CastRtpStream> stream2,
-                          scoped_ptr<CastUdpTransport> udp_transport);
+  void CallCreateCallback(std::unique_ptr<CastRtpStream> stream1,
+                          std::unique_ptr<CastRtpStream> stream2,
+                          std::unique_ptr<CastUdpTransport> udp_transport);
 
   void CallStartCallback(int stream_id) const;
   void CallStopCallback(int stream_id) const;
@@ -98,7 +99,7 @@ class CastStreamingNativeHandler : public ObjectBackedNativeHandler {
       const std::string& url,
       const media::AudioParameters& params,
       scoped_refptr<media::AudioCapturerSource> audio,
-      scoped_ptr<media::VideoCapturerSource> video);
+      std::unique_ptr<media::VideoCapturerSource> video);
 
   // |function| is a javascript function that will take |error_message| as
   // an argument. Called when something goes wrong in a cast receiver.
@@ -107,9 +108,9 @@ class CastStreamingNativeHandler : public ObjectBackedNativeHandler {
       const std::string& error_message);
 
   void CallGetRawEventsCallback(int transport_id,
-                                scoped_ptr<base::BinaryValue> raw_events);
+                                std::unique_ptr<base::BinaryValue> raw_events);
   void CallGetStatsCallback(int transport_id,
-                            scoped_ptr<base::DictionaryValue> stats);
+                            std::unique_ptr<base::DictionaryValue> stats);
 
   // Gets the RTP stream or UDP transport indexed by an ID.
   // If not found, returns NULL and throws a V8 exception.

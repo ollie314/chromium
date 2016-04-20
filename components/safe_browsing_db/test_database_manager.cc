@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "net/url_request/url_request_context_getter.h"
 
 namespace safe_browsing {
 
@@ -39,7 +40,7 @@ bool TestSafeBrowsingDatabaseManager::CanCheckUrl(const GURL& url) const {
   return false;
 }
 
-bool TestSafeBrowsingDatabaseManager::download_protection_enabled() const {
+bool TestSafeBrowsingDatabaseManager::IsDownloadProtectionEnabled() const {
   NOTIMPLEMENTED();
   return false;
 }
@@ -60,6 +61,12 @@ bool TestSafeBrowsingDatabaseManager::CheckDownloadUrl(
 bool TestSafeBrowsingDatabaseManager::CheckExtensionIDs(
     const std::set<std::string>& extension_ids,
     Client* client) {
+  NOTIMPLEMENTED();
+  return true;
+}
+
+bool TestSafeBrowsingDatabaseManager::CheckResourceUrl(const GURL& url,
+                                                       Client* client) {
   NOTIMPLEMENTED();
   return true;
 }
@@ -93,6 +100,12 @@ bool TestSafeBrowsingDatabaseManager::MatchInclusionWhitelistUrl(
   return true;
 }
 
+bool TestSafeBrowsingDatabaseManager::MatchModuleWhitelistString(
+    const std::string& str) {
+  NOTIMPLEMENTED();
+  return true;
+}
+
 bool TestSafeBrowsingDatabaseManager::IsMalwareKillSwitchOn() {
   NOTIMPLEMENTED();
   return false;
@@ -105,17 +118,6 @@ bool TestSafeBrowsingDatabaseManager::IsCsdWhitelistKillSwitchOn() {
 
 void TestSafeBrowsingDatabaseManager::CancelCheck(Client* client) {
   NOTIMPLEMENTED();
-}
-
-void TestSafeBrowsingDatabaseManager::CheckApiBlacklistUrl(const GURL& url,
-                                                           Client* client) {
-  NOTIMPLEMENTED();
-}
-
-void TestSafeBrowsingDatabaseManager::StartOnIOThread() {
-}
-
-void TestSafeBrowsingDatabaseManager::StopOnIOThread(bool shutdown) {
 }
 
 }  // namespace safe_browsing

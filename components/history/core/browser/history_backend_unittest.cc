@@ -24,7 +24,6 @@
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/statistics_recorder.h"
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -42,10 +41,10 @@
 #include "components/history/core/browser/in_memory_history_backend.h"
 #include "components/history/core/browser/keyword_search_term.h"
 #include "components/history/core/browser/visit_delegate.h"
-#include "components/history/core/browser/visit_filter.h"
 #include "components/history/core/test/database_test_utils.h"
 #include "components/history/core/test/history_client_fake_bookmarks.h"
 #include "components/history/core/test/test_history_database.h"
+#include "components/prefs/pref_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -65,8 +64,6 @@ using base::HistogramBase;
 const int kTinyEdgeSize = 10;
 const int kSmallEdgeSize = 16;
 const int kLargeEdgeSize = 32;
-
-const char kAcceptLanguagesForTest[] = "en-US,en";
 
 const gfx::Size kTinySize = gfx::Size(kTinyEdgeSize, kTinyEdgeSize);
 const gfx::Size kSmallSize = gfx::Size(kSmallEdgeSize, kSmallEdgeSize);
@@ -258,8 +255,7 @@ class HistoryBackendTestBase : public testing::Test {
     backend_ = new HistoryBackend(new HistoryBackendTestDelegate(this),
                                   history_client_.CreateBackendClient(),
                                   base::ThreadTaskRunnerHandle::Get());
-    backend_->Init(std::string(), false,
-                   TestHistoryDatabaseParamsForPath(test_dir_));
+    backend_->Init(false, TestHistoryDatabaseParamsForPath(test_dir_));
   }
 
   void TearDown() override {
@@ -1708,8 +1704,7 @@ TEST_F(HistoryBackendTest, MigrationVisitSource) {
   backend_ = new HistoryBackend(new HistoryBackendTestDelegate(this),
                                 history_client_.CreateBackendClient(),
                                 base::ThreadTaskRunnerHandle::Get());
-  backend_->Init(std::string(), false,
-                 TestHistoryDatabaseParamsForPath(new_history_path));
+  backend_->Init(false, TestHistoryDatabaseParamsForPath(new_history_path));
   backend_->Closing();
   backend_ = NULL;
 
@@ -3017,157 +3012,6 @@ TEST_F(HistoryBackendTest, UpdateFaviconMappingsAndFetchNoDB) {
   EXPECT_TRUE(bitmap_results.empty());
 }
 
-TEST_F(HistoryBackendTest, QueryFilteredURLs) {
-  const char* google = "http://www.google.com/";
-  const char* yahoo = "http://www.yahoo.com/";
-  const char* yahoo_sports = "http://sports.yahoo.com/";
-  const char* yahoo_sports_with_article1 =
-      "http://sports.yahoo.com/article1.htm";
-  const char* yahoo_sports_with_article2 =
-      "http://sports.yahoo.com/article2.htm";
-  const char* yahoo_sports_soccer = "http://sports.yahoo.com/soccer";
-  const char* apple = "http://www.apple.com/";
-
-  // Clear all history.
-  backend_->DeleteAllHistory();
-
-  base::Time tested_time = base::Time::Now().LocalMidnight() +
-                     base::TimeDelta::FromHours(4);
-  base::TimeDelta half_an_hour = base::TimeDelta::FromMinutes(30);
-  base::TimeDelta one_hour = base::TimeDelta::FromHours(1);
-  base::TimeDelta one_day = base::TimeDelta::FromDays(1);
-
-  const ui::PageTransition kTypedTransition =
-      ui::PAGE_TRANSITION_TYPED;
-  const ui::PageTransition kKeywordGeneratedTransition =
-      ui::PAGE_TRANSITION_KEYWORD_GENERATED;
-
-  const char* redirect_sequence[2];
-  redirect_sequence[1] = NULL;
-
-  redirect_sequence[0] = google;
-  AddRedirectChainWithTransitionAndTime(
-      redirect_sequence, 0, kTypedTransition,
-      tested_time - one_day - half_an_hour * 2);
-  AddRedirectChainWithTransitionAndTime(
-      redirect_sequence, 0,
-      kTypedTransition, tested_time - one_day);
-  AddRedirectChainWithTransitionAndTime(
-      redirect_sequence, 0,
-      kTypedTransition, tested_time - half_an_hour / 2);
-  AddRedirectChainWithTransitionAndTime(
-      redirect_sequence, 0,
-      kTypedTransition, tested_time);
-
-  // Add a visit with a transition that will make sure that no segment gets
-  // created for this page (so the subsequent entries will have different URLIDs
-  // and SegmentIDs).
-  redirect_sequence[0] = apple;
-  AddRedirectChainWithTransitionAndTime(
-      redirect_sequence, 0, kKeywordGeneratedTransition,
-      tested_time - one_day + one_hour * 6);
-
-  redirect_sequence[0] = yahoo;
-  AddRedirectChainWithTransitionAndTime(
-      redirect_sequence, 0, kTypedTransition,
-      tested_time - one_day + half_an_hour);
-  AddRedirectChainWithTransitionAndTime(
-      redirect_sequence, 0, kTypedTransition,
-      tested_time - one_day + half_an_hour * 2);
-
-  redirect_sequence[0] = yahoo_sports;
-  AddRedirectChainWithTransitionAndTime(
-      redirect_sequence, 0, kTypedTransition,
-      tested_time - one_day - half_an_hour * 2);
-  AddRedirectChainWithTransitionAndTime(
-      redirect_sequence, 0, kTypedTransition,
-      tested_time - one_day);
-  int transition1, transition2;
-  AddClientRedirect(GURL(yahoo_sports), GURL(yahoo_sports_with_article1), false,
-                    tested_time - one_day + half_an_hour,
-                    &transition1, &transition2);
-  AddClientRedirect(GURL(yahoo_sports_with_article1),
-                    GURL(yahoo_sports_with_article2),
-                    false,
-                    tested_time - one_day + half_an_hour * 2,
-                    &transition1, &transition2);
-
-  redirect_sequence[0] = yahoo_sports_soccer;
-  AddRedirectChainWithTransitionAndTime(redirect_sequence, 0,
-                                        kTypedTransition,
-                                        tested_time - half_an_hour);
-  backend_->Commit();
-
-  VisitFilter filter;
-  FilteredURLList filtered_list;
-  // Time limit is |tested_time| +/- 45 min.
-  base::TimeDelta three_quarters_of_an_hour = base::TimeDelta::FromMinutes(45);
-  filter.SetFilterTime(tested_time);
-  filter.SetFilterWidth(three_quarters_of_an_hour);
-  backend_->QueryFilteredURLs(100, filter, false, &filtered_list);
-
-  ASSERT_EQ(4U, filtered_list.size());
-  EXPECT_EQ(std::string(google), filtered_list[0].url.spec());
-  EXPECT_EQ(std::string(yahoo_sports_soccer), filtered_list[1].url.spec());
-  EXPECT_EQ(std::string(yahoo), filtered_list[2].url.spec());
-  EXPECT_EQ(std::string(yahoo_sports), filtered_list[3].url.spec());
-
-  // Time limit is between |tested_time| and |tested_time| + 2 hours.
-  filter.SetFilterTime(tested_time + one_hour);
-  filter.SetFilterWidth(one_hour);
-  backend_->QueryFilteredURLs(100, filter, false, &filtered_list);
-
-  ASSERT_EQ(3U, filtered_list.size());
-  EXPECT_EQ(std::string(google), filtered_list[0].url.spec());
-  EXPECT_EQ(std::string(yahoo), filtered_list[1].url.spec());
-  EXPECT_EQ(std::string(yahoo_sports), filtered_list[2].url.spec());
-
-  // Time limit is between |tested_time| - 2 hours and |tested_time|.
-  filter.SetFilterTime(tested_time - one_hour);
-  filter.SetFilterWidth(one_hour);
-  backend_->QueryFilteredURLs(100, filter, false, &filtered_list);
-
-  ASSERT_EQ(3U, filtered_list.size());
-  EXPECT_EQ(std::string(google), filtered_list[0].url.spec());
-  EXPECT_EQ(std::string(yahoo_sports_soccer), filtered_list[1].url.spec());
-  EXPECT_EQ(std::string(yahoo_sports), filtered_list[2].url.spec());
-
-  filter.ClearFilters();
-  base::Time::Exploded exploded_time;
-  tested_time.LocalExplode(&exploded_time);
-
-  // Today.
-  filter.SetFilterTime(tested_time);
-  filter.SetDayOfTheWeekFilter(static_cast<int>(exploded_time.day_of_week));
-  backend_->QueryFilteredURLs(100, filter, false, &filtered_list);
-
-  ASSERT_EQ(2U, filtered_list.size());
-  EXPECT_EQ(std::string(google), filtered_list[0].url.spec());
-  EXPECT_EQ(std::string(yahoo_sports_soccer), filtered_list[1].url.spec());
-
-  // Today + time limit - only yahoo_sports_soccer should fit.
-  filter.SetFilterTime(tested_time - base::TimeDelta::FromMinutes(40));
-  filter.SetFilterWidth(base::TimeDelta::FromMinutes(20));
-  backend_->QueryFilteredURLs(100, filter, false, &filtered_list);
-
-  ASSERT_EQ(1U, filtered_list.size());
-  EXPECT_EQ(std::string(yahoo_sports_soccer), filtered_list[0].url.spec());
-
-  // Make sure we get debug data if we request it.
-  filter.SetFilterTime(tested_time);
-  filter.SetFilterWidth(one_hour * 2);
-  backend_->QueryFilteredURLs(100, filter, true, &filtered_list);
-
-  // If the SegmentID is used by QueryFilteredURLs when generating the debug
-  // data instead of the URLID, the |total_visits| for the |yahoo_sports_soccer|
-  // entry will be zero instead of 1.
-  ASSERT_GE(filtered_list.size(), 2U);
-  EXPECT_EQ(std::string(google), filtered_list[0].url.spec());
-  EXPECT_EQ(std::string(yahoo_sports_soccer), filtered_list[1].url.spec());
-  EXPECT_EQ(4U, filtered_list[0].extended_info.total_visits);
-  EXPECT_EQ(1U, filtered_list[1].extended_info.total_visits);
-}
-
 TEST_F(HistoryBackendTest, TopHosts) {
   std::vector<GURL> urls;
   urls.push_back(GURL("http://cnn.com/us"));
@@ -3256,7 +3100,7 @@ TEST_F(HistoryBackendTest, TopHosts_IgnoreUnusualURLs) {
       GURL("chrome-extension://nghiiepjnjgjeolabmjjceablnkpkjde/options.html"));
   urls.push_back(GURL("file:///home/foobar/tmp/baz.html"));
   urls.push_back(GURL("data:text/plain,Hello%20world%21"));
-  urls.push_back(GURL("chrome://memory"));
+  urls.push_back(GURL("chrome://version"));
   urls.push_back(GURL("about:mammon"));
   for (const GURL& url : urls) {
     backend_->AddPageVisit(url, base::Time::Now(), 0, ui::PAGE_TRANSITION_LINK,
@@ -3319,33 +3163,49 @@ TEST_F(HistoryBackendTest, RecordTopHostsMetrics) {
               ElementsAre(base::Bucket(1, 1), base::Bucket(51, 1)));
 }
 
-TEST_F(HistoryBackendTest, GetCountsForOrigins) {
-  std::vector<GURL> urls;
-  urls.push_back(GURL("http://cnn.com/us"));
-  urls.push_back(GURL("http://cnn.com/intl"));
-  urls.push_back(GURL("https://cnn.com/intl"));
-  urls.push_back(GURL("http://cnn.com:8080/path"));
-  urls.push_back(GURL("http://dogtopia.com/pups?q=poods"));
-  for (const GURL& url : urls) {
-    backend_->AddPageVisit(url, base::Time::Now(), 0, ui::PAGE_TRANSITION_LINK,
-                           history::SOURCE_BROWSED);
-  }
+TEST_F(HistoryBackendTest, GetCountsAndLastVisitForOrigins) {
+  base::Time now = base::Time::Now();
+  base::Time tomorrow = now + base::TimeDelta::FromDays(1);
+  base::Time yesterday = now - base::TimeDelta::FromDays(1);
+  base::Time last_week = now - base::TimeDelta::FromDays(7);
+
+  backend_->AddPageVisit(GURL("http://cnn.com/intl"), yesterday, 0,
+                         ui::PAGE_TRANSITION_LINK, history::SOURCE_BROWSED);
+  backend_->AddPageVisit(GURL("http://cnn.com/us"), last_week, 0,
+                         ui::PAGE_TRANSITION_LINK, history::SOURCE_BROWSED);
+  backend_->AddPageVisit(GURL("http://cnn.com/ny"), now, 0,
+                         ui::PAGE_TRANSITION_LINK, history::SOURCE_BROWSED);
+  backend_->AddPageVisit(GURL("https://cnn.com/intl"), yesterday, 0,
+                         ui::PAGE_TRANSITION_LINK, history::SOURCE_BROWSED);
+  backend_->AddPageVisit(GURL("http://cnn.com:8080/path"), yesterday, 0,
+                         ui::PAGE_TRANSITION_LINK, history::SOURCE_BROWSED);
+  backend_->AddPageVisit(GURL("http://dogtopia.com/pups?q=poods"), now, 0,
+                         ui::PAGE_TRANSITION_LINK, history::SOURCE_BROWSED);
 
   std::set<GURL> origins;
   origins.insert(GURL("http://cnn.com/"));
-  EXPECT_THAT(backend_->GetCountsForOrigins(origins),
-              ElementsAre(std::make_pair(GURL("http://cnn.com/"), 2)));
+  EXPECT_THAT(backend_->GetCountsAndLastVisitForOrigins(origins),
+              ElementsAre(std::make_pair(GURL("http://cnn.com/"),
+                                         std::make_pair(3, now))));
 
   origins.insert(GURL("http://dogtopia.com/"));
   origins.insert(GURL("http://cnn.com:8080/"));
   origins.insert(GURL("https://cnn.com/"));
   origins.insert(GURL("http://notpresent.com/"));
-  EXPECT_THAT(backend_->GetCountsForOrigins(origins),
-              ElementsAre(std::make_pair(GURL("http://cnn.com/"), 2),
-                          std::make_pair(GURL("http://cnn.com:8080/"), 1),
-                          std::make_pair(GURL("http://dogtopia.com/"), 1),
-                          std::make_pair(GURL("http://notpresent.com/"), 0),
-                          std::make_pair(GURL("https://cnn.com/"), 1)));
+  backend_->AddPageVisit(GURL("http://cnn.com/"), tomorrow, 0,
+                         ui::PAGE_TRANSITION_LINK, history::SOURCE_BROWSED);
+
+  EXPECT_THAT(
+      backend_->GetCountsAndLastVisitForOrigins(origins),
+      ElementsAre(
+          std::make_pair(GURL("http://cnn.com/"), std::make_pair(4, tomorrow)),
+          std::make_pair(GURL("http://cnn.com:8080/"),
+                         std::make_pair(1, yesterday)),
+          std::make_pair(GURL("http://dogtopia.com/"), std::make_pair(1, now)),
+          std::make_pair(GURL("http://notpresent.com/"),
+                         std::make_pair(0, base::Time())),
+          std::make_pair(GURL("https://cnn.com/"),
+                         std::make_pair(1, yesterday))));
 }
 
 TEST_F(HistoryBackendTest, UpdateVisitDuration) {
@@ -3418,8 +3278,7 @@ TEST_F(HistoryBackendTest, MigrationVisitDuration) {
   backend_ = new HistoryBackend(new HistoryBackendTestDelegate(this),
                                 history_client_.CreateBackendClient(),
                                 base::ThreadTaskRunnerHandle::Get());
-  backend_->Init(std::string(), false,
-                 TestHistoryDatabaseParamsForPath(new_history_path));
+  backend_->Init(false, TestHistoryDatabaseParamsForPath(new_history_path));
   backend_->Closing();
   backend_ = NULL;
 
@@ -3646,8 +3505,7 @@ TEST_F(HistoryBackendTest, RemoveNotification) {
       new HistoryService(make_scoped_ptr(new HistoryClientFakeBookmarks),
                          scoped_ptr<history::VisitDelegate>()));
   EXPECT_TRUE(
-      service->Init(kAcceptLanguagesForTest,
-                    TestHistoryDatabaseParamsForPath(scoped_temp_dir.path())));
+      service->Init(TestHistoryDatabaseParamsForPath(scoped_temp_dir.path())));
 
   service->AddPage(
       url, base::Time::Now(), NULL, 1, GURL(), RedirectList(),

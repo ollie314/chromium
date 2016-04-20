@@ -39,7 +39,7 @@ MediaStreamInfoBarDelegateAndroid::~MediaStreamInfoBarDelegateAndroid() {}
 // static
 bool MediaStreamInfoBarDelegateAndroid::Create(
     content::WebContents* web_contents,
-    scoped_ptr<MediaStreamDevicesController> controller) {
+    std::unique_ptr<MediaStreamDevicesController> controller) {
   InfoBarService* infobar_service =
       InfoBarService::FromWebContents(web_contents);
   if (!infobar_service) {
@@ -49,9 +49,10 @@ bool MediaStreamInfoBarDelegateAndroid::Create(
     return false;
   }
 
-  scoped_ptr<infobars::InfoBar> infobar(
-      infobar_service->CreateConfirmInfoBar(scoped_ptr<ConfirmInfoBarDelegate>(
-          new MediaStreamInfoBarDelegateAndroid(std::move(controller)))));
+  std::unique_ptr<infobars::InfoBar> infobar(
+      infobar_service->CreateConfirmInfoBar(
+          std::unique_ptr<ConfirmInfoBarDelegate>(
+              new MediaStreamInfoBarDelegateAndroid(std::move(controller)))));
   for (size_t i = 0; i < infobar_service->infobar_count(); ++i) {
     infobars::InfoBar* old_infobar = infobar_service->infobar_at(i);
     if (old_infobar->delegate()->AsMediaStreamInfoBarDelegateAndroid()) {
@@ -77,7 +78,7 @@ MediaStreamInfoBarDelegateAndroid::GetIdentifier() const {
 }
 
 MediaStreamInfoBarDelegateAndroid::MediaStreamInfoBarDelegateAndroid(
-    scoped_ptr<MediaStreamDevicesController> controller)
+    std::unique_ptr<MediaStreamDevicesController> controller)
     : ConfirmInfoBarDelegate(), controller_(std::move(controller)) {
   DCHECK(controller_.get());
   DCHECK(controller_->IsAskingForAudio() || controller_->IsAskingForVideo());
@@ -107,13 +108,7 @@ MediaStreamInfoBarDelegateAndroid::AsMediaStreamInfoBarDelegateAndroid() {
 }
 
 base::string16 MediaStreamInfoBarDelegateAndroid::GetMessageText() const {
-  int message_id = IDS_MEDIA_CAPTURE_AUDIO_AND_VIDEO;
-  if (!controller_->IsAskingForAudio())
-    message_id = IDS_MEDIA_CAPTURE_VIDEO_ONLY;
-  else if (!controller_->IsAskingForVideo())
-    message_id = IDS_MEDIA_CAPTURE_AUDIO_ONLY;
-  return l10n_util::GetStringFUTF16(
-      message_id, base::UTF8ToUTF16(controller_->GetSecurityOriginSpec()));
+  return controller_->GetMessageText();
 }
 
 base::string16 MediaStreamInfoBarDelegateAndroid::GetButtonLabel(
@@ -124,8 +119,7 @@ base::string16 MediaStreamInfoBarDelegateAndroid::GetButtonLabel(
 }
 
 bool MediaStreamInfoBarDelegateAndroid::Accept() {
-  GURL origin(controller_->GetSecurityOriginSpec());
-  if (content::IsOriginSecure(origin)) {
+  if (content::IsOriginSecure(controller_->GetOrigin())) {
     UMA_HISTOGRAM_ENUMERATION("Media.DevicePermissionActions", kAllowHttps,
                               kPermissionActionsMax);
   } else {

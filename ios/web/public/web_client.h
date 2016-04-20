@@ -8,9 +8,9 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
-#include "ios/web/public/web_view_type.h"
 #include "ui/base/layout.h"
 #include "url/url_util.h"
 
@@ -20,13 +20,12 @@ class RefCountedStaticMemory;
 
 class GURL;
 
-#ifdef __OBJC__
 @class UIWebView;
 @class NSString;
-#else
-class UIWebView;
-class NSString;
-#endif
+
+namespace net {
+class SSLInfo;
+}
 
 namespace web {
 
@@ -34,6 +33,7 @@ class BrowserState;
 class BrowserURLRewriter;
 class WebClient;
 class WebMainParts;
+class WebState;
 
 // Setter and getter for the client.  The client should be set early, before any
 // web code is called.
@@ -82,15 +82,6 @@ class WebClient {
   // created and not called repeatedly.
   virtual bool AllowWebViewAllocInit() const;
 
-  // Returns true if all web views that are created need to be associated with
-  // a BrowserState.
-  // This method is only called if the |AllowWebViewAllocInit| returns false.
-  // If this method returns true, web views can only be created
-  // with the BrowserState whose ActiveStateManager is active.
-  // This is called once (only in debug builds) when the first web view is
-  // created and not called repeatedly.
-  virtual bool WebViewsNeedActiveStateManager() const;
-
   // Returns text to be displayed for an unsupported plugin.
   virtual base::string16 GetPluginNotSupportedText() const;
 
@@ -128,7 +119,19 @@ class WebClient {
 
   // Gives the embedder a chance to provide the JavaScript to be injected into
   // the web view as early as possible. Result must not be nil.
-  virtual NSString* GetEarlyPageScript(WebViewType web_view_type) const;
+  virtual NSString* GetEarlyPageScript() const;
+
+  // Informs the embedder that a certificate error has occurred. If
+  // |overridable| is true, the user can ignore the error and continue. The
+  // embedder can call the |callback| asynchronously (an argument of true means
+  // that |cert_error| should be ignored and web// should load the page).
+  virtual void AllowCertificateError(
+      WebState* web_state,
+      int cert_error,
+      const net::SSLInfo& ssl_info,
+      const GURL& request_url,
+      bool overridable,
+      const base::Callback<void(bool)>& callback);
 };
 
 }  // namespace web

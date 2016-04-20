@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
@@ -14,8 +16,7 @@
 #include "base/i18n/time_formatting.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_service.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
@@ -26,6 +27,7 @@
 #include "chrome/common/channel_info.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/about_sync_util.h"
 #include "components/sync_driver/pref_names.h"
@@ -54,7 +56,7 @@ namespace {
 // results are sent to the Java callback.
 void NativeGetAllNodesCallback(
     const base::android::ScopedJavaGlobalRef<jobject>& callback,
-    scoped_ptr<base::ListValue> result) {
+    std::unique_ptr<base::ListValue> result) {
   JNIEnv* env = base::android::AttachCurrentThread();
   std::string json_string;
   if (!result.get() || !base::JSONWriter::Write(*result, &json_string)) {
@@ -187,18 +189,18 @@ void ProfileSyncServiceAndroid::SetSetupInProgress(
   sync_service_->SetSetupInProgress(in_progress);
 }
 
-jboolean ProfileSyncServiceAndroid::HasSyncSetupCompleted(
+jboolean ProfileSyncServiceAndroid::IsFirstSetupComplete(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  return sync_service_->HasSyncSetupCompleted();
+  return sync_service_->IsFirstSetupComplete();
 }
 
-void ProfileSyncServiceAndroid::SetSyncSetupCompleted(
+void ProfileSyncServiceAndroid::SetFirstSetupComplete(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  sync_service_->SetSyncSetupCompleted();
+  sync_service_->SetFirstSetupComplete();
 }
 
 ScopedJavaLocalRef<jintArray> ProfileSyncServiceAndroid::GetActiveDataTypes(
@@ -344,7 +346,7 @@ void ProfileSyncServiceAndroid::GetAllNodes(
   base::android::ScopedJavaGlobalRef<jobject> java_callback;
   java_callback.Reset(env, callback);
 
-  base::Callback<void(scoped_ptr<base::ListValue>)> native_callback =
+  base::Callback<void(std::unique_ptr<base::ListValue>)> native_callback =
       base::Bind(&NativeGetAllNodesCallback, java_callback);
   sync_service_->GetAllNodes(native_callback);
 }
@@ -454,7 +456,7 @@ ScopedJavaLocalRef<jstring> ProfileSyncServiceAndroid::GetAboutInfoForTest(
     const JavaParamRef<jobject>&) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  scoped_ptr<base::DictionaryValue> about_info =
+  std::unique_ptr<base::DictionaryValue> about_info =
       sync_driver::sync_ui_util::ConstructAboutInformation(
           sync_service_, sync_service_->signin(), chrome::GetChannel());
   std::string about_info_json;
@@ -480,7 +482,7 @@ void ProfileSyncServiceAndroid::OverrideNetworkResourcesForTest(
   syncer::NetworkResources* resources =
       reinterpret_cast<syncer::NetworkResources*>(network_resources);
   sync_service_->OverrideNetworkResourcesForTest(
-      make_scoped_ptr<syncer::NetworkResources>(resources));
+      base::WrapUnique<syncer::NetworkResources>(resources));
 }
 
 // static

@@ -39,8 +39,6 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/navigator_connect_context.h"
-#include "content/public/browser/navigator_connect_service_factory.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
@@ -96,7 +94,7 @@ class BlobProtocolHandler : public net::URLRequestJobFactory::ProtocolHandler {
   const scoped_refptr<ChromeBlobStorageContext> blob_storage_context_;
   const scoped_refptr<StreamContext> stream_context_;
   const scoped_refptr<storage::FileSystemContext> file_system_context_;
-  mutable scoped_ptr<storage::BlobProtocolHandler> blob_protocol_handler_;
+  mutable std::unique_ptr<storage::BlobProtocolHandler> blob_protocol_handler_;
   DISALLOW_COPY_AND_ASSIGN(BlobProtocolHandler);
 };
 
@@ -315,7 +313,7 @@ void NormalizeActivePaths(const base::FilePath& storage_root,
 void BlockingGarbageCollect(
     const base::FilePath& storage_root,
     const scoped_refptr<base::TaskRunner>& file_access_runner,
-    scoped_ptr<base::hash_set<base::FilePath> > active_paths) {
+    std::unique_ptr<base::hash_set<base::FilePath>> active_paths) {
   CHECK(storage_root.IsAbsolute());
 
   NormalizeActivePaths(storage_root, active_paths.get());
@@ -396,12 +394,11 @@ StoragePartitionImpl* StoragePartitionImplMap::Get(
   if (it != partitions_.end())
     return it->second;
 
-  base::FilePath partition_path =
-      browser_context_->GetPath().Append(
-          GetStoragePartitionPath(partition_domain, partition_name));
-  StoragePartitionImpl* partition =
-      StoragePartitionImpl::Create(browser_context_, in_memory,
-                                   partition_path);
+  base::FilePath relative_partition_path =
+      GetStoragePartitionPath(partition_domain, partition_name);
+
+  StoragePartitionImpl* partition = StoragePartitionImpl::Create(
+      browser_context_, in_memory, relative_partition_path);
   partitions_[partition_config] = partition;
 
   partition->GetQuotaManager()->SetTemporaryStorageEvictionPolicy(
@@ -462,23 +459,19 @@ StoragePartitionImpl* StoragePartitionImplMap::Get(
   // These calls must happen after StoragePartitionImpl::Create().
   if (partition_domain.empty()) {
     partition->SetURLRequestContext(
-        GetContentClient()->browser()->CreateRequestContext(
-            browser_context_, &protocol_handlers,
-            std::move(request_interceptors)));
+        browser_context_->CreateRequestContext(
+            &protocol_handlers, std::move(request_interceptors)));
   } else {
     partition->SetURLRequestContext(
-        GetContentClient()->browser()->CreateRequestContextForStoragePartition(
-            browser_context_, partition->GetPath(), in_memory,
-            &protocol_handlers, std::move(request_interceptors)));
+        browser_context_->CreateRequestContextForStoragePartition(
+            partition->GetPath(), in_memory, &protocol_handlers,
+            std::move(request_interceptors)));
   }
   partition->SetMediaURLRequestContext(
       partition_domain.empty() ?
-      browser_context_->GetMediaRequestContext() :
-      browser_context_->GetMediaRequestContextForStoragePartition(
+      browser_context_->CreateMediaRequestContext() :
+      browser_context_->CreateMediaRequestContextForStoragePartition(
           partition->GetPath(), in_memory));
-
-  GetContentClient()->browser()->GetAdditionalNavigatorConnectServices(
-      partition->GetNavigatorConnectContext());
 
   PostCreateInitialization(partition, in_memory);
 
@@ -540,7 +533,7 @@ void StoragePartitionImplMap::AsyncObliterate(
 }
 
 void StoragePartitionImplMap::GarbageCollect(
-    scoped_ptr<base::hash_set<base::FilePath> > active_paths,
+    std::unique_ptr<base::hash_set<base::FilePath>> active_paths,
     const base::Closure& done) {
   // Include all paths for current StoragePartitions in the active_paths since
   // they cannot be deleted safely.
@@ -590,28 +583,29 @@ void StoragePartitionImplMap::PostCreateInitialization(
   if (BrowserThread::IsMessageLoopValid(BrowserThread::IO)) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&ChromeAppCacheService::InitializeOnIOThread,
-                   partition->GetAppCacheService(),
-                   in_memory ? base::FilePath() :
-                       partition->GetPath().Append(kAppCacheDirname),
-                   browser_context_->GetResourceContext(),
-                   make_scoped_refptr(partition->GetURLRequestContext()),
-                   make_scoped_refptr(
-                       browser_context_->GetSpecialStoragePolicy())));
+        base::Bind(
+            &ChromeAppCacheService::InitializeOnIOThread,
+            partition->GetAppCacheService(),
+            in_memory ? base::FilePath()
+                      : partition->GetPath().Append(kAppCacheDirname),
+            browser_context_->GetResourceContext(),
+            base::RetainedRef(partition->GetURLRequestContext()),
+            base::RetainedRef(browser_context_->GetSpecialStoragePolicy())));
 
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&CacheStorageContextImpl::SetBlobParametersForCache,
                    partition->GetCacheStorageContext(),
-                   make_scoped_refptr(partition->GetURLRequestContext()),
-                   make_scoped_refptr(
+                   base::RetainedRef(partition->GetURLRequestContext()),
+                   base::RetainedRef(
                        ChromeBlobStorageContext::GetFor(browser_context_))));
 
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&ServiceWorkerContextWrapper::set_resource_context,
+        base::Bind(&ServiceWorkerContextWrapper::InitializeResourceContext,
                    partition->GetServiceWorkerContext(),
-                   browser_context_->GetResourceContext()));
+                   browser_context_->GetResourceContext(),
+                   base::RetainedRef(partition->GetURLRequestContext())));
 
     // We do not call InitializeURLRequestContext() for media contexts because,
     // other than the HTTP cache, the media contexts share the same backing

@@ -10,6 +10,8 @@ PrinterBasicInfo::PrinterBasicInfo()
     : printer_status(0),
       is_default(false) {}
 
+PrinterBasicInfo::PrinterBasicInfo(const PrinterBasicInfo& other) = default;
+
 PrinterBasicInfo::~PrinterBasicInfo() {}
 
 PrinterSemanticCapsAndDefaults::PrinterSemanticCapsAndDefaults()
@@ -24,9 +26,15 @@ PrinterSemanticCapsAndDefaults::PrinterSemanticCapsAndDefaults()
       bw_model(UNKNOWN_COLOR_MODEL)
 {}
 
+PrinterSemanticCapsAndDefaults::PrinterSemanticCapsAndDefaults(
+    const PrinterSemanticCapsAndDefaults& other) = default;
+
 PrinterSemanticCapsAndDefaults::~PrinterSemanticCapsAndDefaults() {}
 
 PrinterCapsAndDefaults::PrinterCapsAndDefaults() {}
+
+PrinterCapsAndDefaults::PrinterCapsAndDefaults(
+    const PrinterCapsAndDefaults& other) = default;
 
 PrinterCapsAndDefaults::~PrinterCapsAndDefaults() {}
 

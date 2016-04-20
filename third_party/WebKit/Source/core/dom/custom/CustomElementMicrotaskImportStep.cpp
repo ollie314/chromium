@@ -38,18 +38,8 @@
 
 namespace blink {
 
-PassOwnPtrWillBeRawPtr<CustomElementMicrotaskImportStep> CustomElementMicrotaskImportStep::create(HTMLImportChild* import)
-{
-    return adoptPtrWillBeNoop(new CustomElementMicrotaskImportStep(import));
-}
-
 CustomElementMicrotaskImportStep::CustomElementMicrotaskImportStep(HTMLImportChild* import)
-#if ENABLE(OILPAN)
     : m_import(import)
-#else
-    : m_import(import->weakPtr())
-    , m_weakFactory(this)
-#endif
     , m_queue(import->loader()->microtaskQueue())
 {
 }
@@ -71,7 +61,7 @@ bool CustomElementMicrotaskImportStep::shouldWaitForImport() const
 
 void CustomElementMicrotaskImportStep::didUpgradeAllCustomElements()
 {
-    ASSERT(m_queue);
+    DCHECK(m_queue);
     if (m_import)
         m_import->didFinishUpgradingCustomElements();
 }
@@ -96,7 +86,7 @@ DEFINE_TRACE(CustomElementMicrotaskImportStep)
 #if !defined(NDEBUG)
 void CustomElementMicrotaskImportStep::show(unsigned indent)
 {
-    fprintf(stderr, "%*sImport(wait=%d sync=%d, url=%s)\n", indent, "", shouldWaitForImport(), m_import && m_import->isSync(), m_import ? m_import->url().string().utf8().data() : "null");
+    fprintf(stderr, "%*sImport(wait=%d sync=%d, url=%s)\n", indent, "", shouldWaitForImport(), m_import && m_import->isSync(), m_import ? m_import->url().getString().utf8().data() : "null");
     m_queue->show(indent + 1);
 }
 #endif

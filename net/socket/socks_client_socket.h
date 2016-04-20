@@ -8,12 +8,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_errors.h"
@@ -32,7 +32,7 @@ class NET_EXPORT_PRIVATE SOCKSClientSocket : public StreamSocket {
  public:
   // |req_info| contains the hostname and port to which the socket above will
   // communicate to via the socks layer. For testing the referrer is optional.
-  SOCKSClientSocket(scoped_ptr<ClientSocketHandle> transport_socket,
+  SOCKSClientSocket(std::unique_ptr<ClientSocketHandle> transport_socket,
                     const HostResolver::RequestInfo& req_info,
                     RequestPriority priority,
                     HostResolver* host_resolver);
@@ -51,7 +51,6 @@ class NET_EXPORT_PRIVATE SOCKSClientSocket : public StreamSocket {
   void SetSubresourceSpeculation() override;
   void SetOmniboxSpeculation() override;
   bool WasEverUsed() const override;
-  bool UsingTCPFastOpen() const override;
   bool WasNpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
   bool GetSSLInfo(SSLInfo* ssl_info) override;
@@ -104,7 +103,7 @@ class NET_EXPORT_PRIVATE SOCKSClientSocket : public StreamSocket {
   const std::string BuildHandshakeWriteBuffer() const;
 
   // Stores the underlying socket.
-  scoped_ptr<ClientSocketHandle> transport_;
+  std::unique_ptr<ClientSocketHandle> transport_;
 
   State next_state_;
 

@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "ui/compositor/layer_owner_delegate.h"
 
 namespace ui {
@@ -23,14 +24,14 @@ void LayerOwner::SetLayer(Layer* layer) {
   layer_->owner_ = this;
 }
 
-scoped_ptr<Layer> LayerOwner::AcquireLayer() {
+std::unique_ptr<Layer> LayerOwner::AcquireLayer() {
   if (layer_owner_)
     layer_owner_->owner_ = NULL;
   return std::move(layer_owner_);
 }
 
-scoped_ptr<Layer> LayerOwner::RecreateLayer() {
-  scoped_ptr<ui::Layer> old_layer(AcquireLayer());
+std::unique_ptr<Layer> LayerOwner::RecreateLayer() {
+  std::unique_ptr<ui::Layer> old_layer(AcquireLayer());
   if (!old_layer)
     return old_layer;
 
@@ -48,11 +49,13 @@ scoped_ptr<Layer> LayerOwner::RecreateLayer() {
   new_layer->SetFillsBoundsOpaquely(old_layer->fills_bounds_opaquely());
   new_layer->SetFillsBoundsCompletely(old_layer->FillsBoundsCompletely());
   new_layer->SetSubpixelPositionOffset(old_layer->subpixel_position_offset());
+  new_layer->SetLayerInverted(old_layer->layer_inverted());
+  new_layer->SetTransform(old_layer->GetTargetTransform());
   if (old_layer->type() == LAYER_SOLID_COLOR)
     new_layer->SetColor(old_layer->GetTargetColor());
   SkRegion* alpha_shape = old_layer->alpha_shape();
   if (alpha_shape)
-    new_layer->SetAlphaShape(make_scoped_ptr(new SkRegion(*alpha_shape)));
+    new_layer->SetAlphaShape(base::WrapUnique(new SkRegion(*alpha_shape)));
 
   if (old_layer->parent()) {
     // Install new layer as a sibling of the old layer, stacked below it.

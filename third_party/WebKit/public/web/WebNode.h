@@ -41,7 +41,6 @@ namespace blink {
 
 class Node;
 class WebAXObject;
-class WebDOMEvent;
 class WebDocument;
 class WebElement;
 class WebElementCollection;
@@ -90,19 +89,12 @@ public:
     BLINK_EXPORT bool isFocusable() const;
     BLINK_EXPORT bool isContentEditable() const;
     BLINK_EXPORT bool isElementNode() const;
-    BLINK_EXPORT void dispatchEvent(const WebDOMEvent&);
     BLINK_EXPORT void simulateClick();
+
     // The argument should be lower-cased.
     BLINK_EXPORT WebElementCollection getElementsByHTMLTagName(const WebString&) const;
 
-
     BLINK_EXPORT WebElement querySelector(const WebString& selector, WebExceptionCode&) const;
-    BLINK_EXPORT void querySelectorAll(const WebString& selector, WebVector<WebElement>& results, WebExceptionCode&) const;
-
-    // Same as querySelector and querySelectorAll, but ASSERT if an exception
-    // code would be generated.
-    BLINK_EXPORT WebElement querySelector(const WebString& selector) const;
-    BLINK_EXPORT void querySelectorAll(const WebString& selector, WebVector<WebElement>& results) const;
 
     BLINK_EXPORT bool focused() const;
 
@@ -115,9 +107,9 @@ public:
     template<typename T> const T toConst() const;
 
 #if BLINK_IMPLEMENTATION
-    WebNode(const PassRefPtrWillBeRawPtr<Node>&);
-    WebNode& operator=(const PassRefPtrWillBeRawPtr<Node>&);
-    operator PassRefPtrWillBeRawPtr<Node>() const;
+    BLINK_EXPORT WebNode(Node*);
+    BLINK_EXPORT WebNode& operator=(Node*);
+    BLINK_EXPORT operator Node*() const;
 
     template<typename T> T* unwrap()
     {

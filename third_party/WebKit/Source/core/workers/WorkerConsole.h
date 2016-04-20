@@ -30,14 +30,8 @@
 #ifndef WorkerConsole_h
 #define WorkerConsole_h
 
-#include "core/inspector/ConsoleAPITypes.h"
 #include "core/frame/ConsoleBase.h"
-#include "core/frame/ConsoleTypes.h"
 #include "platform/heap/Handle.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
-#include "wtf/RefPtr.h"
-#include "wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -57,12 +51,12 @@ public:
 
 protected:
     ExecutionContext* context() override;
-    void reportMessageToConsole(PassRefPtrWillBeRawPtr<ConsoleMessage>) override;
+    void reportMessageToConsole(ConsoleMessage*) override;
 
 private:
     explicit WorkerConsole(WorkerGlobalScope*);
 
-    RawPtrWillBeMember<WorkerGlobalScope> m_scope;
+    Member<WorkerGlobalScope> m_scope;
 };
 
 } // namespace blink

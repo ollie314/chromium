@@ -5,10 +5,10 @@
 #ifndef CONTENT_RENDERER_GPU_COMPOSITOR_DEPENDENCIES_H_
 #define CONTENT_RENDERER_GPU_COMPOSITOR_DEPENDENCIES_H_
 
+#include <memory>
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -17,6 +17,7 @@ class SingleThreadTaskRunner;
 namespace cc {
 class BeginFrameSource;
 class ContextProvider;
+class ImageSerializationProcessor;
 class SharedBitmapManager;
 class TaskGraphRunner;
 }
@@ -53,8 +54,9 @@ class CompositorDependencies {
   virtual gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() = 0;
   virtual scheduler::RendererScheduler* GetRendererScheduler() = 0;
   virtual cc::ContextProvider* GetSharedMainThreadContextProvider() = 0;
-  virtual scoped_ptr<cc::BeginFrameSource> CreateExternalBeginFrameSource(
+  virtual std::unique_ptr<cc::BeginFrameSource> CreateExternalBeginFrameSource(
       int routing_id) = 0;
+  virtual cc::ImageSerializationProcessor* GetImageSerializationProcessor() = 0;
   virtual cc::TaskGraphRunner* GetTaskGraphRunner() = 0;
   virtual bool AreImageDecodeTasksEnabled() = 0;
   virtual bool IsThreadedAnimationEnabled() = 0;

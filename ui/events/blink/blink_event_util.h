@@ -5,12 +5,18 @@
 #ifndef UI_EVENTS_BLINK_BLINK_EVENT_UTIL_H_
 #define UI_EVENTS_BLINK_BLINK_EVENT_UTIL_H_
 
+#include <memory>
+
+#include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "ui/events/gesture_detection/motion_event.h"
+
 namespace base {
 class TimeDelta;
 }
 
 namespace blink {
 class WebGestureEvent;
+class WebInputEvent;
 class WebTouchEvent;
 }
 
@@ -39,6 +45,13 @@ blink::WebGestureEvent CreateWebGestureEventFromGestureEventData(
 
 int EventFlagsToWebEventModifiers(int flags);
 
-}  // namespace content
+std::unique_ptr<blink::WebInputEvent> ScaleWebInputEvent(
+    const blink::WebInputEvent& event,
+    float scale);
+
+blink::WebPointerProperties::PointerType ToWebPointerType(
+    MotionEvent::ToolType tool_type);
+
+}  // namespace ui
 
 #endif  // UI_EVENTS_BLINK_BLINK_EVENT_UTIL_H_

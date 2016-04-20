@@ -117,15 +117,6 @@ class FullscreenController : public ExclusiveAccessControllerBase {
 
   // Platform Fullscreen ///////////////////////////////////////////////////////
 
-#if defined(OS_WIN)
-  // Returns whether we are currently in a Metro snap view.
-  bool IsInMetroSnapMode();
-
-  // API that puts the window into a mode suitable for rendering when Chrome
-  // is rendered in a 20% screen-width Metro snap view on Windows 8.
-  void SetMetroSnapMode(bool enable);
-#endif  // OS_WIN
-
   // Overrde from ExclusiveAccessControllerBase.
   void OnTabDetachedFromView(content::WebContents* web_contents) override;
   void OnTabClosing(content::WebContents* web_contents) override;
@@ -158,6 +149,8 @@ class FullscreenController : public ExclusiveAccessControllerBase {
   // Notifies the tab that it has been forced out of fullscreen mode if
   // necessary.
   void NotifyTabExclusiveAccessLost() override;
+
+  void RecordBubbleReshowsHistogram(int bubble_reshow_count) override;
 
   void ToggleFullscreenModeInternal(FullscreenInternalOption option);
   void EnterFullscreenModeInternal(FullscreenInternalOption option);

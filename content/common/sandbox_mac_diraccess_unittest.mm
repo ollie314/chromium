@@ -10,6 +10,8 @@ extern "C" {
 #include <sandbox.h>
 }
 
+#include <memory>
+
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
@@ -141,7 +143,7 @@ struct ScopedDirectoryDelete {
   }
 };
 
-typedef scoped_ptr<base::FilePath, ScopedDirectoryDelete> ScopedDirectory;
+typedef std::unique_ptr<base::FilePath, ScopedDirectoryDelete> ScopedDirectory;
 
 TEST_F(MacDirAccessSandboxTest, SandboxAccess) {
   using base::CreateDirectory;

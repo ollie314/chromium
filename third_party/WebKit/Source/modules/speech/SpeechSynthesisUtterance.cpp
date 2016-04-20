@@ -43,9 +43,9 @@ SpeechSynthesisUtterance::~SpeechSynthesisUtterance()
 {
 }
 
-ExecutionContext* SpeechSynthesisUtterance::executionContext() const
+ExecutionContext* SpeechSynthesisUtterance::getExecutionContext() const
 {
-    return ContextLifecycleObserver::executionContext();
+    return ContextLifecycleObserver::getExecutionContext();
 }
 
 const AtomicString& SpeechSynthesisUtterance::interfaceName() const
@@ -72,7 +72,7 @@ DEFINE_TRACE(SpeechSynthesisUtterance)
 {
     visitor->trace(m_platformUtterance);
     visitor->trace(m_voice);
-    RefCountedGarbageCollectedEventTargetWithInlineData<SpeechSynthesisUtterance>::trace(visitor);
+    EventTargetWithInlineData::trace(visitor);
     ContextLifecycleObserver::trace(visitor);
 }
 

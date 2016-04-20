@@ -8,6 +8,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/storage_partition.h"
 #include "net/url_request/url_request_context_getter.h"
 
 namespace content {
@@ -17,7 +18,9 @@ void ProvisionFetcherImpl::Create(
     RenderFrameHost* render_frame_host,
     mojo::InterfaceRequest<media::interfaces::ProvisionFetcher> request) {
   net::URLRequestContextGetter* context_getter =
-      render_frame_host->GetProcess()->GetBrowserContext()->GetRequestContext();
+      BrowserContext::GetDefaultStoragePartition(
+          render_frame_host->GetProcess()->GetBrowserContext())->
+              GetURLRequestContext();
   DCHECK(context_getter);
 
   // The created object is strongly bound to (and owned by) the pipe.
@@ -26,7 +29,7 @@ void ProvisionFetcherImpl::Create(
 }
 
 ProvisionFetcherImpl::ProvisionFetcherImpl(
-    scoped_ptr<media::ProvisionFetcher> provision_fetcher,
+    std::unique_ptr<media::ProvisionFetcher> provision_fetcher,
     mojo::InterfaceRequest<ProvisionFetcher> request)
     : binding_(this, std::move(request)),
       provision_fetcher_(std::move(provision_fetcher)),

@@ -4,6 +4,8 @@
 
 #include "content/public/test/test_renderer_host.h"
 
+#include <utility>
+
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
@@ -22,6 +24,8 @@
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_render_view_host_factory.h"
 #include "content/test/test_web_contents.h"
+#include "ui/base/material_design/material_design_controller.h"
+#include "ui/base/test/material_design_controller_test_api.h"
 
 #if defined(OS_WIN)
 #include "ui/base/win/scoped_ole_initializer.h"
@@ -48,11 +52,6 @@ RenderFrameHost* RenderFrameHostTester::GetPendingForController(
   WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
       controller->GetWebContents());
   return web_contents->GetRenderManagerForTesting()->pending_frame_host();
-}
-
-// static
-bool RenderFrameHostTester::IsRenderFrameHostSwappedOut(RenderFrameHost* rfh) {
-  return static_cast<RenderFrameHostImpl*>(rfh)->is_swapped_out();
 }
 
 // RenderViewHostTester -------------------------------------------------------
@@ -151,11 +150,11 @@ WebContents* RenderViewHostTestHarness::CreateTestWebContents() {
   DCHECK(aura_test_helper_ != NULL);
 #endif
 
-  // This will be deleted when the WebContentsImpl goes away.
-  SiteInstance* instance = SiteInstance::Create(browser_context_.get());
+  scoped_refptr<SiteInstance> instance =
+      SiteInstance::Create(browser_context_.get());
   instance->GetProcess()->Init();
 
-  return TestWebContents::Create(browser_context_.get(), instance);
+  return TestWebContents::Create(browser_context_.get(), std::move(instance));
 }
 
 void RenderViewHostTestHarness::NavigateAndCommit(const GURL& url) {
@@ -182,6 +181,10 @@ void RenderViewHostTestHarness::FailedReload() {
 }
 
 void RenderViewHostTestHarness::SetUp() {
+  // ContentTestSuiteBase might have already initialized
+  // MaterialDesignController in unit_tests suite.
+  ui::test::MaterialDesignControllerTestAPI::Uninitialize();
+  ui::MaterialDesignController::Initialize();
   thread_bundle_.reset(new TestBrowserThreadBundle(thread_bundle_options_));
 
 #if defined(OS_WIN)

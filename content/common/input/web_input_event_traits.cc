@@ -114,7 +114,7 @@ void ApppendEventDetails(const WebTouchEvent& event, std::string* result) {
                 "{\n Touches: %u, Cancelable: %d, CausesScrolling: %d,"
                 " uniqueTouchEventId: %u\n[\n",
                 event.touchesLength, event.cancelable,
-                event.causesScrollingIfUncanceled, event.uniqueTouchEventId);
+                event.movedBeyondSlopRegion, event.uniqueTouchEventId);
   for (unsigned i = 0; i < event.touchesLength; ++i)
     ApppendTouchPointDetails(event.touches[i], result);
   result->append(" ]\n}");
@@ -240,7 +240,7 @@ void Coalesce(const WebTouchEvent& event_to_coalesce, WebTouchEvent* event) {
     if (old_event.touches[i_old].state == blink::WebTouchPoint::StateMoved)
       event->touches[i].state = blink::WebTouchPoint::StateMoved;
   }
-  event->causesScrollingIfUncanceled |= old_event.causesScrollingIfUncanceled;
+  event->movedBeyondSlopRegion |= old_event.movedBeyondSlopRegion;
 }
 
 bool CanCoalesce(const WebGestureEvent& event_to_coalesce,
@@ -413,6 +413,7 @@ const char* WebInputEventTraits::GetName(WebInputEvent::Type type) {
     CASE_TYPE(TouchMove);
     CASE_TYPE(TouchEnd);
     CASE_TYPE(TouchCancel);
+    CASE_TYPE(TouchScrollStarted);
     default:
       // Must include default to let blink::WebInputEvent add new event types
       // before they're added here.
@@ -466,8 +467,7 @@ void WebInputEventTraits::Coalesce(const WebInputEvent& event_to_coalesce,
   Apply(WebInputEventCoalesce(), event->type, event_to_coalesce, event);
 }
 
-bool WebInputEventTraits::WillReceiveAckFromRenderer(
-    const WebInputEvent& event) {
+bool WebInputEventTraits::ShouldBlockEventStream(const WebInputEvent& event) {
   switch (event.type) {
     case WebInputEvent::MouseDown:
     case WebInputEvent::MouseUp:
@@ -483,6 +483,7 @@ bool WebInputEventTraits::WillReceiveAckFromRenderer(
     case WebInputEvent::GesturePinchBegin:
     case WebInputEvent::GesturePinchEnd:
     case WebInputEvent::TouchCancel:
+    case WebInputEvent::TouchScrollStarted:
       return false;
     case WebInputEvent::TouchStart:
     case WebInputEvent::TouchEnd:

@@ -46,12 +46,11 @@ class AuraDesktopCapturerTest : public testing::Test,
 
   void SetUp() override;
 
-  MOCK_METHOD1(CreateSharedMemory, webrtc::SharedMemory*(size_t size));
   MOCK_METHOD1(OnCaptureCompleted, void(webrtc::DesktopFrame* frame));
 
  protected:
   void SimulateFrameCapture() {
-    scoped_ptr<SkBitmap> bitmap(new SkBitmap());
+    std::unique_ptr<SkBitmap> bitmap(new SkBitmap());
     const SkImageInfo& info =
         SkImageInfo::Make(3, 4, kBGRA_8888_SkColorType, kPremul_SkAlphaType);
     bitmap->installPixels(info, const_cast<unsigned char*>(frame_data), 12);
@@ -60,7 +59,7 @@ class AuraDesktopCapturerTest : public testing::Test,
         cc::CopyOutputResult::CreateBitmapResult(std::move(bitmap)));
   }
 
-  scoped_ptr<AuraDesktopCapturer> capturer_;
+  std::unique_ptr<AuraDesktopCapturer> capturer_;
 };
 
 void AuraDesktopCapturerTest::SetUp() {

@@ -5,11 +5,15 @@
 package org.chromium.chrome.browser.media.ui;
 
 import android.app.Activity;
+import android.graphics.Bitmap;
 import android.media.AudioManager;
+import android.os.Build;
+import android.text.TextUtils;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.Log;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.metrics.MediaSessionUMA;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
@@ -17,6 +21,7 @@ import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
+import org.chromium.content_public.common.MediaMetadata;
 import org.chromium.ui.base.WindowAndroid;
 
 import java.net.URI;
@@ -32,10 +37,13 @@ public class MediaSessionTabHelper {
     private static final String UNICODE_PLAY_CHARACTER = "\u25B6";
 
     private Tab mTab;
+    private Bitmap mFavicon = null;
+    private String mOrigin = null;
     private WebContents mWebContents;
     private WebContentsObserver mWebContentsObserver;
     private int mPreviousVolumeControlStream = AudioManager.USE_DEFAULT_STREAM_TYPE;
     private MediaNotificationInfo.Builder mNotificationInfoBuilder = null;
+    private MediaMetadata mFallbackMetadata;
 
     private MediaNotificationListener mControlsListener = new MediaNotificationListener() {
         @Override
@@ -84,30 +92,39 @@ public class MediaSessionTabHelper {
             }
 
             @Override
-            public void mediaSessionStateChanged(boolean isControllable, boolean isPaused) {
+            public void mediaSessionStateChanged(boolean isControllable, boolean isPaused,
+                    MediaMetadata metadata) {
                 if (!isControllable) {
                     hideNotification();
                     return;
                 }
-                String origin = mTab.getUrl();
-                try {
-                    origin = UrlUtilities.formatUrlForSecurityDisplay(new URI(origin), true);
-                } catch (URISyntaxException e) {
-                    Log.e(TAG, "Unable to parse the origin from the URL. "
-                            + "Showing the full URL instead.");
+
+                mFallbackMetadata = null;
+
+                // The page's title is used as a placeholder if no title is specified in the
+                // metadata.
+                if (TextUtils.isEmpty(metadata.getTitle())) {
+                    mFallbackMetadata = new MediaMetadata(
+                            sanitizeMediaTitle(mTab.getTitle()),
+                            metadata.getArtist(),
+                            metadata.getAlbum());
+                    metadata = mFallbackMetadata;
                 }
 
-                mNotificationInfoBuilder = new MediaNotificationInfo.Builder()
-                        .setTitle(sanitizeMediaTitle(mTab.getTitle()))
-                        .setPaused(isPaused)
-                        .setOrigin(origin)
-                        .setTabId(mTab.getId())
-                        .setPrivate(mTab.isIncognito())
-                        .setIcon(R.drawable.audio_playing)
-                        .setActions(MediaNotificationInfo.ACTION_PLAY_PAUSE
-                                | MediaNotificationInfo.ACTION_SWIPEAWAY)
-                        .setId(R.id.media_playback_notification)
-                        .setListener(mControlsListener);
+                mNotificationInfoBuilder =
+                        new MediaNotificationInfo.Builder()
+                                .setMetadata(metadata)
+                                .setPaused(isPaused)
+                                .setOrigin(mOrigin)
+                                .setTabId(mTab.getId())
+                                .setPrivate(mTab.isIncognito())
+                                .setIcon(R.drawable.audio_playing)
+                                .setLargeIcon(mFavicon)
+                                .setActions(MediaNotificationInfo.ACTION_PLAY_PAUSE
+                                        | MediaNotificationInfo.ACTION_SWIPEAWAY)
+                                .setContentIntent(Tab.createBringTabToFrontIntent(mTab.getId()))
+                                .setId(R.id.media_playback_notification)
+                                .setListener(mControlsListener);
 
                 MediaNotificationManager.show(ApplicationStatus.getApplicationContext(),
                         mNotificationInfoBuilder.build());
@@ -142,11 +159,54 @@ public class MediaSessionTabHelper {
         }
 
         @Override
-        public void onTitleUpdated(Tab tab) {
+        public void onFaviconUpdated(Tab tab, Bitmap icon) {
             assert tab == mTab;
+            // Don't update the large icon if using customized notification. Otherwise, the
+            // lockscreen art will be the favicon.
+            if (!ChromeFeatureList.isEnabled(ChromeFeatureList.MEDIA_STYLE_NOTIFICATION)) return;
+
+            if (!updateFavicon(icon)) return;
+
             if (mNotificationInfoBuilder == null) return;
 
-            mNotificationInfoBuilder.setTitle(sanitizeMediaTitle(mTab.getTitle()));
+            mNotificationInfoBuilder.setLargeIcon(mFavicon);
+            MediaNotificationManager.show(
+                    ApplicationStatus.getApplicationContext(), mNotificationInfoBuilder.build());
+        }
+
+        @Override
+        public void onUrlUpdated(Tab tab) {
+            assert tab == mTab;
+
+            String origin = mTab.getUrl();
+            try {
+                origin = UrlUtilities.formatUrlForSecurityDisplay(new URI(origin), true);
+            } catch (URISyntaxException e) {
+                Log.e(TAG, "Unable to parse the origin from the URL. "
+                                + "Using the full URL instead.");
+            }
+
+            if (mOrigin != null && mOrigin.equals(origin)) return;
+            mOrigin = origin;
+            mFavicon = null;
+
+            if (mNotificationInfoBuilder == null) return;
+
+            mNotificationInfoBuilder.setOrigin(mOrigin);
+            mNotificationInfoBuilder.setLargeIcon(mFavicon);
+            MediaNotificationManager.show(
+                    ApplicationStatus.getApplicationContext(), mNotificationInfoBuilder.build());
+        }
+
+        @Override
+        public void onTitleUpdated(Tab tab) {
+            assert tab == mTab;
+            if (mNotificationInfoBuilder == null || mFallbackMetadata == null) return;
+
+            mFallbackMetadata = new MediaMetadata(mFallbackMetadata);
+            mFallbackMetadata.setTitle(sanitizeMediaTitle(mTab.getTitle()));
+            mNotificationInfoBuilder.setMetadata(mFallbackMetadata);
+
             MediaNotificationManager.show(ApplicationStatus.getApplicationContext(),
                     mNotificationInfoBuilder.build());
         }
@@ -219,5 +279,32 @@ public class MediaSessionTabHelper {
         if (windowAndroid == null) return null;
 
         return windowAndroid.getActivity().get();
+    }
+
+    /**
+     * Updates the best favicon if the given icon is better.
+     * @return whether the best favicon is updated.
+     */
+    private boolean updateFavicon(Bitmap icon) {
+        if (icon == null) return false;
+
+        int largeIconSizeInDp = 0;
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.M) {
+            largeIconSizeInDp = 128;
+        } else {
+            // TODO(zqzhang): Get this value via Resource.getDimension() if N has a resource id.
+            largeIconSizeInDp = 96;
+        }
+        int minimalIconSizeInPx = Math.round(largeIconSizeInDp * 0.75f);
+
+        if (icon.getWidth() < minimalIconSizeInPx || icon.getHeight() < minimalIconSizeInPx) {
+            return false;
+        }
+        if (mFavicon != null && (icon.getWidth() < mFavicon.getWidth()
+                                        || icon.getHeight() < mFavicon.getHeight())) {
+            return false;
+        }
+        mFavicon = icon;
+        return true;
     }
 }

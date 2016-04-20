@@ -66,14 +66,14 @@ public:
     }
 
     static const TreeScope* commonAncestorTreeScope(const PositionTemplate<Strategy>&, const PositionTemplate<Strategy>& b);
-    static PositionTemplate<Strategy> editingPositionOf(PassRefPtrWillBeRawPtr<Node> anchorNode, int offset);
+    static PositionTemplate<Strategy> editingPositionOf(Node* anchorNode, int offset);
 
     // For creating before/after positions:
-    PositionTemplate(PassRefPtrWillBeRawPtr<Node> anchorNode, PositionAnchorType);
+    PositionTemplate(Node* anchorNode, PositionAnchorType);
 
     // For creating offset positions:
     // FIXME: This constructor should eventually go away. See bug 63040.
-    PositionTemplate(PassRefPtrWillBeRawPtr<Node> anchorNode, int offset);
+    PositionTemplate(Node* anchorNode, int offset);
 
     PositionTemplate(const PositionTemplate&);
 
@@ -100,7 +100,7 @@ public:
     // Inline O(1) access for Positions which callers know to be parent-anchored
     int offsetInContainerNode() const
     {
-        ASSERT(isOffsetInAnchor());
+        DCHECK(isOffsetInAnchor());
         return m_offset;
     }
 
@@ -137,13 +137,21 @@ public:
     Node* anchorNode() const { return m_anchorNode.get(); }
 
     Document* document() const { return m_anchorNode ? &m_anchorNode->document() : 0; }
-    bool inDocument() const { return m_anchorNode && m_anchorNode->inDocument(); }
+    bool inShadowIncludingDocument() const { return m_anchorNode && m_anchorNode->inShadowIncludingDocument(); }
 
     bool isNull() const { return !m_anchorNode; }
     bool isNotNull() const { return m_anchorNode; }
-    bool isOrphan() const { return m_anchorNode && !m_anchorNode->inDocument(); }
+    bool isOrphan() const { return m_anchorNode && !m_anchorNode->inShadowIncludingDocument(); }
 
+    // Note: Comparison of positions require both parameters are non-null. You
+    // should check null-position before comparing them.
+    // TODO(yosin): We should use |Position::operator<()| instead of
+    // |Position::comapreTo()| to utilize |DHCECK_XX()|.
     int compareTo(const PositionTemplate<Strategy>&) const;
+    bool operator<(const PositionTemplate<Strategy>&) const;
+    bool operator<=(const PositionTemplate<Strategy>&) const;
+    bool operator>(const PositionTemplate<Strategy>&) const;
+    bool operator>=(const PositionTemplate<Strategy>&) const;
 
     // These can be either inside or just before/after the node, depending on
     // if the node is ignored by editing or not.
@@ -172,7 +180,7 @@ public:
     void formatForDebugger(char* buffer, unsigned length) const;
     void showAnchorTypeAndOffset() const;
     void showTreeForThis() const;
-    void showTreeForThisInComposedTree() const;
+    void showTreeForThisInFlatTree() const;
 #endif
 
     DEFINE_INLINE_TRACE()
@@ -186,7 +194,7 @@ private:
         return isAfterAnchor() || isAfterChildren();
     }
 
-    RefPtrWillBeMember<Node> m_anchorNode;
+    Member<Node> m_anchorNode;
     // m_offset can be the offset inside m_anchorNode, or if editingIgnoresContent(m_anchorNode)
     // returns true, then other places in editing will treat m_offset == 0 as "before the anchor"
     // and m_offset > 0 as "after the anchor node".  See parentAnchoredEquivalent for more info.
@@ -195,10 +203,10 @@ private:
 };
 
 extern template class CORE_EXTERN_TEMPLATE_EXPORT PositionTemplate<EditingStrategy>;
-extern template class CORE_EXTERN_TEMPLATE_EXPORT PositionTemplate<EditingInComposedTreeStrategy>;
+extern template class CORE_EXTERN_TEMPLATE_EXPORT PositionTemplate<EditingInFlatTreeStrategy>;
 
 using Position = PositionTemplate<EditingStrategy>;
-using PositionInComposedTree = PositionTemplate<EditingInComposedTreeStrategy>;
+using PositionInFlatTree = PositionTemplate<EditingInFlatTreeStrategy>;
 
 template <typename Strategy>
 bool operator==(const PositionTemplate<Strategy>& a, const PositionTemplate<Strategy>& b)
@@ -232,10 +240,10 @@ bool operator!=(const PositionTemplate<Strategy>& a, const PositionTemplate<Stra
 template <typename Strategy>
 PositionTemplate<Strategy> PositionTemplate<Strategy>::inParentBeforeNode(const Node& node)
 {
-    // FIXME: This should ASSERT(node.parentNode())
+    // FIXME: This should DCHECK(node.parentNode())
     // At least one caller currently hits this ASSERT though, which indicates
     // that the caller is trying to make a position relative to a disconnected node (which is likely an error)
-    // Specifically, editing/deleting/delete-ligature-001.html crashes with ASSERT(node->parentNode())
+    // Specifically, editing/deleting/delete-ligature-001.html crashes with DCHECK(node->parentNode())
     return PositionTemplate<Strategy>(Strategy::parent(node), Strategy::index(node));
 }
 
@@ -247,7 +255,7 @@ inline Position positionInParentBeforeNode(const Node& node)
 template <typename Strategy>
 PositionTemplate<Strategy> PositionTemplate<Strategy>::inParentAfterNode(const Node& node)
 {
-    ASSERT(node.parentNode());
+    DCHECK(node.parentNode()) << node;
     return PositionTemplate<Strategy>(Strategy::parent(node), Strategy::index(node) + 1);
 }
 
@@ -260,7 +268,7 @@ inline Position positionInParentAfterNode(const Node& node)
 template <typename Strategy>
 PositionTemplate<Strategy> PositionTemplate<Strategy>::beforeNode(Node* anchorNode)
 {
-    ASSERT(anchorNode);
+    DCHECK(anchorNode);
     return PositionTemplate<Strategy>(anchorNode, PositionAnchorType::BeforeAnchor);
 }
 
@@ -272,7 +280,7 @@ inline Position positionBeforeNode(Node* anchorNode)
 template <typename Strategy>
 PositionTemplate<Strategy> PositionTemplate<Strategy>::afterNode(Node* anchorNode)
 {
-    ASSERT(anchorNode);
+    DCHECK(anchorNode);
     return PositionTemplate<Strategy>(anchorNode, PositionAnchorType::AfterAnchor);
 }
 
@@ -371,9 +379,9 @@ PositionTemplate<Strategy> PositionTemplate<Strategy>::lastPositionInOrAfterNode
     return Strategy::editingIgnoresContent(node) ? afterNode(node) : lastPositionInNode(node);
 }
 
-CORE_EXPORT PositionInComposedTree toPositionInComposedTree(const Position&);
+CORE_EXPORT PositionInFlatTree toPositionInFlatTree(const Position&);
 CORE_EXPORT Position toPositionInDOMTree(const Position&);
-CORE_EXPORT Position toPositionInDOMTree(const PositionInComposedTree&);
+CORE_EXPORT Position toPositionInDOMTree(const PositionInFlatTree&);
 
 template <typename Strategy>
 PositionTemplate<Strategy> fromPositionInDOMTree(const Position&);
@@ -385,19 +393,14 @@ inline Position fromPositionInDOMTree<EditingStrategy>(const Position& position)
 }
 
 template <>
-inline PositionInComposedTree fromPositionInDOMTree<EditingInComposedTreeStrategy>(const Position& position)
+inline PositionInFlatTree fromPositionInDOMTree<EditingInFlatTreeStrategy>(const Position& position)
 {
-    return toPositionInComposedTree(position);
+    return toPositionInFlatTree(position);
 }
 
-// These printers are available only for testing in "webkit_unit_tests", and
-// implemented in "core/testing/CoreTestPrinters.cpp".
-std::ostream& operator<<(std::ostream&, const Node&);
-std::ostream& operator<<(std::ostream&, const Node*);
-
-std::ostream& operator<<(std::ostream&, PositionAnchorType);
-std::ostream& operator<<(std::ostream&, const Position&);
-std::ostream& operator<<(std::ostream&, const PositionInComposedTree&);
+CORE_EXPORT std::ostream& operator<<(std::ostream&, PositionAnchorType);
+CORE_EXPORT std::ostream& operator<<(std::ostream&, const Position&);
+CORE_EXPORT std::ostream& operator<<(std::ostream&, const PositionInFlatTree&);
 
 } // namespace blink
 

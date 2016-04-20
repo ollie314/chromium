@@ -86,14 +86,13 @@ FunctionCall Properties:
 {
     data : {
         frame : <string>
+        functionName : "intervalTimerWork"
         scriptId : <string>
         scriptLine : <number>
         scriptName : <string>
-        stackTrace : <object>
     }
     endTime : <number>
     frameId : <string>
-    stackTrace : <object>
     startTime : <number>
     type : "FunctionCall"
 }
@@ -101,29 +100,13 @@ FunctionCall Properties:
 {
     data : {
         frame : <string>
+        functionName : "intervalTimerWork"
         scriptId : <string>
         scriptLine : <number>
         scriptName : <string>
-        stackTrace : <object>
     }
     endTime : <number>
     frameId : <string>
-    stackTrace : <object>
-    startTime : <number>
-    type : "FunctionCall"
-}
-FunctionCall Properties:
-{
-    data : {
-        frame : <string>
-        scriptId : <string>
-        scriptLine : <number>
-        scriptName : <string>
-        stackTrace : <object>
-    }
-    endTime : <number>
-    frameId : <string>
-    stackTrace : <object>
     startTime : <number>
     type : "FunctionCall"
 }
@@ -133,12 +116,10 @@ EvaluateScript Properties:
         columnNumber : <number>
         frame : <string>
         lineNumber : <number>
-        stackTrace : <object>
         url : 
     }
     endTime : <number>
     frameId : <string>
-    stackTrace : <object>
     startTime : <number>
     type : "EvaluateScript"
 }

@@ -2,48 +2,54 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "core/CoreExport.h"
 #include "core/dom/DOMTypedArray.h"
-#include "core/fileapi/FileCallback.h"
+#include "core/fileapi/BlobCallback.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/heap/Handle.h"
-#include "public/platform/WebThread.h"
 #include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
 class PNGImageEncoderState;
+class JPEGImageEncoderState;
 
-class CanvasAsyncBlobCreator final : public ThreadSafeRefCounted<CanvasAsyncBlobCreator> {
+class CORE_EXPORT CanvasAsyncBlobCreator : public GarbageCollectedFinalized<CanvasAsyncBlobCreator> {
 public:
-    static PassRefPtr<CanvasAsyncBlobCreator> create(PassRefPtr<DOMUint8ClampedArray> unpremultipliedRGBAImageData, const String& mimeType, const IntSize&, FileCallback*);
+    static CanvasAsyncBlobCreator* create(DOMUint8ClampedArray* unpremultipliedRGBAImageData, const String& mimeType, const IntSize&, BlobCallback*);
     void scheduleAsyncBlobCreation(bool canUseIdlePeriodScheduling, double quality = 0.0);
-    static WebThread* getToBlobThreadInstance();
     virtual ~CanvasAsyncBlobCreator();
 
-private:
-    CanvasAsyncBlobCreator(PassRefPtr<DOMUint8ClampedArray> data, const String& mimeType, const IntSize&, FileCallback*);
+    DEFINE_INLINE_VIRTUAL_TRACE()
+    {
+        visitor->trace(m_data);
+    }
 
-    OwnPtr<PNGImageEncoderState> m_encoderState;
-    RefPtr<DOMUint8ClampedArray> m_data;
+private:
+    CanvasAsyncBlobCreator(DOMUint8ClampedArray* data, const String& mimeType, const IntSize&, BlobCallback*);
+
+    OwnPtr<PNGImageEncoderState> m_pngEncoderState;
+    OwnPtr<JPEGImageEncoderState> m_jpegEncoderState;
+    Member<DOMUint8ClampedArray> m_data;
     OwnPtr<Vector<unsigned char>> m_encodedImage;
     int m_numRowsCompleted;
 
     const IntSize m_size;
     size_t m_pixelRowStride;
     const String m_mimeType;
-    Persistent<FileCallback> m_callback;
-
-    RefPtr<CanvasAsyncBlobCreator> m_selfRef;
+    CrossThreadPersistent<BlobCallback> m_callback;
 
     void initiatePngEncoding(double deadlineSeconds);
     void scheduleIdleEncodeRowsPng();
     void idleEncodeRowsPng(double deadlineSeconds);
+
+    void initiateJpegEncoding(const double& quality);
+
     void createBlobAndCall();
 
-    void encodeImageOnAsyncThread(double quality);
+    void encodeImageOnEncoderThread(double quality);
 };
 
 } // namespace blink

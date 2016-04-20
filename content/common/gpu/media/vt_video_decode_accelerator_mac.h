@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <queue>
 
 #include "base/mac/scoped_cftyperef.h"
@@ -17,6 +18,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
+#include "content/common/gpu/media/gpu_video_decode_accelerator_helpers.h"
 #include "content/common/gpu/media/vt_mac.h"
 #include "media/filters/h264_parser.h"
 #include "media/video/h264_poc.h"
@@ -35,9 +37,9 @@ bool InitializeVideoToolbox();
 class VTVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
  public:
   explicit VTVideoDecodeAccelerator(
-      const base::Callback<bool(void)>& make_context_current,
-      const base::Callback<
-          void(uint32_t, uint32_t, scoped_refptr<gl::GLImage>)>& bind_image);
+      const MakeGLContextCurrentCallback& make_context_current_cb,
+      const BindGLImageCallback& bind_image_cb);
+
   ~VTVideoDecodeAccelerator() override;
 
   // VideoDecodeAccelerator implementation.
@@ -49,7 +51,10 @@ class VTVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   void Flush() override;
   void Reset() override;
   void Destroy() override;
-  bool CanDecodeOnIOThread() override;
+  bool TryToSetupDecodeOnSeparateThread(
+      const base::WeakPtr<Client>& decode_client,
+      const scoped_refptr<base::SingleThreadTaskRunner>& decode_task_runner)
+      override;
 
   // Called by OutputThunk() when VideoToolbox finishes decoding a frame.
   void Output(
@@ -114,6 +119,7 @@ class VTVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
 
   struct Task {
     Task(TaskType type);
+    Task(const Task& other);
     ~Task();
 
     TaskType type;
@@ -189,9 +195,9 @@ class VTVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   //
   // GPU thread state.
   //
-  base::Callback<bool(void)> make_context_current_;
-  base::Callback<void(uint32_t, uint32_t, scoped_refptr<gl::GLImage>)>
-      bind_image_;
+  MakeGLContextCurrentCallback make_context_current_cb_;
+  BindGLImageCallback bind_image_cb_;
+
   media::VideoDecodeAccelerator::Client* client_;
   State state_;
 
@@ -230,7 +236,7 @@ class VTVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   std::set<int32_t> assigned_picture_ids_;
 
   // Texture IDs and image buffers of assigned pictures.
-  std::map<int32_t, scoped_ptr<PictureInfo>> picture_info_map_;
+  std::map<int32_t, std::unique_ptr<PictureInfo>> picture_info_map_;
 
   // Pictures ready to be rendered to.
   std::vector<int32_t> available_picture_ids_;
@@ -249,6 +255,9 @@ class VTVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   std::vector<uint8_t> last_spsext_;
   int last_pps_id_;
   std::vector<uint8_t> last_pps_;
+  bool config_changed_;
+  bool waiting_for_idr_;
+  bool missing_idr_logged_;
   media::H264POC poc_;
 
   //

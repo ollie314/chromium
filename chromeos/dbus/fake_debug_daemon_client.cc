@@ -57,9 +57,12 @@ std::string FakeDebugDaemonClient::GetTraceEventLabel() {
   return kCrOSTraceLabel;
 }
 
-bool FakeDebugDaemonClient::StartAgentTracing(
-    const base::trace_event::TraceConfig& trace_config) {
-  return true;
+void FakeDebugDaemonClient::StartAgentTracing(
+    const base::trace_event::TraceConfig& trace_config,
+    const StartAgentTracingCallback& callback) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(callback, GetTracingAgentName(), true /* success */));
 }
 
 void FakeDebugDaemonClient::StopAgentTracing(
@@ -118,6 +121,14 @@ void FakeDebugDaemonClient::GetPerfOutput(
 void FakeDebugDaemonClient::GetScrubbedLogs(const GetLogsCallback& callback) {
   std::map<std::string, std::string> sample;
   sample["Sample Scrubbed Log"] = "Your email address is xxxxxxxx";
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(callback, false, sample));
+}
+
+void FakeDebugDaemonClient::GetScrubbedBigLogs(
+    const GetLogsCallback& callback) {
+  std::map<std::string, std::string> sample;
+  sample["Sample Scrubbed Big Log"] = "Your email address is xxxxxxxx";
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(callback, false, sample));
 }

@@ -4,8 +4,9 @@
 
 #include "net/quic/crypto/crypto_secret_boxer.h"
 
+#include <memory>
+
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/quic/crypto/aes_128_gcm_12_decrypter.h"
 #include "net/quic/crypto/aes_128_gcm_12_encrypter.h"
 #include "net/quic/crypto/crypto_protocol.h"
@@ -15,6 +16,7 @@
 
 using base::StringPiece;
 using std::string;
+using std::vector;
 
 namespace net {
 
@@ -34,21 +36,34 @@ static const size_t kKeySize = 16;
 //   It's not terrible, but it's not a "forget about it" margin.
 static const size_t kBoxNonceSize = 12;
 
+CryptoSecretBoxer::CryptoSecretBoxer() {}
+
+CryptoSecretBoxer::~CryptoSecretBoxer() {}
+
 // static
 size_t CryptoSecretBoxer::GetKeySize() {
   return kKeySize;
 }
 
-void CryptoSecretBoxer::SetKey(StringPiece key) {
-  DCHECK_EQ(kKeySize, key.size());
-  key_ = key.as_string();
+void CryptoSecretBoxer::SetKeys(const vector<string>& keys) {
+  DCHECK(!keys.empty());
+  vector<string> copy = keys;
+  for (const string& key : keys) {
+    DCHECK_EQ(kKeySize, key.size());
+  }
+  base::AutoLock l(lock_);
+  keys_.swap(copy);
 }
 
 string CryptoSecretBoxer::Box(QuicRandom* rand, StringPiece plaintext) const {
-  scoped_ptr<Aes128Gcm12Encrypter> encrypter(new Aes128Gcm12Encrypter());
-  if (!encrypter->SetKey(key_)) {
-    DLOG(DFATAL) << "CryptoSecretBoxer's encrypter->SetKey failed.";
-    return string();
+  std::unique_ptr<Aes128Gcm12Encrypter> encrypter(new Aes128Gcm12Encrypter());
+  {
+    base::AutoLock l(lock_);
+    DCHECK_EQ(kKeySize, keys_[0].size());
+    if (!encrypter->SetKey(keys_[0])) {
+      DLOG(DFATAL) << "CryptoSecretBoxer's encrypter->SetKey failed.";
+      return string();
+    }
   }
   size_t ciphertext_size = encrypter->GetCiphertextSize(plaintext.length());
 
@@ -85,18 +100,26 @@ bool CryptoSecretBoxer::Unbox(StringPiece ciphertext,
   memcpy(&packet_number, nonce.data() + nonce_prefix.size(),
          sizeof(packet_number));
 
-  scoped_ptr<Aes128Gcm12Decrypter> decrypter(new Aes128Gcm12Decrypter());
-  if (!decrypter->SetKey(key_)) {
-    DLOG(DFATAL) << "CryptoSecretBoxer's decrypter->SetKey failed.";
-    return false;
-  }
-  decrypter->SetNoncePrefix(nonce_prefix);
+  std::unique_ptr<Aes128Gcm12Decrypter> decrypter(new Aes128Gcm12Decrypter());
   char plaintext[kMaxPacketSize];
   size_t plaintext_length = 0;
-  const bool success = decrypter->DecryptPacket(
-      packet_number, StringPiece() /* associated data */, ciphertext, plaintext,
-      &plaintext_length, kMaxPacketSize);
-  if (!success) {
+  bool ok = false;
+  {
+    base::AutoLock l(lock_);
+    for (const string& key : keys_) {
+      if (decrypter->SetKey(key)) {
+        decrypter->SetNoncePrefix(nonce_prefix);
+        if (decrypter->DecryptPacket(
+                /*path_id=*/0u, packet_number,
+                /*associated data=*/StringPiece(), ciphertext, plaintext,
+                &plaintext_length, kMaxPacketSize)) {
+          ok = true;
+          break;
+        }
+      }
+    }
+  }
+  if (!ok) {
     return false;
   }
 

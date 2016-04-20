@@ -10,8 +10,8 @@
 
 #include "mojo/public/cpp/bindings/array.h"
 #include "mojo/public/cpp/bindings/lib/array_internal.h"
-#include "mojo/public/cpp/bindings/lib/array_serialization.h"
 #include "mojo/public/cpp/bindings/lib/fixed_buffer.h"
+#include "mojo/public/cpp/bindings/lib/serialization.h"
 #include "mojo/public/cpp/bindings/lib/validation_errors.h"
 #include "mojo/public/cpp/bindings/string.h"
 #include "mojo/public/cpp/system/message_pipe.h"
@@ -61,9 +61,9 @@ class SerializationWarningTest : public testing::Test {
                              mojo::internal::ValidationError expected_warning) {
     warning_observer_.set_last_warning(mojo::internal::VALIDATION_ERROR_NONE);
 
-    mojo::internal::FixedBufferForTesting buf(GetSerializedSize_(obj));
+    mojo::internal::FixedBufferForTesting buf(GetSerializedSize_(obj, nullptr));
     typename T::Data_* data;
-    Serialize_(std::move(obj), &buf, &data);
+    Serialize_(std::move(obj), &buf, &data, nullptr);
 
     EXPECT_EQ(expected_warning, warning_observer_.last_warning());
   }
@@ -74,9 +74,9 @@ class SerializationWarningTest : public testing::Test {
                         const ArrayValidateParams* validate_params) {
     warning_observer_.set_last_warning(mojo::internal::VALIDATION_ERROR_NONE);
 
-    mojo::internal::FixedBufferForTesting buf(GetSerializedSize_(obj));
+    mojo::internal::FixedBufferForTesting buf(GetSerializedSize_(obj, nullptr));
     typename T::Data_* data;
-    SerializeArray_(std::move(obj), &buf, &data, validate_params);
+    SerializeArray_(std::move(obj), &buf, &data, validate_params, nullptr);
 
     EXPECT_EQ(expected_warning, warning_observer_.last_warning());
   }
@@ -173,7 +173,7 @@ TEST_F(SerializationWarningTest, StringInStruct) {
 
 TEST_F(SerializationWarningTest, ArrayOfArraysOfHandles) {
   Array<Array<ScopedHandle>> test_array = CreateTestNestedHandleArray();
-  test_array[0] = Array<ScopedHandle>();
+  test_array[0] = nullptr;
   test_array[1][0] = ScopedHandle();
 
   ArrayValidateParams validate_params_0(
@@ -182,7 +182,7 @@ TEST_F(SerializationWarningTest, ArrayOfArraysOfHandles) {
                    &validate_params_0);
 
   test_array = CreateTestNestedHandleArray();
-  test_array[0] = Array<ScopedHandle>();
+  test_array[0] = nullptr;
   ArrayValidateParams validate_params_1(
       0, false, new ArrayValidateParams(0, true, nullptr));
   TestArrayWarning(std::move(test_array),
@@ -209,6 +209,8 @@ TEST_F(SerializationWarningTest, ArrayOfStrings) {
                    &validate_params_0);
 
   test_array = Array<String>(3);
+  for (size_t i = 0; i < test_array.size(); ++i)
+    test_array[i] = nullptr;
   ArrayValidateParams validate_params_1(
       0, false, new ArrayValidateParams(0, false, nullptr));
   TestArrayWarning(std::move(test_array),

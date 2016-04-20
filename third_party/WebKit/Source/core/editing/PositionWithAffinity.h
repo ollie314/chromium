@@ -8,6 +8,7 @@
 #include "core/CoreExport.h"
 #include "core/editing/Position.h"
 #include "core/editing/TextAffinity.h"
+#include <iosfwd>
 
 namespace blink {
 
@@ -43,10 +44,10 @@ private:
 };
 
 extern template class CORE_EXTERN_TEMPLATE_EXPORT PositionWithAffinityTemplate<EditingStrategy>;
-extern template class CORE_EXTERN_TEMPLATE_EXPORT PositionWithAffinityTemplate<EditingInComposedTreeStrategy>;
+extern template class CORE_EXTERN_TEMPLATE_EXPORT PositionWithAffinityTemplate<EditingInFlatTreeStrategy>;
 
 using PositionWithAffinity = PositionWithAffinityTemplate<EditingStrategy>;
-using PositionInComposedTreeWithAffinity = PositionWithAffinityTemplate<EditingInComposedTreeStrategy>;
+using PositionInFlatTreeWithAffinity = PositionWithAffinityTemplate<EditingInFlatTreeStrategy>;
 
 template <typename Strategy>
 PositionWithAffinityTemplate<Strategy> fromPositionInDOMTree(const PositionWithAffinity&);
@@ -58,10 +59,13 @@ inline PositionWithAffinity fromPositionInDOMTree<EditingStrategy>(const Positio
 }
 
 template <>
-inline PositionInComposedTreeWithAffinity fromPositionInDOMTree<EditingInComposedTreeStrategy>(const PositionWithAffinity& positionWithAffinity)
+inline PositionInFlatTreeWithAffinity fromPositionInDOMTree<EditingInFlatTreeStrategy>(const PositionWithAffinity& positionWithAffinity)
 {
-    return PositionInComposedTreeWithAffinity(toPositionInComposedTree(positionWithAffinity.position()), positionWithAffinity.affinity());
+    return PositionInFlatTreeWithAffinity(toPositionInFlatTree(positionWithAffinity.position()), positionWithAffinity.affinity());
 }
+
+CORE_EXPORT std::ostream& operator<<(std::ostream&, const PositionWithAffinity&);
+CORE_EXPORT std::ostream& operator<<(std::ostream&, const PositionInFlatTreeWithAffinity&);
 
 } // namespace blink
 

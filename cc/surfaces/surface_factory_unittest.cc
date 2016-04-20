@@ -36,8 +36,7 @@ class TestSurfaceFactoryClient : public SurfaceFactoryClient {
         returned_resources_.end(), resources.begin(), resources.end());
   }
 
-  void SetBeginFrameSource(SurfaceId surface_id,
-                           BeginFrameSource* begin_frame_source) override {
+  void SetBeginFrameSource(BeginFrameSource* begin_frame_source) override {
     begin_frame_source_ = begin_frame_source;
   }
 
@@ -70,14 +69,14 @@ class SurfaceFactoryTest : public testing::Test {
 
   void SubmitCompositorFrameWithResources(ResourceId* resource_ids,
                                           size_t num_resource_ids) {
-    scoped_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
+    std::unique_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
     for (size_t i = 0u; i < num_resource_ids; ++i) {
       TransferableResource resource;
       resource.id = resource_ids[i];
       resource.mailbox_holder.texture_target = GL_TEXTURE_2D;
       frame_data->resource_list.push_back(resource);
     }
-    scoped_ptr<CompositorFrame> frame(new CompositorFrame);
+    std::unique_ptr<CompositorFrame> frame(new CompositorFrame);
     frame->delegated_frame_data = std::move(frame_data);
     factory_->SubmitCompositorFrame(surface_id_, std::move(frame),
                                     SurfaceFactory::DrawCallback());
@@ -119,7 +118,7 @@ class SurfaceFactoryTest : public testing::Test {
  protected:
   SurfaceManager manager_;
   TestSurfaceFactoryClient client_;
-  scoped_ptr<SurfaceFactory> factory_;
+  std::unique_ptr<SurfaceFactory> factory_;
   SurfaceId surface_id_;
 };
 
@@ -395,7 +394,7 @@ TEST_F(SurfaceFactoryTest, BlankNoIndexIncrement) {
   Surface* surface = manager_.GetSurfaceForId(surface_id);
   ASSERT_NE(nullptr, surface);
   EXPECT_EQ(2, surface->frame_index());
-  scoped_ptr<CompositorFrame> frame(new CompositorFrame);
+  std::unique_ptr<CompositorFrame> frame(new CompositorFrame);
   frame->delegated_frame_data.reset(new DelegatedFrameData);
 
   factory_->SubmitCompositorFrame(surface_id, std::move(frame),
@@ -416,12 +415,12 @@ TEST_F(SurfaceFactoryTest, DestroyAll) {
   SurfaceId id(7);
   factory_->Create(id);
 
-  scoped_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
+  std::unique_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
   TransferableResource resource;
   resource.id = 1;
   resource.mailbox_holder.texture_target = GL_TEXTURE_2D;
   frame_data->resource_list.push_back(resource);
-  scoped_ptr<CompositorFrame> frame(new CompositorFrame);
+  std::unique_ptr<CompositorFrame> frame(new CompositorFrame);
   frame->delegated_frame_data = std::move(frame_data);
   uint32_t execute_count = 0;
   SurfaceDrawStatus drawn = SurfaceDrawStatus::DRAW_SKIPPED;
@@ -446,8 +445,8 @@ TEST_F(SurfaceFactoryTest, DestroySequence) {
       ->AddDestructionDependency(SurfaceSequence(0, 4));
   factory_->Destroy(id2);
 
-  scoped_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
-  scoped_ptr<CompositorFrame> frame(new CompositorFrame);
+  std::unique_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
+  std::unique_ptr<CompositorFrame> frame(new CompositorFrame);
   frame->metadata.satisfies_sequences.push_back(6);
   frame->metadata.satisfies_sequences.push_back(4);
   frame->delegated_frame_data = std::move(frame_data);
@@ -498,10 +497,10 @@ TEST_F(SurfaceFactoryTest, DestroyCycle) {
 
   // Give id2 a frame that references surface_id_.
   {
-    scoped_ptr<RenderPass> render_pass(RenderPass::Create());
-    scoped_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
+    std::unique_ptr<RenderPass> render_pass(RenderPass::Create());
+    std::unique_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
     frame_data->render_pass_list.push_back(std::move(render_pass));
-    scoped_ptr<CompositorFrame> frame(new CompositorFrame);
+    std::unique_ptr<CompositorFrame> frame(new CompositorFrame);
     frame->metadata.referenced_surfaces.push_back(surface_id_);
     frame->delegated_frame_data = std::move(frame_data);
     factory_->SubmitCompositorFrame(id2, std::move(frame),
@@ -511,10 +510,10 @@ TEST_F(SurfaceFactoryTest, DestroyCycle) {
 
   // Give surface_id_ a frame that references id2.
   {
-    scoped_ptr<RenderPass> render_pass(RenderPass::Create());
-    scoped_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
+    std::unique_ptr<RenderPass> render_pass(RenderPass::Create());
+    std::unique_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
     frame_data->render_pass_list.push_back(std::move(render_pass));
-    scoped_ptr<CompositorFrame> frame(new CompositorFrame);
+    std::unique_ptr<CompositorFrame> frame(new CompositorFrame);
     frame->metadata.referenced_surfaces.push_back(id2);
     frame->delegated_frame_data = std::move(frame_data);
     factory_->SubmitCompositorFrame(surface_id_, std::move(frame),
@@ -539,16 +538,16 @@ TEST_F(SurfaceFactoryTest, DestroyCycle) {
 }
 
 void CopyRequestTestCallback(bool* called,
-                             scoped_ptr<CopyOutputResult> result) {
+                             std::unique_ptr<CopyOutputResult> result) {
   *called = true;
 }
 
 TEST_F(SurfaceFactoryTest, DuplicateCopyRequest) {
   {
-    scoped_ptr<RenderPass> render_pass(RenderPass::Create());
-    scoped_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
+    std::unique_ptr<RenderPass> render_pass(RenderPass::Create());
+    std::unique_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
     frame_data->render_pass_list.push_back(std::move(render_pass));
-    scoped_ptr<CompositorFrame> frame(new CompositorFrame);
+    std::unique_ptr<CompositorFrame> frame(new CompositorFrame);
     frame->metadata.referenced_surfaces.push_back(surface_id_);
     frame->delegated_frame_data = std::move(frame_data);
     factory_->SubmitCompositorFrame(surface_id_, std::move(frame),
@@ -558,7 +557,7 @@ TEST_F(SurfaceFactoryTest, DuplicateCopyRequest) {
   void* source2 = &source2;
 
   bool called1 = false;
-  scoped_ptr<CopyOutputRequest> request;
+  std::unique_ptr<CopyOutputRequest> request;
   request = CopyOutputRequest::CreateRequest(
       base::Bind(&CopyRequestTestCallback, &called1));
   request->set_source(source1);
@@ -592,37 +591,6 @@ TEST_F(SurfaceFactoryTest, DuplicateCopyRequest) {
   EXPECT_TRUE(called1);
   EXPECT_TRUE(called2);
   EXPECT_TRUE(called3);
-}
-
-// Verifies BFS is forwarded to the client.
-TEST_F(SurfaceFactoryTest, SetBeginFrameSource) {
-  FakeBeginFrameSource bfs1;
-  FakeBeginFrameSource bfs2;
-  EXPECT_EQ(nullptr, client_.begin_frame_source());
-  factory_->SetBeginFrameSource(surface_id_, &bfs1);
-  EXPECT_EQ(&bfs1, client_.begin_frame_source());
-  factory_->SetBeginFrameSource(surface_id_, &bfs2);
-  EXPECT_EQ(&bfs2, client_.begin_frame_source());
-  factory_->SetBeginFrameSource(surface_id_, nullptr);
-  EXPECT_EQ(nullptr, client_.begin_frame_source());
-}
-
-TEST_F(SurfaceFactoryTest, BeginFrameSourceRemovedOnFactoryDestruction) {
-  FakeBeginFrameSource bfs;
-  factory_->SetBeginFrameSource(surface_id_, &bfs);
-  EXPECT_EQ(&bfs, client_.begin_frame_source());
-
-  // Prevent the Surface from being destroyed when we destroy the factory.
-  manager_.RegisterSurfaceIdNamespace(0);
-  manager_.GetSurfaceForId(surface_id_)
-      ->AddDestructionDependency(SurfaceSequence(0, 4));
-
-  surface_id_ = SurfaceId();
-  factory_->DestroyAll();
-
-  EXPECT_EQ(&bfs, client_.begin_frame_source());
-  factory_.reset();
-  EXPECT_EQ(nullptr, client_.begin_frame_source());
 }
 
 }  // namespace

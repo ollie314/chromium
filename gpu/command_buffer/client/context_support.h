@@ -21,10 +21,6 @@ struct SyncToken;
 
 class ContextSupport {
  public:
-  // Runs |callback| when a sync point is reached.
-  virtual void SignalSyncPoint(uint32_t sync_point,
-                               const base::Closure& callback) = 0;
-
   // Runs |callback| when a sync token is signalled.
   virtual void SignalSyncToken(const SyncToken& sync_token,
                                const base::Closure& callback) = 0;
@@ -52,12 +48,13 @@ class ContextSupport {
                                     const gfx::Rect& display_bounds,
                                     const gfx::RectF& uv_rect) = 0;
 
-  virtual uint32_t InsertFutureSyncPointCHROMIUM() = 0;
-  virtual void RetireSyncPointCHROMIUM(uint32_t sync_point) = 0;
-
   // Returns an ID that can be used to globally identify the share group that
   // this context's resources belong to.
   virtual uint64_t ShareGroupTracingGUID() const = 0;
+
+  // Sets a callback to be run when an error occurs.
+  virtual void SetErrorMessageCallback(
+      const base::Callback<void(const char*, int32_t)>& callback) = 0;
 
  protected:
   ContextSupport() {}

@@ -6,10 +6,10 @@
 #define CONTENT_BROWSER_BLUETOOTH_BLUETOOTH_ALLOWED_DEVICES_MAP_
 
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
-#include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
 #include "url/origin.h"
 
@@ -44,10 +44,6 @@ class CONTENT_EXPORT BluetoothAllowedDevicesMap final {
   void RemoveDevice(const url::Origin& origin,
                     const std::string& device_address);
 
-  // TODO(ortuno): Add function to check if origin is allowed to access
-  // a device's service and add tests for that function.
-  // https://crbug.com/493460
-
   // Returns the Bluetooth Device's id for |origin|. Returns an empty string
   // if |origin| is not allowed to access the device.
   const std::string& GetDeviceId(const url::Origin& origin,
@@ -58,6 +54,12 @@ class CONTENT_EXPORT BluetoothAllowedDevicesMap final {
   const std::string& GetDeviceAddress(const url::Origin& origin,
                                       const std::string& device_id);
 
+  // Returns true if the origin has previously been granted access to
+  // the service.
+  bool IsOriginAllowedToAccessService(const url::Origin& origin,
+                                      const std::string& device_id,
+                                      const std::string& service_uuid) const;
+
  private:
   typedef std::map<std::string, std::string> DeviceAddressToIdMap;
   typedef std::map<std::string, std::string> DeviceIdToAddressMap;
@@ -66,9 +68,10 @@ class CONTENT_EXPORT BluetoothAllowedDevicesMap final {
   // Returns an id guaranteed to be unique for the map. The id is randomly
   // generated so that an origin can't guess the id used in another origin.
   std::string GenerateDeviceId();
-  std::set<std::string> UnionOfServices(
+  void AddUnionOfServicesTo(
       const std::vector<BluetoothScanFilter>& filters,
-      const std::vector<device::BluetoothUUID>& optional_services);
+      const std::vector<device::BluetoothUUID>& optional_services,
+      std::set<std::string>* unionOfServices);
 
   std::map<url::Origin, DeviceAddressToIdMap>
       origin_to_device_address_to_id_map_;

@@ -10,12 +10,14 @@
 #include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/wm/common/workspace/workspace_layout_manager_delegate.h"
 #include "ash/wm/window_animations.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/workspace_event_handler.h"
 #include "ash/wm/workspace/workspace_layout_manager.h"
-#include "ash/wm/workspace/workspace_layout_manager_delegate.h"
+#include "ash/wm/workspace/workspace_layout_manager_backdrop_delegate.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -40,11 +42,14 @@ bool IsDockedAreaVisible(const ShelfLayoutManager* shelf) {
 
 }  // namespace
 
-WorkspaceController::WorkspaceController(aura::Window* viewport)
+WorkspaceController::WorkspaceController(
+    aura::Window* viewport,
+    std::unique_ptr<wm::WorkspaceLayoutManagerDelegate> delegate)
     : viewport_(viewport),
       shelf_(NULL),
       event_handler_(new WorkspaceEventHandler),
-      layout_manager_(new WorkspaceLayoutManager(viewport)) {
+      layout_manager_(
+          new WorkspaceLayoutManager(viewport, std::move(delegate))) {
   SetWindowVisibilityAnimationTransition(
       viewport_, ::wm::ANIMATE_NONE);
 
@@ -57,14 +62,14 @@ WorkspaceController::~WorkspaceController() {
   viewport_->RemovePreTargetHandler(event_handler_.get());
 }
 
-WorkspaceWindowState WorkspaceController::GetWindowState() const {
+wm::WorkspaceWindowState WorkspaceController::GetWindowState() const {
   if (!shelf_)
-    return WORKSPACE_WINDOW_STATE_DEFAULT;
+    return wm::WORKSPACE_WINDOW_STATE_DEFAULT;
   const aura::Window* topmost_fullscreen_window = GetRootWindowController(
       viewport_->GetRootWindow())->GetWindowForFullscreenMode();
   if (topmost_fullscreen_window &&
       !wm::GetWindowState(topmost_fullscreen_window)->ignored_by_shelf()) {
-    return WORKSPACE_WINDOW_STATE_FULL_SCREEN;
+    return wm::WORKSPACE_WINDOW_STATE_FULL_SCREEN;
   }
 
   // These are the container ids of containers which may contain windows that
@@ -86,7 +91,7 @@ WorkspaceWindowState WorkspaceController::GetWindowState() const {
       if (!layer->GetTargetVisibility())
         continue;
       if (window_state->IsMaximized())
-        return WORKSPACE_WINDOW_STATE_MAXIMIZED;
+        return wm::WORKSPACE_WINDOW_STATE_MAXIMIZED;
       if (!window_overlaps_launcher &&
           ((*i)->bounds().Intersects(shelf_bounds))) {
         window_overlaps_launcher = true;
@@ -94,14 +99,13 @@ WorkspaceWindowState WorkspaceController::GetWindowState() const {
     }
   }
 
-  return (window_overlaps_launcher || IsDockedAreaVisible(shelf_)) ?
-      WORKSPACE_WINDOW_STATE_WINDOW_OVERLAPS_SHELF :
-      WORKSPACE_WINDOW_STATE_DEFAULT;
+  return (window_overlaps_launcher || IsDockedAreaVisible(shelf_))
+             ? wm::WORKSPACE_WINDOW_STATE_WINDOW_OVERLAPS_SHELF
+             : wm::WORKSPACE_WINDOW_STATE_DEFAULT;
 }
 
 void WorkspaceController::SetShelf(ShelfLayoutManager* shelf) {
   shelf_ = shelf;
-  layout_manager_->SetShelf(shelf);
 }
 
 void WorkspaceController::DoInitialAnimation() {
@@ -134,7 +138,7 @@ void WorkspaceController::DoInitialAnimation() {
 }
 
 void WorkspaceController::SetMaximizeBackdropDelegate(
-    scoped_ptr<WorkspaceLayoutManagerDelegate> delegate) {
+    std::unique_ptr<WorkspaceLayoutManagerBackdropDelegate> delegate) {
   layout_manager_->SetMaximizeBackdropDelegate(std::move(delegate));
 }
 

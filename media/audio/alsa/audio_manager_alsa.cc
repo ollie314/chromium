@@ -11,6 +11,7 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/free_deleter.h"
 #include "base/metrics/histogram.h"
 #include "base/nix/xdg_util.h"
 #include "base/process/launch.h"
@@ -85,8 +86,13 @@ bool AudioManagerAlsa::HasAudioInputDevices() {
   return HasAnyAlsaAudioDevice(kStreamCapture);
 }
 
-AudioManagerAlsa::AudioManagerAlsa(AudioLogFactory* audio_log_factory)
-    : AudioManagerBase(audio_log_factory),
+AudioManagerAlsa::AudioManagerAlsa(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
+    AudioLogFactory* audio_log_factory)
+    : AudioManagerBase(std::move(task_runner),
+                       std::move(worker_task_runner),
+                       audio_log_factory),
       wrapper_(new AlsaWrapper()) {
   SetMaxOutputStreamsAllowed(kMaxOutputStreams);
 }

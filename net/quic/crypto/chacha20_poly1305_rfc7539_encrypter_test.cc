@@ -72,7 +72,7 @@ QuicData* EncryptWithNonce(ChaCha20Poly1305Rfc7539Encrypter* encrypter,
                            StringPiece associated_data,
                            StringPiece plaintext) {
   size_t ciphertext_size = encrypter->GetCiphertextSize(plaintext.length());
-  scoped_ptr<char[]> ciphertext(new char[ciphertext_size]);
+  std::unique_ptr<char[]> ciphertext(new char[ciphertext_size]);
 
   if (!encrypter->Encrypt(nonce, associated_data, plaintext,
                           reinterpret_cast<unsigned char*>(ciphertext.get()))) {
@@ -98,16 +98,18 @@ TEST(ChaCha20Poly1305Rfc7539EncrypterTest, EncryptThenDecrypt) {
   ASSERT_TRUE(encrypter.SetNoncePrefix("abcd"));
   ASSERT_TRUE(decrypter.SetNoncePrefix("abcd"));
 
+  QuicPathId path_id = 0x42;
   QuicPacketNumber packet_number = UINT64_C(0x123456789ABC);
   string associated_data = "associated_data";
   string plaintext = "plaintext";
   char encrypted[1024];
   size_t len;
-  ASSERT_TRUE(encrypter.EncryptPacket(packet_number, associated_data, plaintext,
-                                      encrypted, &len, arraysize(encrypted)));
+  ASSERT_TRUE(encrypter.EncryptPacket(path_id, packet_number, associated_data,
+                                      plaintext, encrypted, &len,
+                                      arraysize(encrypted)));
   StringPiece ciphertext(encrypted, len);
   char decrypted[1024];
-  ASSERT_TRUE(decrypter.DecryptPacket(packet_number, associated_data,
+  ASSERT_TRUE(decrypter.DecryptPacket(path_id, packet_number, associated_data,
                                       ciphertext, decrypted, &len,
                                       arraysize(decrypted)));
 }
@@ -135,7 +137,7 @@ TEST(ChaCha20Poly1305Rfc7539EncrypterTest, Encrypt) {
 
     ChaCha20Poly1305Rfc7539Encrypter encrypter;
     ASSERT_TRUE(encrypter.SetKey(key));
-    scoped_ptr<QuicData> encrypted(EncryptWithNonce(
+    std::unique_ptr<QuicData> encrypted(EncryptWithNonce(
         &encrypter, fixed + iv,
         // This deliberately tests that the encrypter can handle an AAD that
         // is set to nullptr, as opposed to a zero-length, non-nullptr pointer.

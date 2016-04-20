@@ -48,14 +48,7 @@ bool SettingsOverrideAPIPermission::FromValue(
     const base::Value* value,
     std::string* /*error*/,
     std::vector<std::string>* unhandled_permissions) {
-  // Ugly hack: |value| being null should be an error. But before M46 beta, we
-  // didn't store the parameter for settings override permissions in prefs.
-  // See crbug.com/533086.
-  // TODO(treib,devlin): Remove this for M48, when hopefully all users will have
-  // updated prefs.
-  // This should read:
-  // return value && value->GetAsString(&setting_value_);
-  return !value || value->GetAsString(&setting_value_);
+  return value && value->GetAsString(&setting_value_);
 }
 
 scoped_ptr<base::Value> SettingsOverrideAPIPermission::ToValue() const {
@@ -84,9 +77,9 @@ APIPermission* SettingsOverrideAPIPermission::Intersect(
   return new SettingsOverrideAPIPermission(info(), setting_value_);
 }
 
-void SettingsOverrideAPIPermission::Write(IPC::Message* m) const {}
+void SettingsOverrideAPIPermission::Write(base::Pickle* m) const {}
 
-bool SettingsOverrideAPIPermission::Read(const IPC::Message* m,
+bool SettingsOverrideAPIPermission::Read(const base::Pickle* m,
                                          base::PickleIterator* iter) {
   return true;
 }

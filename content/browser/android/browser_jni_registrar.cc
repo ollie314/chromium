@@ -7,20 +7,13 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
 #include "base/macros.h"
-#include "content/browser/android/browser_startup_controller.h"
-#include "content/browser/android/child_process_launcher_android.h"
-#include "content/browser/android/content_video_view.h"
-#include "content/browser/media/android/media_resource_getter_impl.h"
-#include "content/browser/media/android/media_session.h"
-#include "content/browser/mojo/service_registrar_android.h"
-#include "content/browser/mojo/service_registry_android.h"
-#include "mojo/android/system/core_impl.h"
-
-#if !defined(USE_AURA)
 #include "content/browser/accessibility/browser_accessibility_android.h"
 #include "content/browser/accessibility/browser_accessibility_manager_android.h"
 #include "content/browser/android/background_sync_network_observer_android.h"
+#include "content/browser/android/browser_startup_controller.h"
+#include "content/browser/android/child_process_launcher_android.h"
 #include "content/browser/android/composited_touch_handle_drawable.h"
+#include "content/browser/android/content_video_view.h"
 #include "content/browser/android/content_view_core_impl.h"
 #include "content/browser/android/content_view_render_view.h"
 #include "content/browser/android/content_view_statics.h"
@@ -29,12 +22,16 @@
 #include "content/browser/android/interstitial_page_delegate_android.h"
 #include "content/browser/android/load_url_params.h"
 #include "content/browser/android/popup_touch_handle_drawable.h"
+#include "content/browser/android/service_registry_android_impl.h"
 #include "content/browser/android/tracing_controller_android.h"
 #include "content/browser/android/web_contents_observer_proxy.h"
 #include "content/browser/device_sensors/sensor_manager_android.h"
 #include "content/browser/frame_host/navigation_controller_android.h"
 #include "content/browser/gamepad/gamepad_platform_data_fetcher_android.h"
 #include "content/browser/geolocation/location_api_adapter_android.h"
+#include "content/browser/media/android/media_resource_getter_impl.h"
+#include "content/browser/media/session/media_session_delegate_android.h"
+#include "content/browser/mojo/service_registrar_android.h"
 #include "content/browser/power_save_blocker_android.h"
 #include "content/browser/renderer_host/ime_adapter_android.h"
 #include "content/browser/renderer_host/input/synthetic_gesture_target_android.h"
@@ -43,7 +40,7 @@
 #include "content/browser/time_zone_monitor_android.h"
 #include "content/browser/vr/android/cardboard/cardboard_vr_device.h"
 #include "content/browser/web_contents/web_contents_android.h"
-#endif
+#include "mojo/android/system/core_impl.h"
 
 namespace {
 base::android::RegistrationMethod kContentRegisteredMethods[] = {
@@ -53,8 +50,7 @@ base::android::RegistrationMethod kContentRegisteredMethods[] = {
     {"CoreImpl", mojo::android::RegisterCoreImpl},
     {"MediaResourceGetterImpl",
      content::MediaResourceGetterImpl::RegisterMediaResourceGetter},
-    {"MediaSession", content::MediaSession::RegisterMediaSession},
-#if !defined(USE_AURA)
+    {"MediaSessionDelegate", content::MediaSessionDelegateAndroid::Register},
     {"AndroidLocationApiAdapter",
      content::AndroidLocationApiAdapter::RegisterGeolocationService},
     {"BackgroundSyncNetworkObserverAndroid",
@@ -93,7 +89,7 @@ base::android::RegistrationMethod kContentRegisteredMethods[] = {
      content::ScreenOrientationDelegateAndroid::Register},
     {"SensorManagerAndroid", content::SensorManagerAndroid::Register},
     {"ServiceRegistrarAndroid", content::ServiceRegistrarAndroid::Register},
-    {"ServiceRegistryAndroid", content::ServiceRegistryAndroid::Register},
+    {"ServiceRegistryAndroid", content::ServiceRegistryAndroidImpl::Register},
     {"SpeechRecognizerImplAndroid",
      content::SpeechRecognizerImplAndroid::RegisterSpeechRecognizer},
     {"TimeZoneMonitorAndroid", content::TimeZoneMonitorAndroid::Register},
@@ -101,7 +97,6 @@ base::android::RegistrationMethod kContentRegisteredMethods[] = {
     {"WebContentsAndroid", content::WebContentsAndroid::Register},
     {"WebContentsObserver", content::RegisterWebContentsObserverProxy},
     {"WebViewStatics", content::RegisterWebViewStatics},
-#endif  // !USE_AURA
 };
 
 }  // namespace

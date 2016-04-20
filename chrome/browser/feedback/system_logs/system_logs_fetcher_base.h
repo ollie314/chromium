@@ -8,6 +8,7 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/callback.h"
@@ -24,7 +25,7 @@ typedef base::Callback<void(SystemLogsResponse* response)>
     SysLogsSourceCallback;
 
 // Callback that the SystemLogsFetcherBase uses to return data.
-typedef base::Callback<void(scoped_ptr<SystemLogsResponse> response)>
+typedef base::Callback<void(std::unique_ptr<SystemLogsResponse> response)>
     SysLogsFetcherCallback;
 
 // The SystemLogsSource provides a interface for the data sources that
@@ -85,7 +86,7 @@ class SystemLogsFetcherBase
   ScopedVector<SystemLogsSource> data_sources_;
   SysLogsFetcherCallback callback_;
 
-  scoped_ptr<SystemLogsResponse> response_;  // The actual response data.
+  std::unique_ptr<SystemLogsResponse> response_;  // The actual response data.
   size_t num_pending_requests_;   // The number of callbacks it should get.
 
  private:

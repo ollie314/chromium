@@ -42,7 +42,17 @@
 #include "ui/chromeos/user_activity_power_manager_notifier.h"
 #include "ui/display/types/display_mode.h"
 #include "ui/display/types/display_snapshot.h"
+
+#if defined(USE_X11)
+#include "ui/display/chromeos/x11/native_display_delegate_x11.h"
 #endif
+
+#if defined(USE_OZONE)
+#include "ui/display/types/native_display_delegate.h"
+#include "ui/ozone/public/ozone_platform.h"
+#endif
+
+#endif  // defined(OS_CHROMEOS)
 
 namespace extensions {
 namespace {
@@ -168,7 +178,13 @@ ShellDesktopControllerAura::ShellDesktopControllerAura()
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(
       this);
   display_configurator_.reset(new ui::DisplayConfigurator);
-  display_configurator_->Init(false);
+#if defined(USE_OZONE)
+  display_configurator_->Init(
+      ui::OzonePlatform::GetInstance()->CreateNativeDisplayDelegate(), false);
+#elif defined(USE_X11)
+  display_configurator_->Init(
+      base::WrapUnique(new ui::NativeDisplayDelegateX11()), false);
+#endif
   display_configurator_->ForceInitialConfigure(0);
   display_configurator_->AddObserver(this);
 #endif
@@ -269,8 +285,7 @@ void ShellDesktopControllerAura::InitWindowManager() {
   cursor_manager_.reset(
       new wm::CursorManager(scoped_ptr<wm::NativeCursorManager>(
           new ShellNativeCursorManager(host_.get()))));
-  cursor_manager_->SetDisplay(
-      gfx::Screen::GetNativeScreen()->GetPrimaryDisplay());
+  cursor_manager_->SetDisplay(gfx::Screen::GetScreen()->GetPrimaryDisplay());
   cursor_manager_->SetCursor(ui::kCursorPointer);
   aura::client::SetCursorClient(host_->window(), cursor_manager_.get());
 
@@ -298,7 +313,7 @@ void ShellDesktopControllerAura::CreateRootWindow() {
     size = gfx::Size(1920, 1080);
 
   screen_.reset(new ShellScreen(size));
-  gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, screen_.get());
+  gfx::Screen::SetScreenInstance(screen_.get());
   // TODO(mukai): Set up input method.
 
   host_.reset(screen_->CreateHostForPrimaryDisplay());

@@ -27,18 +27,9 @@
 class ImmersiveModeControllerAshTest : public TestWithBrowserView {
  public:
   ImmersiveModeControllerAshTest()
-      : TestWithBrowserView(Browser::TYPE_TABBED,
-                            chrome::HOST_DESKTOP_TYPE_ASH,
-                            false) {
-  }
-  ImmersiveModeControllerAshTest(
-      Browser::Type browser_type,
-      chrome::HostDesktopType host_desktop_type,
-      bool hosted_app)
-      : TestWithBrowserView(browser_type,
-                            host_desktop_type,
-                            hosted_app) {
-  }
+      : TestWithBrowserView(Browser::TYPE_TABBED, false) {}
+  ImmersiveModeControllerAshTest(Browser::Type browser_type, bool hosted_app)
+      : TestWithBrowserView(browser_type, hosted_app) {}
   ~ImmersiveModeControllerAshTest() override {}
 
   // TestWithBrowserView override:
@@ -62,7 +53,7 @@ class ImmersiveModeControllerAshTest : public TestWithBrowserView {
     // is used to trigger changes in whether the shelf is auto hidden and
     // whether a "light bar" version of the tab strip is used when the
     // top-of-window views are hidden.
-    scoped_ptr<FullscreenNotificationObserver> waiter(
+    std::unique_ptr<FullscreenNotificationObserver> waiter(
         new FullscreenNotificationObserver());
     chrome::ToggleFullscreenMode(browser());
     waiter->Wait();
@@ -72,7 +63,7 @@ class ImmersiveModeControllerAshTest : public TestWithBrowserView {
   void SetTabFullscreen(bool tab_fullscreen) {
     content::WebContents* web_contents =
         browser_view()->GetContentsWebViewForTest()->GetWebContents();
-    scoped_ptr<FullscreenNotificationObserver> waiter(
+    std::unique_ptr<FullscreenNotificationObserver> waiter(
         new FullscreenNotificationObserver());
     if (tab_fullscreen) {
       browser()
@@ -107,7 +98,7 @@ class ImmersiveModeControllerAshTest : public TestWithBrowserView {
   // Not owned.
   ImmersiveModeController* controller_;
 
-  scoped_ptr<ImmersiveRevealedLock> revealed_lock_;
+  std::unique_ptr<ImmersiveRevealedLock> revealed_lock_;
 
   DISALLOW_COPY_AND_ASSIGN(ImmersiveModeControllerAshTest);
 };
@@ -272,14 +263,33 @@ TEST_F(ImmersiveModeControllerAshTest, TabAndBrowserFullscreen) {
   EXPECT_TRUE(controller()->ShouldHideTabIndicators());
 }
 
+// Ensure the circular tab-loading throbbers are not painted as layers in
+// immersive fullscreen, since the tab strip may animate in or out without
+// moving the layers.
+TEST_F(ImmersiveModeControllerAshTest, LayeredSpinners) {
+  AddTab(browser(), GURL("about:blank"));
+
+  TabStrip* tabstrip = browser_view()->tabstrip();
+
+  // Immersive fullscreen starts out disabled; layers are OK.
+  EXPECT_FALSE(browser_view()->GetWidget()->IsFullscreen());
+  EXPECT_FALSE(controller()->IsEnabled());
+  EXPECT_TRUE(tabstrip->CanPaintThrobberToLayer());
+
+  ToggleFullscreen();
+  EXPECT_TRUE(browser_view()->GetWidget()->IsFullscreen());
+  EXPECT_TRUE(controller()->IsEnabled());
+  EXPECT_FALSE(tabstrip->CanPaintThrobberToLayer());
+
+  ToggleFullscreen();
+  EXPECT_TRUE(tabstrip->CanPaintThrobberToLayer());
+}
+
 class ImmersiveModeControllerAshTestHostedApp
     : public ImmersiveModeControllerAshTest {
  public:
   ImmersiveModeControllerAshTestHostedApp()
-      : ImmersiveModeControllerAshTest(Browser::TYPE_POPUP,
-                                       chrome::HOST_DESKTOP_TYPE_ASH,
-                                       true) {
-  }
+      : ImmersiveModeControllerAshTest(Browser::TYPE_POPUP, true) {}
   ~ImmersiveModeControllerAshTestHostedApp() override {}
 
  private:

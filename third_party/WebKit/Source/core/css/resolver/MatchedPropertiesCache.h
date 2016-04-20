@@ -25,7 +25,6 @@
 
 #include "core/css/StylePropertySet.h"
 #include "core/css/resolver/MatchResult.h"
-#include "platform/Timer.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
 #include "wtf/HashMap.h"
@@ -36,10 +35,9 @@ namespace blink {
 class ComputedStyle;
 class StyleResolverState;
 
-class CachedMatchedProperties final : public NoBaseWillBeGarbageCollectedFinalized<CachedMatchedProperties> {
-    USING_FAST_MALLOC_WILL_BE_REMOVED(CachedMatchedProperties);
+class CachedMatchedProperties final : public GarbageCollectedFinalized<CachedMatchedProperties> {
 public:
-    WillBeHeapVector<MatchedProperties> matchedProperties;
+    HeapVector<MatchedProperties> matchedProperties;
     RefPtr<ComputedStyle> computedStyle;
     RefPtr<ComputedStyle> parentComputedStyle;
 
@@ -47,15 +45,12 @@ public:
     void clear();
     DEFINE_INLINE_TRACE()
     {
-#if ENABLE(OILPAN)
         visitor->trace(matchedProperties);
-#endif
     }
 };
 
 // Specialize the HashTraits for CachedMatchedProperties to check for dead
 // entries in the MatchedPropertiesCache.
-#if ENABLE(OILPAN)
 struct CachedMatchedPropertiesHashTraits : HashTraits<Member<CachedMatchedProperties>> {
     static const WTF::WeakHandlingFlag weakHandlingFlag = WTF::WeakHandlingInCollections;
 
@@ -70,7 +65,7 @@ struct CachedMatchedPropertiesHashTraits : HashTraits<Member<CachedMatchedProper
             // in the CachedMatchedProperties value contain a dead "properties" field.
             // If there is a dead field the entire cache entry is removed.
             for (const auto& matchedProperties : cachedProperties->matchedProperties) {
-                if (!Heap::isHeapObjectAlive(matchedProperties.properties)) {
+                if (!ThreadHeap::isHeapObjectAlive(matchedProperties.properties)) {
                     // For now report the cache entry as dead. This might not
                     // be the final result if in a subsequent call for this entry,
                     // the "properties" field has been marked via another path.
@@ -82,12 +77,11 @@ struct CachedMatchedPropertiesHashTraits : HashTraits<Member<CachedMatchedProper
         // had a dead "properties" field so trace CachedMatchedProperties strongly.
         // FIXME: traceInCollection is also called from WeakProcessing to check if the entry is dead.
         // Avoid calling trace in that case by only calling trace when cachedProperties is not yet marked.
-        if (!Heap::isHeapObjectAlive(cachedProperties))
+        if (!ThreadHeap::isHeapObjectAlive(cachedProperties))
             visitor->trace(cachedProperties);
         return false;
     }
 };
-#endif
 
 class MatchedPropertiesCache {
     DISALLOW_NEW();
@@ -110,21 +104,10 @@ public:
     DECLARE_TRACE();
 
 private:
-#if ENABLE(OILPAN)
     using Cache = HeapHashMap<unsigned, Member<CachedMatchedProperties>, DefaultHash<unsigned>::Hash, HashTraits<unsigned>, CachedMatchedPropertiesHashTraits>;
-#else
-    // Every N additions to the matched declaration cache trigger a sweep where entries holding
-    // the last reference to a style declaration are garbage collected.
-    void sweep(Timer<MatchedPropertiesCache>*);
-
-    unsigned m_additionsSinceLastSweep;
-
-    using Cache = HashMap<unsigned, OwnPtr<CachedMatchedProperties>>;
-    Timer<MatchedPropertiesCache> m_sweepTimer;
-#endif
     Cache m_cache;
 };
 
-}
+} // namespace blink
 
 #endif

@@ -37,9 +37,6 @@
 #include "media/base/limits.h"
 #include "media/base/media_switches.h"
 
-// Libraries required for the SetupAPI and Wbem APIs used here.
-#pragma comment(lib, "setupapi.lib")
-
 // The following are defined in various DDK headers, and we (re)define them here
 // to avoid adding the DDK as a chrome dependency.
 #define DRV_QUERYDEVICEINTERFACE 0x80c
@@ -129,14 +126,19 @@ static int NumberOfWaveOutBuffers() {
   return (base::win::GetVersion() == base::win::VERSION_VISTA) ? 4 : 3;
 }
 
-AudioManagerWin::AudioManagerWin(AudioLogFactory* audio_log_factory)
-    : AudioManagerBase(audio_log_factory),
+AudioManagerWin::AudioManagerWin(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
+    AudioLogFactory* audio_log_factory)
+    : AudioManagerBase(std::move(task_runner),
+                       std::move(worker_task_runner),
+                       audio_log_factory),
       // |CoreAudioUtil::IsSupported()| uses static variables to avoid doing
       // multiple initializations.  This is however not thread safe.
       // So, here we call it explicitly before we kick off the audio thread
       // or do any other work.
-      enumeration_type_(CoreAudioUtil::IsSupported() ?
-          kMMDeviceEnumeration : kWaveEnumeration) {
+      enumeration_type_(CoreAudioUtil::IsSupported() ? kMMDeviceEnumeration
+                                                     : kWaveEnumeration) {
   SetMaxOutputStreamsAllowed(kMaxOutputStreams);
 
   // WARNING: This is executed on the UI loop, do not add any code here which
@@ -150,10 +152,6 @@ AudioManagerWin::AudioManagerWin(AudioLogFactory* audio_log_factory)
 }
 
 AudioManagerWin::~AudioManagerWin() {
-  // It's safe to post a task here since Shutdown() will wait for all tasks to
-  // complete before returning.
-  GetTaskRunner()->PostTask(FROM_HERE, base::Bind(
-      &AudioManagerWin::ShutdownOnAudioThread, base::Unretained(this)));
   Shutdown();
 }
 
@@ -175,11 +173,6 @@ void AudioManagerWin::InitializeOnAudioThread() {
         base::Bind(&AudioManagerWin::NotifyAllOutputDeviceChangeListeners,
                    base::Unretained(this)))));
   }
-}
-
-void AudioManagerWin::ShutdownOnAudioThread() {
-  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
-  output_device_listener_.reset();
 }
 
 base::string16 AudioManagerWin::GetAudioInputDeviceModel() {
@@ -540,8 +533,13 @@ AudioInputStream* AudioManagerWin::CreatePCMWaveInAudioInputStream(
 }
 
 /// static
-AudioManager* CreateAudioManager(AudioLogFactory* audio_log_factory) {
-  return new AudioManagerWin(audio_log_factory);
+ScopedAudioManagerPtr CreateAudioManager(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
+    AudioLogFactory* audio_log_factory) {
+  return ScopedAudioManagerPtr(
+      new AudioManagerWin(std::move(task_runner), std::move(worker_task_runner),
+                          audio_log_factory));
 }
 
 }  // namespace media

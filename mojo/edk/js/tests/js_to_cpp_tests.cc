@@ -24,11 +24,11 @@
 #include "mojo/edk/test/test_utils.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/system/core.h"
-#include "mojo/public/cpp/system/macros.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace mojo {
 namespace edk {
+namespace js {
 
 // Global value updated by some checks to prevent compilers from optimizing
 // reads out of existence.
@@ -440,5 +440,6 @@ TEST_F(JsToCppTest, BackPointer) {
   EXPECT_TRUE(cpp_side_connection.DidSucceed());
 }
 
+}  // namespace js
 }  // namespace edk
 }  // namespace mojo

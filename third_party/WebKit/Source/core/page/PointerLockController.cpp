@@ -40,17 +40,19 @@ PointerLockController::PointerLockController(Page* page)
 {
 }
 
-PassOwnPtrWillBeRawPtr<PointerLockController> PointerLockController::create(Page* page)
+PointerLockController* PointerLockController::create(Page* page)
 {
-    return adoptPtrWillBeNoop(new PointerLockController(page));
+    return new PointerLockController(page);
 }
 
 void PointerLockController::requestPointerLock(Element* target)
 {
-    if (!target || !target->inDocument() || m_documentOfRemovedElementWhileWaitingForUnlock) {
+    if (!target || !target->inShadowIncludingDocument() || m_documentOfRemovedElementWhileWaitingForUnlock) {
         enqueueEvent(EventTypeNames::pointerlockerror, target);
         return;
     }
+
+    UseCounter::countCrossOriginIframe(target->document(), UseCounter::ElementRequestPointerLockIframe);
 
     if (target->document().isSandboxed(SandboxPointerLock)) {
         // FIXME: This message should be moved off the console once a solution to https://bugs.webkit.org/show_bug.cgi?id=103274 exists.

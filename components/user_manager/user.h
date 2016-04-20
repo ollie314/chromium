@@ -8,7 +8,9 @@
 #include <string>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_image/user_image.h"
@@ -66,8 +68,10 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   // Hence,
   //   (a) existing enumerated constants should never be deleted or reordered,
   //   (b) new constants should only be appended at the end of the enumeration.
+  // TODO(xdai): Add THIRDPARTY enum to keep track of third party wallpapers.
+  // See http://crbug.com/563627.
   enum WallpaperType {
-    /* DAILY = 0 */    // Removed.
+    DAILY = 0,         // Surprise wallpaper. Changes once a day if enabled.
     CUSTOMIZED = 1,    // Selected by user.
     DEFAULT = 2,       // Default.
     /* UNKNOWN = 3 */  // Removed.
@@ -79,18 +83,8 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   // Returns true if user type has gaia account.
   static bool TypeHasGaiaAccount(UserType user_type);
 
-  // Returns the user type.
-  virtual UserType GetType() const = 0;
-
-  // The email the user used to log in.
-  // TODO(alemate): rename this to GetUserEmail() (see crbug.com/548923)
-  const std::string& email() const;
-
-  // The displayed user name.
-  base::string16 display_name() const { return display_name_; }
-
-  // If the user has to use SAML to log in.
-  bool using_saml() const { return using_saml_; }
+  explicit User(const AccountId& account_id);
+  ~User() override;
 
   // UserInfo
   std::string GetEmail() const override;
@@ -98,6 +92,9 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   base::string16 GetGivenName() const override;
   const gfx::ImageSkia& GetImage() const override;
   const AccountId& GetAccountId() const override;
+
+  // Returns the user type.
+  virtual UserType GetType() const = 0;
 
   // Allows managing child status of the user. Used for RegularUser.
   virtual void SetIsChild(bool is_child);
@@ -109,6 +106,28 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   // Returns true if user is supervised.
   virtual bool IsSupervised() const;
 
+  // True if user image can be synced.
+  virtual bool CanSyncImage() const;
+
+  // The displayed (non-canonical) user email.
+  virtual std::string display_email() const;
+
+  // True if the user is affiliated to the device.
+  virtual bool IsAffiliated() const;
+
+  // True if the user is a device local account user.
+  virtual bool IsDeviceLocalAccount() const;
+
+  // The email the user used to log in.
+  // TODO(alemate): rename this to GetUserEmail() (see crbug.com/548923)
+  const std::string& email() const;
+
+  // The displayed user name.
+  base::string16 display_name() const { return display_name_; }
+
+  // If the user has to use SAML to log in.
+  bool using_saml() const { return using_saml_; }
+
   // Returns the account name part of the email. Use the display form of the
   // email if available and use_display_name == true. Otherwise use canonical.
   std::string GetAccountName(bool use_display_email) const;
@@ -116,32 +135,26 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   // Whether the user has a default image.
   bool HasDefaultImage() const;
 
-  // True if user image can be synced.
-  virtual bool CanSyncImage() const;
-
   int image_index() const { return image_index_; }
-  bool has_raw_image() const { return user_image_.has_raw_image(); }
-  // Returns raw representation of static user image.
-  const UserImage::RawImage& raw_image() const {
-    return user_image_.raw_image();
+  bool has_image_bytes() const { return user_image_->has_image_bytes(); }
+  // Returns bytes representation of static user image for WebUI.
+  const UserImage::Bytes& image_bytes() const {
+    return user_image_->image_bytes();
   }
 
-  // Whether |raw_image| contains data in format that is considered safe to
+  // Whether |user_image_| contains data in format that is considered safe to
   // decode in sensitive environment (on Login screen).
-  bool image_is_safe_format() const { return user_image_.is_safe_format(); }
+  bool image_is_safe_format() const { return user_image_->is_safe_format(); }
 
   // Returns the URL of user image, if there is any. Currently only the profile
   // image has a URL, for other images empty URL is returned.
-  GURL image_url() const { return user_image_.url(); }
+  GURL image_url() const { return user_image_->url(); }
 
   // True if user image is a stub (while real image is being loaded from file).
   bool image_is_stub() const { return image_is_stub_; }
 
   // True if image is being loaded from file.
   bool image_is_loading() const { return image_is_loading_; }
-
-  // The displayed (non-canonical) user email.
-  virtual std::string display_email() const;
 
   // OAuth token status for this user.
   OAuthTokenStatus oauth_token_status() const { return oauth_token_status_; }
@@ -166,9 +179,6 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   // True if the user Profile is created.
   bool is_profile_created() const { return profile_is_created_; }
 
-  // True if the user is affiliated to the device.
-  bool is_affiliated() const { return is_affiliated_; }
-
  protected:
   friend class UserManagerBase;
   friend class chromeos::ChromeUserManagerImpl;
@@ -181,6 +191,7 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   friend class chromeos::FakeChromeUserManager;
   friend class chromeos::MockUserManager;
   friend class chromeos::UserAddingScreenTest;
+  FRIEND_TEST_ALL_PREFIXES(UserTest, DeviceLocalAccountAffiliation);
 
   // Do not allow anyone else to create new User instances.
   static User* CreateRegularUser(const AccountId& account_id);
@@ -189,22 +200,19 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   static User* CreateSupervisedUser(const AccountId& account_id);
   static User* CreatePublicAccountUser(const AccountId& account_id);
 
-  explicit User(const AccountId& account_id);
-  ~User() override;
-
   const std::string* GetAccountLocale() const { return account_locale_.get(); }
 
   // Setters are private so only UserManager can call them.
   void SetAccountLocale(const std::string& resolved_account_locale);
 
-  void SetImage(const UserImage& user_image, int image_index);
+  void SetImage(scoped_ptr<UserImage> user_image, int image_index);
 
   void SetImageURL(const GURL& image_url);
 
   // Sets a stub image until the next |SetImage| call. |image_index| may be
   // one of |USER_IMAGE_EXTERNAL| or |USER_IMAGE_PROFILE|.
   // If |is_loading| is |true|, that means user image is being loaded from file.
-  void SetStubImage(const UserImage& stub_user_image,
+  void SetStubImage(scoped_ptr<UserImage> stub_user_image,
                     int image_index,
                     bool is_loading);
 
@@ -222,7 +230,7 @@ class USER_MANAGER_EXPORT User : public UserInfo {
 
   void set_using_saml(const bool using_saml) { using_saml_ = using_saml; }
 
-  const UserImage& user_image() const { return user_image_; }
+  const UserImage& user_image() const { return *user_image_; }
 
   void set_oauth_token_status(OAuthTokenStatus status) {
     oauth_token_status_ = status;
@@ -247,9 +255,7 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   // True if user has google account (not a guest or managed user).
   bool has_gaia_account() const;
 
-  void set_affiliation(bool is_affiliated) {
-    is_affiliated_ = is_affiliated;
-  }
+  virtual void SetAffiliation(bool is_affiliated);
 
  private:
   AccountId account_id_;
@@ -258,7 +264,7 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   // The displayed user email, defaults to |email_|.
   std::string display_email_;
   bool using_saml_ = false;
-  UserImage user_image_;
+  scoped_ptr<UserImage> user_image_;
   OAuthTokenStatus oauth_token_status_ = OAUTH_TOKEN_STATUS_UNKNOWN;
   bool force_online_signin_ = false;
 

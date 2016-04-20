@@ -140,6 +140,8 @@
         'gestures/gesture_types.h',
         'gestures/motion_event_aura.cc',
         'gestures/motion_event_aura.h',
+        'keycodes/platform_key_map_win.cc',
+        'keycodes/platform_key_map_win.h',
         'linux/text_edit_command_auralinux.cc',
         'linux/text_edit_command_auralinux.h',
         'linux/text_edit_key_bindings_delegate_auralinux.cc',
@@ -153,15 +155,14 @@
         'win/system_event_state_lookup.cc',
         'win/system_event_state_lookup.h',
         'x/events_x.cc',
-        'x/events_x_utils.cc',
-        'x/events_x_utils.h',
       ],
       'conditions': [
         ['use_x11==1', {
           'dependencies': [
-            'devices/events_devices.gyp:events_devices',
-            '../gfx/x/gfx_x11.gyp:gfx_x11',
             '../../build/linux/system.gyp:x11',
+            '../gfx/x/gfx_x11.gyp:gfx_x11',
+            'devices/events_devices.gyp:events_devices',
+            'x/events_x.gyp:events_x',
           ],
         }],
         ['use_aura==0', {
@@ -207,9 +208,12 @@
             'android/events_jni_registrar.h',
             'android/motion_event_android.cc',
             'android/motion_event_android.h',
+            'android/key_event_utils.cc',
+            'android/key_event_utils.h',
           ],
           'dependencies': [
             'motionevent_jni_headers',
+            'keyevent_jni_headers',
           ],
         }],
       ],
@@ -311,6 +315,7 @@
       'sources': [
         'ipc/latency_info_param_traits.cc',
         'ipc/latency_info_param_traits.h',
+        'ipc/latency_info_param_traits_macros.h',
       ],
     },
     {
@@ -381,6 +386,15 @@
           'variables': {
             'jni_gen_package': 'ui',
             'input_java_class': 'android/view/MotionEvent.class',
+          },
+          'includes': [ '../../build/jar_file_jni_generator.gypi' ],
+        },
+        {
+          'target_name': 'keyevent_jni_headers',
+          'type': 'none',
+          'variables': {
+            'jni_gen_package': 'ui',
+            'input_java_class': 'android/view/KeyEvent.class',
           },
           'includes': [ '../../build/jar_file_jni_generator.gypi' ],
         },

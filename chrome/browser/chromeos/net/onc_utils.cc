@@ -8,7 +8,6 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/network/managed_network_configuration_handler.h"
@@ -23,6 +22,7 @@
 #include "chromeos/network/onc/onc_signature.h"
 #include "chromeos/network/onc/onc_translator.h"
 #include "chromeos/network/onc/onc_utils.h"
+#include "components/prefs/pref_service.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -77,7 +77,8 @@ void ImportNetworksForUser(const user_manager::User* user,
                            std::string* error) {
   error->clear();
 
-  scoped_ptr<base::ListValue> expanded_networks(network_configs.DeepCopy());
+  std::unique_ptr<base::ListValue> expanded_networks(
+      network_configs.DeepCopy());
   ExpandStringPlaceholdersInNetworksForUser(user, expanded_networks.get());
 
   const NetworkProfile* profile =
@@ -98,17 +99,17 @@ void ImportNetworksForUser(const user_manager::User* user,
 
     // Remove irrelevant fields.
     onc::Normalizer normalizer(true /* remove recommended fields */);
-    scoped_ptr<base::DictionaryValue> normalized_network =
+    std::unique_ptr<base::DictionaryValue> normalized_network =
         normalizer.NormalizeObject(&onc::kNetworkConfigurationSignature,
                                    *network);
 
     // TODO(pneubeck): Use ONC and ManagedNetworkConfigurationHandler instead.
     // crbug.com/457936
-    scoped_ptr<base::DictionaryValue> shill_dict =
+    std::unique_ptr<base::DictionaryValue> shill_dict =
         onc::TranslateONCObjectToShill(&onc::kNetworkConfigurationSignature,
                                        *normalized_network);
 
-    scoped_ptr<NetworkUIData> ui_data(
+    std::unique_ptr<NetworkUIData> ui_data(
         NetworkUIData::CreateFromONC(::onc::ONC_SOURCE_USER_IMPORT));
     base::DictionaryValue ui_data_dict;
     ui_data->FillDictionary(&ui_data_dict);
@@ -141,7 +142,7 @@ void ImportNetworksForUser(const user_manager::User* user,
     } else {
       config_handler->CreateShillConfiguration(
           *shill_dict, NetworkConfigurationObserver::SOURCE_USER_ACTION,
-          network_handler::StringResultCallback(),
+          network_handler::ServiceResultCallback(),
           network_handler::ErrorCallback());
     }
   }

@@ -6,14 +6,14 @@
 #define UI_VIEWS_WIN_HWND_MESSAGE_HANDLER_H_
 
 #include <windows.h>
-#include <stddef.h>
 
+#include <stddef.h>
+#include <memory>
 #include <set>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/win/scoped_gdi_object.h"
@@ -163,6 +163,7 @@ class VIEWS_EXPORT HWNDMessageHandler :
   bool IsActive() const;
   bool IsMinimized() const;
   bool IsMaximized() const;
+  bool IsFullscreen() const;
   bool IsAlwaysOnTop() const;
 
   bool RunMoveLoop(const gfx::Vector2d& drag_offset, bool hide_on_escape);
@@ -193,10 +194,6 @@ class VIEWS_EXPORT HWNDMessageHandler :
   void SetWindowIcons(const gfx::ImageSkia& window_icon,
                       const gfx::ImageSkia& app_icon);
 
-  void set_remove_standard_frame(bool remove_standard_frame) {
-    remove_standard_frame_ = remove_standard_frame;
-  }
-
   void set_use_system_default_icon(bool use_system_default_icon) {
     use_system_default_icon_ = use_system_default_icon;
   }
@@ -205,6 +202,10 @@ class VIEWS_EXPORT HWNDMessageHandler :
 
   // Updates the window style to reflect whether it can be resized or maximized.
   void SizeConstraintsChanged();
+
+  // Returns true if content is rendered to a child window instead of directly
+  // to this window.
+  bool HasChildRenderingWindow();
 
  private:
   typedef std::set<DWORD> TouchIDs;
@@ -255,7 +256,10 @@ class VIEWS_EXPORT HWNDMessageHandler :
 
   // Called after the WM_ACTIVATE message has been processed by the default
   // windows procedure.
-  void PostProcessActivateMessage(int activation_state, bool minimized);
+  void PostProcessActivateMessage(
+      int activation_state,
+      bool minimized,
+      HWND window_gaining_or_losing_activation);
 
   // Enables disabled owner windows that may have been disabled due to this
   // window's modality.
@@ -306,6 +310,8 @@ class VIEWS_EXPORT HWNDMessageHandler :
   // onscreen.
   void ForceRedrawWindow(int attempts);
 
+  bool HasSystemFrame() const;
+
   // Message Handlers ----------------------------------------------------------
 
   BEGIN_SAFE_MSG_MAP_EX(weak_factory_)
@@ -330,6 +336,9 @@ class VIEWS_EXPORT HWNDMessageHandler :
     CR_MESSAGE_HANDLER_EX(WM_MOUSELEAVE, OnMouseRange)
     CR_MESSAGE_HANDLER_EX(WM_NCMOUSELEAVE, OnMouseRange)
     CR_MESSAGE_HANDLER_EX(WM_SETCURSOR, OnSetCursor);
+
+    // Pointer events.
+    CR_MESSAGE_HANDLER_EX(WM_POINTERACTIVATE, OnPointerActivate)
 
     // Key events.
     CR_MESSAGE_HANDLER_EX(WM_KEYDOWN, OnKeyEvent)
@@ -426,6 +435,7 @@ class VIEWS_EXPORT HWNDMessageHandler :
   void OnKillFocus(HWND focused_window);
   LRESULT OnMouseActivate(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnMouseRange(UINT message, WPARAM w_param, LPARAM l_param);
+  LRESULT OnPointerActivate(UINT message, WPARAM w_param, LPARAM l_param);
   void OnMove(const gfx::Point& point);
   void OnMoving(UINT param, const RECT* new_bounds);
   LRESULT OnNCActivate(UINT message, WPARAM w_param, LPARAM l_param);
@@ -502,14 +512,17 @@ class VIEWS_EXPORT HWNDMessageHandler :
                                   WPARAM w_param,
                                   LPARAM l_param);
 
+  // Helper function for setting the bounds of the HWND. For more information
+  // please refer to the SetBounds() function.
+  void SetBoundsInternal(const gfx::Rect& bounds_in_pixels,
+                         bool force_size_changed);
+
   HWNDMessageHandlerDelegate* delegate_;
 
-  scoped_ptr<FullscreenHandler> fullscreen_handler_;
+  std::unique_ptr<FullscreenHandler> fullscreen_handler_;
 
   // Set to true in Close() and false is CloseNow().
   bool waiting_for_close_now_;
-
-  bool remove_standard_frame_;
 
   bool use_system_default_icon_;
 
@@ -582,7 +595,7 @@ class VIEWS_EXPORT HWNDMessageHandler :
 
   // Stores a pointer to the WindowEventTarget interface implemented by this
   // class. Allows callers to retrieve the interface pointer.
-  scoped_ptr<ui::ViewProp> prop_window_target_;
+  std::unique_ptr<ui::ViewProp> prop_window_target_;
 
   // Number of active touch down contexts. This is incremented on touch down
   // events and decremented later using a delayed task.
@@ -614,12 +627,14 @@ class VIEWS_EXPORT HWNDMessageHandler :
   bool sent_window_size_changing_;
 
   // Manages observation of Windows Session Change messages.
-  scoped_ptr<WindowsSessionChangeObserver> windows_session_change_observer_;
+  std::unique_ptr<WindowsSessionChangeObserver>
+      windows_session_change_observer_;
 
   // This class provides functionality to register the legacy window as a
   // Direct Manipulation consumer. This allows us to support smooth scroll
   // in Chrome on Windows 10.
-  scoped_ptr<gfx::win::DirectManipulationHelper> direct_manipulation_helper_;
+  std::unique_ptr<gfx::win::DirectManipulationHelper>
+      direct_manipulation_helper_;
 
   // The location where the user clicked on the caption. We cache this when we
   // receive the WM_NCLBUTTONDOWN message. We use this in the subsequent
@@ -631,6 +646,10 @@ class VIEWS_EXPORT HWNDMessageHandler :
   // Set to true if the left mouse button has been pressed on the caption.
   // Defaults to false.
   bool left_button_down_on_caption_;
+
+  // Set to true if the window is a background fullscreen window, i.e a
+  // fullscreen window which lost activation. Defaults to false.
+  bool background_fullscreen_hack_;
 
   // The WeakPtrFactories below must occur last in the class definition so they
   // get destroyed last.

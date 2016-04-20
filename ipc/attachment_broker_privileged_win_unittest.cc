@@ -6,6 +6,8 @@
 
 #include <windows.h>
 
+#include <tuple>
+
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -76,7 +78,7 @@ ScopedHandle GetHandleFromTestHandleWinMsg(const IPC::Message& message) {
     return ScopedHandle(nullptr);
   }
 
-  IPC::HandleWin handle_win = base::get<1>(p);
+  IPC::HandleWin handle_win = std::get<1>(p);
   return ScopedHandle(handle_win.get_handle());
 }
 
@@ -97,7 +99,7 @@ scoped_ptr<base::SharedMemory> GetSharedMemoryFromSharedMemoryHandleMsg1(
     return nullptr;
   }
 
-  base::SharedMemoryHandle handle = base::get<0>(p);
+  base::SharedMemoryHandle handle = std::get<0>(p);
   scoped_ptr<base::SharedMemory> shared_memory(
       new base::SharedMemory(handle, false));
 
@@ -123,9 +125,9 @@ bool GetHandleFromTestTwoHandleWinMsg(const IPC::Message& message,
     return false;
   }
 
-  IPC::HandleWin handle_win = base::get<0>(p);
+  IPC::HandleWin handle_win = std::get<0>(p);
   *h1 = handle_win.get_handle();
-  handle_win = base::get<1>(p);
+  handle_win = std::get<1>(p);
   *h2 = handle_win.get_handle();
   return true;
 }
@@ -267,7 +269,7 @@ class IPCAttachmentBrokerPrivilegedWinTest : public IPCTestBase {
       set_broker(new IPC::AttachmentBrokerUnprivilegedWin);
     broker_->AddObserver(&observer_, task_runner());
     CreateChannel(&proxy_listener_);
-    broker_->DesignateBrokerCommunicationChannel(channel());
+    broker_->RegisterBrokerCommunicationChannel(channel());
     ASSERT_TRUE(ConnectChannel());
     ASSERT_TRUE(StartClient());
 
@@ -470,7 +472,7 @@ TEST_F(IPCAttachmentBrokerPrivilegedWinTest, SendHandleTwice) {
 
 // An unprivileged process makes a shared memory region and sends it to the
 // privileged process.
-TEST_F(IPCAttachmentBrokerPrivilegedWinTest, DISABLED_SendSharedMemoryHandle) {
+TEST_F(IPCAttachmentBrokerPrivilegedWinTest, SendSharedMemoryHandle) {
   Init("SendSharedMemoryHandle");
 
   CommonSetUp();
@@ -504,7 +506,7 @@ int CommonPrivilegedProcessMain(OnMessageReceivedCallback callback,
   IPC::AttachmentBrokerPrivilegedWin broker;
   scoped_ptr<IPC::Channel> channel(IPC::Channel::CreateClient(
       IPCTestBase::GetChannelName(channel_name), &listener));
-  broker.RegisterCommunicationChannel(channel.get());
+  broker.RegisterCommunicationChannel(channel.get(), nullptr);
   CHECK(channel->Connect());
 
   while (true) {

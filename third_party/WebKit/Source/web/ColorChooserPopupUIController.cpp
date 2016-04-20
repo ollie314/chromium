@@ -49,23 +49,18 @@ ColorChooserPopupUIController::ColorChooserPopupUIController(LocalFrame* frame, 
     , m_popup(nullptr)
     , m_locale(Locale::defaultLocale())
 {
-#if ENABLE(OILPAN)
     ThreadState::current()->registerPreFinalizer(this);
-#endif
 }
 
 ColorChooserPopupUIController::~ColorChooserPopupUIController()
 {
-#if !ENABLE(OILPAN)
-    closePopup();
-#endif
-    // ~ColorChooserUIController ends the ColorChooser.
 }
 
 void ColorChooserPopupUIController::dispose()
 {
     // Finalized earlier so as to access m_chromeClient while alive.
     closePopup();
+    // ~ColorChooserUIController calls endChooser().
 }
 
 DEFINE_TRACE(ColorChooserPopupUIController)
@@ -101,7 +96,7 @@ void ColorChooserPopupUIController::writeDocument(SharedBuffer* data)
     Vector<String> suggestionValues;
     for (unsigned i = 0; i < suggestions.size(); i++)
         suggestionValues.append(suggestions[i].color.serialized());
-    IntRect anchorRectInScreen = m_chromeClient->viewportToScreen(m_client->elementRectRelativeToViewport());
+    IntRect anchorRectInScreen = m_chromeClient->viewportToScreen(m_client->elementRectRelativeToViewport(), m_frame->view());
 
     PagePopupClient::addString("<!DOCTYPE html><head><meta charset='UTF-8'><style>\n", data);
     data->append(Platform::current()->loadResource("pickerCommon.css"));
@@ -125,8 +120,8 @@ Locale& ColorChooserPopupUIController::locale()
 
 void ColorChooserPopupUIController::setValueAndClosePopup(int numValue, const String& stringValue)
 {
-    ASSERT(m_popup);
-    ASSERT(m_client);
+    DCHECK(m_popup);
+    DCHECK(m_client);
     if (numValue == ColorPickerPopupActionSetValue)
         setValue(stringValue);
     if (numValue == ColorPickerPopupActionChooseOtherColor)
@@ -136,7 +131,7 @@ void ColorChooserPopupUIController::setValueAndClosePopup(int numValue, const St
 
 void ColorChooserPopupUIController::setValue(const String& value)
 {
-    ASSERT(m_client);
+    DCHECK(m_client);
     Color color;
     bool success = color.setFromString(value);
     ASSERT_UNUSED(success, success);
@@ -158,7 +153,7 @@ Element& ColorChooserPopupUIController::ownerElement()
 
 void ColorChooserPopupUIController::openPopup()
 {
-    ASSERT(!m_popup);
+    DCHECK(!m_popup);
     m_popup = m_chromeClient->openPagePopup(this);
 }
 

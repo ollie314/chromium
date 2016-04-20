@@ -16,14 +16,13 @@
 #include "jingle/glue/proxy_resolving_client_socket.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/tcp_client_socket.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "third_party/libjingle/source/talk/media/base/rtputils.h"
+#include "third_party/webrtc/media/base/rtputils.h"
 
 namespace {
 
@@ -157,7 +156,7 @@ void P2PSocketHostTcpBase::OnConnected(int result) {
     state_ = STATE_TLS_CONNECTING;
     StartTls();
   } else if (IsPseudoTlsClientSocket(type_)) {
-    scoped_ptr<net::StreamSocket> transport_socket = std::move(socket_);
+    std::unique_ptr<net::StreamSocket> transport_socket = std::move(socket_);
     socket_.reset(
         new jingle_glue::FakeSSLClientSocket(std::move(transport_socket)));
     state_ = STATE_TLS_CONNECTING;
@@ -180,7 +179,7 @@ void P2PSocketHostTcpBase::StartTls() {
   DCHECK_EQ(state_, STATE_TLS_CONNECTING);
   DCHECK(socket_.get());
 
-  scoped_ptr<net::ClientSocketHandle> socket_handle(
+  std::unique_ptr<net::ClientSocketHandle> socket_handle(
       new net::ClientSocketHandle());
   socket_handle->SetSocket(std::move(socket_));
 

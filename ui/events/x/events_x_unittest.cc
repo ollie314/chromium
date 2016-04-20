@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <stddef.h>
-#include <stdint.h>
 #include <X11/XKBlib.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/extensions/XInput2.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <cstring>
+#include <memory>
 #include <set>
 #include <utility>
 
@@ -18,7 +19,6 @@
 #undef None
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/devices/x11/device_data_manager_x11.h"
@@ -28,6 +28,7 @@
 #include "ui/events/event_utils.h"
 #include "ui/events/test/events_test_utils.h"
 #include "ui/events/test/events_test_utils_x11.h"
+#include "ui/events/x/events_x_utils.h"
 #include "ui/gfx/geometry/point.h"
 
 namespace ui {
@@ -81,6 +82,7 @@ class EventsXTest : public testing::Test {
   void SetUp() override {
     DeviceDataManagerX11::CreateInstance();
     ui::TouchFactory::GetInstance()->ResetForTest();
+    ResetTimestampRolloverCountersForTesting();
   }
  private:
   DISALLOW_COPY_AND_ASSIGN(EventsXTest);
@@ -239,9 +241,11 @@ TEST_F(EventsXTest, TouchEventBasic) {
   EXPECT_EQ(ui::ET_TOUCH_PRESSED, ui::EventTypeFromNative(scoped_xevent));
   EXPECT_EQ("10,10", ui::EventLocationFromNative(scoped_xevent).ToString());
   EXPECT_EQ(GetTouchId(scoped_xevent), 0);
-  EXPECT_EQ(GetTouchRadiusX(scoped_xevent), 10);
   EXPECT_FLOAT_EQ(GetTouchAngle(scoped_xevent), 0.15f);
-  EXPECT_FLOAT_EQ(GetTouchForce(scoped_xevent), 0.1f);
+  PointerDetails pointer_details =
+      GetTouchPointerDetailsFromNative(scoped_xevent);
+  EXPECT_FLOAT_EQ(pointer_details.radius_x, 10.0f);
+  EXPECT_FLOAT_EQ(pointer_details.force, 0.1f);
 
   // Touch update, with new orientation info.
   valuators.clear();
@@ -252,9 +256,10 @@ TEST_F(EventsXTest, TouchEventBasic) {
   EXPECT_EQ(ui::ET_TOUCH_MOVED, ui::EventTypeFromNative(scoped_xevent));
   EXPECT_EQ("20,20", ui::EventLocationFromNative(scoped_xevent).ToString());
   EXPECT_EQ(GetTouchId(scoped_xevent), 0);
-  EXPECT_EQ(GetTouchRadiusX(scoped_xevent), 10);
   EXPECT_FLOAT_EQ(GetTouchAngle(scoped_xevent), 0.25f);
-  EXPECT_FLOAT_EQ(GetTouchForce(scoped_xevent), 0.1f);
+  pointer_details = GetTouchPointerDetailsFromNative(scoped_xevent);
+  EXPECT_FLOAT_EQ(pointer_details.radius_x, 10.0f);
+  EXPECT_FLOAT_EQ(pointer_details.force, 0.1f);
 
   // Another touch with tracking id 6, touch id 1.
   valuators.clear();
@@ -267,9 +272,10 @@ TEST_F(EventsXTest, TouchEventBasic) {
   EXPECT_EQ(ui::ET_TOUCH_PRESSED, ui::EventTypeFromNative(scoped_xevent));
   EXPECT_EQ("200,200", ui::EventLocationFromNative(scoped_xevent).ToString());
   EXPECT_EQ(GetTouchId(scoped_xevent), 1);
-  EXPECT_EQ(GetTouchRadiusX(scoped_xevent), 50);
   EXPECT_FLOAT_EQ(GetTouchAngle(scoped_xevent), 0.45f);
-  EXPECT_FLOAT_EQ(GetTouchForce(scoped_xevent), 0.5f);
+  pointer_details = GetTouchPointerDetailsFromNative(scoped_xevent);
+  EXPECT_FLOAT_EQ(pointer_details.radius_x, 50.0f);
+  EXPECT_FLOAT_EQ(pointer_details.force, 0.5f);
 
   // Touch with tracking id 5 should have old radius/angle value and new pressue
   // value.
@@ -280,9 +286,10 @@ TEST_F(EventsXTest, TouchEventBasic) {
   EXPECT_EQ(ui::ET_TOUCH_RELEASED, ui::EventTypeFromNative(scoped_xevent));
   EXPECT_EQ("30,30", ui::EventLocationFromNative(scoped_xevent).ToString());
   EXPECT_EQ(GetTouchId(scoped_xevent), 0);
-  EXPECT_EQ(GetTouchRadiusX(scoped_xevent), 10);
   EXPECT_FLOAT_EQ(GetTouchAngle(scoped_xevent), 0.25f);
-  EXPECT_FLOAT_EQ(GetTouchForce(scoped_xevent), 0.05f);
+  pointer_details = GetTouchPointerDetailsFromNative(scoped_xevent);
+  EXPECT_FLOAT_EQ(pointer_details.radius_x, 10.0f);
+  EXPECT_FLOAT_EQ(pointer_details.force, 0.05f);
 
   // Touch with tracking id 6 should have old angle/pressure value and new
   // radius value.
@@ -293,9 +300,10 @@ TEST_F(EventsXTest, TouchEventBasic) {
   EXPECT_EQ(ui::ET_TOUCH_RELEASED, ui::EventTypeFromNative(scoped_xevent));
   EXPECT_EQ("200,200", ui::EventLocationFromNative(scoped_xevent).ToString());
   EXPECT_EQ(GetTouchId(scoped_xevent), 1);
-  EXPECT_EQ(GetTouchRadiusX(scoped_xevent), 25);
   EXPECT_FLOAT_EQ(GetTouchAngle(scoped_xevent), 0.45f);
-  EXPECT_FLOAT_EQ(GetTouchForce(scoped_xevent), 0.5f);
+  pointer_details = GetTouchPointerDetailsFromNative(scoped_xevent);
+  EXPECT_FLOAT_EQ(pointer_details.radius_x, 25.0f);
+  EXPECT_FLOAT_EQ(pointer_details.force, 0.5f);
 }
 
 int GetTouchIdForTrackingId(uint32_t tracking_id) {
@@ -319,7 +327,7 @@ TEST_F(EventsXTest, TouchEventNotRemovingFromNativeMapping) {
   ui::ScopedXI2Event xpress0;
   xpress0.InitTouchEvent(
       0, XI_TouchBegin, kTrackingId, gfx::Point(10, 10), valuators);
-  scoped_ptr<ui::TouchEvent> upress0(new ui::TouchEvent(xpress0));
+  std::unique_ptr<ui::TouchEvent> upress0(new ui::TouchEvent(xpress0));
   EXPECT_EQ(0, GetTouchIdForTrackingId(kTrackingId));
 
   ui::ScopedXI2Event xpress1;
@@ -381,7 +389,8 @@ TEST_F(EventsXTest, DisableKeyboard) {
   int master_device_id = 3;
   device_data_manager->DisableDevice(blocked_device_id);
 
-  scoped_ptr<std::set<KeyboardCode> > excepted_keys(new std::set<KeyboardCode>);
+  std::unique_ptr<std::set<KeyboardCode>> excepted_keys(
+      new std::set<KeyboardCode>);
   excepted_keys->insert(VKEY_B);
   device_data_manager->SetDisabledKeyboardAllowedKeys(std::move(excepted_keys));
 
@@ -509,6 +518,35 @@ TEST_F(EventsXTest, IgnoresMotionEventForMouseWheelScroll) {
   // We shouldn't produce a mouse move event on a mouse wheel
   // scroll. These events are only produced for some mice.
   EXPECT_EQ(ui::ET_UNKNOWN, ui::EventTypeFromNative(xev));
+}
+
+TEST_F(EventsXTest, TimestampRolloverAndAdjustWhenDecreasing) {
+  XEvent event;
+  InitButtonEvent(&event, true, gfx::Point(5, 10), 1, 0);
+
+  event.xbutton.time = 0xFFFFFFFF;
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(0xFFFFFFFF).ToInternalValue(),
+            ui::EventTimeFromNative(&event).ToInternalValue());
+
+  event.xbutton.time = 3;
+  EXPECT_EQ(
+      base::TimeDelta::FromMilliseconds(0x100000000LL + 3).ToInternalValue(),
+      ui::EventTimeFromNative(&event).ToInternalValue());
+}
+
+TEST_F(EventsXTest, NoTimestampRolloverWhenMonotonicIncreasing) {
+  XEvent event;
+  InitButtonEvent(&event, true, gfx::Point(5, 10), 1, 0);
+
+  event.xbutton.time = 1;
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(1).ToInternalValue(),
+            ui::EventTimeFromNative(&event).ToInternalValue());
+  event.xbutton.time = 2;
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(2).ToInternalValue(),
+            ui::EventTimeFromNative(&event).ToInternalValue());
+  event.xbutton.time = 0xFFFFFFFF;
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(0xFFFFFFFF).ToInternalValue(),
+            ui::EventTimeFromNative(&event).ToInternalValue());
 }
 
 }  // namespace ui

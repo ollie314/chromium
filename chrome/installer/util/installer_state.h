@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -14,7 +15,6 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/strings/string16.h"
 #include "base/version.h"
@@ -94,7 +94,7 @@ class InstallerState {
   // Returns the product that was added, or NULL if |product| is incompatible
   // with this object.  Ownership of |product| is taken by this object, while
   // ownership of the return value is not passed to the caller.
-  Product* AddProduct(scoped_ptr<Product>* product);
+  Product* AddProduct(std::unique_ptr<Product>* product);
 
   // Removes |product| from the set of products to be operated on.  The object
   // pointed to by |product| is freed.  Returns false if |product| is not
@@ -122,6 +122,12 @@ class InstallerState {
   // True if the "msi" preference is set or if a product with the "msi" state
   // flag is set is to be operated on.
   bool is_msi() const { return msi_; }
+
+  // True if the process is running at a reduced "background" priority.
+  bool is_background_mode() const { return background_mode_; }
+
+  // Indicate that the process is or is not running in the background.
+  void set_background_mode(bool bg) { background_mode_ = bg; }
 
   // True if the --verbose-logging command-line flag is set or if the
   // verbose_logging master preferences option is true.
@@ -235,7 +241,7 @@ class InstallerState {
   bool CanAddProduct(const Product& product,
                      const base::FilePath* product_dir) const;
   Product* AddProductInDirectory(const base::FilePath* product_dir,
-                                 scoped_ptr<Product>* product);
+                                 std::unique_ptr<Product>* product);
   Product* AddProductFromPreferences(
       BrowserDistribution::Type distribution_type,
       const MasterPreferences& prefs,
@@ -268,6 +274,7 @@ class InstallerState {
   HKEY root_key_;
 #endif
   bool msi_;
+  bool background_mode_;
   bool verbose_logging_;
 
  private:

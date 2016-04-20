@@ -51,7 +51,6 @@ class ThreadSafeSender;
 class TraceLogObserverAdapter;
 class WebCryptoImpl;
 class WebGeofencingProviderImpl;
-class WebMemoryDumpProviderAdapter;
 
 class CONTENT_EXPORT BlinkPlatformImpl
     : NON_EXPORTED_BASE(public blink::Platform) {
@@ -73,7 +72,7 @@ class CONTENT_EXPORT BlinkPlatformImpl
       const blink::WebString& vfs_file_name) override;
   long long databaseGetFileSize(const blink::WebString& vfs_file_name) override;
   long long databaseGetSpaceAvailableForOrigin(
-      const blink::WebString& origin_identifier) override;
+      const blink::WebSecurityOrigin& origin) override;
   bool databaseSetFileSize(const blink::WebString& vfs_file_name,
                            long long size) override;
   blink::WebString signedPublicKeyAndChallengeString(
@@ -81,14 +80,9 @@ class CONTENT_EXPORT BlinkPlatformImpl
       const blink::WebString& challenge,
       const blink::WebURL& url,
       const blink::WebURL& top_origin) override;
-  size_t memoryUsageMB() override;
   size_t actualMemoryUsageMB() override;
-  size_t physicalMemoryMB() override;
-  size_t virtualMemoryLimitMB() override;
   size_t numberOfProcessors() override;
 
-  blink::WebDiscardableMemory* allocateAndLockDiscardableMemory(
-      size_t bytes) override;
   size_t maxDecodedImageBytes() override;
   uint32_t getUniqueIdForProcess() override;
   blink::WebURLLoader* createURLLoader() override;
@@ -99,31 +93,13 @@ class CONTENT_EXPORT BlinkPlatformImpl
                               blink::WebString& charset) override;
   blink::WebURLError cancelledError(const blink::WebURL& url) const override;
   bool isReservedIPAddress(const blink::WebString& host) const override;
-  bool portAllowed(const blink::WebURL& url) const override;
+  bool parseMultipartHeadersFromBody(const char* bytes,
+                                     size_t size,
+                                     blink::WebURLResponse* response,
+                                     size_t* end) const override;
   blink::WebThread* createThread(const char* name) override;
   blink::WebThread* currentThread() override;
-  void yieldCurrentThread() override;
-  blink::WebWaitableEvent* createWaitableEvent(
-      blink::WebWaitableEvent::ResetPolicy policy,
-      blink::WebWaitableEvent::InitialState state) override;
-  blink::WebWaitableEvent* waitMultipleEvents(
-      const blink::WebVector<blink::WebWaitableEvent*>& events) override;
-  void decrementStatsCounter(const char* name) override;
-  void incrementStatsCounter(const char* name) override;
-  void histogramCustomCounts(const char* name,
-                             int sample,
-                             int min,
-                             int max,
-                             int bucket_count) override;
-  void histogramEnumeration(const char* name,
-                            int sample,
-                            int boundary_value) override;
-  void histogramSparse(const char* name, int sample) override;
-  void registerMemoryDumpProvider(blink::WebMemoryDumpProvider* wmdp,
-                                  const char* name) override;
-  void unregisterMemoryDumpProvider(
-      blink::WebMemoryDumpProvider* wmdp) override;
-  blink::WebProcessMemoryDump* createProcessMemoryDump() override;
+  void recordAction(const blink::UserMetricsAction&) override;
   blink::Platform::WebMemoryAllocatorDumpGuid createWebMemoryAllocatorDumpGuid(
       const blink::WebString& guidStr) override;
   void addTraceLogEnabledStateObserver(
@@ -144,8 +120,6 @@ class CONTENT_EXPORT BlinkPlatformImpl
       const blink::WebString& value1,
       const blink::WebString& value2) override;
   void suddenTerminationChanged(bool enabled) override {}
-  double currentTimeSeconds() override;
-  double monotonicallyIncreasingTimeSeconds() override;
   blink::WebThread* compositorThread() const override;
   blink::WebGestureCurve* createFlingAnimationCurve(
       blink::WebGestureDevice device_source,
@@ -157,8 +131,6 @@ class CONTENT_EXPORT BlinkPlatformImpl
   blink::WebGeofencingProvider* geofencingProvider() override;
   blink::WebNotificationManager* notificationManager() override;
   blink::WebPushProvider* pushProvider() override;
-  blink::WebServicePortProvider* createServicePortProvider(
-      blink::WebServicePortProviderClient*) override;
   blink::WebPermissionClient* permissionClient() override;
   blink::WebSyncProvider* backgroundSyncProvider() override;
 
@@ -184,19 +156,16 @@ class CONTENT_EXPORT BlinkPlatformImpl
   WebFallbackThemeEngineImpl fallback_theme_engine_;
   base::ThreadLocalStorage::Slot current_thread_slot_;
   webcrypto::WebCryptoImpl web_crypto_;
-  scoped_ptr<WebGeofencingProviderImpl> geofencing_provider_;
-  base::ScopedPtrHashMap<blink::WebMemoryDumpProvider*,
-                         scoped_ptr<WebMemoryDumpProviderAdapter>>
-      memory_dump_providers_;
+  std::unique_ptr<WebGeofencingProviderImpl> geofencing_provider_;
   base::ScopedPtrHashMap<blink::Platform::TraceLogEnabledStateObserver*,
-                         scoped_ptr<TraceLogObserverAdapter>>
+                         std::unique_ptr<TraceLogObserverAdapter>>
       trace_log_observers_;
 
   scoped_refptr<ThreadSafeSender> thread_safe_sender_;
   scoped_refptr<NotificationDispatcher> notification_dispatcher_;
   scoped_refptr<PushDispatcher> push_dispatcher_;
-  scoped_ptr<PermissionDispatcher> permission_client_;
-  scoped_ptr<BackgroundSyncProvider> main_thread_sync_provider_;
+  std::unique_ptr<PermissionDispatcher> permission_client_;
+  std::unique_ptr<BackgroundSyncProvider> main_thread_sync_provider_;
 
   scheduler::WebThreadBase* compositor_thread_;
 };

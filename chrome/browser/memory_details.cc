@@ -15,9 +15,9 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/nacl/common/nacl_process_type.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
@@ -90,10 +90,12 @@ std::string ProcessMemoryInformation::GetFullTypeNameInEnglish(
 ProcessMemoryInformation::ProcessMemoryInformation()
     : pid(0),
       num_processes(0),
-      is_diagnostics(false),
       process_type(content::PROCESS_TYPE_UNKNOWN),
       renderer_type(RENDERER_UNKNOWN) {
 }
+
+ProcessMemoryInformation::ProcessMemoryInformation(
+    const ProcessMemoryInformation& other) = default;
 
 ProcessMemoryInformation::~ProcessMemoryInformation() {}
 
@@ -131,7 +133,7 @@ ProcessData& ProcessData::operator=(const ProcessData& rhs) {
 // one task run for that long on the UI or IO threads.  So, we run the
 // expensive parts of this operation over on the blocking pool.
 //
-void MemoryDetails::StartFetch(CollectionMode mode) {
+void MemoryDetails::StartFetch() {
   // This might get called from the UI or FILE threads, but should not be
   // getting called from the IO thread.
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::IO));
@@ -140,7 +142,7 @@ void MemoryDetails::StartFetch(CollectionMode mode) {
   // However, plugin process information is only available from the IO thread.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&MemoryDetails::CollectChildInfoOnIOThread, this, mode));
+      base::Bind(&MemoryDetails::CollectChildInfoOnIOThread, this));
 }
 
 MemoryDetails::~MemoryDetails() {}
@@ -181,7 +183,7 @@ std::string MemoryDetails::ToLogString() {
   return log;
 }
 
-void MemoryDetails::CollectChildInfoOnIOThread(CollectionMode mode) {
+void MemoryDetails::CollectChildInfoOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   std::vector<ProcessMemoryInformation> child_info;
@@ -205,22 +207,17 @@ void MemoryDetails::CollectChildInfoOnIOThread(CollectionMode mode) {
   // Now go do expensive memory lookups on the blocking pool.
   BrowserThread::GetBlockingPool()->PostWorkerTaskWithShutdownBehavior(
       FROM_HERE,
-      base::Bind(&MemoryDetails::CollectProcessData, this, mode, child_info),
+      base::Bind(&MemoryDetails::CollectProcessData, this, child_info),
       base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
 }
 
 void MemoryDetails::CollectChildInfoOnUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
-  const pid_t zygote_pid = content::ZygoteHost::GetInstance()->GetPid();
-#endif
-
   ProcessData* const chrome_browser = ChromeBrowser();
 
   // First pass, collate the widgets by process ID.
   std::map<base::ProcessId, std::vector<RenderWidgetHost*>> widgets_by_pid;
-  scoped_ptr<content::RenderWidgetHostIterator> widget_it(
+  std::unique_ptr<content::RenderWidgetHostIterator> widget_it(
       RenderWidgetHost::GetRenderWidgetHosts());
   while (content::RenderWidgetHost* widget = widget_it->GetNextHost()) {
     // Ignore processes that don't have a connection, such as crashed tabs.
@@ -335,39 +332,10 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
       if (!title.length())
         title = l10n_util::GetStringUTF16(IDS_DEFAULT_TAB_TITLE);
       process.titles.push_back(title);
-
-      // The presence of a single WebContents with a diagnostics page will make
-      // the whole process be considered a diagnostics process.
-      //
-      // We need to check the pending entry as well as the virtual_url to
-      // see if it's a chrome://memory URL (we don't want to count these in
-      // the total memory usage of the browser).
-      //
-      // When we reach here, chrome://memory will be the pending entry since
-      // we haven't responded with any data such that it would be committed.
-      // If you have another chrome://memory tab open (which would be
-      // committed), we don't want to count it either, so we also check the
-      // last committed entry.
-      //
-      // Either the pending or last committed entries can be NULL.
-      const NavigationEntry* pending_entry =
-          contents->GetController().GetPendingEntry();
-      const NavigationEntry* last_committed_entry =
-          contents->GetController().GetLastCommittedEntry();
-      if ((last_committed_entry &&
-           base::LowerCaseEqualsASCII(
-               last_committed_entry->GetVirtualURL().spec(),
-               chrome::kChromeUIMemoryURL)) ||
-          (pending_entry &&
-           base::LowerCaseEqualsASCII(
-               pending_entry->GetVirtualURL().spec(),
-               chrome::kChromeUIMemoryURL))) {
-        process.is_diagnostics = true;
-      }
     }
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
-    if (process.pid == zygote_pid) {
+    if (content::ZygoteHost::GetInstance()->IsZygotePid(process.pid)) {
       process.process_type = content::PROCESS_TYPE_ZYGOTE;
     }
 #endif

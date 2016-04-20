@@ -67,7 +67,7 @@ void GCMDriverAndroid::OnUnregisterFinished(
 
   recorder_.RecordUnregistrationResponse(app_id, success);
 
-  UnregisterFinished(app_id, result);
+  RemoveEncryptionInfoAfterUnregister(app_id, result);
 }
 
 void GCMDriverAndroid::OnMessageReceived(
@@ -84,7 +84,9 @@ void GCMDriverAndroid::OnMessageReceived(
 
   IncomingMessage message;
   message.sender_id = ConvertJavaStringToUTF8(env, j_sender_id);
-  message.collapse_key = ConvertJavaStringToUTF8(env, j_collapse_key);
+  if (!j_collapse_key.is_null())
+    ConvertJavaStringToUTF8(env, j_collapse_key, &message.collapse_key);
+
   // Expand j_data_keys_and_values from array to map.
   std::vector<std::string> data_keys_and_values;
   AppendJavaStringArrayToStringVector(env,
@@ -108,17 +110,8 @@ void GCMDriverAndroid::OnMessageReceived(
   DispatchMessage(app_id, message);
 }
 
-void GCMDriverAndroid::OnMessagesDeleted(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj,
-    const JavaParamRef<jstring>& j_app_id) {
-  std::string app_id = ConvertJavaStringToUTF8(env, j_app_id);
-
-  GetAppHandler(app_id)->OnMessagesDeleted(app_id);
-}
-
 // static
-bool GCMDriverAndroid::RegisterBindings(JNIEnv* env) {
+bool GCMDriverAndroid::RegisterJni(JNIEnv* env) {
   return RegisterNativesImpl(env);
 }
 
@@ -208,7 +201,7 @@ void GCMDriverAndroid::SetLastTokenFetchTime(const base::Time& time) {
 void GCMDriverAndroid::WakeFromSuspendForHeartbeat(bool wake) {
 }
 
-InstanceIDHandler* GCMDriverAndroid::GetInstanceIDHandler() {
+InstanceIDHandler* GCMDriverAndroid::GetInstanceIDHandlerInternal() {
   // Not supported for Android.
   return NULL;
 }
@@ -249,7 +242,8 @@ void GCMDriverAndroid::UnregisterImpl(const std::string& app_id) {
 }
 
 void GCMDriverAndroid::UnregisterWithSenderIdImpl(
-    const std::string& app_id, const std::string& sender_id) {
+    const std::string& app_id,
+    const std::string& sender_id) {
   JNIEnv* env = AttachCurrentThread();
 
   recorder_.RecordUnregistrationSent(app_id);
@@ -263,6 +257,12 @@ void GCMDriverAndroid::SendImpl(const std::string& app_id,
                                 const std::string& receiver_id,
                                 const OutgoingMessage& message) {
   NOTIMPLEMENTED();
+}
+
+void GCMDriverAndroid::RecordDecryptionFailure(
+    const std::string& app_id,
+    GCMEncryptionProvider::DecryptionResult result) {
+  recorder_.RecordDecryptionFailure(app_id, result);
 }
 
 }  // namespace gcm

@@ -5,14 +5,14 @@
 #include "content/browser/compositor/buffer_queue.h"
 
 #include "base/containers/adapters.h"
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
-#include "content/browser/compositor/image_transport_factory.h"
-#include "content/browser/gpu/browser_gpu_memory_buffer_manager.h"
-#include "content/common/gpu/client/context_provider_command_buffer.h"
-#include "content/common/gpu/client/gl_helper.h"
+#include "cc/output/context_provider.h"
+#include "content/browser/compositor/gl_helper.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
-#include "gpu/command_buffer/service/image_factory.h"
+#include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
+#include "gpu/command_buffer/common/gpu_memory_buffer_support.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/gfx/gpu_memory_buffer.h"
@@ -20,13 +20,12 @@
 
 namespace content {
 
-BufferQueue::BufferQueue(
-    scoped_refptr<cc::ContextProvider> context_provider,
-    unsigned int texture_target,
-    unsigned int internalformat,
-    GLHelper* gl_helper,
-    BrowserGpuMemoryBufferManager* gpu_memory_buffer_manager,
-    int surface_id)
+BufferQueue::BufferQueue(scoped_refptr<cc::ContextProvider> context_provider,
+                         unsigned int texture_target,
+                         unsigned int internalformat,
+                         GLHelper* gl_helper,
+                         gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+                         int surface_id)
     : context_provider_(context_provider),
       fbo_(0),
       allocated_count_(0),
@@ -85,7 +84,7 @@ void BufferQueue::UpdateBufferDamage(const gfx::Rect& damage) {
 
 void BufferQueue::SwapBuffers(const gfx::Rect& damage) {
   if (current_surface_) {
-    if (!damage.IsEmpty() && damage != gfx::Rect(size_)) {
+    if (damage != gfx::Rect(size_)) {
       // Copy damage from the most recently swapped buffer. In the event that
       // the buffer was destroyed and failed to recreate, pick from the most
       // recently available buffer.
@@ -156,12 +155,12 @@ void BufferQueue::RecreateBuffers() {
   }
 }
 
-scoped_ptr<BufferQueue::AllocatedSurface> BufferQueue::RecreateBuffer(
-    scoped_ptr<AllocatedSurface> surface) {
+std::unique_ptr<BufferQueue::AllocatedSurface> BufferQueue::RecreateBuffer(
+    std::unique_ptr<AllocatedSurface> surface) {
   if (!surface)
     return nullptr;
 
-  scoped_ptr<AllocatedSurface> new_surface(GetNextSurface());
+  std::unique_ptr<AllocatedSurface> new_surface(GetNextSurface());
   if (!new_surface)
     return nullptr;
 
@@ -204,9 +203,9 @@ void BufferQueue::FreeSurfaceResources(AllocatedSurface* surface) {
   allocated_count_--;
 }
 
-scoped_ptr<BufferQueue::AllocatedSurface> BufferQueue::GetNextSurface() {
+std::unique_ptr<BufferQueue::AllocatedSurface> BufferQueue::GetNextSurface() {
   if (!available_surfaces_.empty()) {
-    scoped_ptr<AllocatedSurface> surface =
+    std::unique_ptr<AllocatedSurface> surface =
         std::move(available_surfaces_.back());
     available_surfaces_.pop_back();
     return surface;
@@ -221,11 +220,10 @@ scoped_ptr<BufferQueue::AllocatedSurface> BufferQueue::GetNextSurface() {
   // We don't want to allow anything more than triple buffering.
   DCHECK_LT(allocated_count_, 4U);
 
-  scoped_ptr<gfx::GpuMemoryBuffer> buffer(
-      gpu_memory_buffer_manager_->AllocateGpuMemoryBufferForScanout(
-          size_, gpu::ImageFactory::DefaultBufferFormatForImageFormat(
-                     internal_format_),
-          surface_id_));
+  std::unique_ptr<gfx::GpuMemoryBuffer> buffer(
+      gpu_memory_buffer_manager_->AllocateGpuMemoryBuffer(
+          size_, gpu::DefaultBufferFormatForImageFormat(internal_format_),
+          gfx::BufferUsage::SCANOUT, surface_id_));
   if (!buffer.get()) {
     gl->DeleteTextures(1, &texture);
     DLOG(ERROR) << "Failed to allocate GPU memory buffer";
@@ -244,13 +242,13 @@ scoped_ptr<BufferQueue::AllocatedSurface> BufferQueue::GetNextSurface() {
   allocated_count_++;
   gl->BindTexture(texture_target_, texture);
   gl->BindTexImage2DCHROMIUM(texture_target_, id);
-  return make_scoped_ptr(new AllocatedSurface(this, std::move(buffer), texture,
-                                              id, gfx::Rect(size_)));
+  return base::WrapUnique(new AllocatedSurface(this, std::move(buffer), texture,
+                                               id, gfx::Rect(size_)));
 }
 
 BufferQueue::AllocatedSurface::AllocatedSurface(
     BufferQueue* buffer_queue,
-    scoped_ptr<gfx::GpuMemoryBuffer> buffer,
+    std::unique_ptr<gfx::GpuMemoryBuffer> buffer,
     unsigned int texture,
     unsigned int image,
     const gfx::Rect& rect)

@@ -5,26 +5,42 @@
 #include "chrome/browser/ui/webui/settings/font_handler.h"
 
 #include <stddef.h>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "base/bind_helpers.h"
 #include "base/i18n/rtl.h"
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/character_encoding.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/webui/options/font_settings_utils.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/font_list_async.h"
 #include "content/public/browser/web_ui.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_system.h"
+#include "extensions/common/extension_urls.h"
+
+namespace {
+
+const char kAdvancedFontSettingsExtensionId[] =
+    "caclkomlalccbpcdllchkeecicepbmbm";
+
+}  // namespace
 
 namespace settings {
 
 FontHandler::FontHandler(content::WebUI* webui)
-    : weak_ptr_factory_(this) {
+    : extension_registry_observer_(this),
+      profile_(Profile::FromWebUI(webui)),
+      weak_ptr_factory_(this) {
   // Perform validation for saved fonts.
-  PrefService* pref_service = Profile::FromWebUI(webui)->GetPrefs();
-  options::FontSettingsUtilities::ValidateSavedFonts(pref_service);
+  options::FontSettingsUtilities::ValidateSavedFonts(profile_->GetPrefs());
 }
 
 FontHandler::~FontHandler() {}
@@ -33,15 +49,74 @@ void FontHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "fetchFontsData", base::Bind(&FontHandler::HandleFetchFontsData,
                                    base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "observeAdvancedFontExtensionAvailable",
+      base::Bind(&FontHandler::HandleObserveAdvancedFontExtensionAvailable,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "openAdvancedFontSettings",
+      base::Bind(&FontHandler::HandleOpenAdvancedFontSettings,
+                 base::Unretained(this)));
 }
 
-void FontHandler::HandleFetchFontsData(
-    const base::ListValue* /*args*/) {
+void FontHandler::HandleFetchFontsData(const base::ListValue* args) {
+  CHECK_EQ(1U, args->GetSize());
+  std::string callback_id;
+  CHECK(args->GetString(0, &callback_id));
+
   content::GetFontListAsync(base::Bind(&FontHandler::FontListHasLoaded,
-                                       weak_ptr_factory_.GetWeakPtr()));
+                                       weak_ptr_factory_.GetWeakPtr(),
+                                       callback_id));
 }
 
-void FontHandler::FontListHasLoaded(scoped_ptr<base::ListValue> list) {
+void FontHandler::HandleObserveAdvancedFontExtensionAvailable(
+    const base::ListValue* /*args*/) {
+  extensions::ExtensionRegistry* observer =
+      extensions::ExtensionRegistry::Get(profile_);
+  if (!extension_registry_observer_.IsObserving(observer))
+    extension_registry_observer_.Add(observer);
+  NotifyAdvancedFontSettingsAvailability();
+}
+
+void FontHandler::HandleOpenAdvancedFontSettings(
+    const base::ListValue* /*args*/) {
+  const extensions::Extension* extension = GetAdvancedFontSettingsExtension();
+  if (!extension)
+    return;
+  extensions::ExtensionTabUtil::OpenOptionsPage(
+      extension,
+      chrome::FindBrowserWithWebContents(web_ui()->GetWebContents()));
+}
+
+const extensions::Extension* FontHandler::GetAdvancedFontSettingsExtension() {
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
+  if (!service->IsExtensionEnabled(kAdvancedFontSettingsExtensionId))
+    return nullptr;
+  return service->GetInstalledExtension(kAdvancedFontSettingsExtensionId);
+}
+
+void FontHandler::NotifyAdvancedFontSettingsAvailability() {
+  web_ui()->CallJavascriptFunction(
+      "cr.webUIListenerCallback",
+      base::StringValue("advanced-font-settings-installed"),
+      base::FundamentalValue(GetAdvancedFontSettingsExtension() != nullptr));
+}
+
+void FontHandler::OnExtensionLoaded(content::BrowserContext*,
+                                    const extensions::Extension*) {
+  NotifyAdvancedFontSettingsAvailability();
+}
+
+void FontHandler::OnExtensionUnloaded(
+    content::BrowserContext*,
+    const extensions::Extension*,
+    extensions::UnloadedExtensionInfo::Reason) {
+  NotifyAdvancedFontSettingsAvailability();
+}
+
+void FontHandler::FontListHasLoaded(std::string callback_id,
+                                    std::unique_ptr<base::ListValue> list) {
   // Font list. Selects the directionality for the fonts in the given list.
   for (size_t i = 0; i < list->GetSize(); i++) {
     base::ListValue* font;
@@ -65,9 +140,9 @@ void FontHandler::FontListHasLoaded(scoped_ptr<base::ListValue> list) {
       pref_service->GetString(prefs::kRecentlySelectedEncoding));
   DCHECK(!encodings->empty());
 
-  base::ListValue encoding_list;
+  std::unique_ptr<base::ListValue> encoding_list(new base::ListValue());
   for (const auto& it : *encodings) {
-    scoped_ptr<base::ListValue> option(new base::ListValue());
+    std::unique_ptr<base::ListValue> option(new base::ListValue());
     if (it.encoding_id) {
       option->AppendString(
           CharacterEncoding::GetCanonicalEncodingNameByCommandId(
@@ -81,11 +156,23 @@ void FontHandler::FontListHasLoaded(scoped_ptr<base::ListValue> list) {
       // Add empty value to indicate a separator item.
       option->AppendString(std::string());
     }
-    encoding_list.Append(std::move(option));
+    encoding_list->Append(std::move(option));
   }
 
-  web_ui()->CallJavascriptFunction("Settings.setFontsData", *list,
-                                   encoding_list);
+  base::DictionaryValue response;
+  response.Set("fontList", std::move(list));
+  response.Set("encodingList", std::move(encoding_list));
+
+  GURL extension_url(extension_urls::GetWebstoreItemDetailURLPrefix());
+  response.SetString(
+      "extensionUrl",
+      extension_url.Resolve(kAdvancedFontSettingsExtensionId).spec());
+
+  ResolveJavascriptCallback(base::StringValue(callback_id), response);
+}
+
+void FontHandler::RenderViewReused() {
+  extension_registry_observer_.RemoveAll();
 }
 
 }  // namespace settings

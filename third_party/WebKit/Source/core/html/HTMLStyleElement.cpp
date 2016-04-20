@@ -26,6 +26,7 @@
 #include "core/HTMLNames.h"
 #include "core/css/MediaList.h"
 #include "core/dom/Document.h"
+#include "core/dom/StyleEngine.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/events/Event.h"
 #include "core/events/EventSender.h"
@@ -36,8 +37,8 @@ using namespace HTMLNames;
 
 static StyleEventSender& styleLoadEventSender()
 {
-    DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<StyleEventSender>, sharedLoadEventSender, (StyleEventSender::create(EventTypeNames::load)));
-    return *sharedLoadEventSender;
+    DEFINE_STATIC_LOCAL(StyleEventSender, sharedLoadEventSender, (StyleEventSender::create(EventTypeNames::load)));
+    return sharedLoadEventSender;
 }
 
 inline HTMLStyleElement::HTMLStyleElement(Document& document, bool createdByParser)
@@ -50,25 +51,20 @@ inline HTMLStyleElement::HTMLStyleElement(Document& document, bool createdByPars
 
 HTMLStyleElement::~HTMLStyleElement()
 {
-#if !ENABLE(OILPAN)
-    StyleElement::clearDocumentData(document(), this);
-
-    styleLoadEventSender().cancelEvent(this);
-#endif
 }
 
-PassRefPtrWillBeRawPtr<HTMLStyleElement> HTMLStyleElement::create(Document& document, bool createdByParser)
+HTMLStyleElement* HTMLStyleElement::create(Document& document, bool createdByParser)
 {
-    return adoptRefWillBeNoop(new HTMLStyleElement(document, createdByParser));
+    return new HTMLStyleElement(document, createdByParser);
 }
 
 void HTMLStyleElement::parseAttribute(const QualifiedName& name, const AtomicString& oldValue, const AtomicString& value)
 {
     if (name == titleAttr && m_sheet) {
         m_sheet->setTitle(value);
-    } else if (name == mediaAttr && inDocument() && document().isActive() && m_sheet) {
+    } else if (name == mediaAttr && inShadowIncludingDocument() && document().isActive() && m_sheet) {
         m_sheet->setMediaQueries(MediaQuerySet::create(value));
-        document().modifiedStyleSheet(m_sheet.get());
+        document().styleEngine().setNeedsActiveStyleUpdate(m_sheet.get(), FullStyleUpdate);
     } else {
         HTMLElement::parseAttribute(name, oldValue, value);
     }
@@ -159,4 +155,4 @@ DEFINE_TRACE(HTMLStyleElement)
     HTMLElement::trace(visitor);
 }
 
-}
+} // namespace blink

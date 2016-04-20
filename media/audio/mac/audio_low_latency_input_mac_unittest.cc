@@ -107,12 +107,16 @@ class MacAudioInputTest : public testing::Test {
  protected:
   MacAudioInputTest()
       : message_loop_(base::MessageLoop::TYPE_UI),
-        audio_manager_(AudioManager::CreateForTesting()) {
+        audio_manager_(
+            AudioManager::CreateForTesting(message_loop_.task_runner())) {
     // Wait for the AudioManager to finish any initialization on the audio loop.
     base::RunLoop().RunUntilIdle();
   }
 
-  ~MacAudioInputTest() override { base::RunLoop().RunUntilIdle(); }
+  ~MacAudioInputTest() override {
+    audio_manager_.reset();
+    base::RunLoop().RunUntilIdle();
+  }
 
   bool InputDevicesAvailable() {
     return audio_manager_->HasAudioInputDevices();
@@ -146,7 +150,7 @@ class MacAudioInputTest : public testing::Test {
   }
 
   base::MessageLoop message_loop_;
-  scoped_ptr<AudioManager> audio_manager_;
+  ScopedAudioManagerPtr audio_manager_;
 };
 
 // Test Create(), Close().
@@ -182,33 +186,6 @@ TEST_F(MacAudioInputTest, AUAudioInputStreamOpenStartStopAndClose) {
   MockAudioInputCallback sink;
   ais->Start(&sink);
   ais->Stop();
-  ais->Close();
-}
-
-// Test some additional calling sequences.
-TEST_F(MacAudioInputTest, AUAudioInputStreamMiscCallingSequences) {
-  ABORT_AUDIO_TEST_IF_NOT(InputDevicesAvailable());
-  AudioInputStream* ais = CreateDefaultAudioInputStream();
-  AUAudioInputStream* auais = static_cast<AUAudioInputStream*>(ais);
-
-  // Open(), Open() should fail the second time.
-  EXPECT_TRUE(ais->Open());
-  EXPECT_FALSE(ais->Open());
-
-  MockAudioInputCallback sink;
-
-  // Start(), Start() is a valid calling sequence (second call does nothing).
-  ais->Start(&sink);
-  EXPECT_TRUE(auais->started());
-  ais->Start(&sink);
-  EXPECT_TRUE(auais->started());
-
-  // Stop(), Stop() is a valid calling sequence (second call does nothing).
-  ais->Stop();
-  EXPECT_FALSE(auais->started());
-  ais->Stop();
-  EXPECT_FALSE(auais->started());
-
   ais->Close();
 }
 

@@ -9,7 +9,6 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_service.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
@@ -18,6 +17,7 @@
 #include "components/policy/core/common/cloud/cloud_policy_client_registration_helper.h"
 #include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
 #include "components/policy/core/common/policy_switches.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "net/base/network_change_notifier.h"
@@ -30,14 +30,11 @@ namespace policy {
 
 namespace {
 
-#if defined(OS_IOS)
-const em::DeviceRegisterRequest::Type kCloudPolicyRegistrationType =
-    em::DeviceRegisterRequest::IOS_BROWSER;
-#elif defined(OS_ANDROID)
+#if defined(OS_ANDROID)
 const em::DeviceRegisterRequest::Type kCloudPolicyRegistrationType =
     em::DeviceRegisterRequest::ANDROID_BROWSER;
 #else
-#error "This file can be built only on OS_IOS or OS_ANDROID."
+#error "This file can be built only on OS_ANDROID."
 #endif
 
 }  // namespace
@@ -59,11 +56,6 @@ UserPolicySigninService::UserPolicySigninService(
       oauth2_token_service_(token_service),
       profile_prefs_(profile->GetPrefs()),
       weak_factory_(this) {
-#if defined(OS_IOS)
-  // iOS doesn't create this service with the Profile; instead it's created
-  // a little bit later. See UserPolicySigninServiceFactory.
-  InitializeOnProfileReady(profile);
-#endif
 }
 
 UserPolicySigninService::~UserPolicySigninService() {}
@@ -89,14 +81,19 @@ std::vector<std::string> UserPolicySigninService::GetScopes() {
 }
 #endif
 
+void UserPolicySigninService::ShutdownUserCloudPolicyManager() {
+  CancelPendingRegistration();
+  UserPolicySigninServiceBase::ShutdownUserCloudPolicyManager();
+}
+
 void UserPolicySigninService::RegisterForPolicyInternal(
     const std::string& username,
     const std::string& account_id,
     const std::string& access_token,
     const PolicyRegistrationCallback& callback) {
   // Create a new CloudPolicyClient for fetching the DMToken.
-  scoped_ptr<CloudPolicyClient> policy_client = CreateClientForRegistrationOnly(
-      username);
+  std::unique_ptr<CloudPolicyClient> policy_client =
+      CreateClientForRegistrationOnly(username);
   if (!policy_client) {
     callback.Run(std::string(), std::string());
     return;
@@ -131,7 +128,7 @@ void UserPolicySigninService::RegisterForPolicyInternal(
 }
 
 void UserPolicySigninService::CallPolicyRegistrationCallback(
-    scoped_ptr<CloudPolicyClient> client,
+    std::unique_ptr<CloudPolicyClient> client,
     PolicyRegistrationCallback callback) {
   registration_helper_.reset();
   callback.Run(client->dm_token(), client->client_id());
@@ -181,11 +178,6 @@ void UserPolicySigninService::OnInitializationCompleted(
       base::Bind(&UserPolicySigninService::RegisterCloudPolicyService,
                  weak_factory_.GetWeakPtr()),
       try_registration_delay);
-}
-
-void UserPolicySigninService::ShutdownUserCloudPolicyManager() {
-  CancelPendingRegistration();
-  UserPolicySigninServiceBase::ShutdownUserCloudPolicyManager();
 }
 
 void UserPolicySigninService::RegisterCloudPolicyService() {

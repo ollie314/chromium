@@ -61,8 +61,8 @@ bool AreLocalAndSyncPasswordsEqual(
           base::UTF16ToUTF8(password_form.display_name) ==
               password_specifics.display_name() &&
           password_form.icon_url.spec() == password_specifics.avatar_url() &&
-          password_form.federation_url.spec() ==
-              password_specifics.federation_url());
+          url::Origin(GURL(password_specifics.federation_url())).Serialize() ==
+              password_form.federation_origin.Serialize());
 }
 
 syncer::SyncChange::SyncChangeType GetSyncChangeType(
@@ -145,8 +145,8 @@ PasswordSyncableService::~PasswordSyncableService() {
 syncer::SyncMergeResult PasswordSyncableService::MergeDataAndStartSyncing(
     syncer::ModelType type,
     const syncer::SyncDataList& initial_sync_data,
-    scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-    scoped_ptr<syncer::SyncErrorFactory> sync_error_factory) {
+    std::unique_ptr<syncer::SyncChangeProcessor> sync_processor,
+    std::unique_ptr<syncer::SyncErrorFactory> sync_error_factory) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(syncer::PASSWORDS, type);
   base::AutoReset<bool> processing_changes(&is_processing_sync_changes_, true);
@@ -463,7 +463,10 @@ syncer::SyncData SyncDataFromPassword(
   CopyField(times_used);
   CopyStringField(display_name);
   password_specifics->set_avatar_url(password_form.icon_url.spec());
-  password_specifics->set_federation_url(password_form.federation_url.spec());
+  password_specifics->set_federation_url(
+      password_form.federation_origin.unique()
+          ? std::string()
+          : password_form.federation_origin.Serialize());
 #undef CopyStringField
 #undef CopyField
 
@@ -495,7 +498,7 @@ autofill::PasswordForm PasswordFromSpecifics(
   new_password.times_used = password.times_used();
   new_password.display_name = base::UTF8ToUTF16(password.display_name());
   new_password.icon_url = GURL(password.avatar_url());
-  new_password.federation_url = GURL(password.federation_url());
+  new_password.federation_origin = url::Origin(GURL(password.federation_url()));
   return new_password;
 }
 

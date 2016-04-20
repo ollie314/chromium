@@ -33,7 +33,6 @@
 
 #include "bindings/core/v8/ScriptState.h"
 #include "wtf/Forward.h"
-#include "wtf/RefCounted.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
 
@@ -41,16 +40,17 @@ namespace blink {
 
 class ScriptValue;
 
-class ScriptArguments final : public RefCountedWillBeGarbageCollectedFinalized<ScriptArguments> {
+class ScriptArguments final : public GarbageCollectedFinalized<ScriptArguments> {
 public:
-    static PassRefPtrWillBeRawPtr<ScriptArguments> create(ScriptState*, Vector<ScriptValue>& arguments);
+    static ScriptArguments* create(ScriptState*, Vector<ScriptValue>& arguments);
+    static ScriptArguments* create(ScriptState*, const v8::FunctionCallbackInfo<v8::Value>& arguments, unsigned skipArgumentCount);
 
     ~ScriptArguments();
 
     const ScriptValue& argumentAt(size_t) const;
     size_t argumentCount() const { return m_arguments.size(); }
 
-    ScriptState* scriptState() const { return m_scriptState.get(); }
+    ScriptState* getScriptState() const { return m_scriptState.get(); }
 
     bool getFirstArgumentAsString(String&) const;
 

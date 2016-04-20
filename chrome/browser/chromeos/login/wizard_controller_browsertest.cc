@@ -7,10 +7,6 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/pref_service_factory.h"
-#include "base/prefs/testing_pref_store.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -39,7 +35,7 @@
 #include "chrome/browser/chromeos/login/screens/wrong_hwid_screen.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/test/wizard_in_process_browser_test.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_test_impl.h"
 #include "chrome/browser/chromeos/policy/enrollment_config.h"
@@ -65,6 +61,10 @@
 #include "chromeos/system/statistics_provider.h"
 #include "chromeos/timezone/timezone_request.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/pref_service_factory.h"
+#include "components/prefs/testing_pref_store.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
@@ -182,8 +182,8 @@ void QuitLoopOnAutoEnrollmentProgress(
 void WaitForAutoEnrollmentState(policy::AutoEnrollmentState state) {
   base::RunLoop loop;
   AutoEnrollmentController* auto_enrollment_controller =
-      LoginDisplayHostImpl::default_host()->GetAutoEnrollmentController();
-  scoped_ptr<AutoEnrollmentController::ProgressCallbackList::Subscription>
+      LoginDisplayHost::default_host()->GetAutoEnrollmentController();
+  std::unique_ptr<AutoEnrollmentController::ProgressCallbackList::Subscription>
       progress_subscription(
           auto_enrollment_controller->RegisterProgressCallback(
               base::Bind(&QuitLoopOnAutoEnrollmentProgress, state, &loop)));
@@ -218,7 +218,7 @@ class MockOutShowHide : public T {
   }
 
  private:
-  scoped_ptr<H> actor_;
+  std::unique_ptr<H> actor_;
 };
 
 #define MOCK(mock_var, screen_name, mocked_class, actor_class)               \
@@ -256,15 +256,10 @@ class WizardControllerTest : public WizardInProcessBrowserTest {
                WizardController::default_controller())->GetErrorScreen();
   }
 
-  OobeUI* GetOobeUI() {
-    OobeUI* oobe_ui = static_cast<LoginDisplayHostImpl*>(
-                          LoginDisplayHostImpl::default_host())->GetOobeUI();
-    return oobe_ui;
-  }
+  OobeUI* GetOobeUI() { return LoginDisplayHost::default_host()->GetOobeUI(); }
 
   content::WebContents* GetWebContents() {
-    LoginDisplayHostImpl* host = static_cast<LoginDisplayHostImpl*>(
-        LoginDisplayHostImpl::default_host());
+    LoginDisplayHost* host = LoginDisplayHost::default_host();
     if (!host)
       return NULL;
     WebUILoginView* webui_login_view = host->GetWebUILoginView();
@@ -274,8 +269,7 @@ class WizardControllerTest : public WizardInProcessBrowserTest {
   }
 
   void WaitUntilJSIsReady() {
-    LoginDisplayHostImpl* host = static_cast<LoginDisplayHostImpl*>(
-        LoginDisplayHostImpl::default_host());
+    LoginDisplayHost* host = LoginDisplayHost::default_host();
     if (!host)
       return;
     chromeos::OobeUI* oobe_ui = host->GetOobeUI();
@@ -374,7 +368,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerTest, VolumeIsAdjustedForChromeVox) {
 class WizardControllerTestURLFetcherFactory
     : public net::TestURLFetcherFactory {
  public:
-  scoped_ptr<net::URLFetcher> CreateURLFetcher(
+  std::unique_ptr<net::URLFetcher> CreateURLFetcher(
       int id,
       const GURL& url,
       net::URLFetcher::RequestType request_type,
@@ -383,14 +377,14 @@ class WizardControllerTestURLFetcherFactory
             url.spec(),
             SimpleGeolocationProvider::DefaultGeolocationProviderURL().spec(),
             base::CompareCase::SENSITIVE)) {
-      return scoped_ptr<net::URLFetcher>(new net::FakeURLFetcher(
+      return std::unique_ptr<net::URLFetcher>(new net::FakeURLFetcher(
           url, d, std::string(kGeolocationResponseBody), net::HTTP_OK,
           net::URLRequestStatus::SUCCESS));
     }
     if (base::StartsWith(url.spec(),
                          chromeos::DefaultTimezoneProviderURL().spec(),
                          base::CompareCase::SENSITIVE)) {
-      return scoped_ptr<net::URLFetcher>(new net::FakeURLFetcher(
+      return std::unique_ptr<net::URLFetcher>(new net::FakeURLFetcher(
           url, d, std::string(kTimezoneResponseBody), net::HTTP_OK,
           net::URLRequestStatus::SUCCESS));
     }
@@ -513,7 +507,7 @@ class WizardControllerFlowTest : public WizardControllerTest {
   }
 
   void WaitUntilTimezoneResolved() {
-    scoped_ptr<TimeZoneTestRunner> runner(new TimeZoneTestRunner);
+    std::unique_ptr<TimeZoneTestRunner> runner(new TimeZoneTestRunner);
     if (!WizardController::default_controller()
              ->SetOnTimeZoneResolvedForTesting(
                  base::Bind(&TimeZoneTestRunner::OnResolved,
@@ -539,15 +533,16 @@ class WizardControllerFlowTest : public WizardControllerTest {
       mock_wrong_hwid_screen_;
   MockOutShowHide<MockEnableDebuggingScreen,
       MockEnableDebuggingScreenActor>* mock_enable_debugging_screen_;
-  scoped_ptr<MockDeviceDisabledScreenActor> device_disabled_screen_actor_;
+  std::unique_ptr<MockDeviceDisabledScreenActor> device_disabled_screen_actor_;
 
  private:
   NetworkPortalDetectorTestImpl* network_portal_detector_;
 
   // Use a test factory as a fallback so we don't have to deal with other
   // requests.
-  scoped_ptr<WizardControllerTestURLFetcherFactory> fallback_fetcher_factory_;
-  scoped_ptr<net::FakeURLFetcherFactory> fetcher_factory_;
+  std::unique_ptr<WizardControllerTestURLFetcherFactory>
+      fallback_fetcher_factory_;
+  std::unique_ptr<net::FakeURLFetcherFactory> fetcher_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WizardControllerFlowTest);
 };
@@ -710,7 +705,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
                        ControlFlowWrongHWIDScreenFromLogin) {
   CheckCurrentScreen(WizardController::kNetworkScreenName);
 
-  LoginDisplayHostImpl::default_host()->StartSignInScreen(LoginScreenContext());
+  LoginDisplayHost::default_host()->StartSignInScreen(LoginScreenContext());
   EXPECT_FALSE(ExistingUserController::current_controller() == NULL);
   ExistingUserController::current_controller()->ShowWrongHWIDScreen();
 
@@ -814,10 +809,9 @@ IN_PROC_BROWSER_TEST_F(WizardControllerDeviceStateTest,
 IN_PROC_BROWSER_TEST_F(WizardControllerDeviceStateTest,
                        ControlFlowNoForcedReEnrollmentOnFirstBoot) {
   fake_statistics_provider_.ClearMachineStatistic(system::kActivateDateKey);
-  EXPECT_NE(policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT,
-            LoginDisplayHostImpl::default_host()
-                ->GetAutoEnrollmentController()
-                ->state());
+  EXPECT_NE(
+      policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT,
+      LoginDisplayHost::default_host()->GetAutoEnrollmentController()->state());
 
   CheckCurrentScreen(WizardController::kNetworkScreenName);
   EXPECT_CALL(*mock_network_screen_, Hide()).Times(1);
@@ -840,10 +834,9 @@ IN_PROC_BROWSER_TEST_F(WizardControllerDeviceStateTest,
 
   CheckCurrentScreen(WizardController::kAutoEnrollmentCheckScreenName);
   mock_auto_enrollment_check_screen_->RealShow();
-  EXPECT_EQ(policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT,
-            LoginDisplayHostImpl::default_host()
-                ->GetAutoEnrollmentController()
-                ->state());
+  EXPECT_EQ(
+      policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT,
+      LoginDisplayHost::default_host()->GetAutoEnrollmentController()->state());
 }
 
 IN_PROC_BROWSER_TEST_F(WizardControllerDeviceStateTest,
@@ -911,11 +904,11 @@ class WizardControllerBrokenLocalStateTest : public WizardControllerTest {
 
     fake_session_manager_client_ = new FakeSessionManagerClient;
     DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
-        scoped_ptr<SessionManagerClient>(fake_session_manager_client_));
+        std::unique_ptr<SessionManagerClient>(fake_session_manager_client_));
   }
 
   void SetUpOnMainThread() override {
-    base::PrefServiceFactory factory;
+    PrefServiceFactory factory;
     factory.set_user_prefs(make_scoped_refptr(new PrefStoreStub()));
     local_state_ = factory.Create(new PrefRegistrySimple());
     WizardController::set_local_state_for_testing(local_state_.get());
@@ -931,7 +924,7 @@ class WizardControllerBrokenLocalStateTest : public WizardControllerTest {
   }
 
  private:
-  scoped_ptr<PrefService> local_state_;
+  std::unique_ptr<PrefService> local_state_;
   FakeSessionManagerClient* fake_session_manager_client_;
 
   DISALLOW_COPY_AND_ASSIGN(WizardControllerBrokenLocalStateTest);
@@ -1006,7 +999,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerProxyAuthOnSigninTest,
 
   CheckCurrentScreen(WizardController::kNetworkScreenName);
 
-  LoginDisplayHostImpl::default_host()->StartSignInScreen(LoginScreenContext());
+  LoginDisplayHost::default_host()->StartSignInScreen(LoginScreenContext());
   auth_needed_waiter.Wait();
 }
 

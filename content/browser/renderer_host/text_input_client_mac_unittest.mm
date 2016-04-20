@@ -87,7 +87,7 @@ class TextInputClientMacTest : public testing::Test {
   // Gets deleted when the last RWH in the "process" gets destroyed.
   MockRenderProcessHostFactory process_factory_;
   MockRenderWidgetHostDelegate delegate_;
-  scoped_ptr<RenderWidgetHostImpl> widget_;
+  std::unique_ptr<RenderWidgetHostImpl> widget_;
 
   base::Thread thread_;
 };
@@ -148,7 +148,6 @@ TEST_F(TextInputClientMacTest, TimeoutCharacterIndex) {
 TEST_F(TextInputClientMacTest, NotFoundCharacterIndex) {
   ScopedTestingThread thread(this);
   const NSUInteger kPreviousValue = 42;
-  const size_t kNotFoundValue = static_cast<size_t>(-1);
 
   // Set an arbitrary value to ensure the index is not |NSNotFound|.
   PostTask(FROM_HERE,
@@ -157,9 +156,9 @@ TEST_F(TextInputClientMacTest, NotFoundCharacterIndex) {
 
   scoped_refptr<TextInputClientMessageFilter> filter(
       new TextInputClientMessageFilter(widget()->GetProcess()->GetID()));
-  scoped_ptr<IPC::Message> message(
+  std::unique_ptr<IPC::Message> message(
       new TextInputClientReplyMsg_GotCharacterIndexForPoint(
-          widget()->GetRoutingID(), kNotFoundValue));
+          widget()->GetRoutingID(), UINT32_MAX));
   // Set |WTF::notFound| to the index |kTaskDelayMs| after the previous
   // setting.
   PostTask(FROM_HERE,

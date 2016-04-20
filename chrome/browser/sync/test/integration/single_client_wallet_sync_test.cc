@@ -4,8 +4,6 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/sync/test/integration/autofill_helper.h"
@@ -19,6 +17,7 @@
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/notification_service.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/test/fake_server/fake_server_entity.h"
@@ -28,13 +27,6 @@ using autofill_helper::GetPersonalDataManager;
 using sync_integration_test_util::AwaitCommitActivityCompletion;
 
 namespace {
-
-// Setting the Preferences files contents to this string (before Profile is
-// created) will bypass the Sync experiment logic for enabling this feature.
-const char kWalletSyncEnabledPreferencesContents[] =
-    "{\"autofill\": { \"wallet_import_sync_experiment_enabled\": true } }";
-
-const char kWalletSyncExperimentTag[] = "wallet_sync";
 
 const char kDefaultCardID[] = "wallet entity ID";
 const int kDefaultCardExpMonth = 8;
@@ -72,13 +64,6 @@ class SingleClientWalletSyncTest : public SyncTest {
  public:
   SingleClientWalletSyncTest() : SyncTest(SINGLE_CLIENT) {}
   ~SingleClientWalletSyncTest() override {}
-
-  void TriggerSyncCycle() {
-    // Note: we use the experiments type here as we want to be able to trigger a
-    // sync cycle even when wallet is not enabled yet.
-    const syncer::ModelTypeSet kExperimentsType(syncer::EXPERIMENTS);
-    TriggerSyncForModelTypes(0, kExperimentsType);
-  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SingleClientWalletSyncTest);
@@ -120,19 +105,8 @@ class WalletDisabledChecker : public SingleClientStatusChangeChecker {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, DisabledByDefault) {
+IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, EnabledByDefault) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed";
-  // The type should not be enabled without the experiment enabled.
-  ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().Has(
-      syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().Has(
-      syncer::AUTOFILL_WALLET_METADATA));
-}
-
-IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, EnabledViaPreference) {
-  SetPreexistingPreferencesFileContents(kWalletSyncEnabledPreferencesContents);
-  ASSERT_TRUE(SetupSync()) << "SetupSync() failed";
-  // The type should not be enabled without the experiment enabled.
   ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
       syncer::AUTOFILL_WALLET_DATA));
   // TODO(pvalenzuela): Assert that the local root node for AUTOFILL_WALLET_DATA
@@ -141,71 +115,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, EnabledViaPreference) {
       syncer::AUTOFILL_WALLET_METADATA));
 }
 
-// Tests that an experiment received at sync startup time (during sign-in)
-// enables the wallet datatype.
-IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
-                       EnabledViaExperimentStartup) {
-  sync_pb::EntitySpecifics experiment_entity;
-  sync_pb::ExperimentsSpecifics* experiment_specifics =
-      experiment_entity.mutable_experiments();
-  experiment_specifics->mutable_wallet_sync()->set_enabled(true);
-  GetFakeServer()->InjectEntity(
-      fake_server::UniqueClientEntity::CreateForInjection(
-          kWalletSyncExperimentTag,
-          experiment_entity));
-
-  ASSERT_TRUE(SetupSync()) << "SetupSync() failed";
-  ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
-      syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
-      syncer::AUTOFILL_WALLET_METADATA));
-}
-
-// Tests receiving an enable experiment at runtime, followed by a disabled
-// experiment, and verifies the datatype is enabled/disabled as necessary.
-IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
-                       EnabledDisabledViaExperiment) {
-  ASSERT_TRUE(SetupSync()) << "SetupSync() failed";
-  ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().
-      Has(syncer::AUTOFILL_WALLET_DATA));
-
-  sync_pb::EntitySpecifics experiment_entity;
-  sync_pb::ExperimentsSpecifics* experiment_specifics =
-      experiment_entity.mutable_experiments();
-
-  // First enable the experiment.
-  experiment_specifics->mutable_wallet_sync()->set_enabled(true);
-  GetFakeServer()->InjectEntity(
-      fake_server::UniqueClientEntity::CreateForInjection(
-          kWalletSyncExperimentTag, experiment_entity));
-  TriggerSyncCycle();
-
-  WalletEnabledChecker enabled_checker;
-  enabled_checker.Wait();
-  ASSERT_FALSE(enabled_checker.TimedOut());
-  ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
-      syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
-      syncer::AUTOFILL_WALLET_METADATA));
-
-  // Then disable the experiment.
-  experiment_specifics->mutable_wallet_sync()->set_enabled(false);
-  GetFakeServer()->InjectEntity(
-      fake_server::UniqueClientEntity::CreateForInjection(
-          kWalletSyncExperimentTag, experiment_entity));
-  TriggerSyncCycle();
-
-  WalletDisabledChecker disable_checker;
-  disable_checker.Wait();
-  ASSERT_FALSE(disable_checker.TimedOut());
-  ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().
-      Has(syncer::AUTOFILL_WALLET_DATA));
-  ASSERT_FALSE(GetClient(0)->service()->GetActiveDataTypes().Has(
-      syncer::AUTOFILL_WALLET_METADATA));
-}
-
 IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, Download) {
-  SetPreexistingPreferencesFileContents(kWalletSyncEnabledPreferencesContents);
   AddDefaultCard(GetFakeServer());
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed";
 
@@ -222,12 +132,11 @@ IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, Download) {
   ASSERT_EQ(kDefaultCardExpMonth, card->expiration_month());
   ASSERT_EQ(kDefaultCardExpYear, card->expiration_year());
   ASSERT_EQ(base::UTF8ToUTF16(kDefaultCardName),
-            card->GetRawInfo(autofill::ServerFieldType::CREDIT_CARD_NAME));
+            card->GetRawInfo(autofill::ServerFieldType::CREDIT_CARD_NAME_FULL));
 }
 
 // Wallet data should get cleared from the database when sync is disabled.
 IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, ClearOnDisableSync) {
-  SetPreexistingPreferencesFileContents(kWalletSyncEnabledPreferencesContents);
   AddDefaultCard(GetFakeServer());
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed";
 
@@ -246,7 +155,6 @@ IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, ClearOnDisableSync) {
 // Wallet data should get cleared from the database when the wallet sync type
 // flag is disabled.
 IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, ClearOnDisableWalletSync) {
-  SetPreexistingPreferencesFileContents(kWalletSyncEnabledPreferencesContents);
   AddDefaultCard(GetFakeServer());
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed";
 
@@ -266,7 +174,6 @@ IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, ClearOnDisableWalletSync) {
 // integration flag is disabled.
 IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest,
                        ClearOnDisableWalletAutofill) {
-  SetPreexistingPreferencesFileContents(kWalletSyncEnabledPreferencesContents);
   AddDefaultCard(GetFakeServer());
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed";
 

@@ -7,11 +7,14 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/location_bar/background_with_1_px_border.h"
-#include "ui/base/resource/material_design/material_design_controller.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/gfx/image/image_util.h"
 #include "ui/native_theme/native_theme.h"
+#include "ui/views/animation/ink_drop_hover.h"
+#include "ui/views/border.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/painter.h"
 
@@ -35,6 +38,8 @@ IconLabelBubbleView::IconLabelBubbleView(int contained_image,
     : background_painter_(nullptr),
       image_(new views::ImageView()),
       label_(new views::Label(base::string16(), font_list)),
+      builtin_leading_padding_(0),
+      builtin_trailing_padding_(0),
       is_extension_icon_(false),
       parent_background_color_(parent_background_color) {
   if (contained_image) {
@@ -53,6 +58,14 @@ IconLabelBubbleView::IconLabelBubbleView(int contained_image,
   if (elide_in_middle)
     label_->SetElideBehavior(gfx::ELIDE_MIDDLE);
   AddChildView(label_);
+
+  // Bubbles are given the full internal height of the location bar so that all
+  // child views in the location bar have the same height. The visible height of
+  // the bubble should be smaller, so use an empty border to shrink down the
+  // content bounds so the background gets painted correctly.
+  const int padding = GetLayoutConstant(LOCATION_BAR_BUBBLE_VERTICAL_PADDING);
+  SetBorder(
+      views::Border::CreateEmptyBorder(gfx::Insets(padding, 0, padding, 0)));
 }
 
 IconLabelBubbleView::~IconLabelBubbleView() {
@@ -85,6 +98,13 @@ void IconLabelBubbleView::SetLabel(const base::string16& label) {
 
 void IconLabelBubbleView::SetImage(const gfx::ImageSkia& image_skia) {
   image_->SetImage(image_skia);
+
+  if (ui::MaterialDesignController::IsModeMaterial()) {
+    gfx::GetVisibleMargins(image_skia, &builtin_leading_padding_,
+                           &builtin_trailing_padding_);
+    if (base::i18n::IsRTL())
+      std::swap(builtin_leading_padding_, builtin_trailing_padding_);
+  }
 }
 
 bool IconLabelBubbleView::ShouldShowBackground() const {
@@ -95,11 +115,8 @@ double IconLabelBubbleView::WidthMultiplier() const {
   return 1.0;
 }
 
-int IconLabelBubbleView::GetImageAndPaddingWidth() const {
-  const int image_width = image_->GetPreferredSize().width();
-  return image_width
-             ? image_width + GetLayoutConstant(ICON_LABEL_VIEW_INTERNAL_PADDING)
-             : 0;
+bool IconLabelBubbleView::IsShrinking() const {
+  return false;
 }
 
 gfx::Size IconLabelBubbleView::GetPreferredSize() const {
@@ -108,29 +125,52 @@ gfx::Size IconLabelBubbleView::GetPreferredSize() const {
 }
 
 void IconLabelBubbleView::Layout() {
-  // In MD mode, both extension icons and Chrome-provided icons are 16px,
-  // so it's not necessary to handle them differently. TODO(estade): clean
-  // this up when MD is on by default.
-  bool icon_has_enough_padding =
+  // Compute the image bounds.  In non-MD, the leading padding depends on
+  // whether this is an extension icon, since extension icons and
+  // Chrome-provided icons are different sizes.  In MD, these sizes are the
+  // same, so it's not necessary to handle the two types differently.
+  const bool icon_has_enough_padding =
       !is_extension_icon_ || ui::MaterialDesignController::IsModeMaterial();
-  const int image_width = image()->GetPreferredSize().width();
-  image_->SetBounds(std::min((width() - image_width) / 2,
-                             GetBubbleOuterPadding(icon_has_enough_padding)),
-                    0, image_->GetPreferredSize().width(), height());
+  int image_x = GetOuterPadding(icon_has_enough_padding);
+  int bubble_trailing_padding = GetOuterPadding(false);
 
-  int pre_label_width = GetBubbleOuterPadding(true) + GetImageAndPaddingWidth();
-  label_->SetBounds(pre_label_width, 0,
-                    width() - pre_label_width - GetBubbleOuterPadding(false),
-                    height());
+  // If ShouldShowBackground() is true, then either we show a background in the
+  // steady state, or we're not yet in the last portion of the animation.  In
+  // these cases, we leave the leading and trailing padding alone; we don't want
+  // to let the image overlap the edge of the background, as this looks glitchy.
+  // If this is false, however, then we're only showing the image, and either
+  // the view width is the image width, or it's animating downwards and getting
+  // close to it.  In these cases, we want to shrink the trailing padding first,
+  // so the image slides all the way to the trailing edge before slowing or
+  // stopping; then we want to shrink the leading padding down to zero.
+  const int image_preferred_width = image_->GetPreferredSize().width();
+  if (!ShouldShowBackground()) {
+    image_x = std::min(image_x, width() - image_preferred_width);
+    bubble_trailing_padding = std::min(
+        bubble_trailing_padding, width() - image_preferred_width - image_x);
+  }
+
+  // Now that we've computed the padding values, give the image all the
+  // remaining width.  This will be less than the image's preferred width during
+  // the first portion of the animation; during the very beginning there may not
+  // be enough room to show the image at all.
+  const int image_width =
+      std::min(image_preferred_width,
+               std::max(0, width() - image_x - bubble_trailing_padding));
+  image_->SetBounds(image_x, 0, image_width, height());
+
+  // Compute the label bounds.  The label gets whatever size is left over after
+  // accounting for the preferred image width and padding amounts.  Note that if
+  // the label has zero size it doesn't actually matter what we compute its X
+  // value to be, since it won't be visible.
+  const int label_x = image_x + image_width + GetInternalSpacing();
+  const int label_width =
+      std::max(0, width() - label_x - bubble_trailing_padding);
+  label_->SetBounds(label_x, 0, label_width, height());
 }
 
 void IconLabelBubbleView::OnNativeThemeChanged(
     const ui::NativeTheme* native_theme) {
-  // If the background isn't visible, the label and border won't be either, so
-  // don't bother updating them.
-  if (!ShouldShowBackground())
-    return;
-
   label_->SetEnabledColor(GetTextColor());
 
   if (!ui::MaterialDesignController::IsModeMaterial())
@@ -144,6 +184,27 @@ void IconLabelBubbleView::OnNativeThemeChanged(
   SetLabelBackgroundColor(background_color);
 }
 
+void IconLabelBubbleView::AddInkDropLayer(ui::Layer* ink_drop_layer) {
+  image()->SetPaintToLayer(true);
+  image()->layer()->SetFillsBoundsOpaquely(false);
+  InkDropHostView::AddInkDropLayer(ink_drop_layer);
+}
+
+void IconLabelBubbleView::RemoveInkDropLayer(ui::Layer* ink_drop_layer) {
+  InkDropHostView::RemoveInkDropLayer(ink_drop_layer);
+  image()->SetPaintToLayer(false);
+}
+
+std::unique_ptr<views::InkDropHover> IconLabelBubbleView::CreateInkDropHover()
+    const {
+  // Location bar views don't show hover effect.
+  return nullptr;
+}
+
+SkColor IconLabelBubbleView::GetInkDropBaseColor() const {
+  return color_utils::DeriveDefaultIconColor(GetTextColor());
+}
+
 SkColor IconLabelBubbleView::GetParentBackgroundColor() const {
   return ui::MaterialDesignController::IsModeMaterial()
              ? GetNativeTheme()->GetSystemColor(
@@ -151,18 +212,32 @@ SkColor IconLabelBubbleView::GetParentBackgroundColor() const {
              : parent_background_color_;
 }
 
-gfx::Size IconLabelBubbleView::GetSizeForLabelWidth(int width) const {
+gfx::Size IconLabelBubbleView::GetSizeForLabelWidth(int label_width) const {
   gfx::Size size(image_->GetPreferredSize());
-  if (ShouldShowBackground()) {
-    const int non_label_width = GetBubbleOuterPadding(true) +
-                                GetImageAndPaddingWidth() +
-                                GetBubbleOuterPadding(false);
-    size = gfx::Size(WidthMultiplier() * (width + non_label_width), 0);
-    if (!ui::MaterialDesignController::IsModeMaterial())
-      size.SetToMax(background_painter_->GetMinimumSize());
+  const bool shrinking = IsShrinking();
+  // Animation continues for the last few pixels even after the label is not
+  // visible in order to slide the icon into its final position. Therefore it
+  // is necessary to animate |total_width| even when the background is hidden
+  // as long as the animation is still shrinking.
+  if (ShouldShowBackground() || shrinking) {
+    // |multiplier| grows from zero to one, stays equal to one and then shrinks
+    // to zero again. The view width should correspondingly grow from zero to
+    // fully showing both label and icon, stay there, then shrink to just large
+    // enough to show the icon. We don't want to shrink all the way back to
+    // zero, since this would mean the view would completely disappear and then
+    // pop back to an icon after the animation finishes.
+    const int max_width = MinimumWidthForImageWithBackgroundShown() +
+                          GetInternalSpacing() + label_width;
+    const int current_width = WidthMultiplier() * max_width;
+    size.set_width(shrinking ? std::max(current_width, size.width())
+                             : current_width);
   }
-
   return size;
+}
+
+int IconLabelBubbleView::MinimumWidthForImageWithBackgroundShown() const {
+  return GetOuterPadding(true) + image_->GetPreferredSize().width() +
+         GetOuterPadding(false);
 }
 
 void IconLabelBubbleView::SetLabelBackgroundColor(
@@ -179,22 +254,26 @@ void IconLabelBubbleView::SetLabelBackgroundColor(
       SkColorGetA(chip_background_color)));
 }
 
-int IconLabelBubbleView::GetBubbleOuterPadding(bool leading) const {
-  if (ui::MaterialDesignController::IsModeMaterial())
-    return GetBubbleOuterPaddingMd(leading);
+int IconLabelBubbleView::GetOuterPadding(bool leading) const {
+  if (ui::MaterialDesignController::IsModeMaterial()) {
+    // The apparent leading and trailing padding should be equal, so we need to
+    // subtract the amount of built-in padding in the image.  This will mean
+    // that the actual padding + the padding inside the image add up to the same
+    // amount of padding as on the trailing edge of the bubble.
+    return GetLayoutConstant(ICON_LABEL_VIEW_TRAILING_PADDING) -
+           (leading ? builtin_leading_padding_ : 0);
+  }
 
   return GetLayoutConstant(LOCATION_BAR_HORIZONTAL_PADDING) -
          GetLayoutConstant(LOCATION_BAR_BUBBLE_HORIZONTAL_PADDING) +
          (leading ? 0 : GetLayoutConstant(ICON_LABEL_VIEW_TRAILING_PADDING));
 }
 
-int IconLabelBubbleView::GetBubbleOuterPaddingMd(bool leading) const {
-  // When the image is empty, leading and trailing padding are equal.
-  if (image_->GetPreferredSize().IsEmpty() || !leading)
-    return GetLayoutConstant(ICON_LABEL_VIEW_TRAILING_PADDING);
-
-  // Leading padding is 2dp.
-  return 2;
+int IconLabelBubbleView::GetInternalSpacing() const {
+  return image_->GetPreferredSize().IsEmpty()
+             ? 0
+             : (GetLayoutConstant(ICON_LABEL_VIEW_INTERNAL_SPACING) -
+                builtin_trailing_padding_);
 }
 
 const char* IconLabelBubbleView::GetClassName() const {
@@ -204,8 +283,10 @@ const char* IconLabelBubbleView::GetClassName() const {
 void IconLabelBubbleView::OnPaint(gfx::Canvas* canvas) {
   if (!ShouldShowBackground())
     return;
-  if (background_painter_)
-    background_painter_->Paint(canvas, size());
+  if (background_painter_) {
+    views::Painter::PaintPainterAt(canvas, background_painter_.get(),
+                                   GetContentsBounds());
+  }
   if (background())
     background()->Paint(canvas, this);
 }

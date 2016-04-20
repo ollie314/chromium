@@ -11,7 +11,6 @@
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
@@ -37,8 +36,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
-#include "components/arc/arc_bridge_service.h"
-#include "components/arc/arc_service_manager.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "ui/aura/window.h"
@@ -149,6 +147,67 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
     return chromeos::AccessibilityManager::Get()->IsVirtualKeyboardEnabled();
   }
 
+  void SetMonoAudioEnabled(bool enabled) override {
+    DCHECK(chromeos::AccessibilityManager::Get());
+    return chromeos::AccessibilityManager::Get()->
+        EnableMonoAudio(enabled);
+  }
+
+  bool IsMonoAudioEnabled() const override {
+    DCHECK(chromeos::AccessibilityManager::Get());
+    return chromeos::AccessibilityManager::Get()->IsMonoAudioEnabled();
+  }
+
+  void SetCaretHighlightEnabled(bool enabled) override {
+    DCHECK(chromeos::AccessibilityManager::Get());
+    chromeos::AccessibilityManager::Get()->SetCaretHighlightEnabled(enabled);
+  }
+
+  bool IsCaretHighlightEnabled() const override {
+    DCHECK(chromeos::AccessibilityManager::Get());
+    return chromeos::AccessibilityManager::Get()->IsCaretHighlightEnabled();
+  }
+
+  void SetCursorHighlightEnabled(bool enabled) override {
+    DCHECK(chromeos::AccessibilityManager::Get());
+    chromeos::AccessibilityManager::Get()->SetCursorHighlightEnabled(enabled);
+  }
+
+  bool IsCursorHighlightEnabled() const override {
+    DCHECK(chromeos::AccessibilityManager::Get());
+    return chromeos::AccessibilityManager::Get()->IsCursorHighlightEnabled();
+  }
+
+  void SetFocusHighlightEnabled(bool enabled) override {
+    DCHECK(chromeos::AccessibilityManager::Get());
+    chromeos::AccessibilityManager::Get()->SetFocusHighlightEnabled(enabled);
+  }
+
+  bool IsFocusHighlightEnabled() const override {
+    DCHECK(chromeos::AccessibilityManager::Get());
+    return chromeos::AccessibilityManager::Get()->IsFocusHighlightEnabled();
+  }
+
+  void SetSelectToSpeakEnabled(bool enabled) override {
+    DCHECK(chromeos::AccessibilityManager::Get());
+    chromeos::AccessibilityManager::Get()->SetSelectToSpeakEnabled(enabled);
+  }
+
+  bool IsSelectToSpeakEnabled() const override {
+    DCHECK(chromeos::AccessibilityManager::Get());
+    return chromeos::AccessibilityManager::Get()->IsSelectToSpeakEnabled();
+  }
+
+  void SetSwitchAccessEnabled(bool enabled) override {
+    DCHECK(chromeos::AccessibilityManager::Get());
+    chromeos::AccessibilityManager::Get()->SetSwitchAccessEnabled(enabled);
+  }
+
+  bool IsSwitchAccessEnabled() const override {
+    DCHECK(chromeos::AccessibilityManager::Get());
+    return chromeos::AccessibilityManager::Get()->IsSwitchAccessEnabled();
+  }
+
   bool ShouldShowAccessibilityMenu() const override {
     DCHECK(chromeos::AccessibilityManager::Get());
     return chromeos::AccessibilityManager::Get()->
@@ -231,17 +290,11 @@ void ChromeShellDelegate::PreInit() {
   display_configuration_observer_.reset(
       new chromeos::DisplayConfigurationObserver());
 
-  arc_session_observer_.reset(new ArcSessionObserver);
-
   chrome_user_metrics_recorder_.reset(new ChromeUserMetricsRecorder);
 }
 
 void ChromeShellDelegate::PreShutdown() {
   display_configuration_observer_.reset();
-
-  // Remove the ARC observer now since it uses the ash::Shell instance in its
-  // destructor, which is unavailable after PreShutdown() returns.
-  arc_session_observer_.reset();
 
   chrome_user_metrics_recorder_.reset();
 }
@@ -309,36 +362,4 @@ void ChromeShellDelegate::PlatformInit() {
   registrar_.Add(this,
                  chrome::NOTIFICATION_SESSION_STARTED,
                  content::NotificationService::AllSources());
-}
-
-ChromeShellDelegate::ArcSessionObserver::ArcSessionObserver() {
-  ash::Shell::GetInstance()->AddShellObserver(this);
-}
-
-ChromeShellDelegate::ArcSessionObserver::~ArcSessionObserver() {
-  ash::Shell::GetInstance()->RemoveShellObserver(this);
-}
-
-void ChromeShellDelegate::ArcSessionObserver::OnLoginStateChanged(
-    ash::user::LoginStatus status) {
-  switch (status) {
-    case ash::user::LOGGED_IN_LOCKED:
-    case ash::user::LOGGED_IN_KIOSK_APP:
-      return;
-
-    case ash::user::LOGGED_IN_NONE:
-      arc::ArcServiceManager::Get()->arc_bridge_service()->Shutdown();
-      break;
-
-    case ash::user::LOGGED_IN_USER:
-    case ash::user::LOGGED_IN_OWNER:
-    case ash::user::LOGGED_IN_GUEST:
-    case ash::user::LOGGED_IN_PUBLIC:
-    case ash::user::LOGGED_IN_SUPERVISED:
-      if (arc::ArcBridgeService::GetEnabled(
-              base::CommandLine::ForCurrentProcess())) {
-        arc::ArcServiceManager::Get()->arc_bridge_service()->HandleStartup();
-      }
-      break;
-  }
 }

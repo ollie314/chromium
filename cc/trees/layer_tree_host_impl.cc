@@ -11,11 +11,14 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <unordered_map>
+#include <utility>
 
 #include "base/auto_reset.h"
-#include "base/containers/hash_tables.h"
+#include "base/bind.h"
 #include "base/containers/small_map.h"
 #include "base/json/json_writer.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/stl_util.h"
@@ -25,7 +28,6 @@
 #include "cc/animation/animation_host.h"
 #include "cc/animation/animation_id_provider.h"
 #include "cc/animation/scroll_offset_animation_curve.h"
-#include "cc/animation/scrollbar_animation_controller.h"
 #include "cc/animation/timing_function.h"
 #include "cc/base/histograms.h"
 #include "cc/base/math_util.h"
@@ -36,9 +38,11 @@
 #include "cc/debug/frame_viewer_instrumentation.h"
 #include "cc/debug/rendering_stats_instrumentation.h"
 #include "cc/debug/traced_value.h"
+#include "cc/input/main_thread_scrolling_reason.h"
 #include "cc/input/page_scale_animation.h"
 #include "cc/input/scroll_elasticity_helper.h"
 #include "cc/input/scroll_state.h"
+#include "cc/input/scrollbar_animation_controller.h"
 #include "cc/input/top_controls_manager.h"
 #include "cc/layers/append_quads_data.h"
 #include "cc/layers/heads_up_display_layer_impl.h"
@@ -71,8 +75,10 @@
 #include "cc/resources/ui_resource_bitmap.h"
 #include "cc/scheduler/delay_based_time_source.h"
 #include "cc/tiles/eviction_tile_priority_queue.h"
+#include "cc/tiles/gpu_image_decode_controller.h"
 #include "cc/tiles/picture_layer_tiling.h"
 #include "cc/tiles/raster_tile_priority_queue.h"
+#include "cc/tiles/software_image_decode_controller.h"
 #include "cc/trees/damage_tracker.h"
 #include "cc/trees/draw_property_utils.h"
 #include "cc/trees/latency_info_swap_promise_monitor.h"
@@ -83,6 +89,7 @@
 #include "cc/trees/tree_synchronizer.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/scroll_offset.h"
 #include "ui/gfx/geometry/size_conversions.h"
@@ -136,12 +143,16 @@ void DidVisibilityChange(LayerTreeHostImpl* id, bool visible) {
   TRACE_EVENT_ASYNC_END0("cc", "LayerTreeHostImpl::SetVisible", id);
 }
 
+bool IsWheelBasedScroll(InputHandler::ScrollInputType type) {
+  return type == InputHandler::WHEEL;
+}
+
 enum ScrollThread { MAIN_THREAD, CC_THREAD };
 
 void RecordCompositorSlowScrollMetric(InputHandler::ScrollInputType type,
                                       ScrollThread scroll_thread) {
   bool scroll_on_main_thread = (scroll_thread == MAIN_THREAD);
-  if (type == InputHandler::WHEEL || type == InputHandler::ANIMATED_WHEEL) {
+  if (IsWheelBasedScroll(type)) {
     UMA_HISTOGRAM_BOOLEAN("Renderer4.CompositorWheelScrollUpdateThread",
                           scroll_on_main_thread);
   } else {
@@ -157,7 +168,7 @@ LayerTreeHostImpl::FrameData::FrameData()
 
 LayerTreeHostImpl::FrameData::~FrameData() {}
 
-scoped_ptr<LayerTreeHostImpl> LayerTreeHostImpl::Create(
+std::unique_ptr<LayerTreeHostImpl> LayerTreeHostImpl::Create(
     const LayerTreeSettings& settings,
     LayerTreeHostImplClient* client,
     TaskRunnerProvider* task_runner_provider,
@@ -166,7 +177,7 @@ scoped_ptr<LayerTreeHostImpl> LayerTreeHostImpl::Create(
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     TaskGraphRunner* task_graph_runner,
     int id) {
-  return make_scoped_ptr(new LayerTreeHostImpl(
+  return base::WrapUnique(new LayerTreeHostImpl(
       settings, client, task_runner_provider, rendering_stats_instrumentation,
       shared_bitmap_manager, gpu_memory_buffer_manager, task_graph_runner, id));
 }
@@ -219,7 +230,8 @@ LayerTreeHostImpl::LayerTreeHostImpl(
       texture_mailbox_deleter_(new TextureMailboxDeleter(GetTaskRunner())),
       max_memory_needed_bytes_(0),
       resourceless_software_draw_(false),
-      animation_registrar_(),
+      output_is_secure_(false),
+      animation_host_(),
       rendering_stats_instrumentation_(rendering_stats_instrumentation),
       micro_benchmark_controller_(this),
       shared_bitmap_manager_(shared_bitmap_manager),
@@ -228,18 +240,10 @@ LayerTreeHostImpl::LayerTreeHostImpl(
       id_(id),
       requires_high_res_to_draw_(false),
       is_likely_to_require_a_draw_(false),
-      frame_timing_tracker_(FrameTimingTracker::Create(this)) {
-  if (settings.use_compositor_animation_timelines) {
-    if (settings.accelerated_animation_enabled) {
-      animation_host_ = AnimationHost::Create(ThreadInstance::IMPL);
-      animation_host_->SetMutatorHostClient(this);
-      animation_host_->SetSupportsScrollAnimations(SupportsImplScrolling());
-    }
-  } else {
-    animation_registrar_ = AnimationRegistrar::Create();
-    animation_registrar_->set_supports_scroll_animations(
-        SupportsImplScrolling());
-  }
+      mutator_(nullptr) {
+  animation_host_ = AnimationHost::Create(ThreadInstance::IMPL);
+  animation_host_->SetMutatorHostClient(this);
+  animation_host_->SetSupportsScrollAnimations(SupportsImplScrolling());
 
   DCHECK(task_runner_provider_->IsImplThread());
   DidVisibilityChange(this, visible_);
@@ -250,6 +254,7 @@ LayerTreeHostImpl::LayerTreeHostImpl(
   active_tree_ =
       LayerTreeImpl::create(this, new SyncedProperty<ScaleGroup>(),
                             new SyncedTopControls, new SyncedElasticOverscroll);
+  active_tree_->property_trees()->is_active = true;
 
   viewport_ = Viewport::Create(this);
 
@@ -276,7 +281,7 @@ LayerTreeHostImpl::~LayerTreeHostImpl() {
     scroll_elasticity_helper_.reset();
 
   // The layer trees must be destroyed before the layer tree host. We've
-  // made a contract with our animation controllers that the registrar
+  // made a contract with our animation controllers that the animation_host
   // will outlive them, and we must make good.
   if (recycle_tree_)
     recycle_tree_->Shutdown();
@@ -287,10 +292,8 @@ LayerTreeHostImpl::~LayerTreeHostImpl() {
   pending_tree_ = nullptr;
   active_tree_ = nullptr;
 
-  if (animation_host_) {
-    animation_host_->ClearTimelines();
-    animation_host_->SetMutatorHostClient(nullptr);
-  }
+  animation_host_->ClearTimelines();
+  animation_host_->SetMutatorHostClient(nullptr);
 
   CleanUpTileManagerAndUIResources();
   renderer_ = nullptr;
@@ -495,7 +498,7 @@ void LayerTreeHostImpl::StartPageScaleAnimation(
       gfx::SizeF(active_tree_->InnerViewportContainerLayer()->bounds());
 
   // Easing constants experimentally determined.
-  scoped_ptr<TimingFunction> timing_function =
+  std::unique_ptr<TimingFunction> timing_function =
       CubicBezierTimingFunction::Create(.8, 0, .3, .9);
 
   // TODO(miletus) : Pass in ScrollOffset.
@@ -548,9 +551,9 @@ bool LayerTreeHostImpl::IsCurrentlyScrollingLayerAt(
       active_tree_->FindLayerThatIsHitByPoint(device_viewport_point);
 
   bool scroll_on_main_thread = false;
-  InputHandler::MainThreadScrollingReason main_thread_scrolling_reasons;
+  uint32_t main_thread_scrolling_reasons;
   LayerImpl* test_layer_impl = FindScrollLayerForDeviceViewportPoint(
-      device_viewport_point, type, layer_impl, &scroll_on_main_thread, nullptr,
+      device_viewport_point, type, layer_impl, &scroll_on_main_thread,
       &main_thread_scrolling_reasons);
 
   if (!test_layer_impl)
@@ -570,31 +573,9 @@ bool LayerTreeHostImpl::IsCurrentlyScrollingLayerAt(
   return false;
 }
 
-bool LayerTreeHostImpl::HaveWheelEventHandlersAt(
-    const gfx::Point& viewport_point) {
-  gfx::PointF device_viewport_point = gfx::ScalePoint(
-      gfx::PointF(viewport_point), active_tree_->device_scale_factor());
-
-  LayerImpl* layer_impl =
-      active_tree_->FindLayerWithWheelHandlerThatIsHitByPoint(
-          device_viewport_point);
-
-  return layer_impl != NULL;
-}
-
-static LayerImpl* NextLayerInScrollOrder(LayerImpl* layer) {
-  if (layer->scroll_parent())
-    return layer->scroll_parent();
-
-  return layer->parent();
-}
-
-static ScrollBlocksOn EffectiveScrollBlocksOn(LayerImpl* layer) {
-  ScrollBlocksOn blocks = SCROLL_BLOCKS_ON_NONE;
-  for (; layer; layer = NextLayerInScrollOrder(layer)) {
-    blocks |= layer->scroll_blocks_on();
-  }
-  return blocks;
+EventListenerProperties LayerTreeHostImpl::GetEventListenerProperties(
+    EventListenerClass event_class) const {
+  return active_tree_->event_listener_properties(event_class);
 }
 
 bool LayerTreeHostImpl::DoTouchEventsBlockScrollAt(
@@ -602,27 +583,18 @@ bool LayerTreeHostImpl::DoTouchEventsBlockScrollAt(
   gfx::PointF device_viewport_point = gfx::ScalePoint(
       gfx::PointF(viewport_point), active_tree_->device_scale_factor());
 
-  // First check if scrolling at this point is required to block on any
-  // touch event handlers.  Note that we must start at the innermost layer
-  // (as opposed to only the layer found to contain a touch handler region
-  // below) to ensure all relevant scroll-blocks-on values are applied.
-  LayerImpl* layer_impl =
-      active_tree_->FindLayerThatIsHitByPoint(device_viewport_point);
-  ScrollBlocksOn blocking = EffectiveScrollBlocksOn(layer_impl);
-  if (!(blocking & SCROLL_BLOCKS_ON_START_TOUCH))
-    return false;
-
   // Now determine if there are actually any handlers at that point.
   // TODO(rbyers): Consider also honoring touch-action (crbug.com/347272).
-  layer_impl = active_tree_->FindLayerThatIsHitByPointInTouchHandlerRegion(
-      device_viewport_point);
+  LayerImpl* layer_impl =
+      active_tree_->FindLayerThatIsHitByPointInTouchHandlerRegion(
+          device_viewport_point);
   return layer_impl != NULL;
 }
 
-scoped_ptr<SwapPromiseMonitor>
+std::unique_ptr<SwapPromiseMonitor>
 LayerTreeHostImpl::CreateLatencyInfoSwapPromiseMonitor(
     ui::LatencyInfo* latency) {
-  return make_scoped_ptr(
+  return base::WrapUnique(
       new LatencyInfoSwapPromiseMonitor(latency, NULL, this));
 }
 
@@ -636,7 +608,7 @@ ScrollElasticityHelper* LayerTreeHostImpl::CreateScrollElasticityHelper() {
 }
 
 void LayerTreeHostImpl::QueueSwapPromiseForMainThreadScrollUpdate(
-    scoped_ptr<SwapPromise> swap_promise) {
+    std::unique_ptr<SwapPromise> swap_promise) {
   swap_promises_for_main_thread_scroll_update_.push_back(
       std::move(swap_promise));
 }
@@ -655,11 +627,9 @@ void LayerTreeHostImpl::TrackDamageForAllSurfaces(
     RenderSurfaceImpl* render_surface = render_surface_layer->render_surface();
     DCHECK(render_surface);
     render_surface->damage_tracker()->UpdateDamageTrackingState(
-        render_surface->layer_list(),
-        render_surface_layer->id(),
+        render_surface->layer_list(), render_surface,
         render_surface->SurfacePropertyChangedOnlyFromDescendant(),
-        render_surface->content_rect(),
-        render_surface_layer->mask_layer(),
+        render_surface->content_rect(), render_surface_layer->mask_layer(),
         render_surface_layer->filters());
   }
 }
@@ -685,7 +655,7 @@ void LayerTreeHostImpl::FrameData::AsValueInto(
 }
 
 void LayerTreeHostImpl::FrameData::AppendRenderPass(
-    scoped_ptr<RenderPass> render_pass) {
+    std::unique_ptr<RenderPass> render_pass) {
   render_passes.push_back(std::move(render_pass));
 }
 
@@ -789,7 +759,7 @@ static RenderPass* FindRenderPassById(const RenderPassList& list,
                                       RenderPassId id) {
   auto it = std::find_if(
       list.begin(), list.end(),
-      [id](const scoped_ptr<RenderPass>& p) { return p->id == id; });
+      [id](const std::unique_ptr<RenderPass>& p) { return p->id == id; });
   return it == list.end() ? nullptr : it->get();
 }
 
@@ -841,7 +811,7 @@ DrawResult LayerTreeHostImpl::CalculateRenderPasses(
     RenderSurfaceImpl* render_surface = render_surface_layer->render_surface();
 
     bool should_draw_into_render_pass =
-        render_surface_layer->parent() == NULL ||
+        active_tree_->IsRootLayer(render_surface_layer) ||
         render_surface->contributes_to_drawn_surface() ||
         render_surface_layer->HasCopyRequest();
     if (should_draw_into_render_pass)
@@ -886,8 +856,6 @@ DrawResult LayerTreeHostImpl::CalculateRenderPasses(
   const DrawMode draw_mode = GetDrawMode();
 
   int num_missing_tiles = 0;
-  int num_missing_tiles_no_image_content = 0;
-  int num_missing_tiles_some_image_content = 0;
   int num_incomplete_tiles = 0;
   int64_t checkerboarded_no_recording_content_area = 0;
   int64_t checkerboarded_needs_raster_content_area = 0;
@@ -930,31 +898,7 @@ DrawResult LayerTreeHostImpl::CalculateRenderPasses(
 
         frame->will_draw_layers.push_back(*it);
 
-        if (it->HasContributingDelegatedRenderPasses()) {
-          RenderPassId contributing_render_pass_id =
-              it->FirstContributingRenderPassId();
-          while (true) {
-            RenderPass* pass = FindRenderPassById(frame->render_passes,
-                                                  contributing_render_pass_id);
-            if (!pass)
-              break;
-            it->AppendQuads(pass, &append_quads_data);
-            contributing_render_pass_id =
-                it->NextContributingRenderPassId(contributing_render_pass_id);
-          }
-        }
-
         it->AppendQuads(target_render_pass, &append_quads_data);
-
-        // For layers that represent themselves, add composite frame timing
-        // requests if the visible rect intersects the requested rect.
-        for (const auto& request : it->frame_timing_requests()) {
-          if (request.rect().Intersects(it->visible_layer_rect())) {
-            frame->composite_events.push_back(
-                FrameTimingTracker::FrameAndRectIds(
-                    active_tree_->source_frame_number(), request.id()));
-          }
-        }
       }
 
       ++layers_drawn;
@@ -972,10 +916,6 @@ DrawResult LayerTreeHostImpl::CalculateRenderPasses(
         append_quads_data.checkerboarded_needs_raster_content_area);
 
     num_missing_tiles += append_quads_data.num_missing_tiles;
-    num_missing_tiles_no_image_content +=
-        append_quads_data.num_missing_tiles_no_image_content;
-    num_missing_tiles_some_image_content +=
-        append_quads_data.num_missing_tiles_some_image_content;
     num_incomplete_tiles += append_quads_data.num_incomplete_tiles;
     checkerboarded_no_recording_content_area +=
         append_quads_data.checkerboarded_no_recording_content_area;
@@ -1034,7 +974,7 @@ DrawResult LayerTreeHostImpl::CalculateRenderPasses(
 
   // Any copy requests left in the tree are not going to get serviced, and
   // should be aborted.
-  std::vector<scoped_ptr<CopyOutputRequest>> requests_to_abort;
+  std::vector<std::unique_ptr<CopyOutputRequest>> requests_to_abort;
   while (!active_tree_->LayersWithCopyOutputRequest().empty()) {
     LayerImpl* layer = active_tree_->LayersWithCopyOutputRequest().back();
     layer->TakeCopyRequestsAndTransformToTarget(&requests_to_abort);
@@ -1060,21 +1000,6 @@ DrawResult LayerTreeHostImpl::CalculateRenderPasses(
         "Compositing.RenderPass.AppendQuadData."
         "CheckerboardedNeedRasterContentArea",
         checkerboarded_needs_raster_content_area);
-
-    if (settings_.image_decode_tasks_enabled && num_missing_tiles) {
-      if (const char* client_name = GetClientNameForMetrics()) {
-        UMA_HISTOGRAM_COUNTS_100(
-            base::StringPrintf("Compositing.%s.RenderPass.AppendQuadData."
-                               "NumMissingTilesSomeImageContent",
-                               client_name),
-            num_missing_tiles_some_image_content);
-        UMA_HISTOGRAM_COUNTS_100(
-            base::StringPrintf("Compositing.%s.RenderPass.AppendQuadData."
-                               "NumMissingTilesNoImageContent",
-                               client_name),
-            num_missing_tiles_no_image_content);
-      }
-    }
   }
 
   // Should only have one render pass in resourceless software mode.
@@ -1188,7 +1113,8 @@ void LayerTreeHostImpl::RemoveRenderPasses(FrameData* frame) {
   std::set<RenderPassId> pass_exists;
   // A set of RenderPassDrawQuads that we have seen (stored by the RenderPasses
   // they refer to).
-  base::SmallMap<base::hash_map<RenderPassId, int>> pass_references;
+  base::SmallMap<std::unordered_map<RenderPassId, int, RenderPassIdHash>>
+      pass_references;
 
   // Iterate RenderPasses in draw order, removing empty render passes (except
   // the root RenderPass).
@@ -1264,16 +1190,17 @@ void LayerTreeHostImpl::BlockNotifyReadyToActivateForTesting(bool block) {
 
 void LayerTreeHostImpl::ResetTreesForTesting() {
   if (active_tree_)
-    active_tree_->DetachLayerTree();
+    active_tree_->ClearLayers();
   active_tree_ =
       LayerTreeImpl::create(this, active_tree()->page_scale_factor(),
                             active_tree()->top_controls_shown_ratio(),
                             active_tree()->elastic_overscroll());
+  active_tree_->property_trees()->is_active = true;
   if (pending_tree_)
-    pending_tree_->DetachLayerTree();
+    pending_tree_->ClearLayers();
   pending_tree_ = nullptr;
   if (recycle_tree_)
-    recycle_tree_->DetachLayerTree();
+    recycle_tree_->ClearLayers();
   recycle_tree_ = nullptr;
 }
 
@@ -1303,14 +1230,21 @@ void LayerTreeHostImpl::UpdateTileManagerMemoryPolicy(
           gpu::MemoryAllocation::CUTOFF_ALLOW_NOTHING);
   global_tile_state_.num_resources_limit = policy.num_resources_limit;
 
-  if (output_surface_ && global_tile_state_.hard_memory_limit_in_bytes > 0) {
+  if (global_tile_state_.hard_memory_limit_in_bytes > 0) {
     // If |global_tile_state_.hard_memory_limit_in_bytes| is greater than 0, we
-    // allow the worker context to retain allocated resources. Notify the worker
-    // context. If the memory policy has become zero, we'll handle the
-    // notification in NotifyAllTileTasksCompleted, after in-progress work
-    // finishes.
-    output_surface_->SetWorkerContextShouldAggressivelyFreeResources(
-        false /* aggressively_free_resources */);
+    // allow the worker context and image decode controller to retain allocated
+    // resources. Notify them here. If the memory policy has become zero, we'll
+    // handle the notification in NotifyAllTileTasksCompleted, after
+    // in-progress work finishes.
+    if (output_surface_) {
+      output_surface_->SetWorkerContextShouldAggressivelyFreeResources(
+          false /* aggressively_free_resources */);
+    }
+
+    if (image_decode_controller_) {
+      image_decode_controller_->SetShouldAggressivelyFreeResources(
+          false /* aggressively_free_resources */);
+    }
   }
 
   DCHECK(resource_pool_);
@@ -1330,10 +1264,11 @@ void LayerTreeHostImpl::DidModifyTilePriorities() {
   client_->SetNeedsPrepareTilesOnImplThread();
 }
 
-scoped_ptr<RasterTilePriorityQueue> LayerTreeHostImpl::BuildRasterQueue(
+std::unique_ptr<RasterTilePriorityQueue> LayerTreeHostImpl::BuildRasterQueue(
     TreePriority tree_priority,
     RasterTilePriorityQueue::Type type) {
-  TRACE_EVENT0("cc", "LayerTreeHostImpl::BuildRasterQueue");
+  TRACE_EVENT0("disabled-by-default-cc.debug",
+               "LayerTreeHostImpl::BuildRasterQueue");
 
   return RasterTilePriorityQueue::Create(active_tree_->picture_layers(),
                                          pending_tree_
@@ -1342,11 +1277,13 @@ scoped_ptr<RasterTilePriorityQueue> LayerTreeHostImpl::BuildRasterQueue(
                                          tree_priority, type);
 }
 
-scoped_ptr<EvictionTilePriorityQueue> LayerTreeHostImpl::BuildEvictionQueue(
-    TreePriority tree_priority) {
-  TRACE_EVENT0("cc", "LayerTreeHostImpl::BuildEvictionQueue");
+std::unique_ptr<EvictionTilePriorityQueue>
+LayerTreeHostImpl::BuildEvictionQueue(TreePriority tree_priority) {
+  TRACE_EVENT0("disabled-by-default-cc.debug",
+               "LayerTreeHostImpl::BuildEvictionQueue");
 
-  scoped_ptr<EvictionTilePriorityQueue> queue(new EvictionTilePriorityQueue);
+  std::unique_ptr<EvictionTilePriorityQueue> queue(
+      new EvictionTilePriorityQueue);
   queue->Build(active_tree_->picture_layers(),
                pending_tree_ ? pending_tree_->picture_layers()
                              : std::vector<PictureLayerImpl*>(),
@@ -1379,9 +1316,15 @@ void LayerTreeHostImpl::NotifyReadyToDraw() {
 void LayerTreeHostImpl::NotifyAllTileTasksCompleted() {
   // The tile tasks started by the most recent call to PrepareTiles have
   // completed. Now is a good time to free resources if necessary.
-  if (output_surface_ && global_tile_state_.hard_memory_limit_in_bytes == 0) {
-    output_surface_->SetWorkerContextShouldAggressivelyFreeResources(
-        true /* aggressively_free_resources */);
+  if (global_tile_state_.hard_memory_limit_in_bytes == 0) {
+    if (output_surface_) {
+      output_surface_->SetWorkerContextShouldAggressivelyFreeResources(
+          true /* aggressively_free_resources */);
+    }
+    if (image_decode_controller_) {
+      image_decode_controller_->SetShouldAggressivelyFreeResources(
+          true /* aggressively_free_resources */);
+    }
   }
 }
 
@@ -1497,6 +1440,8 @@ void LayerTreeHostImpl::SetExternalTilePriorityConstraints(
 
   if (tile_priority_params_changed) {
     active_tree_->set_needs_update_draw_properties();
+    if (pending_tree_)
+      pending_tree_->set_needs_update_draw_properties();
 
     // Compositor, not OutputSurface, is responsible for setting damage and
     // triggering redraw for constraint changes.
@@ -1655,11 +1600,6 @@ void LayerTreeHostImpl::DrawLayers(FrameData* frame) {
   base::TimeTicks frame_begin_time = CurrentBeginFrameArgs().frame_time;
   DCHECK(CanDraw());
 
-  if (!frame->composite_events.empty()) {
-    frame_timing_tracker_->SaveTimeStamps(frame_begin_time,
-                                          frame->composite_events);
-  }
-
   if (frame->has_no_damage) {
     TRACE_EVENT_INSTANT0("cc", "EarlyOut_NoDamage", TRACE_EVENT_SCOPE_THREAD);
     DCHECK(!resourceless_software_draw_);
@@ -1686,13 +1626,13 @@ void LayerTreeHostImpl::DrawLayers(FrameData* frame) {
   TRACE_EVENT_IS_NEW_TRACE(&is_new_trace);
   if (is_new_trace) {
     if (pending_tree_) {
-      LayerTreeHostCommon::CallFunctionForSubtree(
-          pending_tree_->root_layer(),
-          [](LayerImpl* layer) { layer->DidBeginTracing(); });
+      LayerTreeHostCommon::CallFunctionForEveryLayer(
+          pending_tree(), [](LayerImpl* layer) { layer->DidBeginTracing(); },
+          CallFunctionLayerType::ALL_LAYERS);
     }
-    LayerTreeHostCommon::CallFunctionForSubtree(
-        active_tree_->root_layer(),
-        [](LayerImpl* layer) { layer->DidBeginTracing(); });
+    LayerTreeHostCommon::CallFunctionForEveryLayer(
+        active_tree(), [](LayerImpl* layer) { layer->DidBeginTracing(); },
+        CallFunctionLayerType::ALL_LAYERS);
   }
 
   {
@@ -1715,11 +1655,9 @@ void LayerTreeHostImpl::DrawLayers(FrameData* frame) {
 
   if (draw_mode == DRAW_MODE_RESOURCELESS_SOFTWARE) {
     bool disable_picture_quad_image_filtering =
-        IsActivelyScrolling() ||
-        (animation_host_ ? animation_host_->NeedsAnimateLayers()
-                         : animation_registrar_->needs_animate_layers());
+        IsActivelyScrolling() || animation_host_->NeedsAnimateLayers();
 
-    scoped_ptr<SoftwareRenderer> temp_software_renderer =
+    std::unique_ptr<SoftwareRenderer> temp_software_renderer =
         SoftwareRenderer::Create(this, &settings_.renderer_settings,
                                  output_surface_, NULL);
     temp_software_renderer->DrawFrame(
@@ -1741,7 +1679,7 @@ void LayerTreeHostImpl::DrawLayers(FrameData* frame) {
     (*frame->render_surface_layer_list)[i]->render_surface()->damage_tracker()->
         DidDrawDamagedArea();
   }
-  active_tree_->root_layer()->ResetAllChangeTrackingForSubtree();
+  active_tree_->ResetAllChangeTracking(PropertyTrees::ResetFlags::ALL_TREES);
 
   active_tree_->set_has_ever_been_drawn(true);
   devtools_instrumentation::DidDrawFrame(id_);
@@ -1997,24 +1935,6 @@ bool LayerTreeHostImpl::IsActivelyScrolling() const {
   return did_lock_scrolling_layer_;
 }
 
-// Content layers can be either directly scrollable or contained in an outer
-// scrolling layer which applies the scroll transform. Given a content layer,
-// this function returns the associated scroll layer if any.
-static LayerImpl* FindScrollLayerForContentLayer(LayerImpl* layer_impl) {
-  if (!layer_impl)
-    return NULL;
-
-  if (layer_impl->scrollable())
-    return layer_impl;
-
-  if (layer_impl->DrawsContent() &&
-      layer_impl->parent() &&
-      layer_impl->parent()->scrollable())
-    return layer_impl->parent();
-
-  return NULL;
-}
-
 void LayerTreeHostImpl::CreatePendingTree() {
   CHECK(!pending_tree_);
   if (recycle_tree_)
@@ -2039,22 +1959,33 @@ void LayerTreeHostImpl::ActivateSyncTree() {
     pending_tree_->ProcessUIResourceRequestQueue();
 
     if (pending_tree_->needs_full_tree_sync()) {
-      active_tree_->SetRootLayer(
-          TreeSynchronizer::SynchronizeTrees(pending_tree_->root_layer(),
-                                             active_tree_->DetachLayerTree(),
-                                             active_tree_.get()));
+      TreeSynchronizer::SynchronizeTrees(pending_tree_->root_layer(),
+                                         active_tree_.get());
     }
-    TreeSynchronizer::PushProperties(pending_tree_->root_layer(),
-                                     active_tree_->root_layer());
+
+    // We need to preserve the damage status of property trees on active tree.
+    // We do this by pushing the damage status from active tree property trees
+    // to pending tree property trees.
+    if (active_tree_->property_trees()->changed) {
+      if (pending_tree_->property_trees()->sequence_number ==
+          active_tree_->property_trees()->sequence_number)
+        active_tree_->property_trees()->PushChangeTrackingTo(
+            pending_tree_->property_trees());
+      else
+        active_tree_->root_layer()->PushLayerPropertyChangedForSubtree();
+    }
+
+    TreeSynchronizer::PushLayerProperties(pending_tree(), active_tree());
     pending_tree_->PushPropertiesTo(active_tree_.get());
+    if (pending_tree_->root_layer())
+      pending_tree_->property_trees()->ResetAllChangeTracking(
+          PropertyTrees::ResetFlags::ALL_TREES);
 
     // Now that we've synced everything from the pending tree to the active
     // tree, rename the pending tree the recycle tree so we can reuse it on the
     // next sync.
     DCHECK(!recycle_tree_);
     pending_tree_.swap(recycle_tree_);
-
-    UpdateViewportContainerSizes();
 
     // If we commit to the active tree directly, this is already done during
     // commit.
@@ -2064,8 +1995,11 @@ void LayerTreeHostImpl::ActivateSyncTree() {
   }
 
   // bounds_delta isn't a pushed property, so the newly-pushed property tree
-  // won't already account for current bounds_delta values.
+  // won't already account for current bounds_delta values. This needs to
+  // happen before calling UpdateViewportContainerSizes().
   active_tree_->UpdatePropertyTreesForBoundsDelta();
+  UpdateViewportContainerSizes();
+
   active_tree_->DidBecomeActive();
   client_->RenewTreePriority();
   // If we have any picture layers, then by activating we also modified tile
@@ -2078,7 +2012,7 @@ void LayerTreeHostImpl::ActivateSyncTree() {
   if (!tree_activation_callback_.is_null())
     tree_activation_callback_.Run();
 
-  scoped_ptr<PendingPageScaleAnimation> pending_page_scale_animation =
+  std::unique_ptr<PendingPageScaleAnimation> pending_page_scale_animation =
       active_tree_->TakePendingPageScaleAnimation();
   if (pending_page_scale_animation) {
     StartPageScaleAnimation(
@@ -2202,9 +2136,21 @@ void LayerTreeHostImpl::CreateAndSetRenderer() {
 
 void LayerTreeHostImpl::CreateTileManagerResources() {
   CreateResourceAndTileTaskWorkerPool(&tile_task_worker_pool_, &resource_pool_);
+
+  if (use_gpu_rasterization_) {
+    image_decode_controller_ = base::WrapUnique(new GpuImageDecodeController(
+        output_surface_->worker_context_provider(),
+        settings_.renderer_settings.preferred_tile_format));
+  } else {
+    image_decode_controller_ =
+        base::WrapUnique(new SoftwareImageDecodeController(
+            settings_.renderer_settings.preferred_tile_format));
+  }
+
   // TODO(vmpstr): Initialize tile task limit at ctor time.
   tile_manager_->SetResources(
       resource_pool_.get(), tile_task_worker_pool_->AsTileTaskRunner(),
+      image_decode_controller_.get(),
       is_synchronous_single_threaded_ ? std::numeric_limits<size_t>::max()
                                       : settings_.scheduled_raster_task_limit,
       use_gpu_rasterization_);
@@ -2212,8 +2158,8 @@ void LayerTreeHostImpl::CreateTileManagerResources() {
 }
 
 void LayerTreeHostImpl::CreateResourceAndTileTaskWorkerPool(
-    scoped_ptr<TileTaskWorkerPool>* tile_task_worker_pool,
-    scoped_ptr<ResourcePool>* resource_pool) {
+    std::unique_ptr<TileTaskWorkerPool>* tile_task_worker_pool,
+    std::unique_ptr<ResourcePool>* resource_pool) {
   DCHECK(GetTaskRunner());
   // TODO(vmpstr): Make this a DCHECK (or remove) when crbug.com/419086 is
   // resolved.
@@ -2271,7 +2217,7 @@ void LayerTreeHostImpl::CreateResourceAndTileTaskWorkerPool(
 
     *tile_task_worker_pool = ZeroCopyTileTaskWorkerPool::Create(
         GetTaskRunner(), task_graph_runner, resource_provider_.get(),
-        settings_.renderer_settings.use_rgba_4444_textures);
+        settings_.renderer_settings.preferred_tile_format);
     return;
   }
 
@@ -2285,28 +2231,13 @@ void LayerTreeHostImpl::CreateResourceAndTileTaskWorkerPool(
       GetTaskRunner(), task_graph_runner, context_provider,
       resource_provider_.get(), max_copy_texture_chromium_size,
       settings_.use_partial_raster, settings_.max_staging_buffer_usage_in_bytes,
-      settings_.renderer_settings.use_rgba_4444_textures);
+      settings_.renderer_settings.preferred_tile_format);
 }
 
-void LayerTreeHostImpl::RecordMainFrameTiming(
-    const BeginFrameArgs& start_of_main_frame_args,
-    const BeginFrameArgs& expected_next_main_frame_args) {
-  std::vector<int64_t> request_ids;
-  active_tree_->GatherFrameTimingRequestIds(&request_ids);
-  if (request_ids.empty())
-    return;
-
-  base::TimeTicks start_time = start_of_main_frame_args.frame_time;
-  base::TimeTicks end_time = expected_next_main_frame_args.frame_time;
-  frame_timing_tracker_->SaveMainFrameTimeStamps(
-      request_ids, start_time, end_time, active_tree_->source_frame_number());
-}
-
-void LayerTreeHostImpl::PostFrameTimingEvents(
-    scoped_ptr<FrameTimingTracker::CompositeTimingSet> composite_events,
-    scoped_ptr<FrameTimingTracker::MainFrameTimingSet> main_frame_events) {
-  client_->PostFrameTimingEventsOnImplThread(std::move(composite_events),
-                                             std::move(main_frame_events));
+void LayerTreeHostImpl::SetLayerTreeMutator(LayerTreeMutator* mutator) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("compositor-worker"),
+               "LayerTreeHostImpl::SetLayerTreeMutator");
+  mutator_ = mutator;
 }
 
 void LayerTreeHostImpl::CleanUpTileManagerAndUIResources() {
@@ -2315,6 +2246,7 @@ void LayerTreeHostImpl::CleanUpTileManagerAndUIResources() {
   resource_pool_ = nullptr;
   tile_task_worker_pool_ = nullptr;
   single_thread_synchronous_task_graph_runner_ = nullptr;
+  image_decode_controller_ = nullptr;
 }
 
 void LayerTreeHostImpl::ReleaseOutputSurface() {
@@ -2399,6 +2331,10 @@ void LayerTreeHostImpl::CommitVSyncParameters(base::TimeTicks timebase,
   client_->CommitVSyncParameters(timebase, interval);
 }
 
+void LayerTreeHostImpl::SetBeginFrameSource(BeginFrameSource* source) {
+  client_->SetBeginFrameSource(source);
+}
+
 void LayerTreeHostImpl::SetViewportSize(const gfx::Size& device_viewport_size) {
   if (device_viewport_size == device_viewport_size_)
     return;
@@ -2473,73 +2409,139 @@ void LayerTreeHostImpl::BindToClient(InputHandlerClient* client) {
   input_handler_client_ = client;
 }
 
+InputHandler::ScrollStatus LayerTreeHostImpl::TryScroll(
+    const gfx::PointF& screen_space_point,
+    InputHandler::ScrollInputType type,
+    const ScrollTree& scroll_tree,
+    ScrollNode* scroll_node) const {
+  InputHandler::ScrollStatus scroll_status;
+  scroll_status.main_thread_scrolling_reasons =
+      MainThreadScrollingReason::kNotScrollingOnMain;
+  if (!!scroll_node->data.main_thread_scrolling_reasons) {
+    TRACE_EVENT0("cc", "LayerImpl::TryScroll: Failed ShouldScrollOnMainThread");
+    scroll_status.thread = InputHandler::SCROLL_ON_MAIN_THREAD;
+    scroll_status.main_thread_scrolling_reasons =
+        scroll_node->data.main_thread_scrolling_reasons;
+    return scroll_status;
+  }
+
+  gfx::Transform screen_space_transform =
+      scroll_tree.ScreenSpaceTransform(scroll_node->id);
+  if (!screen_space_transform.IsInvertible()) {
+    TRACE_EVENT0("cc", "LayerImpl::TryScroll: Ignored NonInvertibleTransform");
+    scroll_status.thread = InputHandler::SCROLL_IGNORED;
+    scroll_status.main_thread_scrolling_reasons =
+        MainThreadScrollingReason::kNonInvertibleTransform;
+    return scroll_status;
+  }
+
+  if (scroll_node->data.contains_non_fast_scrollable_region) {
+    bool clipped = false;
+    gfx::Transform inverse_screen_space_transform(
+        gfx::Transform::kSkipInitialization);
+    if (!screen_space_transform.GetInverse(&inverse_screen_space_transform)) {
+      // TODO(shawnsingh): We shouldn't be applying a projection if screen space
+      // transform is uninvertible here. Perhaps we should be returning
+      // SCROLL_ON_MAIN_THREAD in this case?
+    }
+
+    gfx::PointF hit_test_point_in_layer_space = MathUtil::ProjectPoint(
+        inverse_screen_space_transform, screen_space_point, &clipped);
+    if (!clipped &&
+        active_tree()
+            ->LayerById(scroll_node->owner_id)
+            ->non_fast_scrollable_region()
+            .Contains(gfx::ToRoundedPoint(hit_test_point_in_layer_space))) {
+      TRACE_EVENT0("cc",
+                   "LayerImpl::tryScroll: Failed NonFastScrollableRegion");
+      scroll_status.thread = InputHandler::SCROLL_ON_MAIN_THREAD;
+      scroll_status.main_thread_scrolling_reasons =
+          MainThreadScrollingReason::kNonFastScrollableRegion;
+      return scroll_status;
+    }
+  }
+
+  if (IsWheelBasedScroll(type) &&
+      !active_tree()->settings().use_mouse_wheel_gestures) {
+    EventListenerProperties event_properties =
+        active_tree()->event_listener_properties(
+            EventListenerClass::kMouseWheel);
+    if (event_properties != EventListenerProperties::kNone) {
+      TRACE_EVENT0("cc", "LayerImpl::tryScroll: Failed WheelEventHandlers");
+      scroll_status.thread = InputHandler::SCROLL_ON_MAIN_THREAD;
+      scroll_status.main_thread_scrolling_reasons =
+          MainThreadScrollingReason::kEventHandlers;
+      return scroll_status;
+    }
+  }
+
+  if (!scroll_node->data.scrollable) {
+    TRACE_EVENT0("cc", "LayerImpl::tryScroll: Ignored not scrollable");
+    scroll_status.thread = InputHandler::SCROLL_IGNORED;
+    scroll_status.main_thread_scrolling_reasons =
+        MainThreadScrollingReason::kNotScrollable;
+    return scroll_status;
+  }
+
+  gfx::ScrollOffset max_scroll_offset =
+      scroll_tree.MaxScrollOffset(scroll_node->id);
+  if (max_scroll_offset.x() <= 0 && max_scroll_offset.y() <= 0) {
+    TRACE_EVENT0("cc",
+                 "LayerImpl::tryScroll: Ignored. Technically scrollable,"
+                 " but has no affordance in either direction.");
+    scroll_status.thread = InputHandler::SCROLL_IGNORED;
+    scroll_status.main_thread_scrolling_reasons =
+        MainThreadScrollingReason::kNotScrollable;
+    return scroll_status;
+  }
+
+  scroll_status.thread = InputHandler::SCROLL_ON_IMPL_THREAD;
+  return scroll_status;
+}
+
 LayerImpl* LayerTreeHostImpl::FindScrollLayerForDeviceViewportPoint(
     const gfx::PointF& device_viewport_point,
     InputHandler::ScrollInputType type,
     LayerImpl* layer_impl,
     bool* scroll_on_main_thread,
-    bool* optional_has_ancestor_scroll_handler,
-    InputHandler::MainThreadScrollingReason* main_thread_scrolling_reasons)
-    const {
+    uint32_t* main_thread_scrolling_reasons) const {
   DCHECK(scroll_on_main_thread);
   DCHECK(main_thread_scrolling_reasons);
-  *main_thread_scrolling_reasons = InputHandler::NOT_SCROLLING_ON_MAIN;
-
-  ScrollBlocksOn block_mode = EffectiveScrollBlocksOn(layer_impl);
+  *main_thread_scrolling_reasons =
+      MainThreadScrollingReason::kNotScrollingOnMain;
 
   // Walk up the hierarchy and look for a scrollable layer.
   LayerImpl* potentially_scrolling_layer_impl = NULL;
-  for (; layer_impl; layer_impl = NextLayerInScrollOrder(layer_impl)) {
-    // The content layer can also block attempts to scroll outside the main
-    // thread.
-    ScrollStatus status =
-        layer_impl->TryScroll(device_viewport_point, type, block_mode);
-    if (status.thread == SCROLL_ON_MAIN_THREAD) {
-      if (layer_impl->should_scroll_on_main_thread()) {
-        DCHECK(status.main_thread_scrolling_reasons <=
-               InputHandler::MaxNonTransientScrollingReason);
-      } else {
-        DCHECK(status.main_thread_scrolling_reasons >
-               InputHandler::MaxNonTransientScrollingReason);
+  if (layer_impl) {
+    ScrollTree& scroll_tree = active_tree_->property_trees()->scroll_tree;
+    ScrollNode* scroll_node = scroll_tree.Node(layer_impl->scroll_tree_index());
+    for (; scroll_tree.parent(scroll_node);
+         scroll_node = scroll_tree.parent(scroll_node)) {
+      // The content layer can also block attempts to scroll outside the main
+      // thread.
+      ScrollStatus status =
+          TryScroll(device_viewport_point, type, scroll_tree, scroll_node);
+      if (status.thread == SCROLL_ON_MAIN_THREAD) {
+        if (!!scroll_node->data.main_thread_scrolling_reasons) {
+          DCHECK(MainThreadScrollingReason::MainThreadCanSetScrollReasons(
+              status.main_thread_scrolling_reasons));
+        } else {
+          DCHECK(MainThreadScrollingReason::CompositorCanSetScrollReasons(
+              status.main_thread_scrolling_reasons));
+        }
+
+        *scroll_on_main_thread = true;
+        *main_thread_scrolling_reasons = status.main_thread_scrolling_reasons;
+        return NULL;
       }
 
-      *scroll_on_main_thread = true;
-      *main_thread_scrolling_reasons = status.main_thread_scrolling_reasons;
-      return NULL;
-    }
-
-    LayerImpl* scroll_layer_impl = FindScrollLayerForContentLayer(layer_impl);
-    if (!scroll_layer_impl)
-      continue;
-
-    status =
-        scroll_layer_impl->TryScroll(device_viewport_point, type, block_mode);
-
-    // If any layer wants to divert the scroll event to the main thread, abort.
-    if (status.thread == SCROLL_ON_MAIN_THREAD) {
-      if (layer_impl->should_scroll_on_main_thread()) {
-        DCHECK(status.main_thread_scrolling_reasons <=
-               InputHandler::MaxNonTransientScrollingReason);
-      } else {
-        DCHECK(status.main_thread_scrolling_reasons >
-               InputHandler::MaxNonTransientScrollingReason);
+      if (status.thread == InputHandler::SCROLL_ON_IMPL_THREAD &&
+          !potentially_scrolling_layer_impl) {
+        potentially_scrolling_layer_impl =
+            active_tree_->LayerById(scroll_node->owner_id);
       }
-
-      *scroll_on_main_thread = true;
-      *main_thread_scrolling_reasons = status.main_thread_scrolling_reasons;
-      return NULL;
-    }
-
-    if (optional_has_ancestor_scroll_handler &&
-        scroll_layer_impl->have_scroll_event_handlers())
-      *optional_has_ancestor_scroll_handler = true;
-
-    if (status.thread == InputHandler::SCROLL_ON_IMPL_THREAD &&
-        !potentially_scrolling_layer_impl) {
-      potentially_scrolling_layer_impl = scroll_layer_impl;
     }
   }
-
   // Falling back to the root scroll layer ensures generation of root overscroll
   // notifications while preventing scroll updates from being unintentionally
   // forwarded to the main thread. The inner viewport layer represents the
@@ -2551,24 +2553,21 @@ LayerImpl* LayerTreeHostImpl::FindScrollLayerForDeviceViewportPoint(
   if (potentially_scrolling_layer_impl == OuterViewportScrollLayer())
     potentially_scrolling_layer_impl = InnerViewportScrollLayer();
 
-  // Animated wheel scrolls need to scroll the outer viewport layer, and do not
-  // go through Viewport::ScrollBy which would normally handle the distribution.
-  // NOTE: This will need refactoring if we want smooth scrolling on Android.
-  if (type == ANIMATED_WHEEL &&
-      potentially_scrolling_layer_impl == InnerViewportScrollLayer()) {
-    potentially_scrolling_layer_impl = OuterViewportScrollLayer();
-  }
-
   return potentially_scrolling_layer_impl;
 }
 
 // Similar to LayerImpl::HasAncestor, but walks up the scroll parents.
 static bool HasScrollAncestor(LayerImpl* child, LayerImpl* scroll_ancestor) {
   DCHECK(scroll_ancestor);
-  for (LayerImpl* ancestor = child; ancestor;
-       ancestor = NextLayerInScrollOrder(ancestor)) {
-    if (ancestor->scrollable())
-      return ancestor == scroll_ancestor;
+  if (!child)
+    return false;
+  ScrollTree& scroll_tree =
+      child->layer_tree_impl()->property_trees()->scroll_tree;
+  ScrollNode* scroll_node = scroll_tree.Node(child->scroll_tree_index());
+  for (; scroll_tree.parent(scroll_node);
+       scroll_node = scroll_tree.parent(scroll_node)) {
+    if (scroll_node->data.scrollable)
+      return scroll_node->owner_id == scroll_ancestor->id();
   }
   return false;
 }
@@ -2581,10 +2580,12 @@ InputHandler::ScrollStatus LayerTreeHostImpl::ScrollBeginImpl(
   DCHECK(scroll_state->delta_x() == 0 && scroll_state->delta_y() == 0);
 
   InputHandler::ScrollStatus scroll_status;
-  scroll_status.main_thread_scrolling_reasons = NOT_SCROLLING_ON_MAIN;
+  scroll_status.main_thread_scrolling_reasons =
+      MainThreadScrollingReason::kNotScrollingOnMain;
   if (!scrolling_layer_impl) {
     scroll_status.thread = SCROLL_IGNORED;
-    scroll_status.main_thread_scrolling_reasons = NO_SCROLLING_LAYER;
+    scroll_status.main_thread_scrolling_reasons =
+        MainThreadScrollingReason::kNoScrollingLayer;
     return scroll_status;
   }
   scroll_status.thread = SCROLL_ON_IMPL_THREAD;
@@ -2595,7 +2596,7 @@ InputHandler::ScrollStatus LayerTreeHostImpl::ScrollBeginImpl(
   active_tree_->SetCurrentlyScrollingLayer(scrolling_layer_impl);
   // TODO(majidvp): get rid of wheel_scrolling_ and set is_direct_manipulation
   // in input_handler_proxy instead.
-  wheel_scrolling_ = (type == WHEEL || type == ANIMATED_WHEEL);
+  wheel_scrolling_ = IsWheelBasedScroll(type);
   scroll_state->set_is_direct_manipulation(!wheel_scrolling_);
   // Invoke |DistributeScrollDelta| even with zero delta and velocity to ensure
   // scroll customization callbacks are invoked.
@@ -2604,9 +2605,6 @@ InputHandler::ScrollStatus LayerTreeHostImpl::ScrollBeginImpl(
   client_->RenewTreePriority();
   RecordCompositorSlowScrollMetric(type, CC_THREAD);
 
-  // TODO(lanwei): Will remove this metric in M50 when we have used the new
-  // metrics for one milestone, see https://crbug.com/557787.
-  UMA_HISTOGRAM_BOOLEAN("TryScroll.SlowScroll", false);
   return scroll_status;
 }
 
@@ -2624,13 +2622,14 @@ InputHandler::ScrollStatus LayerTreeHostImpl::ScrollBegin(
     ScrollState* scroll_state,
     InputHandler::ScrollInputType type) {
   ScrollStatus scroll_status;
-  scroll_status.main_thread_scrolling_reasons = NOT_SCROLLING_ON_MAIN;
+  scroll_status.main_thread_scrolling_reasons =
+      MainThreadScrollingReason::kNotScrollingOnMain;
   TRACE_EVENT0("cc", "LayerTreeHostImpl::ScrollBegin");
 
   ClearCurrentlyScrollingLayer();
 
-  gfx::Point viewport_point(scroll_state->start_position_x(),
-                            scroll_state->start_position_y());
+  gfx::Point viewport_point(scroll_state->position_x(),
+                            scroll_state->position_y());
 
   gfx::PointF device_viewport_point = gfx::ScalePoint(
       gfx::PointF(viewport_point), active_tree_->device_scale_factor());
@@ -2639,13 +2638,13 @@ InputHandler::ScrollStatus LayerTreeHostImpl::ScrollBegin(
 
   if (layer_impl) {
     LayerImpl* scroll_layer_impl =
-        active_tree_->FindFirstScrollingLayerThatIsHitByPoint(
+        active_tree_->FindFirstScrollingLayerOrScrollbarLayerThatIsHitByPoint(
             device_viewport_point);
     if (scroll_layer_impl &&
         !HasScrollAncestor(layer_impl, scroll_layer_impl)) {
       scroll_status.thread = SCROLL_UNKNOWN;
       scroll_status.main_thread_scrolling_reasons =
-          InputHandler::FAILED_HIT_TEST;
+          MainThreadScrollingReason::kFailedHitTest;
       return scroll_status;
     }
   }
@@ -2653,15 +2652,15 @@ InputHandler::ScrollStatus LayerTreeHostImpl::ScrollBegin(
   bool scroll_on_main_thread = false;
   LayerImpl* scrolling_layer_impl = FindScrollLayerForDeviceViewportPoint(
       device_viewport_point, type, layer_impl, &scroll_on_main_thread,
-      &scroll_affects_scroll_handler_,
       &scroll_status.main_thread_scrolling_reasons);
+
+  if (scrolling_layer_impl)
+    scroll_affects_scroll_handler_ =
+        scrolling_layer_impl->layer_tree_impl()->have_scroll_event_handlers();
 
   if (scroll_on_main_thread) {
     RecordCompositorSlowScrollMetric(type, MAIN_THREAD);
 
-    // TODO(lanwei): Will remove this metric in M50 when we have used the new
-    // metrics for one milestone, see https://crbug.com/557787.
-    UMA_HISTOGRAM_BOOLEAN("TryScroll.SlowScroll", true);
     scroll_status.thread = SCROLL_ON_MAIN_THREAD;
     return scroll_status;
   }
@@ -2669,58 +2668,157 @@ InputHandler::ScrollStatus LayerTreeHostImpl::ScrollBegin(
   return ScrollBeginImpl(scroll_state, scrolling_layer_impl, type);
 }
 
+InputHandler::ScrollStatus LayerTreeHostImpl::ScrollAnimatedBegin(
+    const gfx::Point& viewport_point) {
+  InputHandler::ScrollStatus scroll_status;
+  scroll_status.main_thread_scrolling_reasons =
+      MainThreadScrollingReason::kNotScrollingOnMain;
+  ScrollTree& scroll_tree = active_tree_->property_trees()->scroll_tree;
+  ScrollNode* scroll_node = scroll_tree.CurrentlyScrollingNode();
+  if (scroll_node) {
+    gfx::Vector2dF delta;
+
+    if (ScrollAnimationUpdateTarget(scroll_node, delta)) {
+      scroll_status.thread = SCROLL_ON_IMPL_THREAD;
+    } else {
+      scroll_status.thread = SCROLL_IGNORED;
+      scroll_status.main_thread_scrolling_reasons =
+          MainThreadScrollingReason::kNotScrollable;
+    }
+    return scroll_status;
+  }
+  ScrollStateData scroll_state_data;
+  scroll_state_data.position_x = viewport_point.x();
+  scroll_state_data.position_y = viewport_point.y();
+  scroll_state_data.is_in_inertial_phase = true;
+  ScrollState scroll_state(scroll_state_data);
+
+  // ScrollAnimated is used for animated wheel scrolls. We find the first layer
+  // that can scroll and set up an animation of its scroll offset. Note that
+  // this does not currently go through the scroll customization machinery
+  // that ScrollBy uses for non-animated wheel scrolls.
+  scroll_status = ScrollBegin(&scroll_state, WHEEL);
+  scroll_node = scroll_tree.CurrentlyScrollingNode();
+  if (scroll_status.thread == SCROLL_ON_IMPL_THREAD) {
+    ScrollStateData scroll_state_end_data;
+    scroll_state_end_data.is_ending = true;
+    ScrollState scroll_state_end(scroll_state_end_data);
+    ScrollEnd(&scroll_state_end);
+  }
+  return scroll_status;
+}
+
+gfx::Vector2dF LayerTreeHostImpl::ComputeScrollDelta(
+    ScrollNode* scroll_node,
+    const gfx::Vector2dF& delta) {
+  ScrollTree& scroll_tree = active_tree()->property_trees()->scroll_tree;
+  float scale_factor = active_tree()->current_page_scale_factor();
+
+  gfx::Vector2dF adjusted_scroll(delta);
+  adjusted_scroll.Scale(1.f / scale_factor);
+  if (!scroll_node->data.user_scrollable_horizontal)
+    adjusted_scroll.set_x(0);
+  if (!scroll_node->data.user_scrollable_vertical)
+    adjusted_scroll.set_y(0);
+
+  gfx::ScrollOffset old_offset =
+      scroll_tree.current_scroll_offset(scroll_node->owner_id);
+  gfx::ScrollOffset new_offset = scroll_tree.ClampScrollOffsetToLimits(
+      old_offset + gfx::ScrollOffset(adjusted_scroll), scroll_node);
+
+  gfx::ScrollOffset scrolled = new_offset - old_offset;
+  return gfx::Vector2dF(scrolled.x(), scrolled.y());
+}
+
+bool LayerTreeHostImpl::ScrollAnimationCreate(ScrollNode* scroll_node,
+                                              const gfx::Vector2dF& delta) {
+  ScrollTree& scroll_tree = active_tree_->property_trees()->scroll_tree;
+
+  const float kEpsilon = 0.1f;
+  bool scroll_animated =
+      (std::abs(delta.x()) > kEpsilon || std::abs(delta.y()) > kEpsilon);
+  if (!scroll_animated) {
+    scroll_tree.ScrollBy(scroll_node, delta, active_tree());
+    return false;
+  }
+
+  scroll_tree.set_currently_scrolling_node(scroll_node->id);
+
+  gfx::ScrollOffset current_offset =
+      scroll_tree.current_scroll_offset(scroll_node->owner_id);
+  gfx::ScrollOffset target_offset = scroll_tree.ClampScrollOffsetToLimits(
+      current_offset + gfx::ScrollOffset(delta), scroll_node);
+  animation_host_->ImplOnlyScrollAnimationCreate(scroll_node->owner_id,
+                                                 target_offset, current_offset);
+
+  SetNeedsOneBeginImplFrame();
+
+  return true;
+}
+
 InputHandler::ScrollStatus LayerTreeHostImpl::ScrollAnimated(
     const gfx::Point& viewport_point,
     const gfx::Vector2dF& scroll_delta) {
   InputHandler::ScrollStatus scroll_status;
-  scroll_status.main_thread_scrolling_reasons = NOT_SCROLLING_ON_MAIN;
-  if (LayerImpl* layer_impl = CurrentlyScrollingLayer()) {
-    if (ScrollAnimationUpdateTarget(layer_impl, scroll_delta)) {
+  scroll_status.main_thread_scrolling_reasons =
+      MainThreadScrollingReason::kNotScrollingOnMain;
+  ScrollTree& scroll_tree = active_tree_->property_trees()->scroll_tree;
+  ScrollNode* scroll_node = scroll_tree.CurrentlyScrollingNode();
+  if (scroll_node) {
+    gfx::Vector2dF delta = scroll_delta;
+    if (!scroll_node->data.user_scrollable_horizontal)
+      delta.set_x(0);
+    if (!scroll_node->data.user_scrollable_vertical)
+      delta.set_y(0);
+
+    if (ScrollAnimationUpdateTarget(scroll_node, delta)) {
       scroll_status.thread = SCROLL_ON_IMPL_THREAD;
     } else {
       scroll_status.thread = SCROLL_IGNORED;
-      scroll_status.main_thread_scrolling_reasons = NOT_SCROLLABLE;
+      scroll_status.main_thread_scrolling_reasons =
+          MainThreadScrollingReason::kNotScrollable;
     }
     return scroll_status;
   }
 
-  ScrollState scroll_state(0, 0, viewport_point.x(), viewport_point.y(), 0, 0,
-                           false, true, false);
+  ScrollStateData scroll_state_data;
+  scroll_state_data.position_x = viewport_point.x();
+  scroll_state_data.position_y = viewport_point.y();
+  scroll_state_data.is_in_inertial_phase = true;
+  ScrollState scroll_state(scroll_state_data);
+
   // ScrollAnimated is used for animated wheel scrolls. We find the first layer
   // that can scroll and set up an animation of its scroll offset. Note that
-  // this does not currently go through the scroll customization and viewport
-  // machinery that ScrollBy uses for non-animated wheel scrolls.
-  scroll_status = ScrollBegin(&scroll_state, ANIMATED_WHEEL);
+  // this does not currently go through the scroll customization machinery
+  // that ScrollBy uses for non-animated wheel scrolls.
+  scroll_status = ScrollBegin(&scroll_state, WHEEL);
+  scroll_node = scroll_tree.CurrentlyScrollingNode();
   if (scroll_status.thread == SCROLL_ON_IMPL_THREAD) {
     gfx::Vector2dF pending_delta = scroll_delta;
-    for (LayerImpl* layer_impl = CurrentlyScrollingLayer(); layer_impl;
-         layer_impl = NextLayerInScrollOrder(layer_impl)) {
-      if (!layer_impl->scrollable())
-        continue;
+    if (scroll_node) {
+      for (; scroll_tree.parent(scroll_node);
+           scroll_node = scroll_tree.parent(scroll_node)) {
+        if (!scroll_node->data.scrollable ||
+            scroll_node->data.is_outer_viewport_scroll_layer)
+          continue;
 
-      gfx::ScrollOffset current_offset = layer_impl->CurrentScrollOffset();
-      gfx::ScrollOffset target_offset =
-          ScrollOffsetWithDelta(current_offset, pending_delta);
-      target_offset.SetToMax(gfx::ScrollOffset());
-      target_offset.SetToMin(layer_impl->MaxScrollOffset());
-      gfx::Vector2dF actual_delta = target_offset.DeltaFrom(current_offset);
+        if (scroll_node->data.is_inner_viewport_scroll_layer) {
+          gfx::Vector2dF scrolled = viewport()->ScrollAnimated(pending_delta);
+          // Viewport::ScrollAnimated returns pending_delta as long as it
+          // starts an animation.
+          if (scrolled == pending_delta)
+            return scroll_status;
+          pending_delta -= scrolled;
+          continue;
+        }
 
-      const float kEpsilon = 0.1f;
-      bool can_layer_scroll = (std::abs(actual_delta.x()) > kEpsilon ||
-                               std::abs(actual_delta.y()) > kEpsilon);
+        gfx::Vector2dF scroll_delta =
+            ComputeScrollDelta(scroll_node, pending_delta);
+        if (ScrollAnimationCreate(scroll_node, scroll_delta))
+          return scroll_status;
 
-      if (!can_layer_scroll) {
-        layer_impl->ScrollBy(actual_delta);
-        pending_delta -= actual_delta;
-        continue;
+        pending_delta -= scroll_delta;
       }
-
-      active_tree_->SetCurrentlyScrollingLayer(layer_impl);
-
-      ScrollAnimationCreate(layer_impl, target_offset, current_offset);
-
-      SetNeedsOneBeginImplFrame();
-      return scroll_status;
     }
   }
   scroll_state.set_is_ending(true);
@@ -2728,14 +2826,15 @@ InputHandler::ScrollStatus LayerTreeHostImpl::ScrollAnimated(
   return scroll_status;
 }
 
-gfx::Vector2dF LayerTreeHostImpl::ScrollLayerWithViewportSpaceDelta(
-    LayerImpl* layer_impl,
+gfx::Vector2dF LayerTreeHostImpl::ScrollNodeWithViewportSpaceDelta(
+    ScrollNode* scroll_node,
     const gfx::PointF& viewport_point,
-    const gfx::Vector2dF& viewport_delta) {
+    const gfx::Vector2dF& viewport_delta,
+    ScrollTree* scroll_tree) {
   // Layers with non-invertible screen space transforms should not have passed
   // the scroll hit test in the first place.
   const gfx::Transform screen_space_transform =
-      layer_impl->ScreenSpaceTransform();
+      scroll_tree->ScreenSpaceTransform(scroll_node->id);
   DCHECK(screen_space_transform.IsInvertible());
   gfx::Transform inverse_screen_space_transform(
       gfx::Transform::kSkipInitialization);
@@ -2773,10 +2872,13 @@ gfx::Vector2dF LayerTreeHostImpl::ScrollLayerWithViewportSpaceDelta(
     return gfx::Vector2dF();
 
   // Apply the scroll delta.
-  gfx::ScrollOffset previous_offset = layer_impl->CurrentScrollOffset();
-  layer_impl->ScrollBy(local_end_point - local_start_point);
+  gfx::ScrollOffset previous_offset =
+      scroll_tree->current_scroll_offset(scroll_node->owner_id);
+  scroll_tree->ScrollBy(scroll_node, local_end_point - local_start_point,
+                        active_tree());
   gfx::ScrollOffset scrolled =
-      layer_impl->CurrentScrollOffset() - previous_offset;
+      scroll_tree->current_scroll_offset(scroll_node->owner_id) -
+      previous_offset;
 
   // Get the end point in the layer's content space so we can apply its
   // ScreenSpaceTransform.
@@ -2795,16 +2897,20 @@ gfx::Vector2dF LayerTreeHostImpl::ScrollLayerWithViewportSpaceDelta(
   return actual_viewport_end_point - viewport_point;
 }
 
-static gfx::Vector2dF ScrollLayerWithLocalDelta(
-    LayerImpl* layer_impl,
+static gfx::Vector2dF ScrollNodeWithLocalDelta(
+    ScrollNode* scroll_node,
     const gfx::Vector2dF& local_delta,
-    float page_scale_factor) {
-  gfx::ScrollOffset previous_offset = layer_impl->CurrentScrollOffset();
+    float page_scale_factor,
+    LayerTreeImpl* layer_tree_impl) {
+  ScrollTree& scroll_tree = layer_tree_impl->property_trees()->scroll_tree;
+  gfx::ScrollOffset previous_offset =
+      scroll_tree.current_scroll_offset(scroll_node->owner_id);
   gfx::Vector2dF delta = local_delta;
   delta.Scale(1.f / page_scale_factor);
-  layer_impl->ScrollBy(delta);
+  scroll_tree.ScrollBy(scroll_node, delta, layer_tree_impl);
   gfx::ScrollOffset scrolled =
-      layer_impl->CurrentScrollOffset() - previous_offset;
+      scroll_tree.current_scroll_offset(scroll_node->owner_id) -
+      previous_offset;
   gfx::Vector2dF consumed_scroll(scrolled.x(), scrolled.y());
   consumed_scroll.Scale(page_scale_factor);
 
@@ -2813,10 +2919,12 @@ static gfx::Vector2dF ScrollLayerWithLocalDelta(
 
 // TODO(danakj): Make this into two functions, one with delta, one with
 // viewport_point, no bool required.
-gfx::Vector2dF LayerTreeHostImpl::ScrollLayer(LayerImpl* layer_impl,
-                                              const gfx::Vector2dF& delta,
-                                              const gfx::Point& viewport_point,
-                                              bool is_direct_manipulation) {
+gfx::Vector2dF LayerTreeHostImpl::ScrollSingleNode(
+    ScrollNode* scroll_node,
+    const gfx::Vector2dF& delta,
+    const gfx::Point& viewport_point,
+    bool is_direct_manipulation,
+    ScrollTree* scroll_tree) {
   // Events representing direct manipulation of the screen (such as gesture
   // events) need to be transformed from viewport coordinates to local layer
   // coordinates so that the scrolling contents exactly follow the user's
@@ -2825,25 +2933,26 @@ gfx::Vector2dF LayerTreeHostImpl::ScrollLayer(LayerImpl* layer_impl,
   // can just apply them directly, but the page scale factor is applied to the
   // scroll delta.
   if (is_direct_manipulation) {
-    return ScrollLayerWithViewportSpaceDelta(
-        layer_impl, gfx::PointF(viewport_point), delta);
+    return ScrollNodeWithViewportSpaceDelta(
+        scroll_node, gfx::PointF(viewport_point), delta, scroll_tree);
   }
   float scale_factor = active_tree()->current_page_scale_factor();
-  return ScrollLayerWithLocalDelta(layer_impl, delta, scale_factor);
+  return ScrollNodeWithLocalDelta(scroll_node, delta, scale_factor,
+                                  active_tree());
 }
 
-void LayerTreeHostImpl::ApplyScroll(LayerImpl* layer,
+void LayerTreeHostImpl::ApplyScroll(ScrollNode* scroll_node,
                                     ScrollState* scroll_state) {
   DCHECK(scroll_state);
-  gfx::Point viewport_point(scroll_state->start_position_x(),
-                            scroll_state->start_position_y());
+  gfx::Point viewport_point(scroll_state->position_x(),
+                            scroll_state->position_y());
   const gfx::Vector2dF delta(scroll_state->delta_x(), scroll_state->delta_y());
   gfx::Vector2dF applied_delta;
   // TODO(tdresser): Use a more rational epsilon. See crbug.com/510550 for
   // details.
   const float kEpsilon = 0.1f;
 
-  if (layer == InnerViewportScrollLayer()) {
+  if (scroll_node->data.is_inner_viewport_scroll_layer) {
     bool affect_top_controls = !wheel_scrolling_;
     Viewport::ScrollResult result = viewport()->ScrollBy(
         delta, viewport_point, scroll_state->is_direct_manipulation(),
@@ -2854,15 +2963,17 @@ void LayerTreeHostImpl::ApplyScroll(LayerImpl* layer,
         std::abs(result.content_scrolled_delta.y()) > kEpsilon);
     scroll_state->ConsumeDelta(applied_delta.x(), applied_delta.y());
   } else {
-    applied_delta = ScrollLayer(layer, delta, viewport_point,
-                                scroll_state->is_direct_manipulation());
+    applied_delta = ScrollSingleNode(
+        scroll_node, delta, viewport_point,
+        scroll_state->is_direct_manipulation(),
+        &scroll_state->layer_tree_impl()->property_trees()->scroll_tree);
   }
 
   // If the layer wasn't able to move, try the next one in the hierarchy.
   bool scrolled = std::abs(applied_delta.x()) > kEpsilon;
   scrolled = scrolled || std::abs(applied_delta.y()) > kEpsilon;
 
-  if (scrolled && layer != InnerViewportScrollLayer()) {
+  if (scrolled && !scroll_node->data.is_inner_viewport_scroll_layer) {
     // If the applied delta is within 45 degrees of the input
     // delta, bail out to make it easier to scroll just one layer
     // in one direction without affecting any of its parents.
@@ -2883,7 +2994,7 @@ void LayerTreeHostImpl::ApplyScroll(LayerImpl* layer,
   if (!scrolled)
     return;
 
-  scroll_state->set_current_native_scrolling_layer(layer);
+  scroll_state->set_current_native_scrolling_node(scroll_node);
 }
 
 void LayerTreeHostImpl::DistributeScrollDelta(ScrollState* scroll_state) {
@@ -2891,17 +3002,23 @@ void LayerTreeHostImpl::DistributeScrollDelta(ScrollState* scroll_state) {
   // is not the case here. We eventually want to have the same behaviour on both
   // sides but it may become a non issue if we get rid of scroll chaining (see
   // crbug.com/526462)
-  std::list<LayerImpl*> current_scroll_chain;
-  for (LayerImpl* layer_impl = CurrentlyScrollingLayer(); layer_impl;
-       layer_impl = NextLayerInScrollOrder(layer_impl)) {
-    // Skip the outer viewport scroll layer so that we try to scroll the
-    // viewport only once. i.e. The inner viewport layer represents the
-    // viewport.
-    if (!layer_impl->scrollable() || layer_impl == OuterViewportScrollLayer())
-      continue;
-    current_scroll_chain.push_front(layer_impl);
+  std::list<const ScrollNode*> current_scroll_chain;
+  ScrollTree& scroll_tree = active_tree_->property_trees()->scroll_tree;
+  ScrollNode* scroll_node = scroll_tree.CurrentlyScrollingNode();
+  if (scroll_node) {
+    for (; scroll_tree.parent(scroll_node);
+         scroll_node = scroll_tree.parent(scroll_node)) {
+      // Skip the outer viewport scroll layer so that we try to scroll the
+      // viewport only once. i.e. The inner viewport layer represents the
+      // viewport.
+      if (!scroll_node->data.scrollable ||
+          scroll_node->data.is_outer_viewport_scroll_layer)
+        continue;
+      current_scroll_chain.push_front(scroll_node);
+    }
   }
-  scroll_state->set_scroll_chain(current_scroll_chain);
+  scroll_state->set_scroll_chain_and_layer_tree(current_scroll_chain,
+                                                active_tree());
   scroll_state->DistributeToScrollChainDescendant();
 }
 
@@ -2919,12 +3036,13 @@ InputHandlerScrollResult LayerTreeHostImpl::ScrollBy(
   scroll_state->set_delta_consumed_for_scroll_sequence(
       did_lock_scrolling_layer_);
   scroll_state->set_is_direct_manipulation(!wheel_scrolling_);
-  scroll_state->set_current_native_scrolling_layer(CurrentlyScrollingLayer());
+  scroll_state->set_current_native_scrolling_node(
+      active_tree()->property_trees()->scroll_tree.CurrentlyScrollingNode());
 
   DistributeScrollDelta(scroll_state);
 
-  active_tree_->SetCurrentlyScrollingLayer(
-      scroll_state->current_native_scrolling_layer());
+  active_tree_->SetCurrentlyScrollingLayer(active_tree_->LayerById(
+      scroll_state->current_native_scrolling_node()->owner_id));
   did_lock_scrolling_layer_ =
       scroll_state->delta_consumed_for_scroll_sequence();
 
@@ -2985,35 +3103,40 @@ bool LayerTreeHostImpl::ScrollVerticallyByPage(const gfx::Point& viewport_point,
                                                ScrollDirection direction) {
   DCHECK(wheel_scrolling_);
 
-  for (LayerImpl* layer_impl = CurrentlyScrollingLayer(); layer_impl;
-       layer_impl = NextLayerInScrollOrder(layer_impl)) {
-    // The inner viewport layer represents the viewport.
-    if (!layer_impl->scrollable() || layer_impl == OuterViewportScrollLayer())
-      continue;
+  ScrollTree& scroll_tree = active_tree_->property_trees()->scroll_tree;
+  ScrollNode* scroll_node = scroll_tree.CurrentlyScrollingNode();
+  if (scroll_node) {
+    for (; scroll_tree.parent(scroll_node);
+         scroll_node = scroll_tree.parent(scroll_node)) {
+      // The inner viewport layer represents the viewport.
+      if (!scroll_node->data.scrollable ||
+          scroll_node->data.is_outer_viewport_scroll_layer)
+        continue;
 
-    float height = layer_impl->clip_height();
+      float height =
+          scroll_tree.scroll_clip_layer_bounds(scroll_node->id).height();
 
-    // These magical values match WebKit and are designed to scroll nearly the
-    // entire visible content height but leave a bit of overlap.
-    float page = std::max(height * 0.875f, 1.f);
-    if (direction == SCROLL_BACKWARD)
-      page = -page;
+      // These magical values match WebKit and are designed to scroll nearly the
+      // entire visible content height but leave a bit of overlap.
+      float page = std::max(height * 0.875f, 1.f);
+      if (direction == SCROLL_BACKWARD)
+        page = -page;
 
-    gfx::Vector2dF delta = gfx::Vector2dF(0.f, page);
+      gfx::Vector2dF delta = gfx::Vector2dF(0.f, page);
 
-    gfx::Vector2dF applied_delta =
-        ScrollLayerWithLocalDelta(layer_impl, delta, 1.f);
+      gfx::Vector2dF applied_delta =
+          ScrollNodeWithLocalDelta(scroll_node, delta, 1.f, active_tree());
 
-    if (!applied_delta.IsZero()) {
-      client_->SetNeedsCommitOnImplThread();
-      SetNeedsRedraw();
-      client_->RenewTreePriority();
-      return true;
+      if (!applied_delta.IsZero()) {
+        client_->SetNeedsCommitOnImplThread();
+        SetNeedsRedraw();
+        client_->RenewTreePriority();
+        return true;
+      }
+
+      scroll_tree.set_currently_scrolling_node(scroll_node->id);
     }
-
-    active_tree_->SetCurrentlyScrollingLayer(layer_impl);
   }
-
   return false;
 }
 
@@ -3054,10 +3177,11 @@ void LayerTreeHostImpl::ScrollEnd(ScrollState* scroll_state) {
 InputHandler::ScrollStatus LayerTreeHostImpl::FlingScrollBegin() {
   InputHandler::ScrollStatus scroll_status;
   scroll_status.main_thread_scrolling_reasons =
-      InputHandler::NOT_SCROLLING_ON_MAIN;
+      MainThreadScrollingReason::kNotScrollingOnMain;
   if (!CurrentlyScrollingLayer()) {
     scroll_status.thread = SCROLL_IGNORED;
-    scroll_status.main_thread_scrolling_reasons = NO_SCROLLING_LAYER;
+    scroll_status.main_thread_scrolling_reasons =
+        MainThreadScrollingReason::kNoScrollingLayer;
   } else {
     scroll_status.thread = SCROLL_ON_IMPL_THREAD;
   }
@@ -3089,10 +3213,10 @@ void LayerTreeHostImpl::MouseMoveAt(const gfx::Point& viewport_point) {
     return;
 
   bool scroll_on_main_thread = false;
-  InputHandler::MainThreadScrollingReason main_thread_scrolling_reasons;
+  uint32_t main_thread_scrolling_reasons;
   LayerImpl* scroll_layer_impl = FindScrollLayerForDeviceViewportPoint(
-      device_viewport_point, InputHandler::GESTURE, layer_impl,
-      &scroll_on_main_thread, NULL, &main_thread_scrolling_reasons);
+      device_viewport_point, InputHandler::TOUCHSCREEN, layer_impl,
+      &scroll_on_main_thread, &main_thread_scrolling_reasons);
   if (scroll_layer_impl == InnerViewportScrollLayer())
     scroll_layer_impl = OuterViewportScrollLayer();
   if (scroll_on_main_thread || !scroll_layer_impl)
@@ -3176,26 +3300,29 @@ void LayerTreeHostImpl::PinchGestureEnd() {
   SetNeedsRedraw();
 }
 
-static void CollectScrollDeltas(ScrollAndScaleSet* scroll_info,
-                                LayerImpl* layer_impl) {
-  if (!layer_impl)
-    return;
-
-  gfx::ScrollOffset scroll_delta = layer_impl->PullDeltaForMainThread();
-
-  if (!scroll_delta.IsZero()) {
-    LayerTreeHostCommon::ScrollUpdateInfo scroll;
-    scroll.layer_id = layer_impl->id();
-    scroll.scroll_delta = gfx::Vector2d(scroll_delta.x(), scroll_delta.y());
-    scroll_info->scrolls.push_back(scroll);
+std::unique_ptr<BeginFrameCallbackList>
+LayerTreeHostImpl::ProcessLayerTreeMutations() {
+  std::unique_ptr<BeginFrameCallbackList> callbacks(new BeginFrameCallbackList);
+  if (mutator_) {
+    const base::Closure& callback = mutator_->TakeMutations();
+    if (!callback.is_null())
+      callbacks->push_back(callback);
   }
-
-  for (size_t i = 0; i < layer_impl->children().size(); ++i)
-    CollectScrollDeltas(scroll_info, layer_impl->children()[i].get());
+  return callbacks;
 }
 
-scoped_ptr<ScrollAndScaleSet> LayerTreeHostImpl::ProcessScrollDeltas() {
-  scoped_ptr<ScrollAndScaleSet> scroll_info(new ScrollAndScaleSet());
+static void CollectScrollDeltas(ScrollAndScaleSet* scroll_info,
+                                LayerImpl* root_layer) {
+  if (!root_layer)
+    return;
+
+  return root_layer->layer_tree_impl()
+      ->property_trees()
+      ->scroll_tree.CollectScrollDeltas(scroll_info);
+}
+
+std::unique_ptr<ScrollAndScaleSet> LayerTreeHostImpl::ProcessScrollDeltas() {
+  std::unique_ptr<ScrollAndScaleSet> scroll_info(new ScrollAndScaleSet());
 
   CollectScrollDeltas(scroll_info.get(), active_tree_->root_layer());
   scroll_info->page_scale_delta =
@@ -3291,23 +3418,13 @@ bool LayerTreeHostImpl::AnimateScrollbars(base::TimeTicks monotonic_time) {
 }
 
 bool LayerTreeHostImpl::AnimateLayers(base::TimeTicks monotonic_time) {
-  if (!settings_.accelerated_animation_enabled)
-    return false;
-
-  bool animated = false;
-  if (animation_host_) {
-    if (animation_host_->AnimateLayers(monotonic_time))
-      animated = true;
-  } else {
-    if (animation_registrar_->AnimateLayers(monotonic_time))
-      animated = true;
-  }
+  const bool animated = animation_host_->AnimateLayers(monotonic_time);
 
   // TODO(crbug.com/551134): Only do this if the animations are on the active
   // tree, or if they are on the pending tree waiting for some future time to
   // start.
   // TODO(crbug.com/551138): We currently have a single signal from the
-  // animation host/registrar, so on the last frame of an animation we will
+  // animation_host, so on the last frame of an animation we will
   // still request an extra SetNeedsAnimate here.
   if (animated)
     SetNeedsOneBeginImplFrame();
@@ -3318,21 +3435,10 @@ bool LayerTreeHostImpl::AnimateLayers(base::TimeTicks monotonic_time) {
 }
 
 void LayerTreeHostImpl::UpdateAnimationState(bool start_ready_animations) {
-  if (!settings_.accelerated_animation_enabled)
-    return;
+  std::unique_ptr<AnimationEvents> events = animation_host_->CreateEvents();
 
-  bool has_active_animations = false;
-  scoped_ptr<AnimationEvents> events;
-
-  if (animation_host_) {
-    events = animation_host_->CreateEvents();
-    has_active_animations = animation_host_->UpdateAnimationState(
-        start_ready_animations, events.get());
-  } else {
-    events = animation_registrar_->CreateEvents();
-    has_active_animations = animation_registrar_->UpdateAnimationState(
-        start_ready_animations, events.get());
-  }
+  const bool has_active_animations = animation_host_->UpdateAnimationState(
+      start_ready_animations, events.get());
 
   if (!events->events_.empty())
     client_->PostAnimationEventsToMainThreadOnImplThread(std::move(events));
@@ -3342,18 +3448,7 @@ void LayerTreeHostImpl::UpdateAnimationState(bool start_ready_animations) {
 }
 
 void LayerTreeHostImpl::ActivateAnimations() {
-  if (!settings_.accelerated_animation_enabled)
-    return;
-
-  bool activated = false;
-  if (animation_host_) {
-    if (animation_host_->ActivateAnimations())
-      activated = true;
-  } else {
-    if (animation_registrar_->ActivateAnimations())
-      activated = true;
-  }
-
+  const bool activated = animation_host_->ActivateAnimations();
   if (activated) {
     // Activating an animation changes layer draw properties, such as
     // screen_space_transform_is_animating. So when we see a new animation get
@@ -3367,7 +3462,8 @@ void LayerTreeHostImpl::ActivateAnimations() {
 std::string LayerTreeHostImpl::LayerTreeAsJson() const {
   std::string str;
   if (active_tree_->root_layer()) {
-    scoped_ptr<base::Value> json(active_tree_->root_layer()->LayerTreeAsJson());
+    std::unique_ptr<base::Value> json(
+        active_tree_->root_layer()->LayerTreeAsJson());
     base::JSONWriter::WriteWithOptions(
         *json, base::JSONWriter::OPTIONS_PRETTY_PRINT, &str);
   }
@@ -3380,9 +3476,8 @@ void LayerTreeHostImpl::RegisterScrollbarAnimationController(
     return;
   if (ScrollbarAnimationControllerForId(scroll_layer_id))
     return;
-  scrollbar_animation_controllers_.add(
-      scroll_layer_id,
-      active_tree_->CreateScrollbarAnimationController(scroll_layer_id));
+  scrollbar_animation_controllers_[scroll_layer_id] =
+      active_tree_->CreateScrollbarAnimationController(scroll_layer_id);
 }
 
 void LayerTreeHostImpl::UnregisterScrollbarAnimationController(
@@ -3399,7 +3494,7 @@ LayerTreeHostImpl::ScrollbarAnimationControllerForId(
   auto i = scrollbar_animation_controllers_.find(scroll_layer_id);
   if (i == scrollbar_animation_controllers_.end())
     return nullptr;
-  return i->second;
+  return i->second.get();
 }
 
 void LayerTreeHostImpl::PostDelayedScrollbarAnimationTask(
@@ -3467,12 +3562,12 @@ base::TimeDelta LayerTreeHostImpl::CurrentBeginFrameInterval() const {
   return current_begin_frame_tracker_.Interval();
 }
 
-scoped_refptr<base::trace_event::ConvertableToTraceFormat>
+std::unique_ptr<base::trace_event::ConvertableToTraceFormat>
 LayerTreeHostImpl::AsValueWithFrame(FrameData* frame) const {
-  scoped_refptr<base::trace_event::TracedValue> state =
-      new base::trace_event::TracedValue();
+  std::unique_ptr<base::trace_event::TracedValue> state(
+      new base::trace_event::TracedValue());
   AsValueWithFrameInto(frame, state.get());
-  return state;
+  return std::move(state);
 }
 
 void LayerTreeHostImpl::AsValueWithFrameInto(
@@ -3573,6 +3668,8 @@ void LayerTreeHostImpl::CreateUIResource(UIResourceId uid,
   AutoLockUIResourceBitmap bitmap_lock(bitmap);
   resource_provider_->CopyToResource(id, bitmap_lock.GetPixels(),
                                      bitmap.GetSize());
+
+  resource_provider_->GenerateSyncTokenForResource(id);
   MarkUIResourceNotEvicted(uid);
 }
 
@@ -3633,7 +3730,7 @@ void LayerTreeHostImpl::MarkUIResourceNotEvicted(UIResourceId uid) {
 }
 
 void LayerTreeHostImpl::ScheduleMicroBenchmark(
-    scoped_ptr<MicroBenchmarkImpl> benchmark) {
+    std::unique_ptr<MicroBenchmarkImpl> benchmark) {
   micro_benchmark_controller_.ScheduleRun(std::move(benchmark));
 }
 
@@ -3668,65 +3765,17 @@ void LayerTreeHostImpl::UpdateRootLayerStateForSynchronousInputHandler() {
 }
 
 void LayerTreeHostImpl::ScrollAnimationAbort(LayerImpl* layer_impl) {
-  if (animation_host_)
-    return animation_host_->ScrollAnimationAbort();
-
-  layer_impl->layer_animation_controller()->AbortAnimations(
-      Animation::SCROLL_OFFSET);
-}
-
-void LayerTreeHostImpl::ScrollAnimationCreate(
-    LayerImpl* layer_impl,
-    const gfx::ScrollOffset& target_offset,
-    const gfx::ScrollOffset& current_offset) {
-  if (animation_host_)
-    return animation_host_->ImplOnlyScrollAnimationCreate(
-        layer_impl->id(), target_offset, current_offset);
-
-  scoped_ptr<ScrollOffsetAnimationCurve> curve =
-      ScrollOffsetAnimationCurve::Create(
-          target_offset, EaseInOutTimingFunction::Create(),
-          ScrollOffsetAnimationCurve::DurationBehavior::INVERSE_DELTA);
-  curve->SetInitialValue(current_offset);
-
-  scoped_ptr<Animation> animation = Animation::Create(
-      std::move(curve), AnimationIdProvider::NextAnimationId(),
-      AnimationIdProvider::NextGroupId(), Animation::SCROLL_OFFSET);
-  animation->set_is_impl_only(true);
-
-  layer_impl->layer_animation_controller()->AddAnimation(std::move(animation));
+  return animation_host_->ScrollAnimationAbort(false /* needs_completion */);
 }
 
 bool LayerTreeHostImpl::ScrollAnimationUpdateTarget(
-    LayerImpl* layer_impl,
+    ScrollNode* scroll_node,
     const gfx::Vector2dF& scroll_delta) {
-  if (animation_host_)
-    return animation_host_->ImplOnlyScrollAnimationUpdateTarget(
-        layer_impl->id(), scroll_delta, layer_impl->MaxScrollOffset(),
-        CurrentBeginFrameArgs().frame_time);
-
-  Animation* animation =
-      layer_impl->layer_animation_controller()
-          ? layer_impl->layer_animation_controller()->GetAnimation(
-                Animation::SCROLL_OFFSET)
-          : nullptr;
-  if (!animation)
-    return false;
-
-  ScrollOffsetAnimationCurve* curve =
-      animation->curve()->ToScrollOffsetAnimationCurve();
-
-  gfx::ScrollOffset new_target =
-      gfx::ScrollOffsetWithDelta(curve->target_value(), scroll_delta);
-  new_target.SetToMax(gfx::ScrollOffset());
-  new_target.SetToMin(layer_impl->MaxScrollOffset());
-
-  curve->UpdateTarget(
-      animation->TrimTimeToCurrentIteration(CurrentBeginFrameArgs().frame_time)
-          .InSecondsF(),
-      new_target);
-
-  return true;
+  return animation_host_->ImplOnlyScrollAnimationUpdateTarget(
+      scroll_node->owner_id, scroll_delta,
+      active_tree_->property_trees()->scroll_tree.MaxScrollOffset(
+          scroll_node->id),
+      CurrentBeginFrameArgs().frame_time);
 }
 
 bool LayerTreeHostImpl::IsLayerInTree(int layer_id,
@@ -3755,7 +3804,7 @@ void LayerTreeHostImpl::SetTreeLayerFilterMutated(
   if (!tree)
     return;
 
-  LayerAnimationValueObserver* layer = tree->LayerById(layer_id);
+  LayerImpl* layer = tree->LayerById(layer_id);
   if (layer)
     layer->OnFilterAnimated(filters);
 }
@@ -3766,7 +3815,7 @@ void LayerTreeHostImpl::SetTreeLayerOpacityMutated(int layer_id,
   if (!tree)
     return;
 
-  LayerAnimationValueObserver* layer = tree->LayerById(layer_id);
+  LayerImpl* layer = tree->LayerById(layer_id);
   if (layer)
     layer->OnOpacityAnimated(opacity);
 }
@@ -3778,7 +3827,7 @@ void LayerTreeHostImpl::SetTreeLayerTransformMutated(
   if (!tree)
     return;
 
-  LayerAnimationValueObserver* layer = tree->LayerById(layer_id);
+  LayerImpl* layer = tree->LayerById(layer_id);
   if (layer)
     layer->OnTransformAnimated(transform);
 }
@@ -3790,7 +3839,7 @@ void LayerTreeHostImpl::SetTreeLayerScrollOffsetMutated(
   if (!tree)
     return;
 
-  LayerAnimationValueObserver* layer = tree->LayerById(layer_id);
+  LayerImpl* layer = tree->LayerById(layer_id);
   if (layer)
     layer->OnScrollOffsetAnimated(scroll_offset);
 }
@@ -3802,16 +3851,14 @@ void LayerTreeHostImpl::TreeLayerTransformIsPotentiallyAnimatingChanged(
   if (!tree)
     return;
 
-  LayerAnimationValueObserver* layer = tree->LayerById(layer_id);
+  LayerImpl* layer = tree->LayerById(layer_id);
   if (layer)
     layer->OnTransformIsPotentiallyAnimatingChanged(is_animating);
 }
 
 bool LayerTreeHostImpl::AnimationsPreserveAxisAlignment(
     const LayerImpl* layer) const {
-  return animation_host_
-             ? animation_host_->AnimationsPreserveAxisAlignment(layer->id())
-             : true;
+  return animation_host_->AnimationsPreserveAxisAlignment(layer->id());
 }
 
 void LayerTreeHostImpl::SetLayerFilterMutated(int layer_id,
@@ -3875,14 +3922,15 @@ void LayerTreeHostImpl::LayerTransformIsPotentiallyAnimatingChanged(
 
 void LayerTreeHostImpl::ScrollOffsetAnimationFinished() {
   // TODO(majidvp): We should pass in the original starting scroll position here
-  ScrollState scroll_state(0, 0, 0, 0, 0, 0, false, false, false);
+  ScrollStateData scroll_state_data;
+  ScrollState scroll_state(scroll_state_data);
   ScrollEnd(&scroll_state);
 }
 
 gfx::ScrollOffset LayerTreeHostImpl::GetScrollOffsetForAnimation(
     int layer_id) const {
   if (active_tree()) {
-    LayerAnimationValueProvider* layer = active_tree()->LayerById(layer_id);
+    LayerImpl* layer = active_tree()->LayerById(layer_id);
     if (layer)
       return layer->ScrollOffsetForAnimation();
   }

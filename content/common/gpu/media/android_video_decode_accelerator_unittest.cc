@@ -6,10 +6,11 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/android/jni_android.h"
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "content/common/gpu/media/android_copying_backing_strategy.h"
 #include "content/common/gpu/media/android_video_decode_accelerator.h"
@@ -27,13 +28,15 @@ bool MockMakeContextCurrent() {
   return true;
 }
 
+static base::WeakPtr<gpu::gles2::GLES2Decoder> MockGetGLES2Decoder(
+    const base::WeakPtr<gpu::gles2::GLES2Decoder>& decoder) {
+  return decoder;
+}
+
 }  // namespace
 
 namespace content {
 
-// TODO(felipeg): Add more unit tests to test the ordinary behavior of
-// AndroidVideoDecodeAccelerator.
-// http://crbug.com/178647
 class MockVideoDecodeAcceleratorClient
     : public media::VideoDecodeAccelerator::Client {
  public:
@@ -42,6 +45,7 @@ class MockVideoDecodeAcceleratorClient
 
   // VideoDecodeAccelerator::Client implementation.
   void ProvidePictureBuffers(uint32_t requested_num_of_buffers,
+                             uint32_t textures_per_buffer,
                              const gfx::Size& dimensions,
                              uint32_t texture_target) override {}
   void DismissPictureBuffer(int32_t picture_buffer_id) override {}
@@ -60,32 +64,34 @@ class AndroidVideoDecodeAcceleratorTest : public testing::Test {
   void SetUp() override {
     JNIEnv* env = base::android::AttachCurrentThread();
     media::RegisterJni(env);
-    // TODO(felipeg): fix GL bindings, so that the decoder can perform GL
-    // calls.
 
     // Start message loop because
     // AndroidVideoDecodeAccelerator::ConfigureMediaCodec() starts a timer task.
     message_loop_.reset(new base::MessageLoop());
 
-    scoped_ptr<gpu::gles2::MockGLES2Decoder> decoder(
+    std::unique_ptr<gpu::gles2::MockGLES2Decoder> decoder(
         new gpu::gles2::MockGLES2Decoder());
-    scoped_ptr<MockVideoDecodeAcceleratorClient> client(
+    std::unique_ptr<MockVideoDecodeAcceleratorClient> client(
         new MockVideoDecodeAcceleratorClient());
     accelerator_.reset(new AndroidVideoDecodeAccelerator(
-        decoder->AsWeakPtr(), base::Bind(&MockMakeContextCurrent)));
+        base::Bind(&MockMakeContextCurrent),
+        base::Bind(&MockGetGLES2Decoder, decoder->AsWeakPtr())));
   }
 
   bool Configure(media::VideoCodec codec) {
     AndroidVideoDecodeAccelerator* accelerator =
         static_cast<AndroidVideoDecodeAccelerator*>(accelerator_.get());
-    accelerator->surface_texture_ = gfx::SurfaceTexture::Create(0);
-    accelerator->codec_ = codec;
-    return accelerator->ConfigureMediaCodec();
+    scoped_refptr<gfx::SurfaceTexture> surface_texture =
+        gfx::SurfaceTexture::Create(0);
+    accelerator->codec_config_->surface_ =
+        gfx::ScopedJavaSurface(surface_texture.get());
+    accelerator->codec_config_->codec_ = codec;
+    return accelerator->ConfigureMediaCodecSynchronously();
   }
 
  private:
-  scoped_ptr<media::VideoDecodeAccelerator> accelerator_;
-  scoped_ptr<base::MessageLoop> message_loop_;
+  std::unique_ptr<media::VideoDecodeAccelerator> accelerator_;
+  std::unique_ptr<base::MessageLoop> message_loop_;
 };
 
 TEST_F(AndroidVideoDecodeAcceleratorTest, ConfigureUnsupportedCodec) {

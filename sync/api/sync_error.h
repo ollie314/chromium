@@ -6,9 +6,9 @@
 #define SYNC_API_SYNC_ERROR_H_
 
 #include <iosfwd>
+#include <memory>
 #include <string>
 
-#include "base/memory/scoped_ptr.h"
 #include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base/model_type.h"
 
@@ -114,8 +114,8 @@ class SYNC_EXPORT SyncError {
   // Reset the error to it's default (unset) values.
   void Clear();
 
-  // scoped_ptr is necessary because Location objects aren't assignable.
-  scoped_ptr<tracked_objects::Location> location_;
+  // unique_ptr is necessary because Location objects aren't assignable.
+  std::unique_ptr<tracked_objects::Location> location_;
   std::string message_;
   ModelType model_type_;
   ErrorType error_type_;

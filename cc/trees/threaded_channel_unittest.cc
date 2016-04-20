@@ -5,6 +5,7 @@
 #include "cc/trees/threaded_channel.h"
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "cc/animation/animation_events.h"
 #include "cc/test/layer_tree_test.h"
 #include "cc/trees/single_thread_proxy.h"
@@ -72,22 +73,6 @@ class ThreadedChannelTestInitializationAndShutdown
 
 MULTI_THREAD_DIRECT_RENDERER_TEST_F(
     ThreadedChannelTestInitializationAndShutdown);
-
-class ThreadedChannelTestThrottleFrameProduction : public ThreadedChannelTest {
-  void BeginChannelTest() override {
-    proxy()->SetThrottleFrameProduction(true);
-  }
-
-  void SetThrottleFrameProductionOnImpl(bool throttle) override {
-    ASSERT_TRUE(throttle);
-    calls_received_++;
-    EndTest();
-  }
-
-  void AfterTest() override { EXPECT_EQ(1, calls_received_); }
-};
-
-MULTI_THREAD_DIRECT_RENDERER_TEST_F(ThreadedChannelTestThrottleFrameProduction);
 
 class ThreadedChannelTestTopControlsState : public ThreadedChannelTest {
   void BeginChannelTest() override {
@@ -259,7 +244,8 @@ class ThreadedChannelTestSetAnimationEvents : public ThreadedChannelTest {
   void BeginChannelTest() override { PostOnImplThread(); }
 
   void StartTestOnImplThread() override {
-    scoped_ptr<AnimationEvents> events(make_scoped_ptr(new AnimationEvents));
+    std::unique_ptr<AnimationEvents> events(
+        base::WrapUnique(new AnimationEvents));
     GetProxyImplForTest()->PostAnimationEventsToMainThreadOnImplThread(
         std::move(events));
   }

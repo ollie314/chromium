@@ -5,7 +5,6 @@
 #include <utility>
 
 #include "base/command_line.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -28,6 +27,7 @@
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -113,7 +113,7 @@ class SupervisedUserBlockModeTest : public InProcessBrowserTest {
         SupervisedUserSettingsServiceFactory::GetForProfile(profile);
     supervised_user_settings_service->SetLocalSetting(
         supervised_users::kContentPackDefaultFilteringBehavior,
-        scoped_ptr<base::Value>(
+        std::unique_ptr<base::Value>(
             new base::FundamentalValue(SupervisedUserURLFilter::BLOCK)));
   }
 
@@ -234,7 +234,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest,
       supervised_user_service_->GetURLFilterForUIThread();
 
   // Set the host as allowed.
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
   dict->SetBooleanWithoutPathExpansion(allowed_url.host(), true);
   SupervisedUserSettingsService* supervised_user_settings_service =
       SupervisedUserSettingsServiceFactory::GetForProfile(
@@ -299,7 +299,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest, Unblock) {
       content::NotificationService::AllSources());
 
   // Set the host as allowed.
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
   dict->SetBooleanWithoutPathExpansion(test_url.host(), true);
   SupervisedUserSettingsService* supervised_user_settings_service =
       SupervisedUserSettingsServiceFactory::GetForProfile(

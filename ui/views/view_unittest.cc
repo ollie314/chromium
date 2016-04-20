@@ -2,13 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ui/views/view.h"
+
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/rand_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -31,6 +33,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/transform.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/native/native_view_host.h"
@@ -38,7 +41,6 @@
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/focus/view_storage.h"
 #include "ui/views/test/views_test_base.h"
-#include "ui/views/view.h"
 #include "ui/views/widget/native_widget.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/window/dialog_client_view.h"
@@ -384,7 +386,7 @@ TEST_F(ViewTest, MouseEvent) {
   TestView* v2 = new TestView();
   v2->SetBoundsRect(gfx::Rect(100, 100, 100, 100));
 
-  scoped_ptr<Widget> widget(new Widget);
+  std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = gfx::Rect(50, 50, 650, 650);
@@ -447,7 +449,7 @@ TEST_F(ViewTest, DeleteOnPressed) {
   v1->Reset();
   v2->Reset();
 
-  scoped_ptr<Widget> widget(new Widget);
+  std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = gfx::Rect(50, 50, 650, 650);
@@ -2101,6 +2103,84 @@ bool TestView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   return true;
 }
 
+// On non-ChromeOS aura there is extra logic to determine whether a view should
+// handle accelerators or not (see View::CanHandleAccelerators for details).
+// This test targets that extra logic, but should also work on other platforms.
+TEST_F(ViewTest, HandleAccelerator) {
+  ui::Accelerator return_accelerator(ui::VKEY_RETURN, ui::EF_NONE);
+  TestView* view = new TestView();
+  view->Reset();
+  view->AddAccelerator(return_accelerator);
+  EXPECT_EQ(view->accelerator_count_map_[return_accelerator], 0);
+
+  // Create a window and add the view as its child.
+  std::unique_ptr<Widget> widget(new Widget);
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
+  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.bounds = gfx::Rect(0, 0, 100, 100);
+  widget->Init(params);
+  View* root = widget->GetRootView();
+  root->AddChildView(view);
+  widget->Show();
+
+  FocusManager* focus_manager = widget->GetFocusManager();
+  ASSERT_TRUE(focus_manager);
+
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+  // When a non-child view is not active, it shouldn't handle accelerators.
+  EXPECT_FALSE(widget->IsActive());
+  EXPECT_FALSE(focus_manager->ProcessAccelerator(return_accelerator));
+  EXPECT_EQ(0, view->accelerator_count_map_[return_accelerator]);
+#endif
+
+  // TYPE_POPUP widgets default to non-activatable, so the Show() above wouldn't
+  // have activated the Widget. First, allow activation.
+  widget->widget_delegate()->set_can_activate(true);
+
+  // When a non-child view is active, it should handle accelerators.
+  view->accelerator_count_map_[return_accelerator] = 0;
+  widget->Activate();
+  EXPECT_TRUE(widget->IsActive());
+  EXPECT_TRUE(focus_manager->ProcessAccelerator(return_accelerator));
+  EXPECT_EQ(1, view->accelerator_count_map_[return_accelerator]);
+
+  // Add a child view associated with a child widget.
+  TestView* child_view = new TestView();
+  child_view->Reset();
+  child_view->AddAccelerator(return_accelerator);
+  EXPECT_EQ(child_view->accelerator_count_map_[return_accelerator], 0);
+  view->AddChildView(child_view);
+  Widget* child_widget = new Widget;
+  Widget::InitParams child_params =
+      CreateParams(Widget::InitParams::TYPE_CONTROL);
+  child_params.parent = widget->GetNativeView();
+  child_widget->Init(child_params);
+  child_widget->SetContentsView(child_view);
+
+  FocusManager* child_focus_manager = child_widget->GetFocusManager();
+  ASSERT_TRUE(child_focus_manager);
+
+  // When a child view is in focus, it should handle accelerators.
+  child_view->accelerator_count_map_[return_accelerator] = 0;
+  view->accelerator_count_map_[return_accelerator] = 0;
+  child_focus_manager->SetFocusedView(child_view);
+  EXPECT_FALSE(child_view->GetWidget()->IsActive());
+  EXPECT_TRUE(child_focus_manager->ProcessAccelerator(return_accelerator));
+  EXPECT_EQ(1, child_view->accelerator_count_map_[return_accelerator]);
+  EXPECT_EQ(0, view->accelerator_count_map_[return_accelerator]);
+
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+  // When a child view is not in focus, its parent should handle accelerators.
+  child_view->accelerator_count_map_[return_accelerator] = 0;
+  view->accelerator_count_map_[return_accelerator] = 0;
+  child_focus_manager->ClearFocus();
+  EXPECT_FALSE(child_view->GetWidget()->IsActive());
+  EXPECT_TRUE(child_focus_manager->ProcessAccelerator(return_accelerator));
+  EXPECT_EQ(0, child_view->accelerator_count_map_[return_accelerator]);
+  EXPECT_EQ(1, view->accelerator_count_map_[return_accelerator]);
+#endif
+}
+
 // TODO: these tests were initially commented out when getting aura to
 // run. Figure out if still valuable and either nuke or fix.
 #if 0
@@ -2113,7 +2193,7 @@ TEST_F(ViewTest, ActivateAccelerator) {
   EXPECT_EQ(view->accelerator_count_map_[return_accelerator], 0);
 
   // Create a window and add the view as its child.
-  scoped_ptr<Widget> widget(new Widget);
+  std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = gfx::Rect(0, 0, 100, 100);
@@ -2176,7 +2256,7 @@ TEST_F(ViewTest, HiddenViewWithAccelerator) {
   view->AddAccelerator(return_accelerator);
   EXPECT_EQ(view->accelerator_count_map_[return_accelerator], 0);
 
-  scoped_ptr<Widget> widget(new Widget);
+  std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = gfx::Rect(0, 0, 100, 100);
@@ -2204,7 +2284,7 @@ TEST_F(ViewTest, ViewInHiddenWidgetWithAccelerator) {
   view->AddAccelerator(return_accelerator);
   EXPECT_EQ(view->accelerator_count_map_[return_accelerator], 0);
 
-  scoped_ptr<Widget> widget(new Widget);
+  std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = gfx::Rect(0, 0, 100, 100);
@@ -2350,13 +2430,13 @@ class ToplevelWidgetObserverView : public View {
 // Test that a view can track the current top level widget by overriding
 // View::ViewHierarchyChanged() and View::NativeViewHierarchyChanged().
 TEST_F(ViewTest, MAYBE_NativeViewHierarchyChanged) {
-  scoped_ptr<Widget> toplevel1(new Widget);
+  std::unique_ptr<Widget> toplevel1(new Widget);
   Widget::InitParams toplevel1_params =
       CreateParams(Widget::InitParams::TYPE_POPUP);
   toplevel1_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   toplevel1->Init(toplevel1_params);
 
-  scoped_ptr<Widget> toplevel2(new Widget);
+  std::unique_ptr<Widget> toplevel2(new Widget);
   Widget::InitParams toplevel2_params =
       CreateParams(Widget::InitParams::TYPE_POPUP);
   toplevel2_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
@@ -2597,7 +2677,7 @@ TEST_F(ViewTest, TransformEvent) {
 TEST_F(ViewTest, TransformVisibleBound) {
   gfx::Rect viewport_bounds(0, 0, 100, 100);
 
-  scoped_ptr<Widget> widget(new Widget);
+  std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = viewport_bounds;
@@ -2654,7 +2734,7 @@ class VisibleBoundsView : public View {
 TEST_F(ViewTest, OnVisibleBoundsChanged) {
   gfx::Rect viewport_bounds(0, 0, 100, 100);
 
-  scoped_ptr<Widget> widget(new Widget);
+  std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = viewport_bounds;
@@ -2756,7 +2836,7 @@ TEST_F(ViewTest, AddAndRemoveSchedulePaints) {
 
   // We have to put the View hierarchy into a Widget or no paints will be
   // scheduled.
-  scoped_ptr<Widget> widget(new Widget);
+  std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = viewport_bounds;
@@ -2776,7 +2856,7 @@ TEST_F(ViewTest, AddAndRemoveSchedulePaints) {
 
   parent_view->scheduled_paint_rects_.clear();
   parent_view->RemoveChildView(child_view);
-  scoped_ptr<View> child_deleter(child_view);
+  std::unique_ptr<View> child_deleter(child_view);
   ASSERT_EQ(1U, parent_view->scheduled_paint_rects_.size());
   EXPECT_EQ(child_view->bounds(), parent_view->scheduled_paint_rects_.front());
 
@@ -2972,7 +3052,7 @@ TEST_F(ViewTest, ConversionsWithTransform) {
 
 // Tests conversion methods to and from screen coordinates.
 TEST_F(ViewTest, ConversionsToFromScreen) {
-  scoped_ptr<Widget> widget(new Widget);
+  std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = gfx::Rect(50, 50, 650, 650);
@@ -2998,7 +3078,7 @@ TEST_F(ViewTest, ConversionsToFromScreen) {
 
 // Tests conversion methods for rectangles.
 TEST_F(ViewTest, ConvertRectWithTransform) {
-  scoped_ptr<Widget> widget(new Widget);
+  std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = gfx::Rect(50, 50, 650, 650);
@@ -3113,7 +3193,7 @@ TEST_F(ViewTest, ViewHierarchyChanged) {
   ObserverView* v3 = new ObserverView();
 
   // Add |v3| to |v2|.
-  scoped_ptr<ObserverView> v2(new ObserverView());
+  std::unique_ptr<ObserverView> v2(new ObserverView());
   v2->AddChildView(v3);
 
   // Make sure both |v2| and |v3| receive the ViewHierarchyChanged()
@@ -3431,12 +3511,8 @@ TEST_F(ViewTest, GetViewByID) {
   View::Views views;
   v1.GetViewsInGroup(kGroup, &views);
   EXPECT_EQ(2U, views.size());
-
-  View::Views::const_iterator i(std::find(views.begin(), views.end(), &v3));
-  EXPECT_NE(views.end(), i);
-
-  i = std::find(views.begin(), views.end(), &v4);
-  EXPECT_NE(views.end(), i);
+  EXPECT_NE(views.cend(), std::find(views.cbegin(), views.cend(), &v3));
+  EXPECT_NE(views.cend(), std::find(views.cbegin(), views.cend(), &v4));
 }
 
 TEST_F(ViewTest, AddExistingChild) {
@@ -4132,15 +4208,15 @@ TEST_F(ViewLayerTest, ReorderUnderWidget) {
 TEST_F(ViewLayerTest, AcquireLayer) {
   View* content = new View;
   widget()->SetContentsView(content);
-  scoped_ptr<View> c1(new View);
+  std::unique_ptr<View> c1(new View);
   c1->SetPaintToLayer(true);
   EXPECT_TRUE(c1->layer());
   content->AddChildView(c1.get());
 
-  scoped_ptr<ui::Layer> layer(c1->AcquireLayer());
+  std::unique_ptr<ui::Layer> layer(c1->AcquireLayer());
   EXPECT_EQ(layer.get(), c1->layer());
 
-  scoped_ptr<ui::Layer> layer2(c1->RecreateLayer());
+  std::unique_ptr<ui::Layer> layer2(c1->RecreateLayer());
   EXPECT_NE(c1->layer(), layer2.get());
 
   // Destroy view before destroying layer.
@@ -4149,7 +4225,7 @@ TEST_F(ViewLayerTest, AcquireLayer) {
 
 // Verify the z-order of the layers as a result of calling RecreateLayer().
 TEST_F(ViewLayerTest, RecreateLayerZOrder) {
-  scoped_ptr<View> v(new View());
+  std::unique_ptr<View> v(new View());
   v->SetPaintToLayer(true);
 
   View* v1 = new View();
@@ -4165,7 +4241,7 @@ TEST_F(ViewLayerTest, RecreateLayerZOrder) {
   EXPECT_EQ(v1->layer(), child_layers_pre[0]);
   EXPECT_EQ(v2->layer(), child_layers_pre[1]);
 
-  scoped_ptr<ui::Layer> v1_old_layer(v1->RecreateLayer());
+  std::unique_ptr<ui::Layer> v1_old_layer(v1->RecreateLayer());
 
   // Test the new layer order. We expect: |v1| |v1_old_layer| |v2|.
   // for |v1| and |v2|.
@@ -4197,7 +4273,7 @@ TEST_F(ViewLayerTest, RecreateLayerZOrderWidgetParent) {
   EXPECT_EQ(v1->layer(), child_layers_pre[0]);
   EXPECT_EQ(v2->layer(), child_layers_pre[1]);
 
-  scoped_ptr<ui::Layer> v1_old_layer(v1->RecreateLayer());
+  std::unique_ptr<ui::Layer> v1_old_layer(v1->RecreateLayer());
 
   // Test the new layer order. We expect: |v1| |v1_old_layer| |v2|.
   const std::vector<ui::Layer*>& child_layers_post = root_layer->children();
@@ -4223,7 +4299,7 @@ TEST_F(ViewLayerTest, RecreateLayerMovesNonViewChildren) {
   v.layer()->Add(&layer);
   v.layer()->StackAtBottom(&layer);
 
-  scoped_ptr<ui::Layer> old_layer(v.RecreateLayer());
+  std::unique_ptr<ui::Layer> old_layer(v.RecreateLayer());
 
   // All children should be moved from old layer to new layer.
   ASSERT_TRUE(old_layer.get() != NULL);
@@ -4329,7 +4405,7 @@ TEST_F(ViewTest, OnNativeThemeChanged) {
   // new native theme notification.
   test_view->AddChildView(test_view_child);
 
-  scoped_ptr<Widget> widget(new Widget);
+  std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   widget->Init(params);
@@ -4369,7 +4445,7 @@ TEST_F(ViewTest, ScopedTargetHandlerReceivesEvents) {
   TestView* v = new TestView();
   v->SetBoundsRect(gfx::Rect(0, 0, 300, 300));
 
-  scoped_ptr<Widget> widget(new Widget);
+  std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = gfx::Rect(50, 50, 350, 350);
@@ -4401,6 +4477,98 @@ TEST_F(ViewTest, ScopedTargetHandlerReceivesEvents) {
                           ui::EventTimeForNow(), 0, 0);
   root->OnMouseReleased(released);
   EXPECT_EQ(ui::ET_MOUSE_RELEASED, v->last_mouse_event_type_);
+}
+
+// See comment above test for details.
+class WidgetWithCustomTheme : public Widget {
+ public:
+  explicit WidgetWithCustomTheme(ui::NativeTheme* theme) : theme_(theme) {}
+  ~WidgetWithCustomTheme() override {}
+
+  // Widget:
+  const ui::NativeTheme* GetNativeTheme() const override { return theme_; }
+
+ private:
+  ui::NativeTheme* theme_;
+
+  DISALLOW_COPY_AND_ASSIGN(WidgetWithCustomTheme);
+};
+
+// See comment above test for details.
+class ViewThatAddsViewInOnNativeThemeChanged : public View {
+ public:
+  ViewThatAddsViewInOnNativeThemeChanged() { SetPaintToLayer(true); }
+  ~ViewThatAddsViewInOnNativeThemeChanged() override {}
+
+  bool on_native_theme_changed_called() const {
+    return on_native_theme_changed_called_;
+  }
+
+  // View:
+  void OnNativeThemeChanged(const ui::NativeTheme* theme) override {
+    on_native_theme_changed_called_ = true;
+    GetWidget()->GetRootView()->AddChildView(new View);
+  }
+
+ private:
+  bool on_native_theme_changed_called_ = false;
+
+  DISALLOW_COPY_AND_ASSIGN(ViewThatAddsViewInOnNativeThemeChanged);
+};
+
+// See comment above test for details.
+class TestNativeTheme : public ui::NativeTheme {
+ public:
+  TestNativeTheme() {}
+  ~TestNativeTheme() override {}
+
+  // ui::NativeTheme:
+  SkColor GetSystemColor(ColorId color_id) const override {
+    return SK_ColorRED;
+  }
+  gfx::Size GetPartSize(Part part,
+                        State state,
+                        const ExtraParams& extra) const override {
+    return gfx::Size();
+  }
+  void Paint(SkCanvas* canvas,
+             Part part,
+             State state,
+             const gfx::Rect& rect,
+             const ExtraParams& extra) const override {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestNativeTheme);
+};
+
+// Creates and adds a new child view to |parent| that has a layer.
+void AddViewWithChildLayer(View* parent) {
+  View* child = new View;
+  child->SetPaintToLayer(true);
+  parent->AddChildView(child);
+}
+
+// This test does the following:
+// . creates a couple of views with layers added to the root.
+// . Add a view that overrides OnNativeThemeChanged(). In
+//   OnNativeThemeChanged() another view is added.
+// This sequence triggered DCHECKs or crashes previously. This tests verifies
+// that doesn't happen. Reason for crash was OnNativeThemeChanged() was called
+// before the layer hierarchy was updated. OnNativeThemeChanged() should be
+// called after the layer hierarchy matches the view hierarchy.
+TEST_F(ViewTest, CrashOnAddFromFromOnNativeThemeChanged) {
+  TestNativeTheme theme;
+  WidgetWithCustomTheme widget(&theme);
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.bounds = gfx::Rect(50, 50, 350, 350);
+  widget.Init(params);
+
+  AddViewWithChildLayer(widget.GetRootView());
+  ViewThatAddsViewInOnNativeThemeChanged* v =
+      new ViewThatAddsViewInOnNativeThemeChanged;
+  widget.GetRootView()->AddChildView(v);
+  EXPECT_TRUE(v->on_native_theme_changed_called());
 }
 
 }  // namespace views

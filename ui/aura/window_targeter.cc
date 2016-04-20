@@ -62,10 +62,9 @@ bool WindowTargeter::EventLocationInsideBounds(
 ui::EventTarget* WindowTargeter::FindTargetForEvent(ui::EventTarget* root,
                                                     ui::Event* event) {
   Window* window = static_cast<Window*>(root);
-  Window* target =
-      event->IsKeyEvent()
-          ? FindTargetForKeyEvent(window, *static_cast<ui::KeyEvent*>(event))
-          : FindTargetForNonKeyEvent(window, event);
+  Window* target = event->IsKeyEvent()
+                       ? FindTargetForKeyEvent(window, *event->AsKeyEvent())
+                       : FindTargetForNonKeyEvent(window, event);
   if (target && !window->parent() && !window->Contains(target)) {
     // |window| is the root window, but |target| is not a descendent of
     // |window|. So do not allow dispatching from here. Instead, dispatch the
@@ -148,7 +147,7 @@ Window* WindowTargeter::FindTargetInRootWindow(Window* root_window,
 
   if (event.IsTouchEvent()) {
     // Query the gesture-recognizer to find targets for touch events.
-    const ui::TouchEvent& touch = static_cast<const ui::TouchEvent&>(event);
+    const ui::TouchEvent& touch = *event.AsTouchEvent();
     ui::GestureConsumer* consumer =
         ui::GestureRecognizer::Get()->GetTouchLockedTarget(touch);
     if (consumer)
@@ -169,7 +168,8 @@ Window* WindowTargeter::FindTargetInRootWindow(Window* root_window,
 Window* WindowTargeter::FindTargetForLocatedEventRecursively(
     Window* root_window,
     ui::LocatedEvent* event) {
-  scoped_ptr<ui::EventTargetIterator> iter = root_window->GetChildIterator();
+  std::unique_ptr<ui::EventTargetIterator> iter =
+      root_window->GetChildIterator();
   if (iter) {
     ui::EventTarget* target = root_window;
     for (ui::EventTarget* child = iter->GetNextTarget(); child;

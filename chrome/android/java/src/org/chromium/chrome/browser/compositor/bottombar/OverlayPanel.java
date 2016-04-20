@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.compositor.bottombar;
 
 import android.app.Activity;
 import android.content.Context;
+import android.view.View;
 import android.view.View.MeasureSpec;
 
 import org.chromium.base.ActivityState;
@@ -14,10 +15,14 @@ import org.chromium.base.ApplicationStatus.ActivityStateListener;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager.PanelPriority;
-import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanelAnimation;
 import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
+import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeEventFilter.ScrollDirection;
+import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeHandler;
+import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilter;
+import org.chromium.chrome.browser.compositor.layouts.eventfilter.GestureHandler;
 import org.chromium.chrome.browser.compositor.scene_layer.SceneLayer;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.content.browser.ContentVideoViewEmbedder;
 import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content_public.common.TopControlsState;
@@ -27,8 +32,8 @@ import org.chromium.ui.resources.ResourceManager;
 /**
  * Controls the Overlay Panel.
  */
-public class OverlayPanel extends ContextualSearchPanelAnimation
-        implements ActivityStateListener, OverlayPanelContentFactory {
+public class OverlayPanel extends OverlayPanelAnimation implements ActivityStateListener,
+        EdgeSwipeHandler, GestureHandler, OverlayPanelContentFactory {
 
     /**
      * The extra dp added around the close button touch target.
@@ -38,19 +43,20 @@ public class OverlayPanel extends ContextualSearchPanelAnimation
     /**
      * State of the Overlay Panel.
      */
-    public static enum PanelState {
+    public enum PanelState {
+        // TODO(pedrosimonetti): consider removing the UNDEFINED state
         UNDEFINED,
         CLOSED,
         PEEKED,
         EXPANDED,
-        MAXIMIZED;
+        MAXIMIZED
     }
 
     /**
      * The reason for a change in the Overlay Panel's state.
      * TODO(mdjones): Separate generic reasons from Contextual Search reasons.
      */
-    public static enum StateChangeReason {
+    public enum StateChangeReason {
         UNKNOWN,
         RESET,
         BACK_PRESS,
@@ -75,42 +81,37 @@ public class OverlayPanel extends ContextualSearchPanelAnimation
         FULLSCREEN_EXITED,
         INFOBAR_SHOWN,
         INFOBAR_HIDDEN,
-        CONTENT_CHANGED;
+        CONTENT_CHANGED,
+        KEYBOARD_SHOWN,
+        KEYBOARD_HIDDEN,
+        TAB_NAVIGATION
     }
 
-    /**
-     * The activity this panel is in.
-     */
+    /** The activity this panel is in. */
     protected ChromeActivity mActivity;
 
-    /**
-     * The initial height of the Overlay Panel.
-     */
+    /** The initial height of the Overlay Panel. */
     private float mInitialPanelHeight;
 
-    /**
-     * Whether a touch gesture has been detected.
-     */
+    /** The initial location of a touch on the panel */
+    private float mInitialPanelTouchY;
+
+    /** Whether a touch gesture has been detected. */
     private boolean mHasDetectedTouchGesture;
 
-    /**
-     * That factory that creates OverlayPanelContents.
-     */
+    /** The EventFilter that this panel uses. */
+    protected EventFilter mEventFilter;
+
+    /** That factory that creates OverlayPanelContents. */
     private OverlayPanelContentFactory mContentFactory;
 
-    /**
-     * Container for content the panel will show.
-     */
+    /** Container for content the panel will show. */
     private OverlayPanelContent mContent;
 
-    /**
-     * The {@link OverlayPanelHost} used to communicate with the supported layout.
-     */
+    /** The {@link OverlayPanelHost} used to communicate with the supported layout. */
     private OverlayPanelHost mOverlayPanelHost;
 
-    /**
-     * OverlayPanel manager handle for notifications of opening and closing.
-     */
+    /** OverlayPanel manager handle for notifications of opening and closing. */
     protected OverlayPanelManager mPanelManager;
 
     // ============================================================================================
@@ -235,13 +236,22 @@ public class OverlayPanel extends ContextualSearchPanelAnimation
         if (mActivity != null) {
             ApplicationStatus.registerStateListenerForActivity(this, mActivity);
         }
+
+        // TODO(pedrosimonetti): Coordinate with mdjones@ to move this to the OverlayPanelBase
+        // constructor, once we are able to get the Activity during instantiation. The Activity
+        // is needed in order to get the correct height of the Toolbar, which varies depending
+        // on the Activity (WebApps have a smaller toolbar for example).
+        initializeUiState();
     }
 
     /**
      * Notify the panel's content that it has been touched.
+     * @param x The X position of the touch in dp.
      */
-    public void notifyPanelTouched() {
-        getOverlayPanelContent().notifyPanelTouched();
+    public void notifyBarTouched(float x) {
+        if (!isCoordinateInsideCloseButton(x)) {
+            getOverlayPanelContent().showContent();
+        }
     }
 
     /**
@@ -324,24 +334,45 @@ public class OverlayPanel extends ContextualSearchPanelAnimation
         content.setContentViewClient(new ContentViewClient() {
             @Override
             public int getDesiredWidthMeasureSpec() {
-                if (isFullscreenSizePanel()) {
+                if (isFullWidthSizePanel()) {
                     return super.getDesiredWidthMeasureSpec();
                 } else {
                     return MeasureSpec.makeMeasureSpec(
-                            getSearchContentViewWidthPx(),
+                            getContentViewWidthPx(),
                             MeasureSpec.EXACTLY);
                 }
             }
 
             @Override
             public int getDesiredHeightMeasureSpec() {
-                if (isFullscreenSizePanel()) {
+                if (isFullWidthSizePanel()) {
                     return super.getDesiredHeightMeasureSpec();
                 } else {
                     return MeasureSpec.makeMeasureSpec(
-                            getSearchContentViewHeightPx(),
+                            getContentViewHeightPx(),
                             MeasureSpec.EXACTLY);
                 }
+            }
+
+            @Override
+            public ContentVideoViewEmbedder getContentVideoViewEmbedder() {
+                // TODO(mdjones): Possibly enable fullscreen video in overlay panels rather than
+                // passing an empty implementation.
+                return new ContentVideoViewEmbedder() {
+                    @Override
+                    public void enterFullscreenVideo(View view) {}
+
+                    @Override
+                    public void exitFullscreenVideo() {}
+
+                    @Override
+                    public View getVideoLoadingProgressView() {
+                        return null;
+                    }
+
+                    @Override
+                    public void setSystemUiVisibility(boolean enterFullscreen) {}
+                };
             }
         });
 
@@ -392,7 +423,7 @@ public class OverlayPanel extends ContextualSearchPanelAnimation
     public void updateTopControlsState() {
         if (mContent == null) return;
 
-        if (isFullscreenSizePanel()) {
+        if (isFullWidthSizePanel()) {
             // Consider the ContentView height to be fullscreen, and inform the system that
             // the Toolbar is always visible (from the Compositor's perspective), even though
             // the Toolbar and Base Page might be offset outside the screen. This means the
@@ -466,8 +497,8 @@ public class OverlayPanel extends ContextualSearchPanelAnimation
     // ============================================================================================
 
     /**
-     * Sets the {@OverlayPanelHost} used to communicate with the supported layout.
-     * @param host The {@OverlayPanelHost}.
+     * Sets the {@link OverlayPanelHost} used to communicate with the supported layout.
+     * @param host The {@link OverlayPanelHost}.
      */
     public void setHost(OverlayPanelHost host) {
         mOverlayPanelHost = host;
@@ -515,11 +546,6 @@ public class OverlayPanel extends ContextualSearchPanelAnimation
      * Updates the Panel so it preserves its state when the orientation changes.
      */
     protected void updatePanelForOrientationChange() {
-        // NOTE(pedrosimonetti): We cannot tell where the selection will be after the
-        // orientation change, so we are setting the selection position to zero, which
-        // means the base page will be positioned in its original state and we won't
-        // try to keep the selection in view.
-        updateBasePageSelectionYPx(0.f);
         resizePanelToState(getPanelState(), StateChangeReason.UNKNOWN);
     }
 
@@ -650,7 +676,7 @@ public class OverlayPanel extends ContextualSearchPanelAnimation
      */
     public boolean isCoordinateInsideBar(float x, float y) {
         return isCoordinateInsideOverlayPanel(x, y)
-                && y >= getOffsetY() && y <= (getOffsetY() + getSearchBarContainerHeight());
+                && y >= getOffsetY() && y <= (getOffsetY() + getBarContainerHeight());
     }
 
     /**
@@ -674,7 +700,7 @@ public class OverlayPanel extends ContextualSearchPanelAnimation
      * @return The vertical offset of the Overlay Content View in dp.
      */
     public float getContentY() {
-        return getOffsetY() + getSearchBarContainerHeight() + getPromoHeight();
+        return getOffsetY() + getBarContainerHeight();
     }
 
     /**
@@ -699,5 +725,69 @@ public class OverlayPanel extends ContextualSearchPanelAnimation
     @VisibleForTesting
     public void setOverlayPanelContentFactory(OverlayPanelContentFactory factory) {
         mContentFactory = factory;
+    }
+
+    // ============================================================================================
+    // GestureHandler and EdgeSwipeHandler implementation.
+    // ============================================================================================
+
+    @Override
+    public void onDown(float x, float y, boolean fromMouse, int buttons) {
+        mInitialPanelTouchY = y;
+        handleSwipeStart();
+    }
+
+    @Override
+    public void drag(float x, float y, float deltaX, float deltaY, float tx, float ty) {
+        handleSwipeMove(y - mInitialPanelTouchY);
+    }
+
+    @Override
+    public void onUpOrCancel() {
+        handleSwipeEnd();
+    }
+
+    @Override
+    public void fling(float x, float y, float velocityX, float velocityY) {
+        handleFling(velocityY);
+    }
+
+    @Override
+    public void click(float x, float y, boolean fromMouse, int buttons) {
+        // TODO(mdjones): The time param for handleClick is not used anywhere, remove it.
+        handleClick(0, x, y);
+    }
+
+    @Override
+    public void onLongPress(float x, float y) {}
+
+    @Override
+    public void onPinch(float x0, float y0, float x1, float y1, boolean firstEvent) {}
+
+    // EdgeSwipeHandler implementation.
+
+    @Override
+    public void swipeStarted(ScrollDirection direction, float x, float y) {
+        handleSwipeStart();
+    }
+
+    @Override
+    public void swipeUpdated(float x, float y, float dx, float dy, float tx, float ty) {
+        handleSwipeMove(ty);
+    }
+
+    @Override
+    public void swipeFinished() {
+        handleSwipeEnd();
+    }
+
+    @Override
+    public void swipeFlingOccurred(float x, float y, float tx, float ty, float vx, float vy) {
+        handleFling(vy);
+    }
+
+    @Override
+    public boolean isSwipeEnabled(ScrollDirection direction) {
+        return direction == ScrollDirection.UP && isShowing();
     }
 }

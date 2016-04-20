@@ -103,13 +103,6 @@
       'include_dirs': [
         '../..',
       ],
-      'direct_dependent_settings': {
-        'ldflags': [
-          # Some android targets still depend on --gc-sections to link.
-          # TODO: remove --gc-sections for Debug builds (crbug.com/159847).
-          '-Wl,--gc-sections',
-        ],
-      },
       'conditions': [
         # TODO(yfriedman): move this DEP to chrome_android_core to be shared
         # between internal/external.
@@ -127,11 +120,6 @@
             }],
           ],
         }],  # order_profiling!=0
-        ['use_allocator!="none"', {
-          'dependencies': [
-            '../../base/allocator/allocator.gyp:allocator',
-          ],
-        }],
       ],
     },
     {
@@ -167,7 +155,6 @@
         'jinja_output': '<(chrome_public_apk_manifest)',
         'jinja_variables': [
           'channel=<(android_channel)',
-          'configuration_policy=<(configuration_policy)',
           'manifest_package=<(manifest_package)',
           'min_sdk_version=16',
           'target_sdk_version=23',
@@ -184,7 +171,6 @@
         'jinja_output': '<(chrome_sync_shell_apk_manifest)',
         'jinja_variables': [
           'channel=<(android_channel)',
-          'configuration_policy=<(configuration_policy)',
           'manifest_package=<(sync_shell_manifest_package)',
           'min_sdk_version=16',
           'target_sdk_version=22',
@@ -276,10 +262,8 @@
       'includes': [ '../../build/apk_fake_jar.gypi' ],
     },
     {
-      # GN: //chrome/android:chrome_shared_test_java
-      # This target is for sharing tests between both upstream and internal
-      # trees until sufficient test coverage is upstream.
-      'target_name': 'chrome_shared_test_java',
+      # GN: //chrome/android:chrome_test_java
+      'target_name': 'chrome_test_java',
       'type': 'none',
       'variables': {
         'java_in_dir': 'javatests',
@@ -291,7 +275,8 @@
         '../../chrome/chrome.gyp:chrome_java_test_support',
         '../../components/components.gyp:invalidation_javatests',
         '../../components/components.gyp:gcm_driver_java',
-        '../../components/components.gyp:offline_pages_enums_java',
+        '../../components/components.gyp:offline_page_feature_enums_java',
+        '../../components/components.gyp:offline_page_model_enums_java',
         '../../components/components.gyp:precache_javatests',
         '../../components/components.gyp:security_state_enums_java',
         '../../components/components.gyp:web_contents_delegate_android_java',
@@ -336,9 +321,10 @@
       'target_name': 'chrome_public_test_apk',
       'type': 'none',
       'dependencies': [
-        'chrome_shared_test_java',
+        'chrome_test_java',
         'chrome_public_apk_java',
         '../../chrome/chrome.gyp:require_chrome_public_test_support_apk',
+        '../../net/net.gyp:require_net_test_support_apk',
         '../../testing/android/on_device_instrumentation.gyp:broker_java',
         '../../testing/android/on_device_instrumentation.gyp:require_driver_apk',
       ],
@@ -349,8 +335,13 @@
         'java_in_dir_suffix': '/src_dummy',
         'apk_name': 'ChromePublicTest',
         'is_test_apk': 1,
+        'never_lint': 1,
         'test_type': 'instrumentation',
         'isolate_file': '../chrome_public_test_apk.isolate',
+        'additional_apks': [
+          '<(PRODUCT_DIR)/apks/ChromePublicTestSupport.apk',
+          '<(PRODUCT_DIR)/apks/ChromiumNetTestSupport.apk',
+        ],
       },
       'includes': [
         '../../build/java_apk.gypi',

@@ -4,8 +4,10 @@
 
 #include "chrome/browser/page_load_metrics/page_load_metrics_initialize.h"
 
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/page_load_metrics/observers/aborts_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/core_page_load_metrics_observer.h"
+#include "chrome/browser/page_load_metrics/observers/document_write_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/from_gws_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/google_captcha_observer.h"
 #include "chrome/browser/page_load_metrics/observers/stale_while_revalidate_metrics_observer.h"
@@ -19,7 +21,7 @@ namespace chrome {
 void InitializePageLoadMetricsForWebContents(
     content::WebContents* web_contents) {
   page_load_metrics::MetricsWebContentsObserver::CreateForWebContents(
-      web_contents, make_scoped_ptr(new PageLoadMetricsEmbedder()));
+      web_contents, base::WrapUnique(new PageLoadMetricsEmbedder()));
 }
 
 PageLoadMetricsEmbedder::~PageLoadMetricsEmbedder() {}
@@ -27,14 +29,16 @@ PageLoadMetricsEmbedder::~PageLoadMetricsEmbedder() {}
 void PageLoadMetricsEmbedder::RegisterObservers(
     page_load_metrics::PageLoadTracker* tracker) {
   // These classes are owned by the metrics.
-  tracker->AddObserver(make_scoped_ptr(new AbortsPageLoadMetricsObserver()));
-  tracker->AddObserver(make_scoped_ptr(new CorePageLoadMetricsObserver()));
-  tracker->AddObserver(make_scoped_ptr(new FromGWSPageLoadMetricsObserver()));
+  tracker->AddObserver(base::WrapUnique(new AbortsPageLoadMetricsObserver()));
+  tracker->AddObserver(base::WrapUnique(new CorePageLoadMetricsObserver()));
+  tracker->AddObserver(base::WrapUnique(new FromGWSPageLoadMetricsObserver()));
   tracker->AddObserver(
-      make_scoped_ptr(new google_captcha_observer::GoogleCaptchaObserver()));
+      base::WrapUnique(new google_captcha_observer::GoogleCaptchaObserver()));
   // TODO(ricea): Remove this in April 2016 or before. crbug.com/348877
   tracker->AddObserver(
-      make_scoped_ptr(new chrome::StaleWhileRevalidateMetricsObserver()));
+      base::WrapUnique(new chrome::StaleWhileRevalidateMetricsObserver()));
+  tracker->AddObserver(
+      base::WrapUnique(new DocumentWritePageLoadMetricsObserver()));
 }
 
 bool PageLoadMetricsEmbedder::IsPrerendering(

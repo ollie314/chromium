@@ -12,7 +12,6 @@
 #include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/compiler_specific.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -77,8 +76,9 @@ volatile base::subtle::Atomic32 needs_on_demand_update = 0;
 void CheckVersionCompatiblity(const base::Version& current_version) {
   // Using NoBarrier, since needs_on_demand_update is standalone and does
   // not have other associated data.
-  base::subtle::NoBarrier_Store(&needs_on_demand_update,
-                                current_version.IsOlderThan(kMinPnaclVersion));
+  base::subtle::NoBarrier_Store(
+    &needs_on_demand_update,
+    current_version < base::Version(kMinPnaclVersion));
 }
 
 // PNaCl is packaged as a multi-CRX.  This returns the platform-specific
@@ -128,7 +128,7 @@ bool GetLatestPnaclDirectory(const scoped_refptr<PnaclComponentInstaller>& pci,
 base::DictionaryValue* ReadJSONManifest(const base::FilePath& manifest_path) {
   JSONFileValueDeserializer deserializer(manifest_path);
   std::string error;
-  scoped_ptr<base::Value> root = deserializer.Deserialize(NULL, &error);
+  std::unique_ptr<base::Value> root = deserializer.Deserialize(NULL, &error);
   if (!root.get())
     return NULL;
   if (!root->IsType(base::Value::TYPE_DICTIONARY))
@@ -227,7 +227,7 @@ base::FilePath PnaclComponentInstaller::GetPnaclBaseDirectory() {
 
 bool PnaclComponentInstaller::Install(const base::DictionaryValue& manifest,
                                       const base::FilePath& unpack_path) {
-  scoped_ptr<base::DictionaryValue> pnacl_manifest(
+  std::unique_ptr<base::DictionaryValue> pnacl_manifest(
       ReadPnaclManifest(unpack_path));
   if (pnacl_manifest == NULL) {
     LOG(WARNING) << "Failed to read pnacl manifest.";
@@ -272,7 +272,7 @@ bool PnaclComponentInstaller::Install(const base::DictionaryValue& manifest,
 // |installed_file| actually exists.
 bool PnaclComponentInstaller::GetInstalledFile(const std::string& file,
                                                base::FilePath* installed_file) {
-  if (current_version().Equals(Version(kNullVersion)))
+  if (current_version() == Version(kNullVersion))
     return false;
 
   *installed_file = GetPnaclBaseDirectory()
@@ -329,8 +329,10 @@ void StartPnaclUpdateRegistration(
   std::string current_fingerprint;
   std::vector<base::FilePath> older_dirs;
   if (GetLatestPnaclDirectory(pci, &path, &current_version, &older_dirs)) {
-    scoped_ptr<base::DictionaryValue> manifest(ReadComponentManifest(path));
-    scoped_ptr<base::DictionaryValue> pnacl_manifest(ReadPnaclManifest(path));
+    std::unique_ptr<base::DictionaryValue> manifest(
+        ReadComponentManifest(path));
+    std::unique_ptr<base::DictionaryValue> pnacl_manifest(
+        ReadPnaclManifest(path));
     Version manifest_version;
     // Check that the component manifest and PNaCl manifest files
     // are legit, and that the indicated version matches the one
@@ -339,7 +341,7 @@ void StartPnaclUpdateRegistration(
         !CheckPnaclComponentManifest(*manifest,
                                      *pnacl_manifest,
                                      &manifest_version) ||
-        !current_version.Equals(manifest_version)) {
+        current_version != manifest_version) {
       current_version = Version(kNullVersion);
     } else {
       OverrideDirPnaclComponent(path);

@@ -13,7 +13,6 @@ import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.ntp.NativePageFactory;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabIdManager;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabPersistentStore.TabPersistentStoreObserver;
@@ -28,6 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * TabModel methods to the active model that it contains.
  */
 public class TabModelSelectorImpl extends TabModelSelectorBase implements TabModelDelegate {
+    public static final int CUSTOM_TABS_SELECTOR_INDEX = -1;
 
     private final ChromeActivity mActivity;
 
@@ -277,8 +277,7 @@ public class TabModelSelectorImpl extends TabModelSelectorBase implements TabMod
      * tabs shall not be restored until {@link #restoreTabs} is called.
      */
     public void loadState() {
-        int nextId = mTabSaver.loadState();
-        if (nextId >= 0) TabIdManager.getInstance().incrementIdCounterTo(nextId);
+        mTabSaver.loadState();
     }
 
     /**
@@ -311,10 +310,6 @@ public class TabModelSelectorImpl extends TabModelSelectorBase implements TabMod
 
     public void clearState() {
         mTabSaver.clearState();
-    }
-
-    public void clearEncryptedState() {
-        mTabSaver.clearEncryptedState();
     }
 
     @Override

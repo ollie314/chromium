@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -34,31 +35,14 @@ class ChromeContentUtilityClient : public content::ContentUtilityClient {
   bool OnMessageReceived(const IPC::Message& message) override;
   void RegisterMojoServices(content::ServiceRegistry* registry) override;
 
-  void AddHandler(scoped_ptr<UtilityMessageHandler> handler);
+  void AddHandler(std::unique_ptr<UtilityMessageHandler> handler);
 
   static void PreSandboxStartup();
-
-  // Shared with extensions::ExtensionsHandler.
-  static SkBitmap DecodeImage(const std::vector<unsigned char>& encoded_data,
-                              bool shrink_to_fit);
-  static void DecodeImageAndSend(const std::vector<unsigned char>& encoded_data,
-                                 bool shrink_to_fit,
-                                 int request_id);
-
-  static void set_max_ipc_message_size_for_test(int64_t max_message_size) {
-    max_ipc_message_size_ = max_message_size;
-  }
 
  private:
   // IPC message handlers.
   void OnUnpackWebResource(const std::string& resource_data);
-  void OnDecodeImage(const std::vector<unsigned char>& encoded_data,
-                     bool shrink_to_fit,
-                     int request_id);
 #if defined(OS_CHROMEOS)
-  void OnRobustJPEGDecodeImage(const std::vector<unsigned char>& encoded_data,
-                               int request_id);
-
   void OnCreateZipFile(const base::FilePath& src_dir,
                        const std::vector<base::FilePath>& src_relative_paths,
                        const base::FileDescriptor& dest_fd);
@@ -88,8 +72,6 @@ class ChromeContentUtilityClient : public content::ContentUtilityClient {
   bool filter_messages_;
   // A list of message_ids to filter.
   std::set<int> message_id_whitelist_;
-  // Maximum IPC msg size (default to kMaximumMessageSize; override for testing)
-  static int64_t max_ipc_message_size_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeContentUtilityClient);
 };

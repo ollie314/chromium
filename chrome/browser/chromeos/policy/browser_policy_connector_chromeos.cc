@@ -14,7 +14,6 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_registry_simple.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
@@ -22,6 +21,7 @@
 #include "chrome/browser/chromeos/policy/affiliated_cloud_policy_invalidator.h"
 #include "chrome/browser/chromeos/policy/affiliated_invalidation_service_provider.h"
 #include "chrome/browser/chromeos/policy/affiliated_invalidation_service_provider_impl.h"
+#include "chrome/browser/chromeos/policy/bluetooth_policy_handler.h"
 #include "chrome/browser/chromeos/policy/consumer_management_service.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_initializer.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_store_chromeos.h"
@@ -49,6 +49,7 @@
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_refresh_scheduler.h"
 #include "components/policy/core/common/proxy_policy_provider.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -135,20 +136,19 @@ BrowserPolicyConnectorChromeOS::BrowserPolicyConnectorChromeOS()
               chromeos::DeviceSettingsService::Get()));
     }
 
-    scoped_ptr<DeviceCloudPolicyStoreChromeOS> device_cloud_policy_store(
+    std::unique_ptr<DeviceCloudPolicyStoreChromeOS> device_cloud_policy_store(
         new DeviceCloudPolicyStoreChromeOS(
-            chromeos::DeviceSettingsService::Get(),
-            install_attributes_.get(),
+            chromeos::DeviceSettingsService::Get(), install_attributes_.get(),
             GetBackgroundTaskRunner()));
     device_cloud_policy_manager_ = new DeviceCloudPolicyManagerChromeOS(
         std::move(device_cloud_policy_store),
         base::ThreadTaskRunnerHandle::Get(), state_keys_broker_.get());
-    AddPolicyProvider(
-        scoped_ptr<ConfigurationPolicyProvider>(device_cloud_policy_manager_));
+    AddPolicyProvider(std::unique_ptr<ConfigurationPolicyProvider>(
+        device_cloud_policy_manager_));
   }
 
   global_user_cloud_policy_provider_ = new ProxyPolicyProvider();
-  AddPolicyProvider(scoped_ptr<ConfigurationPolicyProvider>(
+  AddPolicyProvider(std::unique_ptr<ConfigurationPolicyProvider>(
       global_user_cloud_policy_provider_));
 }
 
@@ -166,7 +166,7 @@ void BrowserPolicyConnectorChromeOS::Init(
   const base::CommandLine* command_line =
       base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(chromeos::switches::kEnableConsumerManagement)) {
-    scoped_ptr<DeviceManagementService::Configuration> configuration(
+    std::unique_ptr<DeviceManagementService::Configuration> configuration(
         new DeviceManagementServiceConfiguration(
             GetDeviceManagementServerUrlForConsumer()));
     consumer_device_management_service_.reset(
@@ -219,6 +219,9 @@ void BrowserPolicyConnectorChromeOS::Init(
               ->managed_network_configuration_handler(),
           chromeos::NetworkHandler::Get()->network_device_handler(),
           chromeos::CrosSettings::Get());
+
+  bluetooth_policy_handler_.reset(
+      new BluetoothPolicyHandler(chromeos::CrosSettings::Get()));
 }
 
 void BrowserPolicyConnectorChromeOS::PreShutdown() {
@@ -245,7 +248,7 @@ void BrowserPolicyConnectorChromeOS::Shutdown() {
   ChromeBrowserPolicyConnector::Shutdown();
 }
 
-bool BrowserPolicyConnectorChromeOS::IsEnterpriseManaged() {
+bool BrowserPolicyConnectorChromeOS::IsEnterpriseManaged() const {
   return install_attributes_ && install_attributes_->IsEnterpriseDevice();
 }
 
@@ -253,7 +256,7 @@ std::string BrowserPolicyConnectorChromeOS::GetEnterpriseDomain() const {
   return install_attributes_ ? install_attributes_->GetDomain() : std::string();
 }
 
-std::string BrowserPolicyConnectorChromeOS::GetDeviceAssetID() {
+std::string BrowserPolicyConnectorChromeOS::GetDeviceAssetID() const {
   if (device_cloud_policy_manager_) {
     const enterprise_management::PolicyData* policy =
         device_cloud_policy_manager_->device_store()->policy();
@@ -263,7 +266,7 @@ std::string BrowserPolicyConnectorChromeOS::GetDeviceAssetID() {
   return std::string();
 }
 
-std::string BrowserPolicyConnectorChromeOS::GetDirectoryApiID() {
+std::string BrowserPolicyConnectorChromeOS::GetDirectoryApiID() const {
   if (device_cloud_policy_manager_) {
     const enterprise_management::PolicyData* policy =
         device_cloud_policy_manager_->device_store()->policy();
@@ -273,7 +276,7 @@ std::string BrowserPolicyConnectorChromeOS::GetDirectoryApiID() {
   return std::string();
 }
 
-DeviceMode BrowserPolicyConnectorChromeOS::GetDeviceMode() {
+DeviceMode BrowserPolicyConnectorChromeOS::GetDeviceMode() const {
   return install_attributes_ ? install_attributes_->GetMode()
                              : DEVICE_MODE_NOT_SET;
 }
@@ -292,12 +295,12 @@ void BrowserPolicyConnectorChromeOS::SetUserPolicyDelegate(
 }
 
 void BrowserPolicyConnectorChromeOS::SetConsumerManagementServiceForTesting(
-    scoped_ptr<ConsumerManagementService> service) {
+    std::unique_ptr<ConsumerManagementService> service) {
   consumer_management_service_ = std::move(service);
 }
 
 void BrowserPolicyConnectorChromeOS::SetDeviceCloudPolicyInitializerForTesting(
-    scoped_ptr<DeviceCloudPolicyInitializer> initializer) {
+    std::unique_ptr<DeviceCloudPolicyInitializer> initializer) {
   device_cloud_policy_initializer_ = std::move(initializer);
 }
 

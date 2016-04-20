@@ -4,8 +4,11 @@
 
 #include "chrome/renderer/safe_browsing/phishing_dom_feature_extractor.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -24,6 +27,7 @@
 #include "net/base/escape.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "third_party/WebKit/public/platform/URLConversion.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -94,7 +98,7 @@ class TestPhishingDOMFeatureExtractor : public PhishingDOMFeatureExtractor {
     GURL full_url;
     if (parsed_url.has_scheme()) {
       // This is already a complete URL.
-      full_url = GURL(partial_url);
+      full_url = GURL(blink::WebStringToGURL(partial_url));
     } else if (!base_domain_.empty()) {
       // This is a partial URL and only one frame in testing html.
       full_url = GURL("http://" + base_domain_).Resolve(partial_url);
@@ -201,7 +205,7 @@ class PhishingDOMFeatureExtractorTest : public ChromeRenderViewTest {
         new ChromeExtensionsDispatcherDelegate());
     ChromeExtensionsRendererClient* ext_client =
         ChromeExtensionsRendererClient::GetInstance();
-    ext_client->SetExtensionDispatcherForTest(make_scoped_ptr(
+    ext_client->SetExtensionDispatcherForTest(base::WrapUnique(
         new extensions::Dispatcher(extension_dispatcher_delegate_.get())));
 #endif
 #if defined(ENABLE_SPELLCHECK)
@@ -225,7 +229,7 @@ class PhishingDOMFeatureExtractorTest : public ChromeRenderViewTest {
 
   MockFeatureExtractorClock clock_;
   bool success_;
-  scoped_ptr<TestPhishingDOMFeatureExtractor> extractor_;
+  std::unique_ptr<TestPhishingDOMFeatureExtractor> extractor_;
   scoped_refptr<content::MessageLoopRunner> message_loop_;
   base::WeakPtrFactory<PhishingDOMFeatureExtractorTest> weak_factory_;
 };

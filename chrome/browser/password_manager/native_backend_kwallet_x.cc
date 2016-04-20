@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include <map>
 #include <utility>
 #include <vector>
 
@@ -26,6 +28,7 @@
 #include "dbus/object_path.h"
 #include "dbus/object_proxy.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/origin.h"
 
 using autofill::PasswordForm;
 using content::BrowserThread;
@@ -34,7 +37,7 @@ namespace {
 
 // In case the fields in the pickle ever change, version them so we can try to
 // read old pickles. (Note: do not eat old pickles past the expiration date.)
-const int kPickleVersion = 7;
+const int kPickleVersion = 8;
 
 // We could localize this string, but then changing your locale would cause
 // you to lose access to all your stored passwords. Maybe best not to do that.
@@ -82,6 +85,22 @@ bool ReadGURL(base::PickleIterator* iter, bool warn_only, GURL* url) {
   return true;
 }
 
+// Convenience function to read a url::Origin from a Pickle. Assumes the origin
+// has been written as a UTF-8 string. Returns true on success.
+bool ReadOrigin(base::PickleIterator* iter,
+                bool warn_only,
+                url::Origin* origin) {
+  std::string origin_string;
+  if (!iter->ReadString(&origin_string)) {
+    if (!warn_only)
+      LOG(ERROR) << "Failed to deserialize Origin.";
+    *origin = url::Origin();
+    return false;
+  }
+  *origin = url::Origin(GURL(origin_string));
+  return true;
+}
+
 void LogDeserializationWarning(int version,
                                std::string signon_realm,
                                bool warn_only) {
@@ -121,11 +140,13 @@ bool DeserializeValueSize(const std::string& signon_realm,
     }
     count = count_32;
   } else {
-    if (!iter.ReadSizeT(&count)) {
+    uint64_t count_64 = 0;
+    if (!iter.ReadUInt64(&count_64)) {
       LOG(ERROR) << "Failed to deserialize KWallet entry "
                  << "(realm: " << signon_realm << ")";
       return false;
     }
+    count = static_cast<size_t>(count_64);
   }
 
   if (count > 0xFFFF) {
@@ -147,7 +168,7 @@ bool DeserializeValueSize(const std::string& signon_realm,
   ScopedVector<autofill::PasswordForm> converted_forms;
   converted_forms.reserve(count);
   for (size_t i = 0; i < count; ++i) {
-    scoped_ptr<PasswordForm> form(new PasswordForm());
+    std::unique_ptr<PasswordForm> form(new PasswordForm());
     form->signon_realm.assign(signon_realm);
 
     int scheme = 0;
@@ -195,11 +216,13 @@ bool DeserializeValueSize(const std::string& signon_realm,
     if (version > 3) {
       if (!iter.ReadString16(&form->display_name) ||
           !ReadGURL(&iter, warn_only, &form->icon_url) ||
-          !ReadGURL(&iter, warn_only, &form->federation_url) ||
+          !ReadOrigin(&iter, warn_only, &form->federation_origin) ||
           !iter.ReadBool(&form->skip_zero_click)) {
         LogDeserializationWarning(version, signon_realm, false);
         return false;
       }
+      if (version <= 7)
+        form->skip_zero_click = true;
     }
 
     if (version > 4) {
@@ -234,7 +257,7 @@ bool DeserializeValueSize(const std::string& signon_realm,
 void SerializeValue(const std::vector<autofill::PasswordForm*>& forms,
                     base::Pickle* pickle) {
   pickle->WriteInt(kPickleVersion);
-  pickle->WriteSizeT(forms.size());
+  pickle->WriteUInt64(forms.size());
   for (autofill::PasswordForm* form : forms) {
     pickle->WriteInt(form->scheme);
     pickle->WriteString(form->origin.spec());
@@ -254,7 +277,11 @@ void SerializeValue(const std::vector<autofill::PasswordForm*>& forms,
     pickle->WriteInt64(form->date_synced.ToInternalValue());
     pickle->WriteString16(form->display_name);
     pickle->WriteString(form->icon_url.spec());
-    pickle->WriteString(form->federation_url.spec());
+    // We serialize unique origins as "", in order to make other systems that
+    // read from the login database happy. https://crbug.com/591310
+    pickle->WriteString(form->federation_origin.unique()
+                            ? std::string()
+                            : form->federation_origin.Serialize());
     pickle->WriteBool(form->skip_zero_click);
     pickle->WriteInt(form->generation_upload_status);
   }
@@ -370,14 +397,13 @@ bool NativeBackendKWallet::StartKWalletd() {
                                "start_service_by_desktop_name");
   dbus::MessageWriter builder(&method_call);
   std::vector<std::string> empty;
-  builder.AppendString(kwalletd_name_); // serviceName
-  builder.AppendArrayOfStrings(empty);  // urls
-  builder.AppendArrayOfStrings(empty);  // envs
-  builder.AppendString(std::string());  // startup_id
-  builder.AppendBool(false);            // blind
-  scoped_ptr<dbus::Response> response(
-      klauncher->CallMethodAndBlock(
-          &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
+  builder.AppendString(kwalletd_name_);  // serviceName
+  builder.AppendArrayOfStrings(empty);   // urls
+  builder.AppendArrayOfStrings(empty);   // envs
+  builder.AppendString(std::string());   // startup_id
+  builder.AppendBool(false);             // blind
+  std::unique_ptr<dbus::Response> response(klauncher->CallMethodAndBlock(
+      &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
   if (!response.get()) {
     LOG(ERROR) << "Error contacting klauncher to start " << kwalletd_name_;
     return false;
@@ -407,9 +433,8 @@ NativeBackendKWallet::InitResult NativeBackendKWallet::InitWallet() {
   {
     // Check that KWallet is enabled.
     dbus::MethodCall method_call(kKWalletInterface, "isEnabled");
-    scoped_ptr<dbus::Response> response(
-        kwallet_proxy_->CallMethodAndBlock(
-            &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
+    std::unique_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
     if (!response.get()) {
       LOG(ERROR) << "Error contacting " << kwalletd_name_ << " (isEnabled)";
       return TEMPORARY_FAIL;
@@ -431,9 +456,8 @@ NativeBackendKWallet::InitResult NativeBackendKWallet::InitWallet() {
   {
     // Get the wallet name.
     dbus::MethodCall method_call(kKWalletInterface, "networkWallet");
-    scoped_ptr<dbus::Response> response(
-        kwallet_proxy_->CallMethodAndBlock(
-            &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
+    std::unique_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
     if (!response.get()) {
       LOG(ERROR) << "Error contacting " << kwalletd_name_ << " (networkWallet)";
       return TEMPORARY_FAIL;
@@ -558,6 +582,22 @@ bool NativeBackendKWallet::RemoveLoginsSyncedBetween(
   return RemoveLoginsBetween(delete_begin, delete_end, SYNC_TIMESTAMP, changes);
 }
 
+bool NativeBackendKWallet::DisableAutoSignInForAllLogins(
+    password_manager::PasswordStoreChangeList* changes) {
+  ScopedVector<autofill::PasswordForm> all_forms;
+  if (!GetAllLogins(&all_forms))
+    return false;
+
+  for (auto& form : all_forms) {
+    if (!form->skip_zero_click) {
+      form->skip_zero_click = true;
+      if (!UpdateLogin(*form, changes))
+        return false;
+    }
+  }
+  return true;
+}
+
 bool NativeBackendKWallet::GetLogins(
     const PasswordForm& form,
     ScopedVector<autofill::PasswordForm>* forms) {
@@ -583,6 +623,14 @@ bool NativeBackendKWallet::GetBlacklistLogins(
   return GetLoginsList(BlacklistOptions::BLACKLISTED, wallet_handle, forms);
 }
 
+bool NativeBackendKWallet::GetAllLogins(
+    ScopedVector<autofill::PasswordForm>* forms) {
+  int wallet_handle = WalletHandle();
+  if (wallet_handle == kInvalidKWalletHandle)
+    return false;
+  return GetAllLoginsInternal(wallet_handle, forms);
+}
+
 bool NativeBackendKWallet::GetLoginsList(
     const std::string& signon_realm,
     int wallet_handle,
@@ -596,9 +644,8 @@ bool NativeBackendKWallet::GetLoginsList(
     builder.AppendString(folder_name_);  // folder
     builder.AppendString(signon_realm);  // key
     builder.AppendString(app_name_);     // appid
-    scoped_ptr<dbus::Response> response(
-        kwallet_proxy_->CallMethodAndBlock(
-            &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
+    std::unique_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
     if (!response.get()) {
       LOG(ERROR) << "Error contacting " << kwalletd_name_ << " (hasEntry)";
       return false;
@@ -623,9 +670,8 @@ bool NativeBackendKWallet::GetLoginsList(
     builder.AppendString(folder_name_);  // folder
     builder.AppendString(signon_realm);  // key
     builder.AppendString(app_name_);     // appid
-    scoped_ptr<dbus::Response> response(
-        kwallet_proxy_->CallMethodAndBlock(
-            &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
+    std::unique_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
     if (!response.get()) {
       LOG(ERROR) << "Error contacting " << kwalletd_name_ << " (readEntry)";
       return false;
@@ -662,7 +708,7 @@ bool NativeBackendKWallet::GetLoginsList(
     ScopedVector<autofill::PasswordForm>* forms) {
   forms->clear();
   ScopedVector<autofill::PasswordForm> all_forms;
-  if (!GetAllLogins(wallet_handle, &all_forms))
+  if (!GetAllLoginsInternal(wallet_handle, &all_forms))
     return false;
 
   // Remove the duplicate sync tags.
@@ -702,7 +748,7 @@ bool NativeBackendKWallet::GetLoginsList(
   return true;
 }
 
-bool NativeBackendKWallet::GetAllLogins(
+bool NativeBackendKWallet::GetAllLoginsInternal(
     int wallet_handle,
     ScopedVector<autofill::PasswordForm>* forms) {
   // We could probably also use readEntryList here.
@@ -713,9 +759,8 @@ bool NativeBackendKWallet::GetAllLogins(
     builder.AppendInt32(wallet_handle);  // handle
     builder.AppendString(folder_name_);  // folder
     builder.AppendString(app_name_);     // appid
-    scoped_ptr<dbus::Response> response(
-        kwallet_proxy_->CallMethodAndBlock(
-            &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
+    std::unique_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
     if (!response.get()) {
       LOG(ERROR) << "Error contacting " << kwalletd_name_ << " (entryList)";
       return false;
@@ -736,9 +781,8 @@ bool NativeBackendKWallet::GetAllLogins(
     builder.AppendString(folder_name_);  // folder
     builder.AppendString(signon_realm);  // key
     builder.AppendString(app_name_);     // appid
-    scoped_ptr<dbus::Response> response(
-        kwallet_proxy_->CallMethodAndBlock(
-            &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
+    std::unique_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
     if (!response.get()) {
       LOG(ERROR) << "Error contacting " << kwalletd_name_ << "(readEntry)";
       return false;
@@ -773,9 +817,8 @@ bool NativeBackendKWallet::SetLoginsList(
     builder.AppendString(folder_name_);  // folder
     builder.AppendString(signon_realm);  // key
     builder.AppendString(app_name_);     // appid
-    scoped_ptr<dbus::Response> response(
-        kwallet_proxy_->CallMethodAndBlock(
-            &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
+    std::unique_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
     if (!response.get()) {
       LOG(ERROR) << "Error contacting " << kwalletd_name_ << " (removeEntry)";
       return kInvalidKWalletHandle;
@@ -803,9 +846,8 @@ bool NativeBackendKWallet::SetLoginsList(
   builder.AppendArrayOfBytes(static_cast<const uint8_t*>(value.data()),
                              value.size());  // value
   builder.AppendString(app_name_);     // appid
-  scoped_ptr<dbus::Response> response(
-      kwallet_proxy_->CallMethodAndBlock(
-          &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
+  std::unique_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
+      &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
   if (!response.get()) {
     LOG(ERROR) << "Error contacting " << kwalletd_name_ << " (writeEntry)";
     return kInvalidKWalletHandle;
@@ -841,7 +883,7 @@ bool NativeBackendKWallet::RemoveLoginsBetween(
     builder.AppendInt32(wallet_handle);  // handle
     builder.AppendString(folder_name_);  // folder
     builder.AppendString(app_name_);     // appid
-    scoped_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
+    std::unique_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
     if (!response.get()) {
       LOG(ERROR) << "Error contacting " << kwalletd_name_ << " (entryList)";
@@ -874,7 +916,7 @@ bool NativeBackendKWallet::RemoveLoginsBetween(
     builder.AppendString(folder_name_);  // folder
     builder.AppendString(signon_realm);  // key
     builder.AppendString(app_name_);     // appid
-    scoped_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
+    std::unique_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
     if (!response.get()) {
       LOG(ERROR) << "Error contacting " << kwalletd_name_ << " (readEntry)";
@@ -971,9 +1013,8 @@ int NativeBackendKWallet::WalletHandle() {
     builder.AppendString(wallet_name_);  // wallet
     builder.AppendInt64(0);              // wid
     builder.AppendString(app_name_);     // appid
-    scoped_ptr<dbus::Response> response(
-        kwallet_proxy_->CallMethodAndBlock(
-            &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
+    std::unique_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
     if (!response.get()) {
       LOG(ERROR) << "Error contacting " << kwalletd_name_ << " (open)";
       return kInvalidKWalletHandle;
@@ -998,9 +1039,8 @@ int NativeBackendKWallet::WalletHandle() {
     builder.AppendInt32(handle);         // handle
     builder.AppendString(folder_name_);  // folder
     builder.AppendString(app_name_);     // appid
-    scoped_ptr<dbus::Response> response(
-        kwallet_proxy_->CallMethodAndBlock(
-            &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
+    std::unique_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
     if (!response.get()) {
       LOG(ERROR) << "Error contacting " << kwalletd_name_ << " (hasFolder)";
       return kInvalidKWalletHandle;
@@ -1020,9 +1060,8 @@ int NativeBackendKWallet::WalletHandle() {
     builder.AppendInt32(handle);         // handle
     builder.AppendString(folder_name_);  // folder
     builder.AppendString(app_name_);     // appid
-    scoped_ptr<dbus::Response> response(
-        kwallet_proxy_->CallMethodAndBlock(
-            &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
+    std::unique_ptr<dbus::Response> response(kwallet_proxy_->CallMethodAndBlock(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT));
     if (!response.get()) {
       LOG(ERROR) << "Error contacting << " << kwalletd_name_
                  << " (createFolder)";

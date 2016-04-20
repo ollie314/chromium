@@ -7,10 +7,10 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "ui/message_center/message_center_export.h"
 #include "ui/message_center/message_center_types.h"
 #include "ui/message_center/notification_list.h"
@@ -50,6 +50,13 @@ class NotifierSettingsProvider;
 
 class MESSAGE_CENTER_EXPORT MessageCenter {
  public:
+  enum class RemoveType {
+    // Remove all notifications.
+    ALL,
+    // Remove non-pinned notification (don't remove invisible ones).
+    NON_PINNED,
+  };
+
   // Creates the global message center object.
   static void Initialize();
 
@@ -93,17 +100,16 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
   // Basic operations of notification: add/remove/update.
 
   // Adds a new notification.
-  virtual void AddNotification(scoped_ptr<Notification> notification) = 0;
+  virtual void AddNotification(std::unique_ptr<Notification> notification) = 0;
 
   // Updates an existing notification with id = old_id and set its id to new_id.
   virtual void UpdateNotification(
       const std::string& old_id,
-      scoped_ptr<Notification> new_notification) = 0;
+      std::unique_ptr<Notification> new_notification) = 0;
 
   // Removes an existing notification.
   virtual void RemoveNotification(const std::string& id, bool by_user) = 0;
-  virtual void RemoveAllNotifications(bool by_user) = 0;
-  virtual void RemoveAllVisibleNotifications(bool by_user) = 0;
+  virtual void RemoveAllNotifications(bool by_user, RemoveType type) = 0;
 
   // Sets the icon image. Icon appears at the top-left of the notification.
   virtual void SetNotificationIcon(const std::string& notification_id,

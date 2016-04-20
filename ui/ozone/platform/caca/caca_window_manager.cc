@@ -31,7 +31,7 @@ class CacaSurface : public ui::SurfaceOzoneCanvas {
   skia::RefPtr<SkSurface> GetSurface() override;
   void ResizeCanvas(const gfx::Size& viewport_size) override;
   void PresentCanvas(const gfx::Rect& damage) override;
-  scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() override;
+  std::unique_ptr<gfx::VSyncProvider> CreateVSyncProvider() override;
 
  private:
   CacaWindow* window_;  // Not owned.
@@ -87,22 +87,17 @@ void CacaSurface::ResizeCanvas(const gfx::Size& viewport_size) {
 void CacaSurface::PresentCanvas(const gfx::Rect& damage) {
   TRACE_EVENT0("ozone", "CacaSurface::PresentCanvas");
 
-  SkImageInfo info;
-  size_t row_bytes;
-  const void* pixels = surface_->peekPixels(&info, &row_bytes);
+  SkPixmap pixmap;
+  surface_->peekPixels(&pixmap);
 
   caca_canvas_t* canvas = caca_get_canvas(window_->display());
-  caca_dither_bitmap(canvas,
-                     0,
-                     0,
-                     caca_get_canvas_width(canvas),
-                     caca_get_canvas_height(canvas),
-                     dither_.get(),
-                     static_cast<const uint8_t*>(pixels));
+  caca_dither_bitmap(canvas, 0, 0, caca_get_canvas_width(canvas),
+                     caca_get_canvas_height(canvas), dither_.get(),
+                     static_cast<const uint8_t*>(pixmap.addr()));
   caca_refresh_display(window_->display());
 }
 
-scoped_ptr<gfx::VSyncProvider> CacaSurface::CreateVSyncProvider() {
+std::unique_ptr<gfx::VSyncProvider> CacaSurface::CreateVSyncProvider() {
   return nullptr;
 }
 
@@ -131,16 +126,16 @@ bool CacaWindowManager::LoadEGLGLES2Bindings(
   return false;
 }
 
-scoped_ptr<ui::SurfaceOzoneCanvas> CacaWindowManager::CreateCanvasForWidget(
-    gfx::AcceleratedWidget widget) {
+std::unique_ptr<ui::SurfaceOzoneCanvas>
+CacaWindowManager::CreateCanvasForWidget(gfx::AcceleratedWidget widget) {
   DCHECK(thread_checker_.CalledOnValidThread());
   CacaWindow* window = windows_.Lookup(widget);
   DCHECK(window);
 
-  scoped_ptr<CacaSurface> canvas(new CacaSurface(window));
+  std::unique_ptr<CacaSurface> canvas(new CacaSurface(window));
   bool initialized = canvas->Initialize();
   DCHECK(initialized);
-  return canvas;
+  return std::move(canvas);
 }
 
 }  // namespace ui

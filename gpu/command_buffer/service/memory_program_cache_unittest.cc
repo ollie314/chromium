@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/service/gl_utils.h"
@@ -67,16 +69,18 @@ class ProgramBinaryEmulator {
 class MemoryProgramCacheTest : public GpuServiceTest {
  public:
   static const size_t kCacheSizeBytes = 1024;
+  static const bool kDisableGpuDiskCache = false;
   static const GLuint kVertexShaderClientId = 90;
   static const GLuint kVertexShaderServiceId = 100;
   static const GLuint kFragmentShaderClientId = 91;
   static const GLuint kFragmentShaderServiceId = 100;
 
   MemoryProgramCacheTest()
-      : cache_(new MemoryProgramCache(kCacheSizeBytes)),
+      : cache_(new MemoryProgramCache(kCacheSizeBytes, kDisableGpuDiskCache)),
         vertex_shader_(NULL),
         fragment_shader_(NULL),
-        shader_cache_count_(0) { }
+        shader_cache_count_(0) {
+  }
   ~MemoryProgramCacheTest() override { shader_manager_.Destroy(false); }
 
   void ShaderCacheCb(const std::string& key, const std::string& shader) {
@@ -180,7 +184,7 @@ class MemoryProgramCacheTest : public GpuServiceTest {
                 .WillOnce(SetArgPointee<2>(GL_FALSE));
   }
 
-  scoped_ptr<MemoryProgramCache> cache_;
+  std::unique_ptr<MemoryProgramCache> cache_;
   ShaderManager shader_manager_;
   Shader* vertex_shader_;
   Shader* fragment_shader_;
@@ -558,8 +562,8 @@ TEST_F(MemoryProgramCacheTest, MemoryProgramCacheEviction) {
   fragment_shader_->set_source("al sdfkjdk");
   TestHelper::SetShaderStates(gl_.get(), fragment_shader_, true);
 
-  scoped_ptr<char[]> bigTestBinary =
-      scoped_ptr<char[]>(new char[kEvictingBinaryLength]);
+  std::unique_ptr<char[]> bigTestBinary =
+      std::unique_ptr<char[]>(new char[kEvictingBinaryLength]);
   for (size_t i = 0; i < kEvictingBinaryLength; ++i) {
     bigTestBinary[i] = i % 250;
   }

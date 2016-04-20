@@ -105,8 +105,8 @@ class CardUnmaskPromptViewBrowserTest : public InProcessBrowserTest {
 
  private:
   content::WebContents* contents_;
-  scoped_ptr<TestCardUnmaskPromptController> controller_;
-  scoped_ptr<TestCardUnmaskDelegate> delegate_;
+  std::unique_ptr<TestCardUnmaskPromptController> controller_;
+  std::unique_ptr<TestCardUnmaskDelegate> delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(CardUnmaskPromptViewBrowserTest);
 };
@@ -114,6 +114,7 @@ class CardUnmaskPromptViewBrowserTest : public InProcessBrowserTest {
 IN_PROC_BROWSER_TEST_F(CardUnmaskPromptViewBrowserTest, DisplayUI) {
   controller()->ShowPrompt(CreateCardUnmaskPromptView(controller(), contents()),
                            test::GetMaskedServerCard(),
+                           AutofillClient::UNMASK_FOR_AUTOFILL,
                            delegate()->GetWeakPtr());
 }
 
@@ -125,6 +126,7 @@ IN_PROC_BROWSER_TEST_F(CardUnmaskPromptViewBrowserTest,
                        EarlyCloseAfterSuccess) {
   controller()->ShowPrompt(CreateCardUnmaskPromptView(controller(), contents()),
                            test::GetMaskedServerCard(),
+                           AutofillClient::UNMASK_FOR_AUTOFILL,
                            delegate()->GetWeakPtr());
   controller()->OnUnmaskResponse(base::ASCIIToUTF16("123"),
                                  base::ASCIIToUTF16("10"),
@@ -149,6 +151,7 @@ IN_PROC_BROWSER_TEST_F(CardUnmaskPromptViewBrowserTest,
                        CloseTabWhileDialogShowing) {
   controller()->ShowPrompt(CreateCardUnmaskPromptView(controller(), contents()),
                            test::GetMaskedServerCard(),
+                           AutofillClient::UNMASK_FOR_AUTOFILL,
                            delegate()->GetWeakPtr());
   // Simulate AutofillManager (the delegate in production code) being destroyed
   // before CardUnmaskPromptViewBridge::OnConstrainedWindowClosed() is called.

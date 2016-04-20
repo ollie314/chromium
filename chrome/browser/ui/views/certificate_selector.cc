@@ -19,6 +19,7 @@
 #include "components/guest_view/browser/guest_view_base.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/web_contents.h"
+#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/table_model.h"
 #include "ui/base/models/table_model_observer.h"
@@ -174,7 +175,8 @@ void CertificateSelector::Show() {
   table_->Select(0);
 }
 
-void CertificateSelector::InitWithText(scoped_ptr<views::View> text_label) {
+void CertificateSelector::InitWithText(
+    std::unique_ptr<views::View> text_label) {
   views::GridLayout* const layout = views::GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
@@ -235,7 +237,7 @@ views::View* CertificateSelector::GetInitiallyFocusedView() {
 
 views::View* CertificateSelector::CreateExtraView() {
   DCHECK(!view_cert_button_);
-  scoped_ptr<views::LabelButton> button(new views::LabelButton(
+  std::unique_ptr<views::LabelButton> button(new views::LabelButton(
       this, l10n_util::GetStringUTF16(IDS_PAGEINFO_CERT_INFO_BUTTON)));
   button->SetStyle(views::Button::STYLE_BUTTON);
   view_cert_button_ = button.get();

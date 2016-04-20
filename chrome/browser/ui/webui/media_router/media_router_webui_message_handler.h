@@ -11,6 +11,7 @@
 #include "chrome/browser/media/router/issue.h"
 #include "chrome/browser/ui/webui/media_router/media_cast_mode.h"
 #include "chrome/browser/ui/webui/media_router/media_sink_with_cast_modes.h"
+#include "components/signin/core/browser/account_info.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -18,6 +19,10 @@ namespace base {
 class DictionaryValue;
 class ListValue;
 }  // namespace base
+
+namespace content {
+class WebUI;
+}
 
 namespace media_router {
 
@@ -48,8 +53,7 @@ class MediaRouterWebUIMessageHandler : public content::WebUIMessageHandler {
   // the browser window changes.
   void UpdateMaxDialogHeight(int height);
 
-  // Notifies the dialog that the route creation attempt timed out.
-  void NotifyRouteCreationTimeout();
+  void SetWebUIForTest(content::WebUI* webui);
 
  private:
   // WebUIMessageHandler implementation.
@@ -64,10 +68,14 @@ class MediaRouterWebUIMessageHandler : public content::WebUIMessageHandler {
   void OnCloseRoute(const base::ListValue* args);
   void OnJoinRoute(const base::ListValue* args);
   void OnCloseDialog(const base::ListValue* args);
+  void OnReportBlur(const base::ListValue* args);
   void OnReportClickedSinkIndex(const base::ListValue* args);
+  void OnReportFilter(const base::ListValue* args);
   void OnReportInitialAction(const base::ListValue* args);
   void OnReportInitialState(const base::ListValue* args);
   void OnReportNavigateToView(const base::ListValue* args);
+  void OnReportRouteCreation(const base::ListValue* args);
+  void OnReportRouteCreationOutcome(const base::ListValue* args);
   void OnReportSelectedCastMode(const base::ListValue* args);
   void OnReportSinkCount(const base::ListValue* args);
   void OnReportTimeToClickSink(const base::ListValue* args);
@@ -79,6 +87,16 @@ class MediaRouterWebUIMessageHandler : public content::WebUIMessageHandler {
   // Returns |true| if the action was successfully performed.
   bool ActOnIssueType(const IssueAction::Type& type,
                       const base::DictionaryValue* args);
+
+  // May update the first run flow related properties in the WebUI. This is
+  // called after the initial data is received to avoid unnecessary work when
+  // initializing the WebUI.
+  void MaybeUpdateFirstRunFlowData();
+
+  // Retrieve the account info for email and domain of signed in users. This is
+  // used when updating sinks to determine if identity should be displayed.
+  // Marked virtual for tests.
+  virtual AccountInfo GetAccountInfo();
 
   // Keeps track of whether a command to close the dialog has been issued.
   bool dialog_closing_;

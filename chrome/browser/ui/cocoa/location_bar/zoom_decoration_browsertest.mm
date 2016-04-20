@@ -13,8 +13,8 @@
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "chrome/browser/ui/cocoa/run_loop_testing.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/toolbar/test_toolbar_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/toolbar/test_toolbar_model.h"
 #include "components/ui/zoom/page_zoom.h"
 #include "components/ui/zoom/zoom_controller.h"
 #include "content/public/browser/host_zoom_map.h"
@@ -74,7 +74,7 @@ class ZoomDecorationTest : public InProcessBrowserTest {
 
  private:
   bool should_quit_on_zoom_;
-  scoped_ptr<content::HostZoomMap::Subscription> zoom_subscription_;
+  std::unique_ptr<content::HostZoomMap::Subscription> zoom_subscription_;
 
   DISALLOW_COPY_AND_ASSIGN(ZoomDecorationTest);
 };
@@ -144,7 +144,7 @@ IN_PROC_BROWSER_TEST_F(ZoomDecorationTest, HideOnInputProgress) {
   Zoom(content::PAGE_ZOOM_IN);
   EXPECT_TRUE(zoom_decoration->IsVisible());
 
-  scoped_ptr<ToolbarModel> toolbar_model(new TestToolbarModel);
+  std::unique_ptr<ToolbarModel> toolbar_model(new TestToolbarModel);
   toolbar_model->set_input_in_progress(true);
   browser()->swap_toolbar_models(&toolbar_model);
   GetLocationBar()->ZoomChangedForActiveTab(false);

@@ -22,7 +22,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "chrome/renderer/web_apps.h"
-#include "components/web_cache/renderer/web_cache_render_process_observer.h"
+#include "components/web_cache/renderer/web_cache_render_thread_observer.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/render_frame.h"
@@ -41,9 +41,9 @@ using blink::WebWindowFeatures;
 
 ChromeRenderViewObserver::ChromeRenderViewObserver(
     content::RenderView* render_view,
-    web_cache::WebCacheRenderProcessObserver* web_cache_render_process_observer)
+    web_cache::WebCacheRenderThreadObserver* web_cache_render_thread_observer)
     : content::RenderViewObserver(render_view),
-      web_cache_render_process_observer_(web_cache_render_process_observer),
+      web_cache_render_thread_observer_(web_cache_render_thread_observer),
       webview_visually_deemphasized_(false) {}
 
 ChromeRenderViewObserver::~ChromeRenderViewObserver() {
@@ -52,7 +52,7 @@ ChromeRenderViewObserver::~ChromeRenderViewObserver() {
 bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderViewObserver, message)
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_WebUIJavaScript, OnWebUIJavaScript)
 #endif
 #if defined(ENABLE_EXTENSIONS)
@@ -72,7 +72,7 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
 void ChromeRenderViewObserver::OnWebUIJavaScript(
     const base::string16& javascript) {
   webui_javascript_.push_back(javascript);
@@ -138,8 +138,8 @@ void ChromeRenderViewObserver::OnSetWindowFeatures(
 void ChromeRenderViewObserver::Navigate(const GURL& url) {
   // Execute cache clear operations that were postponed until a navigation
   // event (including tab reload).
-  if (web_cache_render_process_observer_)
-    web_cache_render_process_observer_->ExecutePendingClearCache();
+  if (web_cache_render_thread_observer_)
+    web_cache_render_thread_observer_->ExecutePendingClearCache();
 }
 
 #if defined(ENABLE_EXTENSIONS)
@@ -159,13 +159,13 @@ void ChromeRenderViewObserver::OnSetVisuallyDeemphasized(bool deemphasized) {
 }
 #endif
 
-void ChromeRenderViewObserver::DidStartLoading() {
+void ChromeRenderViewObserver::DidCommitProvisionalLoad(
+    blink::WebLocalFrame* frame,
+    bool is_new_navigation) {
   if ((render_view()->GetEnabledBindings() & content::BINDINGS_POLICY_WEB_UI) &&
       !webui_javascript_.empty()) {
-    for (size_t i = 0; i < webui_javascript_.size(); ++i) {
-      render_view()->GetMainRenderFrame()->ExecuteJavaScript(
-          webui_javascript_[i]);
-    }
+    for (const auto& script : webui_javascript_)
+      render_view()->GetMainRenderFrame()->ExecuteJavaScript(script);
     webui_javascript_.clear();
   }
 }

@@ -72,19 +72,21 @@ static NSAttributedString* attributedSubstringFromRange(const EphemeralRange& ra
 
         Node* container = it.currentContainer();
         LayoutObject* layoutObject = container->layoutObject();
-        ASSERT(layoutObject);
+        DCHECK(layoutObject);
         if (!layoutObject)
             continue;
 
         const ComputedStyle* style = layoutObject->style();
         const FontPlatformData& fontPlatformData = style->font().primaryFont()->platformData();
         NSFont* font = toNSFont(fontPlatformData.ctFont());
-        // If the platform font can't be loaded, it's likely that the site is
-        // using a web font. For now, just use the default font instead.
+        // If the platform font can't be loaded, or the size is incorrect comparing
+        // to the computed style, it's likely that the site is using a web font.
+        // For now, just use the default font instead.
         // TODO(rsesek): Change the font activation flags to allow other processes
         // to use the font.
-        if (!font)
-          font = [NSFont systemFontOfSize:style->font().fontDescription().computedSize()];
+        // TODO(shuchen): Support scaling the font as necessary according to CSS transforms.
+        if (!font || floor(fontPlatformData.size()) != floor([[font fontDescriptor] pointSize]))
+            font = [NSFont systemFontOfSize:style->font().getFontDescription().computedSize()];
         [attrs setObject:font forKey:NSFontAttributeName];
 
         if (style->visitedDependentColor(CSSPropertyColor).alpha())
@@ -96,8 +98,8 @@ static NSAttributedString* attributedSubstringFromRange(const EphemeralRange& ra
         else
             [attrs removeObjectForKey:NSBackgroundColorAttributeName];
 
-        Vector<UChar> characters;
-        it.copyTextTo(characters);
+        ForwardsTextBuffer characters;
+        it.copyTextTo(&characters);
         NSString* substring =
             [[[NSString alloc] initWithCharacters:characters.data()
                                            length:characters.size()] autorelease];
@@ -112,8 +114,9 @@ static NSAttributedString* attributedSubstringFromRange(const EphemeralRange& ra
 WebPoint getBaselinePoint(FrameView* frameView, const EphemeralRange& range, NSAttributedString* string)
 {
     // Compute bottom left corner and convert to AppKit coordinates.
-    // TODO(yosin) We shold avoid to create |Range| object. See crbug.com/529985.
-    IntRect stringRect = enclosingIntRect(createRange(range)->boundingRect());
+    // TODO(yosin): We shold avoid to create |Range| object. See crbug.com/529985.
+    // TODO(shuchen): Support page-zoom for getting the baseline point.
+    IntRect stringRect = frameView->contentsToRootFrame(createRange(range)->boundingBox());
     IntPoint stringPoint = stringRect.minXMaxYCorner();
     stringPoint.setY(frameView->height() - stringPoint.y());
 

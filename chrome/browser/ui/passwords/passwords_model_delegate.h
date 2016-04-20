@@ -26,7 +26,7 @@ class GURL;
 // and notify about user actions.
 class PasswordsModelDelegate {
  public:
-  // Returns the origin of the current page.
+  // Returns the URL of the site the current forms are retrieved for.
   virtual const GURL& GetOrigin() const = 0;
 
   // Returns the current tab state.
@@ -75,9 +75,11 @@ class PasswordsModelDelegate {
   // Called from the model when the user chooses to update a password.
   virtual void UpdatePassword(const autofill::PasswordForm& password_form) = 0;
 
-  // Called from the model when the user chooses a credential.
+  // Called from the dialog controller when the user chooses a credential.
+  // Everything is passed by value because the controller can be destroyed
+  // inside the method.
   virtual void ChooseCredential(
-      const autofill::PasswordForm& form,
+      autofill::PasswordForm form,
       password_manager::CredentialType credential_type) = 0;
 
   // Open a new tab pointing to passwords.google.com.
@@ -86,6 +88,9 @@ class PasswordsModelDelegate {
   virtual void NavigateToSmartLockHelpPage() = 0;
   // Open a new tab, pointing to the password manager settings page.
   virtual void NavigateToPasswordManagerSettingsPage() = 0;
+
+  // Called from the dialog controller when the dialog is hidden.
+  virtual void OnDialogHidden() = 0;
 
  protected:
   virtual ~PasswordsModelDelegate() = default;

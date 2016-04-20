@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "cc/base/cc_export.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/ui_resource_layer_impl.h"
@@ -24,9 +25,9 @@ namespace cc {
 
 class CC_EXPORT NinePatchLayerImpl : public UIResourceLayerImpl {
  public:
-  static scoped_ptr<NinePatchLayerImpl> Create(LayerTreeImpl* tree_impl,
-                                               int id) {
-    return make_scoped_ptr(new NinePatchLayerImpl(tree_impl, id));
+  static std::unique_ptr<NinePatchLayerImpl> Create(LayerTreeImpl* tree_impl,
+                                                    int id) {
+    return base::WrapUnique(new NinePatchLayerImpl(tree_impl, id));
   }
   ~NinePatchLayerImpl() override;
 
@@ -56,9 +57,10 @@ class CC_EXPORT NinePatchLayerImpl : public UIResourceLayerImpl {
   // |fill_center| indicates whether to draw the center quad or not.
   void SetLayout(const gfx::Rect& image_aperture,
                  const gfx::Rect& border,
-                 bool fill_center);
+                 bool fill_center,
+                 bool nearest_neighbor);
 
-  scoped_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
+  std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
   void PushPropertiesTo(LayerImpl* layer) override;
 
   void AppendQuads(RenderPass* render_pass,
@@ -82,6 +84,8 @@ class CC_EXPORT NinePatchLayerImpl : public UIResourceLayerImpl {
   gfx::Rect border_;
 
   bool fill_center_;
+
+  bool nearest_neighbor_;
 
   DISALLOW_COPY_AND_ASSIGN(NinePatchLayerImpl);
 };

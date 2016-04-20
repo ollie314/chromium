@@ -10,7 +10,6 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/interstitials/security_interstitial_page_test_utils.h"
@@ -23,6 +22,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/captive_portal/captive_portal_detector.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
@@ -63,7 +63,7 @@ class CaptivePortalBlockingPageForTesting : public CaptivePortalBlockingPage {
       content::WebContents* web_contents,
       const GURL& request_url,
       const GURL& login_url,
-      scoped_ptr<SSLCertReporter> ssl_cert_reporter,
+      std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
       const net::SSLInfo& ssl_info,
       const base::Callback<void(bool)>& callback,
       bool is_wifi,
@@ -95,7 +95,7 @@ class CaptivePortalBlockingPageTest
                         ExpectWiFi expect_wifi,
                         ExpectWiFiSSID expect_wifi_ssid,
                         ExpectLoginURL expect_login_url,
-                        scoped_ptr<SSLCertReporter> ssl_cert_reporter,
+                        std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
                         const std::string& expected_login_hostname);
 
   void TestInterstitial(bool is_wifi_connection,
@@ -111,7 +111,7 @@ class CaptivePortalBlockingPageTest
                         ExpectWiFi expect_wifi,
                         ExpectWiFiSSID expect_wifi_ssid,
                         ExpectLoginURL expect_login_url,
-                        scoped_ptr<SSLCertReporter> ssl_cert_reporter);
+                        std::unique_ptr<SSLCertReporter> ssl_cert_reporter);
 
   void TestCertReporting(certificate_reporting_test_utils::OptIn opt_in);
 
@@ -126,7 +126,7 @@ void CaptivePortalBlockingPageTest::TestInterstitial(
     ExpectWiFi expect_wifi,
     ExpectWiFiSSID expect_wifi_ssid,
     ExpectLoginURL expect_login_url,
-    scoped_ptr<SSLCertReporter> ssl_cert_reporter,
+    std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
     const std::string& expected_login_hostname) {
   content::WebContents* contents =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -180,7 +180,7 @@ void CaptivePortalBlockingPageTest::TestInterstitial(
     ExpectWiFi expect_wifi,
     ExpectWiFiSSID expect_wifi_ssid,
     ExpectLoginURL expect_login_url,
-    scoped_ptr<SSLCertReporter> ssl_cert_reporter) {
+    std::unique_ptr<SSLCertReporter> ssl_cert_reporter) {
   TestInterstitial(is_wifi_connection, wifi_ssid, login_url, expect_wifi,
                    expect_wifi_ssid, expect_login_url,
                    std::move(ssl_cert_reporter), login_url.host());
@@ -192,7 +192,7 @@ void CaptivePortalBlockingPageTest::TestCertReporting(
 
   certificate_reporting_test_utils::SetCertReportingOptIn(browser(), opt_in);
   base::RunLoop run_loop;
-  scoped_ptr<SSLCertReporter> ssl_cert_reporter =
+  std::unique_ptr<SSLCertReporter> ssl_cert_reporter =
       certificate_reporting_test_utils::SetUpMockSSLCertReporter(
           &run_loop,
           opt_in == certificate_reporting_test_utils::EXTENDED_REPORTING_OPT_IN

@@ -19,9 +19,11 @@
 #include <stdint.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+
 #include <algorithm>
 #include <deque>
 #include <map>
+#include <memory>
 #include <utility>
 
 #include "base/at_exit.h"
@@ -47,9 +49,10 @@
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "content/common/gpu/media/fake_video_decode_accelerator.h"
+#include "content/common/gpu/media/gpu_video_decode_accelerator_factory_impl.h"
 #include "content/common/gpu/media/rendering_helper.h"
 #include "content/common/gpu/media/video_accelerator_unittest_helpers.h"
-#include "content/public/common/content_switches.h"
+#include "gpu/command_buffer/service/gpu_preferences.h"
 #include "media/filters/h264_parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -73,8 +76,10 @@
 #endif  // OS_WIN
 
 #if defined(USE_OZONE)
+#include "ui/ozone/public/native_pixmap.h"
 #include "ui/ozone/public/ozone_gpu_test_helper.h"
 #include "ui/ozone/public/ozone_platform.h"
+#include "ui/ozone/public/surface_factory_ozone.h"
 #endif  // defined(USE_OZONE)
 
 using media::VideoDecodeAccelerator;
@@ -123,6 +128,10 @@ int g_rendering_warm_up = 0;
 int g_num_play_throughs = 0;
 // Fake decode
 int g_fake_decoder = 0;
+
+// Test buffer import into VDA, providing buffers allocated by us, instead of
+// requesting the VDA itself to allocate buffers.
+bool g_test_import = false;
 
 // Environment to store rendering thread.
 class VideoDecodeAcceleratorTestEnvironment;
@@ -262,30 +271,110 @@ class VideoDecodeAcceleratorTestEnvironment : public ::testing::Environment {
  private:
   base::Thread rendering_thread_;
 #if defined(USE_OZONE)
-  scoped_ptr<ui::OzoneGpuTestHelper> gpu_helper_;
+  std::unique_ptr<ui::OzoneGpuTestHelper> gpu_helper_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(VideoDecodeAcceleratorTestEnvironment);
 };
 
-// A helper class used to manage the lifetime of a Texture.
+// A helper class used to manage the lifetime of a Texture. Can be backed by
+// either a buffer allocated by the VDA, or by a preallocated pixmap.
 class TextureRef : public base::RefCounted<TextureRef> {
  public:
-  TextureRef(uint32_t texture_id, const base::Closure& no_longer_needed_cb)
-      : texture_id_(texture_id), no_longer_needed_cb_(no_longer_needed_cb) {}
+  static scoped_refptr<TextureRef> Create(
+      uint32_t texture_id,
+      const base::Closure& no_longer_needed_cb);
+
+  static scoped_refptr<TextureRef> CreatePreallocated(
+      uint32_t texture_id,
+      const base::Closure& no_longer_needed_cb,
+      media::VideoPixelFormat pixel_format,
+      const gfx::Size& size);
+
+  std::vector<gfx::GpuMemoryBufferHandle> ExportGpuMemoryBufferHandles() const;
 
   int32_t texture_id() const { return texture_id_; }
 
  private:
   friend class base::RefCounted<TextureRef>;
+
+  TextureRef(uint32_t texture_id, const base::Closure& no_longer_needed_cb)
+      : texture_id_(texture_id), no_longer_needed_cb_(no_longer_needed_cb) {}
+
   ~TextureRef();
 
   uint32_t texture_id_;
   base::Closure no_longer_needed_cb_;
+#if defined(USE_OZONE)
+  scoped_refptr<ui::NativePixmap> pixmap_;
+#endif
 };
 
 TextureRef::~TextureRef() {
   base::ResetAndReturn(&no_longer_needed_cb_).Run();
+}
+
+// static
+scoped_refptr<TextureRef> TextureRef::Create(
+    uint32_t texture_id,
+    const base::Closure& no_longer_needed_cb) {
+  return make_scoped_refptr(new TextureRef(texture_id, no_longer_needed_cb));
+}
+
+#if defined(USE_OZONE)
+gfx::BufferFormat VideoPixelFormatToGfxBufferFormat(
+    media::VideoPixelFormat pixel_format) {
+  switch (pixel_format) {
+    case media::VideoPixelFormat::PIXEL_FORMAT_ARGB:
+      return gfx::BufferFormat::BGRA_8888;
+    case media::VideoPixelFormat::PIXEL_FORMAT_XRGB:
+      return gfx::BufferFormat::BGRX_8888;
+    case media::VideoPixelFormat::PIXEL_FORMAT_NV12:
+      return gfx::BufferFormat::YUV_420_BIPLANAR;
+    default:
+      LOG_ASSERT(false) << "Unknown VideoPixelFormat";
+      return gfx::BufferFormat::BGRX_8888;
+  }
+}
+#endif
+
+// static
+scoped_refptr<TextureRef> TextureRef::CreatePreallocated(
+    uint32_t texture_id,
+    const base::Closure& no_longer_needed_cb,
+    media::VideoPixelFormat pixel_format,
+    const gfx::Size& size) {
+  scoped_refptr<TextureRef> texture_ref;
+#if defined(USE_OZONE)
+  texture_ref = TextureRef::Create(texture_id, no_longer_needed_cb);
+  LOG_ASSERT(texture_ref);
+
+  ui::OzonePlatform* platform = ui::OzonePlatform::GetInstance();
+  ui::SurfaceFactoryOzone* factory = platform->GetSurfaceFactoryOzone();
+  gfx::BufferFormat buffer_format =
+      VideoPixelFormatToGfxBufferFormat(pixel_format);
+  texture_ref->pixmap_ =
+      factory->CreateNativePixmap(gfx::kNullAcceleratedWidget, size,
+                                  buffer_format, gfx::BufferUsage::SCANOUT);
+  LOG_ASSERT(texture_ref->pixmap_);
+#endif
+
+  return texture_ref;
+}
+
+std::vector<gfx::GpuMemoryBufferHandle>
+TextureRef::ExportGpuMemoryBufferHandles() const {
+  std::vector<gfx::GpuMemoryBufferHandle> handles;
+#if defined(USE_OZONE)
+  CHECK(pixmap_);
+  int duped_fd = HANDLE_EINTR(dup(pixmap_->GetDmaBufFd()));
+  LOG_ASSERT(duped_fd != -1) << "Failed duplicating dmabuf fd";
+  gfx::GpuMemoryBufferHandle handle;
+  handle.type = gfx::OZONE_NATIVE_PIXMAP;
+  handle.native_pixmap_handle.fd = base::FileDescriptor(duped_fd, true);
+  handles.push_back(handle);
+#endif
+  return handles;
 }
 
 // Client that can accept callbacks from a VideoDecodeAccelerator and is used by
@@ -334,6 +423,7 @@ class GLRenderingVDAClient
   // VideoDecodeAccelerator::Client implementation.
   // The heart of the Client.
   void ProvidePictureBuffers(uint32_t requested_num_of_buffers,
+                             uint32_t textures_per_buffer,
                              const gfx::Size& dimensions,
                              uint32_t texture_target) override;
   void DismissPictureBuffer(int32_t picture_buffer_id) override;
@@ -358,16 +448,6 @@ class GLRenderingVDAClient
 
  private:
   typedef std::map<int32_t, scoped_refptr<TextureRef>> TextureRefMap;
-
-  scoped_ptr<media::VideoDecodeAccelerator> CreateFakeVDA();
-  scoped_ptr<media::VideoDecodeAccelerator> CreateDXVAVDA();
-  scoped_ptr<media::VideoDecodeAccelerator> CreateV4L2VDA();
-  scoped_ptr<media::VideoDecodeAccelerator> CreateV4L2SliceVDA();
-  scoped_ptr<media::VideoDecodeAccelerator> CreateVaapiVDA();
-
-  void BindImage(uint32_t client_texture_id,
-                 uint32_t texture_target,
-                 scoped_refptr<gl::GLImage> image);
 
   void SetState(ClientState new_state);
   void FinishInitialization();
@@ -400,9 +480,11 @@ class GLRenderingVDAClient
   size_t encoded_data_next_pos_to_decode_;
   int next_bitstream_buffer_id_;
   ClientStateNotification<ClientState>* note_;
-  scoped_ptr<VideoDecodeAccelerator> decoder_;
-  scoped_ptr<base::WeakPtrFactory<VideoDecodeAccelerator> >
-      weak_decoder_factory_;
+  std::unique_ptr<VideoDecodeAccelerator> decoder_;
+  base::WeakPtr<VideoDecodeAccelerator> weak_vda_;
+  std::unique_ptr<base::WeakPtrFactory<VideoDecodeAccelerator>>
+      weak_vda_ptr_factory_;
+  std::unique_ptr<GpuVideoDecodeAcceleratorFactoryImpl> vda_factory_;
   int remaining_play_throughs_;
   int reset_after_frame_num_;
   int delete_decoder_state_;
@@ -440,8 +522,22 @@ class GLRenderingVDAClient
 
   int32_t next_picture_buffer_id_;
 
+  base::WeakPtr<GLRenderingVDAClient> weak_this_;
+  base::WeakPtrFactory<GLRenderingVDAClient> weak_this_factory_;
+
   DISALLOW_IMPLICIT_CONSTRUCTORS(GLRenderingVDAClient);
 };
+
+static bool DoNothingReturnTrue() {
+  return true;
+}
+
+static bool DummyBindImage(uint32_t client_texture_id,
+                           uint32_t texture_target,
+                           const scoped_refptr<gl::GLImage>& image,
+                           bool can_bind_to_sampler) {
+  return true;
+}
 
 GLRenderingVDAClient::GLRenderingVDAClient(
     size_t window_id,
@@ -483,7 +579,8 @@ GLRenderingVDAClient::GLRenderingVDAClient(
       delay_reuse_after_frame_num_(delay_reuse_after_frame_num),
       decode_calls_per_second_(decode_calls_per_second),
       render_as_thumbnails_(render_as_thumbnails),
-      next_picture_buffer_id_(1) {
+      next_picture_buffer_id_(1),
+      weak_this_factory_(this) {
   LOG_ASSERT(num_in_flight_decodes > 0);
   LOG_ASSERT(num_play_throughs > 0);
   // |num_in_flight_decodes_| is unsupported if |decode_calls_per_second_| > 0.
@@ -494,6 +591,8 @@ GLRenderingVDAClient::GLRenderingVDAClient(
   profile_ = (profile != media::VIDEO_CODEC_PROFILE_UNKNOWN
                   ? profile
                   : media::H264PROFILE_BASELINE);
+
+  weak_this_ = weak_this_factory_.GetWeakPtr();
 }
 
 GLRenderingVDAClient::~GLRenderingVDAClient() {
@@ -502,119 +601,49 @@ GLRenderingVDAClient::~GLRenderingVDAClient() {
   SetState(CS_DESTROYED);
 }
 
-static bool DoNothingReturnTrue() { return true; }
-
-scoped_ptr<media::VideoDecodeAccelerator>
-GLRenderingVDAClient::CreateFakeVDA() {
-  scoped_ptr<media::VideoDecodeAccelerator> decoder;
-  if (fake_decoder_) {
-    decoder.reset(new FakeVideoDecodeAccelerator(
-        static_cast<gfx::GLContext*> (rendering_helper_->GetGLContextHandle()),
-        frame_size_,
-        base::Bind(&DoNothingReturnTrue)));
-  }
-  return decoder;
-}
-
-scoped_ptr<media::VideoDecodeAccelerator>
-GLRenderingVDAClient::CreateDXVAVDA() {
-  scoped_ptr<media::VideoDecodeAccelerator> decoder;
-#if defined(OS_WIN)
-  if (base::win::GetVersion() >= base::win::VERSION_WIN7)
-    decoder.reset(
-        new DXVAVideoDecodeAccelerator(
-            base::Bind(&DoNothingReturnTrue),
-            rendering_helper_->GetGLContext().get()));
-#endif
-  return decoder;
-}
-
-scoped_ptr<media::VideoDecodeAccelerator>
-GLRenderingVDAClient::CreateV4L2VDA() {
-  scoped_ptr<media::VideoDecodeAccelerator> decoder;
-#if defined(OS_CHROMEOS) && defined(USE_V4L2_CODEC)
-  scoped_refptr<V4L2Device> device = V4L2Device::Create(V4L2Device::kDecoder);
-  if (device.get()) {
-    base::WeakPtr<VideoDecodeAccelerator::Client> weak_client = AsWeakPtr();
-    decoder.reset(new V4L2VideoDecodeAccelerator(
-        static_cast<EGLDisplay>(rendering_helper_->GetGLDisplay()),
-        static_cast<EGLContext>(rendering_helper_->GetGLContextHandle()),
-        weak_client, base::Bind(&DoNothingReturnTrue), device,
-        base::ThreadTaskRunnerHandle::Get()));
-  }
-#endif
-  return decoder;
-}
-
-scoped_ptr<media::VideoDecodeAccelerator>
-GLRenderingVDAClient::CreateV4L2SliceVDA() {
-  scoped_ptr<media::VideoDecodeAccelerator> decoder;
-#if defined(OS_CHROMEOS) && defined(USE_V4L2_CODEC)
-  scoped_refptr<V4L2Device> device = V4L2Device::Create(V4L2Device::kDecoder);
-  if (device.get()) {
-    base::WeakPtr<VideoDecodeAccelerator::Client> weak_client = AsWeakPtr();
-    decoder.reset(new V4L2SliceVideoDecodeAccelerator(
-        device, static_cast<EGLDisplay>(rendering_helper_->GetGLDisplay()),
-        static_cast<EGLContext>(rendering_helper_->GetGLContextHandle()),
-        weak_client, base::Bind(&DoNothingReturnTrue),
-        base::ThreadTaskRunnerHandle::Get()));
-  }
-#endif
-  return decoder;
-}
-
-scoped_ptr<media::VideoDecodeAccelerator>
-GLRenderingVDAClient::CreateVaapiVDA() {
-  scoped_ptr<media::VideoDecodeAccelerator> decoder;
-#if defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
-  decoder.reset(new VaapiVideoDecodeAccelerator(
-      base::Bind(&DoNothingReturnTrue),
-      base::Bind(&GLRenderingVDAClient::BindImage, base::Unretained(this))));
-#endif
-  return decoder;
-}
-
-void GLRenderingVDAClient::BindImage(uint32_t client_texture_id,
-                                     uint32_t texture_target,
-                                     scoped_refptr<gl::GLImage> image) {}
-
 void GLRenderingVDAClient::CreateAndStartDecoder() {
   LOG_ASSERT(decoder_deleted());
   LOG_ASSERT(!decoder_.get());
 
-  VideoDecodeAccelerator::Client* client = this;
-
-  scoped_ptr<media::VideoDecodeAccelerator> decoders[] = {
-    CreateFakeVDA(),
-    CreateDXVAVDA(),
-    CreateV4L2VDA(),
-    CreateV4L2SliceVDA(),
-    CreateVaapiVDA(),
-  };
-
-  for (size_t i = 0; i < arraysize(decoders); ++i) {
-    if (!decoders[i])
-      continue;
-    decoder_ = std::move(decoders[i]);
-    weak_decoder_factory_.reset(
-        new base::WeakPtrFactory<VideoDecodeAccelerator>(decoder_.get()));
-    if (decoder_->Initialize(profile_, client)) {
-      SetState(CS_DECODER_SET);
-      FinishInitialization();
-      return;
+  if (fake_decoder_) {
+    decoder_.reset(new FakeVideoDecodeAccelerator(
+        frame_size_, base::Bind(&DoNothingReturnTrue)));
+    LOG_ASSERT(decoder_->Initialize(profile_, this));
+  } else {
+    if (!vda_factory_) {
+      vda_factory_ = GpuVideoDecodeAcceleratorFactoryImpl::Create(
+          base::Bind(&RenderingHelper::GetGLContext,
+                     base::Unretained(rendering_helper_)),
+          base::Bind(&DoNothingReturnTrue), base::Bind(&DummyBindImage));
+      LOG_ASSERT(vda_factory_);
     }
+
+    VideoDecodeAccelerator::Config config(profile_);
+    if (g_test_import) {
+      config.output_mode =
+          media::VideoDecodeAccelerator::Config::OutputMode::IMPORT;
+    }
+    gpu::GpuPreferences gpu_preferences;
+    decoder_ = vda_factory_->CreateVDA(this, config, gpu_preferences);
   }
-  // Decoders are all initialize failed.
-  LOG(ERROR) << "VideoDecodeAccelerator::Initialize() failed";
-  LOG_ASSERT(false);
+
+  LOG_ASSERT(decoder_) << "Failed creating a VDA";
+
+  decoder_->TryToSetupDecodeOnSeparateThread(
+      weak_this_, base::ThreadTaskRunnerHandle::Get());
+
+  SetState(CS_DECODER_SET);
+  FinishInitialization();
 }
 
 void GLRenderingVDAClient::ProvidePictureBuffers(
     uint32_t requested_num_of_buffers,
+    uint32_t textures_per_buffer,
     const gfx::Size& dimensions,
     uint32_t texture_target) {
   if (decoder_deleted())
     return;
+  LOG_ASSERT(textures_per_buffer == 1u);
   std::vector<media::PictureBuffer> buffers;
 
   requested_num_of_buffers += kExtraPictureBuffers;
@@ -627,20 +656,46 @@ void GLRenderingVDAClient::ProvidePictureBuffers(
         texture_target_, &texture_id, dimensions, &done);
     done.Wait();
 
-    int32_t picture_buffer_id = next_picture_buffer_id_++;
-    LOG_ASSERT(active_textures_
-              .insert(std::make_pair(
-                  picture_buffer_id,
-                  new TextureRef(texture_id,
-                                 base::Bind(&RenderingHelper::DeleteTexture,
-                                            base::Unretained(rendering_helper_),
-                                            texture_id))))
-              .second);
+    scoped_refptr<TextureRef> texture_ref;
+    base::Closure delete_texture_cb =
+        base::Bind(&RenderingHelper::DeleteTexture,
+                   base::Unretained(rendering_helper_), texture_id);
 
-    buffers.push_back(
-        media::PictureBuffer(picture_buffer_id, dimensions, texture_id));
+    if (g_test_import) {
+      media::VideoPixelFormat pixel_format = decoder_->GetOutputFormat();
+      if (pixel_format == media::PIXEL_FORMAT_UNKNOWN)
+        pixel_format = media::PIXEL_FORMAT_ARGB;
+      texture_ref = TextureRef::CreatePreallocated(
+          texture_id, delete_texture_cb, pixel_format, dimensions);
+    } else {
+      texture_ref = TextureRef::Create(texture_id, delete_texture_cb);
+    }
+
+    LOG_ASSERT(texture_ref);
+
+    int32_t picture_buffer_id = next_picture_buffer_id_++;
+    LOG_ASSERT(
+        active_textures_.insert(std::make_pair(picture_buffer_id, texture_ref))
+            .second);
+
+    media::PictureBuffer::TextureIds ids;
+    ids.push_back(texture_id);
+    buffers.push_back(media::PictureBuffer(picture_buffer_id, dimensions, ids));
   }
   decoder_->AssignPictureBuffers(buffers);
+
+  if (g_test_import) {
+    for (const auto& buffer : buffers) {
+      TextureRefMap::iterator texture_it = active_textures_.find(buffer.id());
+      ASSERT_NE(active_textures_.end(), texture_it);
+
+      std::vector<gfx::GpuMemoryBufferHandle> handles =
+          texture_it->second->ExportGpuMemoryBufferHandles();
+      LOG_ASSERT(!handles.empty()) << "Failed producing GMB handles";
+
+      decoder_->ImportBufferForPicture(buffer.id(), handles);
+    }
+  }
 }
 
 void GLRenderingVDAClient::DismissPictureBuffer(int32_t picture_buffer_id) {
@@ -710,10 +765,8 @@ void GLRenderingVDAClient::ReturnPicture(int32_t picture_buffer_id) {
 
   if (num_decoded_frames_ > delay_reuse_after_frame_num_) {
     base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&VideoDecodeAccelerator::ReusePictureBuffer,
-                   weak_decoder_factory_->GetWeakPtr(),
-                   picture_buffer_id),
+        FROM_HERE, base::Bind(&VideoDecodeAccelerator::ReusePictureBuffer,
+                              weak_vda_, picture_buffer_id),
         kReuseDelay);
   } else {
     decoder_->ReusePictureBuffer(picture_buffer_id);
@@ -835,7 +888,7 @@ void GLRenderingVDAClient::FinishInitialization() {
 void GLRenderingVDAClient::DeleteDecoder() {
   if (decoder_deleted())
     return;
-  weak_decoder_factory_.reset();
+  weak_vda_ptr_factory_.reset();
   decoder_.reset();
   STLClearObject(&encoded_data_);
   active_textures_.clear();
@@ -1195,17 +1248,6 @@ class VideoDecodeAcceleratorParamTest
       public ::testing::WithParamInterface<
         base::Tuple<int, int, int, ResetPoint, ClientState, bool, bool> > {
 };
-
-// Helper so that gtest failures emit a more readable version of the tuple than
-// its byte representation.
-::std::ostream& operator<<(
-    ::std::ostream& os,
-    const base::Tuple<int, int, int, ResetPoint, ClientState, bool, bool>& t) {
-  return os << base::get<0>(t) << ", " << base::get<1>(t) << ", "
-            << base::get<2>(t) << ", " << base::get<3>(t) << ", "
-            << base::get<4>(t) << ", " << base::get<5>(t) << ", "
-            << base::get<6>(t);
-}
 
 // Wait for |note| to report a state and if it's not |expected_state| then
 // assert |client| has deleted its decoder.
@@ -1632,6 +1674,10 @@ int main(int argc, char **argv) {
       continue;
     if (it->first == "ozone-platform" || it->first == "ozone-use-surfaceless")
       continue;
+    if (it->first == "test_import") {
+      content::g_test_import = true;
+      continue;
+    }
     LOG(FATAL) << "Unexpected switch: " << it->first << ":" << it->second;
   }
 

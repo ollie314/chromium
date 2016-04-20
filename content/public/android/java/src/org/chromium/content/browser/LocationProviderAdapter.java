@@ -18,7 +18,7 @@ import java.util.concurrent.FutureTask;
  * Delegates all real functionality to the implementation
  * returned from LocationProviderFactory.
  * See detailed documentation on
- * content/browser/geolocation/android_location_api_adapter.h.
+ * content/browser/geolocation/location_api_adapter_android.h.
  * Based on android.webkit.GeolocationService.java
  */
 @MainDex
@@ -38,16 +38,15 @@ public class LocationProviderAdapter {
     }
 
     /**
-     * Start listening for location updates until we're told to quit. May be
-     * called in any thread.
-     * @param gpsEnabled Whether or not we're interested in high accuracy GPS.
+     * Start listening for location updates until we're told to quit. May be called in any thread.
+     * @param enableHighAccuracy Whether or not to enable high accuracy location providers.
      */
     @CalledByNative
-    public boolean start(final boolean gpsEnabled) {
+    public boolean start(final boolean enableHighAccuracy) {
         FutureTask<Void> task = new FutureTask<Void>(new Runnable() {
             @Override
             public void run() {
-                mImpl.start(gpsEnabled);
+                mImpl.start(enableHighAccuracy);
             }
         }, null);
         ThreadUtils.runOnUiThread(task);

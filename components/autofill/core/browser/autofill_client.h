@@ -5,10 +5,12 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_AUTOFILL_CLIENT_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_AUTOFILL_CLIENT_H_
 
+#include <memory>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "base/i18n/rtl.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/values.h"
@@ -85,6 +87,14 @@ class AutofillClient {
     NETWORK_ERROR,
   };
 
+  enum UnmaskCardReason {
+    // The card is being unmasked for PaymentRequest.
+    UNMASK_FOR_PAYMENT_REQUEST,
+
+    // The card is being unmasked for Autofill.
+    UNMASK_FOR_AUTOFILL,
+  };
+
   typedef base::Callback<void(RequestAutocompleteResult,
                               const base::string16&,
                               const FormStructure*)> ResultCallback;
@@ -122,6 +132,7 @@ class AutofillClient {
   // A user has attempted to use a masked card. Prompt them for further
   // information to proceed.
   virtual void ShowUnmaskPrompt(const CreditCard& card,
+                                UnmaskCardReason reason,
                                 base::WeakPtr<CardUnmaskDelegate> delegate) = 0;
   virtual void OnUnmaskVerificationResult(PaymentsRpcResult result) = 0;
 
@@ -134,7 +145,7 @@ class AutofillClient {
   // contents of |legal_message| to the user.
   virtual void ConfirmSaveCreditCardToCloud(
       const CreditCard& card,
-      scoped_ptr<base::DictionaryValue> legal_message,
+      std::unique_ptr<base::DictionaryValue> legal_message,
       const base::Closure& callback) = 0;
 
   // Gathers risk data and provides it to |callback|.

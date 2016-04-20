@@ -4,7 +4,9 @@
 
 #include "chrome/browser/android/intercept_download_resource_throttle.h"
 
+#include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
+#include "chrome/browser/android/chrome_feature_list.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "content/public/browser/android/download_controller_android.h"
 #include "content/public/browser/resource_controller.h"
@@ -41,15 +43,22 @@ void RecordInterceptFailureReasons(
 
 namespace chrome {
 
+// static
+bool InterceptDownloadResourceThrottle::IsDownloadInterceptionEnabled() {
+  return base::FeatureList::IsEnabled(chrome::android::kSystemDownloadManager);
+}
+
 InterceptDownloadResourceThrottle::InterceptDownloadResourceThrottle(
     net::URLRequest* request,
     int render_process_id,
     int render_view_id,
-    int request_id)
+    int request_id,
+    bool must_download)
     : request_(request),
       render_process_id_(render_process_id),
       render_view_id_(render_view_id),
-      request_id_(request_id) {
+      request_id_(request_id),
+      must_download_(must_download) {
 }
 
 InterceptDownloadResourceThrottle::~InterceptDownloadResourceThrottle() {
@@ -64,6 +73,9 @@ const char* InterceptDownloadResourceThrottle::GetNameForLogging() const {
 }
 
 void InterceptDownloadResourceThrottle::ProcessDownloadRequest() {
+  if (!IsDownloadInterceptionEnabled())
+    return;
+
   if (request_->url_chain().empty()) {
     RecordInterceptFailureReasons(EMPTY_URL);
     return;
@@ -109,7 +121,7 @@ void InterceptDownloadResourceThrottle::ProcessDownloadRequest() {
   }
 
   content::DownloadControllerAndroid::Get()->CreateGETDownload(
-      render_process_id_, render_view_id_, request_id_);
+      render_process_id_, render_view_id_, request_id_, must_download_);
   controller()->Cancel();
   RecordInterceptFailureReasons(NO_FAILURE);
 }

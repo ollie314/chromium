@@ -5,6 +5,7 @@
 #include "ui/ozone/platform/drm/gpu/drm_thread_proxy.h"
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "ui/ozone/platform/drm/gpu/drm_thread_message_proxy.h"
 #include "ui/ozone/platform/drm/gpu/drm_window_proxy.h"
 #include "ui/ozone/platform/drm/gpu/gbm_buffer.h"
@@ -16,14 +17,14 @@ DrmThreadProxy::DrmThreadProxy() {}
 
 DrmThreadProxy::~DrmThreadProxy() {}
 
-scoped_refptr<DrmThreadMessageProxy>
-DrmThreadProxy::CreateDrmThreadMessageProxy() {
-  return make_scoped_refptr(new DrmThreadMessageProxy(&drm_thread_));
+void DrmThreadProxy::BindThreadIntoMessagingProxy(
+    InterThreadMessagingProxy* messaging_proxy) {
+  messaging_proxy->SetDrmThread(&drm_thread_);
 }
 
-scoped_ptr<DrmWindowProxy> DrmThreadProxy::CreateDrmWindowProxy(
+std::unique_ptr<DrmWindowProxy> DrmThreadProxy::CreateDrmWindowProxy(
     gfx::AcceleratedWidget widget) {
-  return make_scoped_ptr(new DrmWindowProxy(widget, &drm_thread_));
+  return base::WrapUnique(new DrmWindowProxy(widget, &drm_thread_));
 }
 
 scoped_refptr<GbmBuffer> DrmThreadProxy::CreateBuffer(
@@ -37,6 +38,28 @@ scoped_refptr<GbmBuffer> DrmThreadProxy::CreateBuffer(
       base::Bind(&DrmThread::CreateBuffer, base::Unretained(&drm_thread_),
                  widget, size, format, usage, &buffer));
   return buffer;
+}
+
+scoped_refptr<GbmBuffer> DrmThreadProxy::CreateBufferFromFD(
+    const gfx::Size& size,
+    gfx::BufferFormat format,
+    base::ScopedFD fd,
+    int stride) {
+  scoped_refptr<GbmBuffer> buffer;
+  PostSyncTask(
+      drm_thread_.task_runner(),
+      base::Bind(&DrmThread::CreateBufferFromFD, base::Unretained(&drm_thread_),
+                 size, format, base::Passed(&fd), stride, &buffer));
+  return buffer;
+}
+
+void DrmThreadProxy::GetScanoutFormats(
+    gfx::AcceleratedWidget widget,
+    std::vector<gfx::BufferFormat>* scanout_formats) {
+  PostSyncTask(
+      drm_thread_.task_runner(),
+      base::Bind(&DrmThread::GetScanoutFormats, base::Unretained(&drm_thread_),
+                 widget, scanout_formats));
 }
 
 }  // namespace ui

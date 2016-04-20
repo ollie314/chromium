@@ -15,13 +15,16 @@
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/shared_memory.h"
+#include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "cc/resources/shared_bitmap_manager.h"
+#include "content/common/gpu_process_launch_causes.h"
 #include "content/common/host_discardable_shared_memory_manager.h"
 #include "content/common/host_shared_bitmap_manager.h"
 #include "content/public/browser/browser_message_filter.h"
+#include "gpu/config/gpu_info.h"
 #include "ipc/message_filter.h"
 #include "media/audio/audio_parameters.h"
 #include "media/base/channel_layout.h"
@@ -160,6 +163,16 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
   void OnGetMonitorColorProfile(std::vector<char>* profile);
 #endif
 
+  // Message handlers called on the browser IO thread:
+  void OnEstablishGpuChannel(CauseForGpuLaunch, IPC::Message* reply);
+  void OnHasGpuProcess(IPC::Message* reply);
+  // Helper callbacks for the message handlers.
+  void EstablishChannelCallback(std::unique_ptr<IPC::Message> reply,
+                                const IPC::ChannelHandle& channel,
+                                const gpu::GPUInfo& gpu_info);
+  void GetGpuProcessHandlesCallback(
+      std::unique_ptr<IPC::Message> reply,
+      const std::list<base::ProcessHandle>& handles);
   // Used to ask the browser to allocate a block of shared memory for the
   // renderer to send back data in, since shared memory can't be created
   // in the renderer on POSIX due to the sandbox.
@@ -197,10 +210,12 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
                 const GURL& url,
                 const GURL& top_origin,
                 IPC::Message* reply_msg);
-  void PostKeygenToWorkerThread(IPC::Message* reply_msg,
-                                scoped_ptr<net::KeygenHandler> keygen_handler);
-  void OnKeygenOnWorkerThread(scoped_ptr<net::KeygenHandler> keygen_handler,
-                              IPC::Message* reply_msg);
+  void PostKeygenToWorkerThread(
+      IPC::Message* reply_msg,
+      std::unique_ptr<net::KeygenHandler> keygen_handler);
+  void OnKeygenOnWorkerThread(
+      std::unique_ptr<net::KeygenHandler> keygen_handler,
+      IPC::Message* reply_msg);
   void OnMediaLogEvents(const std::vector<media::MediaLogEvent>&);
 
   bool CheckBenchmarkingEnabled() const;
@@ -234,10 +249,13 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
 
   scoped_refptr<DOMStorageContextWrapper> dom_storage_context_;
 
+  int gpu_process_id_;
   int render_process_id_;
 
   media::AudioManager* audio_manager_;
   MediaInternals* media_internals_;
+
+  base::WeakPtrFactory<RenderMessageFilter> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderMessageFilter);
 };

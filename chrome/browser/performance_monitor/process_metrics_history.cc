@@ -36,6 +36,9 @@ ProcessMetricsHistory::ProcessMetricsHistory()
     : last_update_sequence_(0), cpu_usage_(0.0), trace_trigger_handle_(-1) {
 }
 
+ProcessMetricsHistory::ProcessMetricsHistory(
+    const ProcessMetricsHistory& other) = default;
+
 ProcessMetricsHistory::~ProcessMetricsHistory() {
 }
 
@@ -111,13 +114,6 @@ void ProcessMetricsHistory::RunPerformanceTriggers() {
         UMA_HISTOGRAM_BOOLEAN("PerformanceMonitor.HighCPU.RendererProcess",
                               true);
       }
-      break;
-    case content::PROCESS_TYPE_PLUGIN:
-      UMA_HISTOGRAM_CUSTOM_COUNTS("PerformanceMonitor.AverageCPU.PluginProcess",
-                                  cpu_usage_, kHistogramMin, kHistogramMax,
-                                  kHistogramBucketCount);
-      if (cpu_usage_ > kHighCPUUtilizationThreshold)
-        UMA_HISTOGRAM_BOOLEAN("PerformanceMonitor.HighCPU.PluginProcess", true);
       break;
     case content::PROCESS_TYPE_GPU:
       UMA_HISTOGRAM_CUSTOM_COUNTS("PerformanceMonitor.AverageCPU.GPUProcess",

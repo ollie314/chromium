@@ -41,11 +41,6 @@ WebSize WebViewFrameWidget::size()
     return m_webView->size();
 }
 
-void WebViewFrameWidget::willStartLiveResize()
-{
-    return m_webView->willStartLiveResize();
-}
-
 void WebViewFrameWidget::resize(const WebSize& size)
 {
     return m_webView->resize(size);
@@ -54,11 +49,6 @@ void WebViewFrameWidget::resize(const WebSize& size)
 void WebViewFrameWidget::resizeVisualViewport(const WebSize& size)
 {
     return m_webView->resizeVisualViewport(size);
-}
-
-void WebViewFrameWidget::willEndLiveResize()
-{
-    return m_webView->willEndLiveResize();
 }
 
 void WebViewFrameWidget::didEnterFullScreen()
@@ -129,11 +119,6 @@ void WebViewFrameWidget::applyViewportDeltas(
     float topControlsShownRatioDelta)
 {
     return m_webView->applyViewportDeltas(visualViewportDelta, layoutViewportDelta, elasticOverscrollDelta, scaleFactor, topControlsShownRatioDelta);
-}
-
-void WebViewFrameWidget::recordFrameTimingEvent(FrameTimingEventType eventType, int64_t rectId, const WebVector<WebFrameTimingEvent>& events)
-{
-    return m_webView->recordFrameTimingEvent(eventType, rectId, events);
 }
 
 void WebViewFrameWidget::mouseCaptureLost()
@@ -263,6 +248,21 @@ void WebViewFrameWidget::updateTopControlsState(WebTopControlsState constraints,
 void WebViewFrameWidget::setVisibilityState(WebPageVisibilityState visibilityState, bool isInitialState)
 {
     return m_webView->setVisibilityState(visibilityState, isInitialState);
+}
+
+void WebViewFrameWidget::setIsTransparent(bool isTransparent)
+{
+    m_webView->setIsTransparent(isTransparent);
+}
+
+bool WebViewFrameWidget::isTransparent() const
+{
+    return m_webView->isTransparent();
+}
+
+void WebViewFrameWidget::setBaseBackgroundColor(WebColor color)
+{
+    m_webView->setBaseBackgroundColor(color);
 }
 
 void WebViewFrameWidget::scheduleAnimation()

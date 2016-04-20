@@ -35,8 +35,8 @@ SerialConnection::SerialConnection(
 SerialConnection::~SerialConnection() {
   receiver_->ShutDown();
   sender_->ShutDown();
-  io_handler_->CancelRead(serial::RECEIVE_ERROR_DISCONNECTED);
-  io_handler_->CancelWrite(serial::SEND_ERROR_DISCONNECTED);
+  io_handler_->CancelRead(serial::ReceiveError::DISCONNECTED);
+  io_handler_->CancelWrite(serial::SendError::DISCONNECTED);
 }
 
 void SerialConnection::GetInfo(
@@ -47,7 +47,7 @@ void SerialConnection::GetInfo(
 void SerialConnection::SetOptions(serial::ConnectionOptionsPtr options,
                                   const mojo::Callback<void(bool)>& callback) {
   callback.Run(io_handler_->ConfigurePort(*options));
-  io_handler_->CancelRead(device::serial::RECEIVE_ERROR_NONE);
+  io_handler_->CancelRead(device::serial::ReceiveError::NONE);
 }
 
 void SerialConnection::SetControlSignals(
@@ -69,11 +69,12 @@ void SerialConnection::OnSendCancelled(int32_t error) {
   io_handler_->CancelWrite(static_cast<serial::SendError>(error));
 }
 
-void SerialConnection::OnSendPipeReady(scoped_ptr<ReadOnlyBuffer> buffer) {
+void SerialConnection::OnSendPipeReady(std::unique_ptr<ReadOnlyBuffer> buffer) {
   io_handler_->Write(std::move(buffer));
 }
 
-void SerialConnection::OnReceivePipeReady(scoped_ptr<WritableBuffer> buffer) {
+void SerialConnection::OnReceivePipeReady(
+    std::unique_ptr<WritableBuffer> buffer) {
   io_handler_->Read(std::move(buffer));
 }
 

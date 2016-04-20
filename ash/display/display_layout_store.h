@@ -8,10 +8,11 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 
 #include "ash/ash_export.h"
-#include "ash/display/display_layout.h"
 #include "base/macros.h"
+#include "ui/display/manager/display_layout.h"
 
 namespace ash {
 
@@ -20,48 +21,36 @@ class ASH_EXPORT DisplayLayoutStore {
   DisplayLayoutStore();
   ~DisplayLayoutStore();
 
-  const DisplayLayout& default_display_layout() const {
-    return default_display_layout_;
-  }
-  void SetDefaultDisplayLayout(const DisplayLayout& layout);
+  void SetDefaultDisplayPlacement(const display::DisplayPlacement& placement);
 
   // Registeres the display layout info for the specified display(s).
-  void RegisterLayoutForDisplayIdPair(int64_t id1,
-                                      int64_t id2,
-                                      const DisplayLayout& layout);
+  void RegisterLayoutForDisplayIdList(
+      const display::DisplayIdList& list,
+      std::unique_ptr<display::DisplayLayout> layout);
 
   // If no layout is registered, it creatas new layout using
   // |default_display_layout_|.
-  DisplayLayout GetRegisteredDisplayLayout(const DisplayIdPair& pair);
-
-  // Returns the display layout for the display id pair
-  // with display swapping applied.  That is, this returns
-  // flipped layout if the displays are swapped.
-  DisplayLayout ComputeDisplayLayoutForDisplayIdPair(
-      const DisplayIdPair& display_pair);
+  const display::DisplayLayout& GetRegisteredDisplayLayout(
+      const display::DisplayIdList& list);
 
   // Update the multi display state in the display layout for
-  // |display_pair|.  This creates new display layout if no layout is
-  // registered for |display_pair|.
-  void UpdateMultiDisplayState(const DisplayIdPair& display_pair,
+  // |display_list|.  This creates new display layout if no layout is
+  // registered for |display_list|.
+  void UpdateMultiDisplayState(const display::DisplayIdList& display_list,
                                bool mirrored,
                                bool default_unified);
 
-  // Update the |primary_id| in the display layout for
-  // |display_pair|.  This creates new display layout if no layout is
-  // registered for |display_pair|.
-  void UpdatePrimaryDisplayId(const DisplayIdPair& display_pair,
-                              int64_t display_id);
-
  private:
-  // Creates new layout for display pair from |default_display_layout_|.
-  DisplayLayout CreateDisplayLayout(const DisplayIdPair& display_pair);
+  // Creates new layout for display list from |default_display_layout_|.
+  display::DisplayLayout* CreateDefaultDisplayLayout(
+      const display::DisplayIdList& display_list);
 
-  // The default display layout.
-  DisplayLayout default_display_layout_;
+  // The default display placement.
+  display::DisplayPlacement default_display_placement_;
 
-  // Display layout per pair of devices.
-  std::map<DisplayIdPair, DisplayLayout> paired_layouts_;
+  // Display layout per list of devices.
+  std::map<display::DisplayIdList, std::unique_ptr<display::DisplayLayout>>
+      layouts_;
 
   DISALLOW_COPY_AND_ASSIGN(DisplayLayoutStore);
 };

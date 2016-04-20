@@ -7,13 +7,12 @@
 
 #include <stdint.h>
 
-#include <list>
+#include <memory>
 #include <utility>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "media/base/media_export.h"
 #include "media/base/video_decoder_config.h"
@@ -21,6 +20,7 @@
 #include "media/formats/mp2t/es_parser.h"
 
 namespace media {
+class EncryptionScheme;
 class H264Parser;
 struct H264SPS;
 class OffsetByteQueue;
@@ -70,14 +70,15 @@ class MEDIA_EXPORT EsParserH264 : public EsParser {
 
   // Update the video decoder config based on an H264 SPS.
   // Return true if successful.
-  bool UpdateVideoDecoderConfig(const H264SPS* sps);
+  bool UpdateVideoDecoderConfig(const H264SPS* sps,
+                                const EncryptionScheme& scheme);
 
   EsAdapterVideo es_adapter_;
 
   // H264 parser state.
   // - |current_access_unit_pos_| is pointing to an annexB syncword
   // representing the first NALU of an H264 access unit.
-  scoped_ptr<H264Parser> h264_parser_;
+  std::unique_ptr<H264Parser> h264_parser_;
   int64_t current_access_unit_pos_;
   int64_t next_access_unit_pos_;
 

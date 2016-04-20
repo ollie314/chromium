@@ -39,12 +39,9 @@ Surface::~Surface() {
   }
   if (!draw_callback_.is_null())
     draw_callback_.Run(SurfaceDrawStatus::DRAW_SKIPPED);
-
-  if (factory_)
-    factory_->SetBeginFrameSource(surface_id_, NULL);
 }
 
-void Surface::QueueFrame(scoped_ptr<CompositorFrame> frame,
+void Surface::QueueFrame(std::unique_ptr<CompositorFrame> frame,
                          const DrawCallback& callback) {
   DCHECK(factory_);
   ClearCopyRequests();
@@ -53,7 +50,7 @@ void Surface::QueueFrame(scoped_ptr<CompositorFrame> frame,
     TakeLatencyInfo(&frame->metadata.latency_info);
   }
 
-  scoped_ptr<CompositorFrame> previous_frame = std::move(current_frame_);
+  std::unique_ptr<CompositorFrame> previous_frame = std::move(current_frame_);
   current_frame_ = std::move(frame);
 
   if (current_frame_) {
@@ -98,10 +95,11 @@ void Surface::QueueFrame(scoped_ptr<CompositorFrame> frame,
   }
 }
 
-void Surface::RequestCopyOfOutput(scoped_ptr<CopyOutputRequest> copy_request) {
+void Surface::RequestCopyOfOutput(
+    std::unique_ptr<CopyOutputRequest> copy_request) {
   if (current_frame_ &&
       !current_frame_->delegated_frame_data->render_pass_list.empty()) {
-    std::vector<scoped_ptr<CopyOutputRequest>>& copy_requests =
+    std::vector<std::unique_ptr<CopyOutputRequest>>& copy_requests =
         current_frame_->delegated_frame_data->render_pass_list.back()
             ->copy_requests;
 
@@ -110,7 +108,7 @@ void Surface::RequestCopyOfOutput(scoped_ptr<CopyOutputRequest> copy_request) {
       // source.
       auto to_remove =
           std::remove_if(copy_requests.begin(), copy_requests.end(),
-                         [source](const scoped_ptr<CopyOutputRequest>& x) {
+                         [source](const std::unique_ptr<CopyOutputRequest>& x) {
                            return x->source() == source;
                          });
       copy_requests.erase(to_remove, copy_requests.end());
@@ -122,7 +120,8 @@ void Surface::RequestCopyOfOutput(scoped_ptr<CopyOutputRequest> copy_request) {
 }
 
 void Surface::TakeCopyOutputRequests(
-    std::multimap<RenderPassId, scoped_ptr<CopyOutputRequest>>* copy_requests) {
+    std::multimap<RenderPassId, std::unique_ptr<CopyOutputRequest>>*
+        copy_requests) {
   DCHECK(copy_requests->empty());
   if (current_frame_) {
     for (const auto& render_pass :
@@ -166,8 +165,8 @@ void Surface::AddDestructionDependency(SurfaceSequence sequence) {
 }
 
 void Surface::SatisfyDestructionDependencies(
-    base::hash_set<SurfaceSequence>* sequences,
-    base::hash_set<uint32_t>* valid_id_namespaces) {
+    std::unordered_set<SurfaceSequence, SurfaceSequenceHash>* sequences,
+    std::unordered_set<uint32_t>* valid_id_namespaces) {
   destruction_dependencies_.erase(
       std::remove_if(destruction_dependencies_.begin(),
                      destruction_dependencies_.end(),
@@ -176,34 +175,6 @@ void Surface::SatisfyDestructionDependencies(
                                !valid_id_namespaces->count(seq.id_namespace));
                      }),
       destruction_dependencies_.end());
-}
-
-void Surface::AddBeginFrameSource(BeginFrameSource* begin_frame_source) {
-  DCHECK(base::STLIsSorted(begin_frame_sources_));
-  DCHECK(!ContainsValue(begin_frame_sources_, begin_frame_source))
-      << begin_frame_source;
-  begin_frame_sources_.insert(begin_frame_source);
-  UpdatePrimaryBeginFrameSource();
-}
-
-void Surface::RemoveBeginFrameSource(BeginFrameSource* begin_frame_source) {
-  size_t erase_count = begin_frame_sources_.erase(begin_frame_source);
-  DCHECK_EQ(1u, erase_count);
-  UpdatePrimaryBeginFrameSource();
-}
-
-void Surface::UpdatePrimaryBeginFrameSource() {
-  // Ensure the BeginFrameSources are sorted so our we make a stable decision
-  // regarding which source is primary.
-  // TODO(brianderson): Do something smarter based on coverage instead.
-  DCHECK(base::STLIsSorted(begin_frame_sources_));
-
-  BeginFrameSource* primary_source = nullptr;
-  if (!begin_frame_sources_.empty())
-    primary_source = *begin_frame_sources_.begin();
-
-  if (factory_)
-    factory_->SetBeginFrameSource(surface_id_, primary_source);
 }
 
 void Surface::ClearCopyRequests() {

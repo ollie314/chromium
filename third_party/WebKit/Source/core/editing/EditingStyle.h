@@ -39,8 +39,6 @@
 #include "core/editing/WritingDirection.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
-#include "wtf/RefCounted.h"
-#include "wtf/RefPtr.h"
 #include "wtf/TriState.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
@@ -59,7 +57,7 @@ class QualifiedName;
 class ComputedStyle;
 class StylePropertySet;
 
-class EditingStyle final : public RefCountedWillBeGarbageCollectedFinalized<EditingStyle> {
+class EditingStyle final : public GarbageCollectedFinalized<EditingStyle> {
 public:
 
     enum PropertiesToInclude { AllProperties, OnlyEditingInheritableProperties, EditingPropertiesInEffect };
@@ -67,29 +65,29 @@ public:
     enum ShouldExtractMatchingStyle { ExtractMatchingStyle, DoNotExtractMatchingStyle };
     static float NoFontDelta;
 
-    static PassRefPtrWillBeRawPtr<EditingStyle> create()
+    static EditingStyle* create()
     {
-        return adoptRefWillBeNoop(new EditingStyle());
+        return new EditingStyle();
     }
 
-    static PassRefPtrWillBeRawPtr<EditingStyle> create(ContainerNode* node, PropertiesToInclude propertiesToInclude = OnlyEditingInheritableProperties)
+    static EditingStyle* create(ContainerNode* node, PropertiesToInclude propertiesToInclude = OnlyEditingInheritableProperties)
     {
-        return adoptRefWillBeNoop(new EditingStyle(node, propertiesToInclude));
+        return new EditingStyle(node, propertiesToInclude);
     }
 
-    static PassRefPtrWillBeRawPtr<EditingStyle> create(const Position& position, PropertiesToInclude propertiesToInclude = OnlyEditingInheritableProperties)
+    static EditingStyle* create(const Position& position, PropertiesToInclude propertiesToInclude = OnlyEditingInheritableProperties)
     {
-        return adoptRefWillBeNoop(new EditingStyle(position, propertiesToInclude));
+        return new EditingStyle(position, propertiesToInclude);
     }
 
-    static PassRefPtrWillBeRawPtr<EditingStyle> create(const StylePropertySet* style)
+    static EditingStyle* create(const StylePropertySet* style)
     {
-        return adoptRefWillBeNoop(new EditingStyle(style));
+        return new EditingStyle(style);
     }
 
-    static PassRefPtrWillBeRawPtr<EditingStyle> create(CSSPropertyID propertyID, const String& value)
+    static EditingStyle* create(CSSPropertyID propertyID, const String& value)
     {
-        return adoptRefWillBeNoop(new EditingStyle(propertyID, value));
+        return new EditingStyle(propertyID, value);
     }
 
     ~EditingStyle();
@@ -99,9 +97,9 @@ public:
     bool isEmpty() const;
     void overrideWithStyle(const StylePropertySet*);
     void clear();
-    PassRefPtrWillBeRawPtr<EditingStyle> copy() const;
-    PassRefPtrWillBeRawPtr<EditingStyle> extractAndRemoveBlockProperties();
-    PassRefPtrWillBeRawPtr<EditingStyle> extractAndRemoveTextDirection();
+    EditingStyle* copy() const;
+    EditingStyle* extractAndRemoveBlockProperties();
+    EditingStyle* extractAndRemoveTextDirection();
     void removeBlockProperties();
     void removeStyleAddedByElement(Element*);
     void removeStyleConflictingWithStyleOfElement(Element*);
@@ -126,8 +124,8 @@ public:
     void mergeTypingStyle(Document*);
     enum CSSPropertyOverrideMode { OverrideValues, DoNotOverrideValues };
     void mergeInlineStyleOfElement(HTMLElement*, CSSPropertyOverrideMode, PropertiesToInclude = AllProperties);
-    static PassRefPtrWillBeRawPtr<EditingStyle> wrappingStyleForAnnotatedSerialization(ContainerNode* context);
-    static PassRefPtrWillBeRawPtr<EditingStyle> wrappingStyleForSerialization(ContainerNode* context);
+    static EditingStyle* wrappingStyleForAnnotatedSerialization(ContainerNode* context);
+    static EditingStyle* wrappingStyleForSerialization(ContainerNode* context);
     void mergeStyleFromRules(Element*);
     void mergeStyleFromRulesForSerialization(Element*);
     void removeStyleFromRulesAndContext(Element*, ContainerNode* context);
@@ -139,7 +137,7 @@ public:
     float fontSizeDelta() const { return m_fontSizeDelta; }
     bool hasFontSizeDelta() const { return m_fontSizeDelta != NoFontDelta; }
 
-    static PassRefPtrWillBeRawPtr<EditingStyle> styleAtSelectionStart(const VisibleSelection&, bool shouldUseBackgroundColorInEffect = false);
+    static EditingStyle* styleAtSelectionStart(const VisibleSelection&, bool shouldUseBackgroundColorInEffect = false);
     static WritingDirection textDirectionForSelection(const VisibleSelection&, EditingStyle* typingStyle, bool& hasNestedOrMultipleEmbeddings);
     static bool isEmbedOrIsolate(CSSValueID unicodeBidi)
     {
@@ -164,7 +162,7 @@ private:
     void mergeInlineAndImplicitStyleOfElement(Element*, CSSPropertyOverrideMode, PropertiesToInclude);
     void mergeStyle(const StylePropertySet*, CSSPropertyOverrideMode);
 
-    RefPtrWillBeMember<MutableStylePropertySet> m_mutableStyle;
+    Member<MutableStylePropertySet> m_mutableStyle;
     bool m_isMonospaceFont;
     float m_fontSizeDelta;
 

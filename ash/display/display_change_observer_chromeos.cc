@@ -24,6 +24,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/user_activity/user_activity_detector.h"
 #include "ui/compositor/dip_util.h"
+#include "ui/display/manager/display_layout.h"
 #include "ui/display/types/display_mode.h"
 #include "ui/display/types/display_snapshot.h"
 #include "ui/display/util/display_util.h"
@@ -154,12 +155,18 @@ DisplayChangeObserver::~DisplayChangeObserver() {
 ui::MultipleDisplayState DisplayChangeObserver::GetStateForDisplayIds(
     const ui::DisplayConfigurator::DisplayStateList& display_states) const {
   UpdateInternalDisplayId(display_states);
-  if (display_states.size() != 2)
-    return ui::MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED;
-  DisplayIdPair pair = CreateDisplayIdPair(display_states[0]->display_id(),
-                                           display_states[1]->display_id());
-  DisplayLayout layout = Shell::GetInstance()->display_manager()->
-      layout_store()->GetRegisteredDisplayLayout(pair);
+  if (display_states.size() == 1)
+    return ui::MULTIPLE_DISPLAY_STATE_SINGLE;
+  display::DisplayIdList list =
+      GenerateDisplayIdList(display_states.begin(), display_states.end(),
+                            [](const ui::DisplaySnapshot* display_state) {
+                              return display_state->display_id();
+                            });
+
+  const display::DisplayLayout& layout = Shell::GetInstance()
+                                             ->display_manager()
+                                             ->layout_store()
+                                             ->GetRegisteredDisplayLayout(list);
   return layout.mirrored ? ui::MULTIPLE_DISPLAY_STATE_DUAL_MIRROR :
                            ui::MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED;
 }
@@ -258,6 +265,7 @@ void DisplayChangeObserver::OnDisplayModeChanged(
         Shell::GetInstance()
             ->display_configurator()
             ->GetAvailableColorCalibrationProfiles(id));
+    new_info.set_maximum_cursor_size(state->maximum_cursor_size());
   }
 
   AssociateTouchscreens(
@@ -284,11 +292,9 @@ void DisplayChangeObserver::OnDisplayModeChangeFailed(
 }
 
 void DisplayChangeObserver::OnAppTerminating() {
-#if defined(USE_ASH)
   // Stop handling display configuration events once the shutdown
   // process starts. crbug.com/177014.
   Shell::GetInstance()->display_configurator()->PrepareForExit();
-#endif
 }
 
 // static

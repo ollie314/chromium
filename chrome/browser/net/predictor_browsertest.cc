@@ -9,7 +9,6 @@
 #include "base/command_line.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/synchronization/lock.h"
 #include "base/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -20,6 +19,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/host_port_pair.h"
@@ -302,12 +302,13 @@ class PredictorBrowserTest : public InProcessBrowserTest {
   const GURL startup_url_;
   const GURL referring_url_;
   const GURL target_url_;
-  scoped_ptr<ConnectionListener> connection_listener_;
+  std::unique_ptr<ConnectionListener> connection_listener_;
 
  private:
   scoped_refptr<HostResolutionRequestRecorder>
       host_resolution_request_recorder_;
-  scoped_ptr<net::ScopedDefaultHostResolverProc> scoped_host_resolver_proc_;
+  std::unique_ptr<net::ScopedDefaultHostResolverProc>
+      scoped_host_resolver_proc_;
 };
 
 IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, PRE_ShutdownStartupCycle) {

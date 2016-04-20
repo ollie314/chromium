@@ -6,7 +6,8 @@
 
 #include <stddef.h>
 
-#include "base/prefs/pref_service.h"
+#include <string>
+
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -22,6 +23,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
@@ -84,7 +86,7 @@ class GAIAInfoUpdateServiceTest : public ProfileInfoCacheTest {
         ChromeSigninClientFactory::GetInstance(),
         signin::BuildTestSigninClient));
     Profile* profile = testing_profile_manager_.CreateTestingProfile(
-        name, scoped_ptr<syncable_prefs::PrefServiceSyncable>(),
+        name, std::unique_ptr<syncable_prefs::PrefServiceSyncable>(),
         base::UTF8ToUTF16(name), 0, std::string(), testing_factories);
     // The testing manager sets the profile name manually, which counts as
     // a user-customized profile name. Reset this to match the default name
@@ -130,7 +132,7 @@ class GAIAInfoUpdateServiceTest : public ProfileInfoCacheTest {
 
   void RenameProfile(const base::string16& full_name,
                      const base::string16& given_name) {
-    gfx::Image image = gfx::test::CreateImage(256,256);
+    gfx::Image image = gfx::test::CreateImage(256, 256);
     std::string url("foo.com");
     ProfileDownloadSuccess(full_name, given_name, image, url, base::string16());
 
@@ -145,8 +147,8 @@ class GAIAInfoUpdateServiceTest : public ProfileInfoCacheTest {
   void TearDown() override;
 
   Profile* profile_;
-  scoped_ptr<NiceMock<GAIAInfoUpdateServiceMock> > service_;
-  scoped_ptr<NiceMock<ProfileDownloaderMock> > downloader_;
+  std::unique_ptr<NiceMock<GAIAInfoUpdateServiceMock>> service_;
+  std::unique_ptr<NiceMock<ProfileDownloaderMock>> downloader_;
 };
 
 void GAIAInfoUpdateServiceTest::SetUp() {
@@ -162,7 +164,7 @@ void GAIAInfoUpdateServiceTest::TearDown() {
   ProfileInfoCacheTest::TearDown();
 }
 
-} // namespace
+}  // namespace
 
 TEST_F(GAIAInfoUpdateServiceTest, DownloadSuccess) {
   // No URL should be cached yet.
@@ -289,7 +291,7 @@ TEST_F(GAIAInfoUpdateServiceTest, LogOut) {
   signin_manager->SetAuthenticatedAccountInfo("gaia_id", "pat@example.com");
   base::string16 gaia_name = base::UTF8ToUTF16("Pat Foo");
   GetCache()->SetGAIANameOfProfileAtIndex(0, gaia_name);
-  gfx::Image gaia_picture = gfx::test::CreateImage(256,256);
+  gfx::Image gaia_picture = gfx::test::CreateImage(256, 256);
   GetCache()->SetGAIAPictureOfProfileAtIndex(0, &gaia_picture);
 
   // Set a fake picture URL.
@@ -299,7 +301,8 @@ TEST_F(GAIAInfoUpdateServiceTest, LogOut) {
   EXPECT_FALSE(service()->GetCachedPictureURL().empty());
 
   // Log out.
-  signin_manager->SignOut(signin_metrics::SIGNOUT_TEST);
+  signin_manager->SignOut(signin_metrics::SIGNOUT_TEST,
+                          signin_metrics::SignoutDelete::IGNORE_METRIC);
   // Verify that the GAIA name and picture, and picture URL are unset.
   EXPECT_TRUE(GetCache()->GetGAIANameOfProfileAtIndex(0).empty());
   EXPECT_EQ(NULL, GetCache()->GetGAIAPictureOfProfileAtIndex(0));

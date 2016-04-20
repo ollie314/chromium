@@ -9,16 +9,17 @@
 #include <stdint.h>
 
 #include <deque>
+#include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/memory_dump_provider.h"
@@ -41,6 +42,7 @@
 #include "ui/gfx/gpu_memory_buffer.h"
 
 class GrContext;
+class GrSurface;
 
 namespace gpu {
 class GpuMemoryBufferManager;
@@ -68,9 +70,9 @@ class CC_EXPORT ResourceProvider
   struct Resource;
 
  public:
-  typedef std::vector<ResourceId> ResourceIdArray;
-  typedef base::hash_set<ResourceId> ResourceIdSet;
-  typedef base::hash_map<ResourceId, ResourceId> ResourceIdMap;
+  using ResourceIdArray = std::vector<ResourceId>;
+  using ResourceIdSet = std::unordered_set<ResourceId>;
+  using ResourceIdMap = std::unordered_map<ResourceId, ResourceId>;
   enum TextureHint {
     TEXTURE_HINT_DEFAULT = 0x0,
     TEXTURE_HINT_IMMUTABLE = 0x1,
@@ -84,7 +86,7 @@ class CC_EXPORT ResourceProvider
     RESOURCE_TYPE_BITMAP,
   };
 
-  static scoped_ptr<ResourceProvider> Create(
+  static std::unique_ptr<ResourceProvider> Create(
       OutputSurface* output_surface,
       SharedBitmapManager* shared_bitmap_manager,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
@@ -102,12 +104,14 @@ class CC_EXPORT ResourceProvider
   ResourceFormat best_render_buffer_format() const {
     return best_render_buffer_format_;
   }
-  ResourceFormat yuv_resource_format() const { return yuv_resource_format_; }
+  ResourceFormat YuvResourceFormat(int bits) const;
   bool use_sync_query() const { return use_sync_query_; }
   gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager() {
     return gpu_memory_buffer_manager_;
   }
   size_t num_resources() const { return resources_.size(); }
+
+  bool IsResourceFormatSupported(ResourceFormat format) const;
 
   // Checks whether a resource is in use by a consumer.
   bool InUseByConsumer(ResourceId id);
@@ -122,6 +126,7 @@ class CC_EXPORT ResourceProvider
   ResourceType default_resource_type() const { return default_resource_type_; }
   ResourceType GetResourceType(ResourceId id);
   GLenum GetResourceTextureTarget(ResourceId id);
+  TextureHint GetTextureHint(ResourceId id);
 
   // Creates a resource of the default resource type.
   ResourceId CreateResource(const gfx::Size& size,
@@ -141,11 +146,11 @@ class CC_EXPORT ResourceProvider
   // Wraps an external texture mailbox into a GL resource.
   ResourceId CreateResourceFromTextureMailbox(
       const TextureMailbox& mailbox,
-      scoped_ptr<SingleReleaseCallbackImpl> release_callback_impl);
+      std::unique_ptr<SingleReleaseCallbackImpl> release_callback_impl);
 
   ResourceId CreateResourceFromTextureMailbox(
       const TextureMailbox& mailbox,
-      scoped_ptr<SingleReleaseCallbackImpl> release_callback_impl,
+      std::unique_ptr<SingleReleaseCallbackImpl> release_callback_impl,
       bool read_lock_fences_enabled);
 
   void DeleteResource(ResourceId id);
@@ -156,9 +161,9 @@ class CC_EXPORT ResourceProvider
                       const uint8_t* image,
                       const gfx::Size& image_size);
 
-  // Only flush the command buffer if supported.
-  // Returns true if the shallow flush occurred, false otherwise.
-  bool ShallowFlushIfSupported();
+  // Generates sync tokesn for resources which need a sync token.
+  void GenerateSyncTokenForResource(ResourceId resource_id);
+  void GenerateSyncTokenForResources(const ResourceIdArray& resource_ids);
 
   // Creates accounting for a child. Returns a child ID.
   int CreateChild(const ReturnCallback& return_callback);
@@ -177,7 +182,7 @@ class CC_EXPORT ResourceProvider
   // mailboxes and serializing meta-data into TransferableResources.
   // Resources are not removed from the ResourceProvider, but are marked as
   // "in use".
-  void PrepareSendToParent(const ResourceIdArray& resources,
+  void PrepareSendToParent(const ResourceIdArray& resource_ids,
                            TransferableResourceArray* transferable_resources);
 
   // Receives resources from a child, moving them from mailboxes. Resource IDs
@@ -257,10 +262,17 @@ class CC_EXPORT ResourceProvider
 
     unsigned texture_id() const { return texture_id_; }
 
+    void UpdateResourceSyncToken(const gpu::SyncToken& sync_token) {
+      set_sync_token_ = true;
+      sync_token_ = sync_token;
+    }
+
    private:
     ResourceProvider* resource_provider_;
     ResourceProvider::Resource* resource_;
     unsigned texture_id_;
+    bool set_sync_token_;
+    gpu::SyncToken sync_token_;
 
     DISALLOW_COPY_AND_ASSIGN(ScopedWriteLockGL);
   };
@@ -315,7 +327,7 @@ class CC_EXPORT ResourceProvider
    private:
     ResourceProvider* resource_provider_;
     ResourceProvider::Resource* resource_;
-    scoped_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer_;
+    std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer_;
     base::ThreadChecker thread_checker_;
 
     DISALLOW_COPY_AND_ASSIGN(ScopedWriteLockGpuMemoryBuffer);
@@ -333,13 +345,21 @@ class CC_EXPORT ResourceProvider
     void ReleaseSkSurface();
 
     SkSurface* sk_surface() { return sk_surface_.get(); }
-    ResourceProvider::Resource* resource() { return resource_; }
+
+    gfx::Size GetResourceSize() const { return resource_->size; }
+
+    void UpdateResourceSyncToken(const gpu::SyncToken& sync_token) {
+      set_sync_token_ = true;
+      sync_token_ = sync_token;
+    }
 
    private:
     ResourceProvider* resource_provider_;
     ResourceProvider::Resource* resource_;
     base::ThreadChecker thread_checker_;
-    skia::RefPtr<SkSurface> sk_surface_;
+    sk_sp<SkSurface> sk_surface_;
+    bool set_sync_token_;
+    gpu::SyncToken sync_token_;
 
     DISALLOW_COPY_AND_ASSIGN(ScopedWriteLockGr);
   };
@@ -410,6 +430,13 @@ class CC_EXPORT ResourceProvider
   // Indicates if we can currently lock this resource for write.
   bool CanLockForWrite(ResourceId id);
 
+  // Indicates if this resource is currently being used as an overlay by the
+  // windowing system.
+  // TODO(ccameron): This should be entirely hidden inside CanLockForWrite, but
+  // will erratically returns true, potentially breaking DCHECKs.
+  // http://crbug.com/577121
+  bool IsInUseByMacOSWindowServer(ResourceId id);
+
   // Indicates if this resource may be used for a hardware overlay plane.
   bool IsOverlayCandidate(ResourceId id);
 
@@ -443,6 +470,35 @@ class CC_EXPORT ResourceProvider
  private:
   struct Resource {
     enum Origin { INTERNAL, EXTERNAL, DELEGATED };
+    enum SynchronizationState {
+      // The LOCALLY_USED state is the state each resource defaults to when
+      // constructed or modified or read. This state indicates that the
+      // resource has not been properly synchronized and it would be an error
+      // to send this resource to a parent, child, or client.
+      LOCALLY_USED,
+
+      // The NEEDS_WAIT state is the state that indicates a resource has been
+      // modified but it also has an associated sync token assigned to it.
+      // The sync token has not been waited on with the local context. When
+      // a sync token arrives from an external resource (such as a child or
+      // parent), it is automatically initialized as NEEDS_WAIT as well
+      // since we still need to wait on it before the resource is synchronized
+      // on the current context. It is an error to use the resource locally for
+      // reading or writing if the resource is in this state.
+      NEEDS_WAIT,
+
+      // The SYNCHRONIZED state indicates that the resource has been properly
+      // synchronized locally. This can either synchronized externally (such
+      // as the case of software rasterized bitmaps), or synchronized
+      // internally using a sync token that has been waited upon. In the
+      // former case where the resource was synchronized externally, a
+      // corresponding sync token will not exist. In the latter case which was
+      // synchronized from the NEEDS_WAIT state, a corresponding sync token will
+      // exist which is assocaited with the resource. This sync token is still
+      // valid and still associated with the resource and can be passed as an
+      // external resource for others to wait on.
+      SYNCHRONIZED,
+    };
 
     ~Resource();
     Resource(unsigned texture_id,
@@ -462,6 +518,22 @@ class CC_EXPORT ResourceProvider
              const gfx::Size& size,
              Origin origin,
              GLenum filter);
+    Resource(Resource&& other);
+
+    bool needs_sync_token() const { return needs_sync_token_; }
+
+    SynchronizationState synchronization_state() const {
+      return synchronization_state_;
+    }
+
+    const TextureMailbox& mailbox() const { return mailbox_; }
+    void set_mailbox(const TextureMailbox& mailbox);
+
+    void SetLocallyUsed();
+    void SetSynchronized();
+    void UpdateSyncToken(const gpu::SyncToken& sync_token);
+    int8_t* GetSyncTokenData();
+    void WaitSyncToken(gpu::gles2::GLES2Interface* gl);
 
     int child_id;
     unsigned gl_id;
@@ -471,7 +543,6 @@ class CC_EXPORT ResourceProvider
     unsigned gl_upload_query_id;
     // Query used to determine when read lock fence has passed.
     unsigned gl_read_lock_query_id;
-    TextureMailbox mailbox;
     ReleaseCallbackImpl release_callback_impl;
     uint8_t* pixels;
     int lock_for_read_count;
@@ -499,12 +570,20 @@ class CC_EXPORT ResourceProvider
     ResourceFormat format;
     SharedBitmapId shared_bitmap_id;
     SharedBitmap* shared_bitmap;
-    gfx::GpuMemoryBuffer* gpu_memory_buffer;
+    std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer;
+
+   private:
+    SynchronizationState synchronization_state_ = SYNCHRONIZED;
+    bool needs_sync_token_ = false;
+    TextureMailbox mailbox_;
+
+    DISALLOW_COPY_AND_ASSIGN(Resource);
   };
-  typedef base::hash_map<ResourceId, Resource> ResourceMap;
+  using ResourceMap = std::unordered_map<ResourceId, Resource>;
 
   struct Child {
     Child();
+    Child(const Child& other);
     ~Child();
 
     ResourceIdMap child_to_parent_map;
@@ -513,7 +592,7 @@ class CC_EXPORT ResourceProvider
     bool marked_for_deletion;
     bool needs_sync_tokens;
   };
-  typedef base::hash_map<int, Child> ChildMap;
+  using ChildMap = std::unordered_map<int, Child>;
 
   bool ReadLockFenceHasPassed(const Resource* resource) {
     return !resource->read_lock_fence.get() ||
@@ -525,7 +604,7 @@ class CC_EXPORT ResourceProvider
                              ResourceType type,
                              ResourceFormat format);
   ResourceId CreateBitmap(const gfx::Size& size);
-  Resource* InsertResource(ResourceId id, const Resource& resource);
+  Resource* InsertResource(ResourceId id, Resource resource);
   Resource* GetResource(ResourceId id);
   const Resource* LockForRead(ResourceId id);
   void UnlockForRead(ResourceId id);
@@ -535,7 +614,10 @@ class CC_EXPORT ResourceProvider
   static void PopulateSkBitmapWithResource(SkBitmap* sk_bitmap,
                                            const Resource* resource);
 
-  void TransferResource(gpu::gles2::GLES2Interface* gl,
+  void CreateMailboxAndBindResource(gpu::gles2::GLES2Interface* gl,
+                                    Resource* resource);
+
+  void TransferResource(Resource* source,
                         ResourceId id,
                         TransferableResource* resource);
   enum DeleteStyle {
@@ -579,6 +661,7 @@ class CC_EXPORT ResourceProvider
   bool use_texture_usage_hint_;
   bool use_compressed_texture_etc1_;
   ResourceFormat yuv_resource_format_;
+  ResourceFormat yuv_highbit_resource_format_;
   int max_texture_size_;
   ResourceFormat best_texture_format_;
   ResourceFormat best_render_buffer_format_;
@@ -588,8 +671,8 @@ class CC_EXPORT ResourceProvider
   scoped_refptr<Fence> current_read_lock_fence_;
 
   const size_t id_allocation_chunk_size_;
-  scoped_ptr<IdAllocator> texture_id_allocator_;
-  scoped_ptr<IdAllocator> buffer_id_allocator_;
+  std::unique_ptr<IdAllocator> texture_id_allocator_;
+  std::unique_ptr<IdAllocator> buffer_id_allocator_;
 
   bool use_sync_query_;
   std::vector<unsigned> use_image_texture_targets_;

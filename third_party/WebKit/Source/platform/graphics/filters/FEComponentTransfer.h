@@ -62,7 +62,7 @@ struct ComponentTransferFunction {
 
 class PLATFORM_EXPORT FEComponentTransfer final : public FilterEffect {
 public:
-    static PassRefPtrWillBeRawPtr<FEComponentTransfer> create(Filter*, const ComponentTransferFunction& redFunc, const ComponentTransferFunction& greenFunc,
+    static FEComponentTransfer* create(Filter*, const ComponentTransferFunction& redFunc, const ComponentTransferFunction& greenFunc,
         const ComponentTransferFunction& blueFunc, const ComponentTransferFunction& alphaFunc);
 
     TextStream& externalRepresentation(TextStream&, int indention) const override;
@@ -71,7 +71,7 @@ private:
     FEComponentTransfer(Filter*, const ComponentTransferFunction& redFunc, const ComponentTransferFunction& greenFunc,
         const ComponentTransferFunction& blueFunc, const ComponentTransferFunction& alphaFunc);
 
-    PassRefPtr<SkImageFilter> createImageFilter(SkiaImageFilterBuilder&) override;
+    sk_sp<SkImageFilter> createImageFilter() override;
 
     bool affectsTransparentPixels() override;
 

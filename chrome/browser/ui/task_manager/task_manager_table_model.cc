@@ -10,7 +10,6 @@
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -23,6 +22,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/nacl/common/nacl_switches.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "content/public/common/result_codes.h"
 #include "third_party/WebKit/public/web/WebCache.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -52,6 +52,7 @@ bool IsSharedByGroup(int column_id) {
     case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN:
     case IDS_TASK_MANAGER_SHARED_MEM_COLUMN:
     case IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN:
+    case IDS_TASK_MANAGER_SWAPPED_MEM_COLUMN:
     case IDS_TASK_MANAGER_CPU_COLUMN:
     case IDS_TASK_MANAGER_NET_COLUMN:
     case IDS_TASK_MANAGER_PROCESS_ID_COLUMN:
@@ -270,9 +271,11 @@ TaskManagerTableModel::TaskManagerTableModel(int64_t refresh_flags,
       is_nacl_debugging_flag_enabled_(false) {
 #endif  // !defined(DISABLE_NACL)
   DCHECK(delegate);
+  StartUpdating();
 }
 
 TaskManagerTableModel::~TaskManagerTableModel() {
+  StopUpdating();
 }
 
 int TaskManagerTableModel::RowCount() {
@@ -309,6 +312,10 @@ base::string16 TaskManagerTableModel::GetText(int row, int column) {
     case IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN:
       return stringifier_->GetMemoryUsageText(
           observed_task_manager()->GetPhysicalMemoryUsage(tasks_[row]), false);
+
+    case IDS_TASK_MANAGER_SWAPPED_MEM_COLUMN:
+      return stringifier_->GetMemoryUsageText(
+          observed_task_manager()->GetSwappedMemoryUsage(tasks_[row]), false);
 
     case IDS_TASK_MANAGER_PROCESS_ID_COLUMN:
       return stringifier_->GetProcessIdText(
@@ -441,6 +448,11 @@ int TaskManagerTableModel::CompareValues(int row1,
           observed_task_manager()->GetPhysicalMemoryUsage(tasks_[row1]),
           observed_task_manager()->GetPhysicalMemoryUsage(tasks_[row2]));
 
+    case IDS_TASK_MANAGER_SWAPPED_MEM_COLUMN:
+      return ValueCompare(
+          observed_task_manager()->GetSwappedMemoryUsage(tasks_[row1]),
+          observed_task_manager()->GetSwappedMemoryUsage(tasks_[row2]));
+
     case IDS_TASK_MANAGER_NACL_DEBUG_STUB_PORT_COLUMN:
       return ValueCompare(
           observed_task_manager()->GetNaClDebugStubPort(tasks_[row1]),
@@ -506,8 +518,15 @@ int TaskManagerTableModel::CompareValues(int row1,
 
     case IDS_TASK_MANAGER_JAVASCRIPT_MEMORY_ALLOCATED_COLUMN: {
       int64_t allocated1, allocated2, used1, used2;
-      observed_task_manager()->GetV8Memory(tasks_[row1], &allocated1, &used1);
-      observed_task_manager()->GetV8Memory(tasks_[row2], &allocated2, &used2);
+      bool row1_valid = observed_task_manager()->GetV8Memory(tasks_[row1],
+                                                             &allocated1,
+                                                             &used1);
+      bool row2_valid = observed_task_manager()->GetV8Memory(tasks_[row2],
+                                                             &allocated2,
+                                                             &used2);
+      if (!row1_valid || !row2_valid)
+        return OrderUnavailableValue(row1_valid, row2_valid);
+
       return ValueCompare(allocated1, allocated2);
     }
 
@@ -584,23 +603,6 @@ void TaskManagerTableModel::OnTasksRefreshed(
   OnRefresh();
 }
 
-void TaskManagerTableModel::StartUpdating() {
-  TaskManagerInterface::GetTaskManager()->AddObserver(this);
-  tasks_ = observed_task_manager()->GetTaskIdsList();
-  OnRefresh();
-
-  // In order for the scrollbar of the TableView to work properly on startup of
-  // the task manager, we must invoke TableModelObserver::OnModelChanged() which
-  // in turn will invoke TableView::NumRowsChanged(). This will adjust the
-  // vertical scrollbar correctly. crbug.com/570966.
-  if (table_model_observer_)
-    table_model_observer_->OnModelChanged();
-}
-
-void TaskManagerTableModel::StopUpdating() {
-  observed_task_manager()->RemoveObserver(this);
-}
-
 void TaskManagerTableModel::ActivateTask(int row_index) {
   observed_task_manager()->ActivateTask(tasks_[row_index]);
 }
@@ -629,13 +631,16 @@ void TaskManagerTableModel::UpdateRefreshTypes(int column_id, bool visibility) {
     case IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN:
     case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN:
     case IDS_TASK_MANAGER_SHARED_MEM_COLUMN:
+    case IDS_TASK_MANAGER_SWAPPED_MEM_COLUMN:
       type = REFRESH_TYPE_MEMORY;
       if (table_view_delegate_->IsColumnVisible(
               IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN) ||
           table_view_delegate_->IsColumnVisible(
               IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN) ||
           table_view_delegate_->IsColumnVisible(
-              IDS_TASK_MANAGER_SHARED_MEM_COLUMN)) {
+              IDS_TASK_MANAGER_SHARED_MEM_COLUMN) ||
+          table_view_delegate_->IsColumnVisible(
+              IDS_TASK_MANAGER_SWAPPED_MEM_COLUMN)) {
         new_visibility = true;
       }
       break;
@@ -797,6 +802,23 @@ void TaskManagerTableModel::ToggleColumnVisibility(int column_id) {
   table_view_delegate_->SetColumnVisibility(column_id, new_visibility);
   columns_settings_->SetBoolean(GetColumnIdAsString(column_id), new_visibility);
   UpdateRefreshTypes(column_id, new_visibility);
+}
+
+void TaskManagerTableModel::StartUpdating() {
+  TaskManagerInterface::GetTaskManager()->AddObserver(this);
+  tasks_ = observed_task_manager()->GetTaskIdsList();
+  OnRefresh();
+
+  // In order for the scrollbar of the TableView to work properly on startup of
+  // the task manager, we must invoke TableModelObserver::OnModelChanged() which
+  // in turn will invoke TableView::NumRowsChanged(). This will adjust the
+  // vertical scrollbar correctly. crbug.com/570966.
+  if (table_model_observer_)
+    table_model_observer_->OnModelChanged();
+}
+
+void TaskManagerTableModel::StopUpdating() {
+  observed_task_manager()->RemoveObserver(this);
 }
 
 void TaskManagerTableModel::OnRefresh() {

@@ -21,7 +21,9 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
+#include "extensions/grit/extensions_browser_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/web_ui_util.h"
 
 namespace chromeos {
@@ -99,15 +101,20 @@ void KioskAppMenuHandler::SendKioskApps() {
   for (size_t i = 0; i < apps.size(); ++i) {
     const KioskAppManager::App& app_data = apps[i];
 
-    scoped_ptr<base::DictionaryValue> app_info(new base::DictionaryValue);
+    std::unique_ptr<base::DictionaryValue> app_info(new base::DictionaryValue);
     app_info->SetBoolean("isApp", true);
     app_info->SetString("id", app_data.app_id);
     app_info->SetString("label", app_data.name);
 
-    // TODO(xiyuan): Replace data url with a URLDataSource.
-    std::string icon_url("chrome://theme/IDR_APP_DEFAULT_ICON");
-    if (!app_data.icon.isNull())
+    std::string icon_url;
+    if (app_data.icon.isNull()) {
+      icon_url =
+          webui::GetBitmapDataUrl(*ResourceBundle::GetSharedInstance()
+                                       .GetImageNamed(IDR_APP_DEFAULT_ICON)
+                                       .ToSkBitmap());
+    } else {
       icon_url = webui::GetBitmapDataUrl(*app_data.icon.bitmap());
+    }
     app_info->SetString("iconUrl", icon_url);
 
     apps_list.Append(app_info.release());
@@ -152,6 +159,10 @@ void KioskAppMenuHandler::OnKioskAppsSettingsChanged() {
 }
 
 void KioskAppMenuHandler::OnKioskAppDataChanged(const std::string& app_id) {
+  SendKioskApps();
+}
+
+void KioskAppMenuHandler::OnKioskAppDataLoadFailure(const std::string& app_id) {
   SendKioskApps();
 }
 

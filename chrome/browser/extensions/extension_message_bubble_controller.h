@@ -8,11 +8,15 @@
 #include <stddef.h>
 
 #include <string>
+
 #include "base/macros.h"
+#include "base/scoped_observer.h"
+#include "chrome/browser/ui/browser_list_observer.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/common/extension.h"
 
 class Browser;
+class BrowserList;
 class ExtensionService;
 class Profile;
 
@@ -21,7 +25,7 @@ namespace extensions {
 class ExtensionPrefs;
 class ExtensionRegistry;
 
-class ExtensionMessageBubbleController {
+class ExtensionMessageBubbleController : public chrome::BrowserListObserver {
  public:
   // UMA histogram constants.
   enum BubbleAction {
@@ -121,7 +125,7 @@ class ExtensionMessageBubbleController {
   };
 
   ExtensionMessageBubbleController(Delegate* delegate, Browser* browser);
-  virtual ~ExtensionMessageBubbleController();
+  ~ExtensionMessageBubbleController() override;
 
   Delegate* delegate() const { return delegate_.get(); }
   Profile* profile();
@@ -162,6 +166,9 @@ class ExtensionMessageBubbleController {
       bool should_ignore_learn_more);
 
  private:
+  // BrowserListObserver:
+  void OnBrowserRemoved(Browser* browser) override;
+
   // Iterate over the known extensions and acknowledge each one.
   void AcknowledgeExtensions();
 
@@ -183,13 +190,15 @@ class ExtensionMessageBubbleController {
   BubbleAction user_action_;
 
   // Our delegate supplying information about what to show in the dialog.
-  scoped_ptr<Delegate> delegate_;
+  std::unique_ptr<Delegate> delegate_;
 
   // Whether this class has initialized.
   bool initialized_;
 
   // Whether or not the bubble is highlighting extensions.
   bool did_highlight_;
+
+  ScopedObserver<BrowserList, BrowserListObserver> browser_list_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionMessageBubbleController);
 };

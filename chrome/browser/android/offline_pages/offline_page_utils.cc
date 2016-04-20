@@ -4,6 +4,7 @@
 
 #include "chrome/browser/android/offline_pages/offline_page_utils.h"
 
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/android/offline_pages/offline_page_mhtml_archiver.h"
@@ -103,7 +104,15 @@ int64_t OfflinePageUtils::GetBookmarkIdForOfflineURL(
   if (!offline_page)
     return -1;
 
-  return offline_page->bookmark_id;
+  if (offline_page->client_id.name_space != offline_pages::BOOKMARK_NAMESPACE) {
+    return -1;
+  }
+
+  int64_t result;
+  if (base::StringToInt64(offline_page->client_id.id, &result)) {
+    return result;
+  }
+  return -1;
 }
 
 // static
@@ -119,20 +128,6 @@ bool OfflinePageUtils::HasOfflinePageForOnlineURL(
   const offline_pages::OfflinePageItem* offline_page =
       GetOfflinePageForOnlineURL(browser_context, online_url);
   return offline_page && !offline_page->file_path.empty();
-}
-
-// static
-bool OfflinePageUtils::HasOfflinePages(
-    content::BrowserContext* browser_context) {
-  DCHECK(browser_context);
-
-  if (!offline_pages::IsOfflinePagesEnabled())
-    return false;
-
-  offline_pages::OfflinePageModel* offline_page_model =
-      offline_pages::OfflinePageModelFactory::GetForBrowserContext(
-          browser_context);
-  return offline_page_model->HasOfflinePages();
 }
 
 }  // namespace offline_pages

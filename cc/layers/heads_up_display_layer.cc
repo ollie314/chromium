@@ -13,13 +13,18 @@
 
 namespace cc {
 
-scoped_refptr<HeadsUpDisplayLayer> HeadsUpDisplayLayer::Create(
-    const LayerSettings& settings) {
-  return make_scoped_refptr(new HeadsUpDisplayLayer(settings));
+scoped_refptr<HeadsUpDisplayLayer> HeadsUpDisplayLayer::Create() {
+  return make_scoped_refptr(new HeadsUpDisplayLayer());
 }
 
-HeadsUpDisplayLayer::HeadsUpDisplayLayer(const LayerSettings& settings)
-    : Layer(settings) {
+HeadsUpDisplayLayer::HeadsUpDisplayLayer()
+    : typeface_(skia::AdoptRef(
+          SkTypeface::CreateFromName("times new roman", SkTypeface::kNormal))) {
+  if (!typeface_) {
+    typeface_ = skia::AdoptRef(
+        SkTypeface::CreateFromName("monospace", SkTypeface::kBold));
+  }
+  DCHECK(typeface_.get());
   SetIsDrawable(true);
   UpdateDrawsContent(HasDrawableContent());
 }
@@ -57,14 +62,23 @@ bool HeadsUpDisplayLayer::HasDrawableContent() const {
   return true;
 }
 
-scoped_ptr<LayerImpl> HeadsUpDisplayLayer::CreateLayerImpl(
+std::unique_ptr<LayerImpl> HeadsUpDisplayLayer::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
   return HeadsUpDisplayLayerImpl::Create(tree_impl, layer_id_);
 }
 
 void HeadsUpDisplayLayer::SetTypeForProtoSerialization(
     proto::LayerNode* proto) const {
-  proto->set_type(proto::LayerType::HEADS_UP_DISPLAY_LAYER);
+  proto->set_type(proto::LayerNode::HEADS_UP_DISPLAY_LAYER);
+}
+
+void HeadsUpDisplayLayer::PushPropertiesTo(LayerImpl* layer) {
+  Layer::PushPropertiesTo(layer);
+  TRACE_EVENT0("cc", "HeadsUpDisplayLayer::PushPropertiesTo");
+  HeadsUpDisplayLayerImpl* layer_impl =
+      static_cast<HeadsUpDisplayLayerImpl*>(layer);
+
+  layer_impl->SetHUDTypeface(typeface_);
 }
 
 }  // namespace cc

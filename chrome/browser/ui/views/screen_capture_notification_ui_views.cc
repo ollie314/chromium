@@ -195,7 +195,7 @@ gfx::NativeViewId ScreenCaptureNotificationUIViews::OnStarted(
   set_background(views::Background::CreateSolidBackground(GetNativeTheme()->
       GetSystemColor(ui::NativeTheme::kColorId_DialogBackground)));
 
-  gfx::Screen* screen = gfx::Screen::GetNativeScreen();
+  gfx::Screen* screen = gfx::Screen::GetScreen();
   // TODO(sergeyu): Move the notification to the display being captured when
   // per-display screen capture is supported.
   gfx::Rect work_area = screen->GetPrimaryDisplay().work_area();
@@ -210,6 +210,7 @@ gfx::NativeViewId ScreenCaptureNotificationUIViews::OnStarted(
   widget->Show();
   // This has to be called after Show() to have effect.
   widget->SetOpacity(0xFF * kWindowAlphaValue);
+  widget->SetVisibleOnAllWorkspaces(true);
 
 #if defined(OS_WIN)
   return gfx::NativeViewId(views::HWNDForWidget(widget));
@@ -280,16 +281,13 @@ views::NonClientFrameView*
 ScreenCaptureNotificationUIViews::CreateNonClientFrameView(
     views::Widget* widget) {
   views::BubbleFrameView* frame = new views::BubbleFrameView(
-      gfx::Insets(kPaddingVertical,
-                  kPaddingHorizontal,
-                  kPaddingVertical,
-                  kPaddingHorizontal));
+      gfx::Insets(), gfx::Insets(kPaddingVertical, kPaddingHorizontal,
+                                 kPaddingVertical, kPaddingHorizontal));
   SkColor color = widget->GetNativeTheme()->GetSystemColor(
       ui::NativeTheme::kColorId_DialogBackground);
-  frame->SetBubbleBorder(scoped_ptr<views::BubbleBorder>(
+  frame->SetBubbleBorder(std::unique_ptr<views::BubbleBorder>(
       new views::BubbleBorder(views::BubbleBorder::NONE,
-                              views::BubbleBorder::SMALL_SHADOW,
-                              color)));
+                              views::BubbleBorder::SMALL_SHADOW, color)));
   return frame;
 }
 
@@ -332,8 +330,8 @@ void ScreenCaptureNotificationUIViews::NotifyStopped() {
 
 }  // namespace
 
-scoped_ptr<ScreenCaptureNotificationUI> ScreenCaptureNotificationUI::Create(
-    const base::string16& text) {
-  return scoped_ptr<ScreenCaptureNotificationUI>(
+std::unique_ptr<ScreenCaptureNotificationUI>
+ScreenCaptureNotificationUI::Create(const base::string16& text) {
+  return std::unique_ptr<ScreenCaptureNotificationUI>(
       new ScreenCaptureNotificationUIViews(text));
 }

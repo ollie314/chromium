@@ -35,7 +35,7 @@ CanvasFontCache::CanvasFontCache(Document& document)
     defaultFontDescription.setComputedSize(defaultFontSize);
     m_defaultFontStyle = ComputedStyle::create();
     m_defaultFontStyle->setFontDescription(defaultFontDescription);
-    m_defaultFontStyle->font().update(m_defaultFontStyle->font().fontSelector());
+    m_defaultFontStyle->font().update(m_defaultFontStyle->font().getFontSelector());
 }
 
 CanvasFontCache::~CanvasFontCache()
@@ -81,7 +81,7 @@ bool CanvasFontCache::getFontUsingDefaultStyle(const String& fontString, Font& r
 
 MutableStylePropertySet* CanvasFontCache::parseFont(const String& fontString)
 {
-    RefPtrWillBeRawPtr<MutableStylePropertySet> parsedStyle;
+    MutableStylePropertySet* parsedStyle;
     MutableStylePropertyMap::iterator i = m_fetchedFonts.find(fontString);
     if (i != m_fetchedFonts.end()) {
         ASSERT(m_fontLRUList.contains(fontString));
@@ -90,12 +90,12 @@ MutableStylePropertySet* CanvasFontCache::parseFont(const String& fontString)
         m_fontLRUList.add(fontString);
     } else {
         parsedStyle = MutableStylePropertySet::create(HTMLStandardMode);
-        CSSParser::parseValue(parsedStyle.get(), CSSPropertyFont, fontString, true, 0);
+        CSSParser::parseValue(parsedStyle, CSSPropertyFont, fontString, true, 0);
         if (parsedStyle->isEmpty())
             return nullptr;
         // According to http://lists.w3.org/Archives/Public/public-html/2009Jul/0947.html,
         // the "inherit" and "initial" values must be ignored.
-        RefPtrWillBeRawPtr<CSSValue> fontValue = parsedStyle->getPropertyCSSValue(CSSPropertyFontSize);
+        CSSValue* fontValue = parsedStyle->getPropertyCSSValue(CSSPropertyFontSize);
         if (fontValue && (fontValue->isInitialValue() || fontValue->isInheritedValue()))
             return nullptr;
         m_fetchedFonts.add(fontString, parsedStyle);
@@ -112,7 +112,7 @@ MutableStylePropertySet* CanvasFontCache::parseFont(const String& fontString)
     }
     schedulePruningIfNeeded();
 
-    return parsedStyle.get(); // In non-oilpan builds: ref in m_fetchedFonts keeps object alive after return.
+    return parsedStyle;
 }
 
 void CanvasFontCache::didProcessTask()
@@ -153,10 +153,8 @@ void CanvasFontCache::pruneAll()
 
 DEFINE_TRACE(CanvasFontCache)
 {
-#if ENABLE(OILPAN)
     visitor->trace(m_fetchedFonts);
     visitor->trace(m_document);
-#endif
 }
 
-} // blink
+} // namespace blink

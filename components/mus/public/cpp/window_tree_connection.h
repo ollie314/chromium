@@ -15,6 +15,10 @@
 #include "components/mus/public/interfaces/window_tree.mojom.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 
+namespace shell {
+class Connector;
+}
+
 namespace mus {
 
 class Window;
@@ -36,13 +40,19 @@ class WindowTreeConnection {
 
   virtual ~WindowTreeConnection() {}
 
-  // The returned WindowTreeConnection instance owns itself, and is deleted when
-  // the last root is destroyed or the connection to the service is broken.
+  // Creates a WindowTreeConnection with no roots. Use this to establish a
+  // connection directly to mus and create top level windows.
+  static WindowTreeConnection* Create(WindowTreeDelegate* delegate,
+                                      shell::Connector* connector);
+
+  // Creates a WindowTreeConnection to service the specified request for
+  // a WindowTreeClient. Use this to be embedded in another app.
   static WindowTreeConnection* Create(
       WindowTreeDelegate* delegate,
       mojo::InterfaceRequest<mojom::WindowTreeClient> request,
       CreateType create_type);
 
+  // Create a WindowTreeConnection that is going to serve as the WindowManager.
   static WindowTreeConnection* CreateForWindowManager(
       WindowTreeDelegate* delegate,
       mojo::InterfaceRequest<mojom::WindowTreeClient> request,
@@ -56,12 +66,16 @@ class WindowTreeConnection {
   // Returns the root of this connection.
   virtual const std::set<Window*>& GetRoots() = 0;
 
-  // Returns a Window known to this connection.
-  virtual Window* GetWindowById(Id id) = 0;
+  // Returns the Window with input capture; null if no window has requested
+  // input capture, or if another app has capture.
+  virtual Window* GetCaptureWindow() = 0;
 
   // Returns the focused window; null if focus is not yet known or another app
   // is focused.
   virtual Window* GetFocusedWindow() = 0;
+
+  // Sets focus to null. This does nothing if focus is currently null.
+  virtual void ClearFocus() = 0;
 
   // Creates and returns a new Window (which is owned by the window server).
   // Windows are initially hidden, use SetVisible(true) to show.
@@ -71,10 +85,8 @@ class WindowTreeConnection {
   virtual Window* NewTopLevelWindow(
       const std::map<std::string, std::vector<uint8_t>>* properties) = 0;
 
-  // Returns true if ACCESS_POLICY_EMBED_ROOT was specified.
-  virtual bool IsEmbedRoot() = 0;
-
   // Returns the id for this connection.
+  // TODO(sky): remove this. It is not necessarily correct anymore.
   virtual ConnectionSpecificId GetConnectionId() = 0;
 
   virtual void AddObserver(WindowTreeConnectionObserver* observer) = 0;

@@ -18,7 +18,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/observer_list_threadsafe.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -34,6 +33,7 @@
 #include "chromeos/network/network_handler_callbacks.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
+#include "components/prefs/pref_service.h"
 #include "components/ssl_config/ssl_config_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -128,7 +128,7 @@ bool CellularConfigDocument::LoadFromFile(const base::FilePath& config_path) {
   if (!base::ReadFileToString(config_path, &config))
     return false;
 
-  scoped_ptr<base::Value> root =
+  std::unique_ptr<base::Value> root =
       base::JSONReader::Read(config, base::JSON_ALLOW_TRAILING_COMMAS);
   DCHECK(root.get() != NULL);
   if (!root.get() || root->GetType() != base::Value::TYPE_DICTIONARY) {
@@ -324,7 +324,7 @@ void MobileActivator::GetPropertiesAndContinueActivation(
 
 void MobileActivator::GetPropertiesFailure(
     const std::string& error_name,
-    scoped_ptr<base::DictionaryValue> error_data) {
+    std::unique_ptr<base::DictionaryValue> error_data) {
   NET_LOG_ERROR("MobileActivator GetProperties Failed: " + error_name,
                 service_path_);
 }
@@ -928,7 +928,7 @@ void MobileActivator::HandleActivationFailure(
     const std::string& service_path,
     PlanActivationState new_state,
     const std::string& error_name,
-    scoped_ptr<base::DictionaryValue> error_data) {
+    std::unique_ptr<base::DictionaryValue> error_data) {
   pending_activation_request_ = false;
   const NetworkState* network = GetNetworkState(service_path);
   if (!network) {

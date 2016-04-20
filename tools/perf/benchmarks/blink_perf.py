@@ -24,8 +24,8 @@ SKIPPED_FILE = os.path.join(BLINK_PERF_BASE_DIR, 'Skipped')
 
 
 def CreateStorySetFromPath(path, skipped_file,
-                          shared_page_state_class=(
-                            shared_page_state.SharedPageState)):
+                           shared_page_state_class=(
+                               shared_page_state.SharedPageState)):
   assert os.path.exists(path)
 
   page_urls = []
@@ -62,17 +62,18 @@ def CreateStorySetFromPath(path, skipped_file,
     _AddDir(path, tuple(skipped))
   else:
     _AddPage(path)
-  ps = story.StorySet(base_dir=os.getcwd()+os.sep,
-                        serving_dirs=serving_dirs)
+  ps = story.StorySet(base_dir=os.getcwd() + os.sep,
+                      serving_dirs=serving_dirs)
   for url in page_urls:
     ps.AddStory(page_module.Page(
-      url, ps, ps.base_dir,
-      shared_page_state_class=shared_page_state_class))
+        url, ps, ps.base_dir,
+        shared_page_state_class=shared_page_state_class))
   return ps
 
 
 class _BlinkPerfMeasurement(page_test.PageTest):
   """Tuns a blink performance test and reports the results."""
+
   def __init__(self):
     super(_BlinkPerfMeasurement, self).__init__()
     with open(os.path.join(os.path.dirname(__file__),
@@ -87,7 +88,9 @@ class _BlinkPerfMeasurement(page_test.PageTest):
         '--js-flags=--expose_gc',
         '--enable-experimental-web-platform-features',
         '--disable-gesture-requirement-for-media-playback',
-        '--enable-experimental-canvas-features'
+        '--enable-experimental-canvas-features',
+        # TODO(qinmin): After fixing crbug.com/592017, remove this command line.
+        '--reduce-security-for-testing'
     ])
     if 'content-shell' in options.browser_type:
       options.AppendExtraBrowserArgs('--expose-internals-for-testing')
@@ -98,6 +101,9 @@ class _BlinkPerfMeasurement(page_test.PageTest):
     log = tab.EvaluateJavaScript('document.getElementById("log").innerHTML')
 
     for line in log.splitlines():
+      if line.startswith("FATAL: "):
+        print line
+        continue
       if not line.startswith('values '):
         continue
       parts = line.split()
@@ -114,6 +120,7 @@ class _BlinkPerfMeasurement(page_test.PageTest):
 
 class _SharedPywebsocketPageState(shared_page_state.SharedPageState):
   """Runs a pywebsocket server."""
+
   def __init__(self, test, finder_options, user_story_set):
     super(_SharedPywebsocketPageState, self).__init__(
         test, finder_options, user_story_set)
@@ -164,12 +171,15 @@ class BlinkPerfCSS(perf_benchmark.PerfBenchmark):
     return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
-@benchmark.Disabled('xp',  # http://crbug.com/488059
-                    'android',  # http://crbug.com/496707
+@benchmark.Disabled('android-webview', # http://crbug.com/593200
                     'reference')  # http://crbug.com/576779
 class BlinkPerfCanvas(perf_benchmark.PerfBenchmark):
   tag = 'canvas'
   test = _BlinkPerfMeasurement
+
+  @classmethod
+  def ShouldDisable(cls, possible_browser):
+    return cls.IsSvelte(possible_browser)  # http://crbug.com/593973.
 
   @classmethod
   def Name(cls):
@@ -178,9 +188,9 @@ class BlinkPerfCanvas(perf_benchmark.PerfBenchmark):
   def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'Canvas')
     story_set = CreateStorySetFromPath(
-      path, SKIPPED_FILE,
-      shared_page_state_class=(
-        webgl_supported_shared_state.WebGLSupportedSharedState))
+        path, SKIPPED_FILE,
+        shared_page_state_class=(
+            webgl_supported_shared_state.WebGLSupportedSharedState))
     # WebGLSupportedSharedState requires the skipped_gpus property to
     # be set on each page.
     for page in story_set:
@@ -188,6 +198,7 @@ class BlinkPerfCanvas(perf_benchmark.PerfBenchmark):
     return story_set
 
 
+@benchmark.Disabled('win', 'mac', 'linux')  # http://crbug.com/601666
 class BlinkPerfDOM(perf_benchmark.PerfBenchmark):
   tag = 'dom'
   test = _BlinkPerfMeasurement
@@ -201,6 +212,7 @@ class BlinkPerfDOM(perf_benchmark.PerfBenchmark):
     return CreateStorySetFromPath(path, SKIPPED_FILE)
 
 
+@benchmark.Disabled('win')  # http://crbug.com/588819
 class BlinkPerfEvents(perf_benchmark.PerfBenchmark):
   tag = 'events'
   test = _BlinkPerfMeasurement
@@ -305,15 +317,13 @@ class BlinkPerfXMLHttpRequest(perf_benchmark.PerfBenchmark):
 
 
 # Disabled on Windows and ChromeOS due to https://crbug.com/521887
-# Disabled on reference builds due to https://crbug.com/530374
-@benchmark.Disabled('win', 'chromeos', 'reference')
+@benchmark.Disabled('win', 'chromeos')
 class BlinkPerfPywebsocket(perf_benchmark.PerfBenchmark):
-  '''
-  The blink_perf.pywebsocket tests measure turn-around-time of 10MB
-  send/receive for XHR, Fetch API and WebSocket.
-  We might ignore <10% regressions, because the tests are noisy and such
-  regressions are often unreproducible (https://crbug.com/549017).
-  '''
+  """The blink_perf.pywebsocket tests measure turn-around-time of 10MB
+  send/receive for XHR, Fetch API and WebSocket. We might ignore < 10%
+  regressions, because the tests are noisy and such regressions are
+  often unreproducible (https://crbug.com/549017).
+  """
   tag = 'pywebsocket'
   test = _BlinkPerfMeasurement
 
@@ -323,7 +333,8 @@ class BlinkPerfPywebsocket(perf_benchmark.PerfBenchmark):
 
   def CreateStorySet(self, options):
     path = os.path.join(BLINK_PERF_BASE_DIR, 'Pywebsocket')
-    return CreateStorySetFromPath(path, SKIPPED_FILE,
+    return CreateStorySetFromPath(
+        path, SKIPPED_FILE,
         shared_page_state_class=_SharedPywebsocketPageState)
 
   @classmethod

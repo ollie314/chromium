@@ -9,6 +9,7 @@
 #include "chrome/browser/extensions/extension_action_test_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/ui/extensions/extension_message_bubble_factory.h"
+#include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "extensions/common/feature_switch.h"
 #include "extensions/test/extension_test_message_listener.h"
 
@@ -29,6 +30,7 @@ void ExtensionMessageBubbleBrowserTest::SetUpCommandLine(
           true));
   ExtensionMessageBubbleFactory::set_override_for_tests(
       ExtensionMessageBubbleFactory::OVERRIDE_ENABLED);
+  ToolbarActionsBar::set_extension_bubble_appearance_wait_time_for_testing(0);
 }
 
 void ExtensionMessageBubbleBrowserTest::TearDownOnMainThread() {
@@ -45,8 +47,7 @@ void ExtensionMessageBubbleBrowserTest::TestBubbleAnchoredToExtensionAction() {
           extensions::Manifest::UNPACKED);
   extension_service()->AddExtension(action_extension.get());
 
-  Browser* second_browser = new Browser(
-      Browser::CreateParams(profile(), browser()->host_desktop_type()));
+  Browser* second_browser = new Browser(Browser::CreateParams(profile()));
   base::RunLoop().RunUntilIdle();
 
   CheckBubble(second_browser, ANCHOR_BROWSER_ACTION);
@@ -60,11 +61,8 @@ void ExtensionMessageBubbleBrowserTest::TestBubbleAnchoredToAppMenu() {
           extensions::extension_action_test_util::NO_ACTION,
           extensions::Manifest::UNPACKED);
   extension_service()->AddExtension(no_action_extension.get());
-
-  Browser* second_browser = new Browser(
-      Browser::CreateParams(profile(), browser()->host_desktop_type()));
+  Browser* second_browser = new Browser(Browser::CreateParams(profile()));
   base::RunLoop().RunUntilIdle();
-
   CheckBubble(second_browser, ANCHOR_APP_MENU);
   CloseBubble(second_browser);
 }
@@ -85,8 +83,7 @@ void ExtensionMessageBubbleBrowserTest::
           extensions::Manifest::INTERNAL);
   extension_service()->AddExtension(action_extension.get());
 
-  Browser* second_browser = new Browser(
-      Browser::CreateParams(profile(), browser()->host_desktop_type()));
+  Browser* second_browser = new Browser(Browser::CreateParams(profile()));
   base::RunLoop().RunUntilIdle();
 
   CheckBubble(second_browser, ANCHOR_APP_MENU);
@@ -105,8 +102,7 @@ void ExtensionMessageBubbleBrowserTest::TestUninstallDangerousExtension() {
 
   // Create a second browser with the extension installed - the bubble will be
   // set to show.
-  Browser* second_browser = new Browser(
-      Browser::CreateParams(profile(), browser()->host_desktop_type()));
+  Browser* second_browser = new Browser(Browser::CreateParams(profile()));
   ASSERT_TRUE(second_browser);
   // Uninstall the extension before the bubble is shown. This should not crash,
   // and the bubble shouldn't be shown.

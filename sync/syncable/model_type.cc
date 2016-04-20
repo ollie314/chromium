@@ -30,10 +30,18 @@ namespace syncer {
 
 struct ModelTypeInfo {
   const ModelType model_type;
-  const char* const notification_type;  // Model Type notification string.
-  const char* const root_tag;           // Root tag for Model Type
-  const char* const model_type_string;  // String value for Model Type
-  const int specifics_field_number;     // SpecificsFieldNumber for Model Type
+  // Model Type notification string.
+  // This needs to match the corresponding proto message name in sync.proto
+  const char* const notification_type;
+  // Root tag for Model Type
+  // This should be the same as the model type but all lowercase.
+  const char* const root_tag;
+  // String value for Model Type
+  // This should be the same as the model type but space separated and the
+  // first letter of every word capitalized.
+  const char* const model_type_string;
+  // SpecificsFieldNumber for Model Type
+  const int specifics_field_number;
   // Histogram value should be unique for the Model Type, Existing histogram
   // values should never be modified without updating "SyncModelTypes" enum in
   // histograms.xml to maintain backward compatibility.
@@ -43,6 +51,7 @@ struct ModelTypeInfo {
 // Below struct entries are in the same order as their definition in the
 // ModelType enum. Don't forget to update the ModelType enum when you make
 // changes to this list.
+// Struct field values should be unique across the entire map.
 const ModelTypeInfo kModelTypeInfoMap[] = {
     {UNSPECIFIED, "", "", "Unspecified", -1, 0},
     {TOP_LEVEL_FOLDER, "", "", "Top Level Folder", -1, 1},
@@ -60,7 +69,7 @@ const ModelTypeInfo kModelTypeInfoMap[] = {
     {AUTOFILL_WALLET_DATA, "AUTOFILL_WALLET", "autofill_wallet",
      "Autofill Wallet", sync_pb::EntitySpecifics::kAutofillWalletFieldNumber,
      34},
-    {AUTOFILL_WALLET_METADATA, "AUTOFILL_WALLET_METADATA",
+    {AUTOFILL_WALLET_METADATA, "WALLET_METADATA",
      "autofill_wallet_metadata", "Autofill Wallet Metadata",
      sync_pb::EntitySpecifics::kWalletMetadataFieldNumber, 35},
     {THEMES, "THEME", "themes", "Themes",
@@ -555,21 +564,6 @@ ModelTypeSet PriorityCoreTypes() {
   return result;
 }
 
-ModelTypeSet BackupTypes() {
-  ModelTypeSet result;
-  result.Put(BOOKMARKS);
-  result.Put(PREFERENCES);
-  result.Put(THEMES);
-  result.Put(EXTENSIONS);
-  result.Put(SEARCH_ENGINES);
-  result.Put(APPS);
-  result.Put(APP_LIST);
-  result.Put(APP_SETTINGS);
-  result.Put(EXTENSION_SETTINGS);
-  result.Put(PRIORITY_PREFERENCES);
-  return result;
-}
-
 const char* ModelTypeToString(ModelType model_type) {
   // This is used in serialization routines as well as for displaying debug
   // information.  Do not attempt to change these string values unless you know
@@ -667,8 +661,8 @@ ModelTypeSet ModelTypeSetFromString(const std::string& model_types_string) {
   return model_types;
 }
 
-scoped_ptr<base::ListValue> ModelTypeSetToValue(ModelTypeSet model_types) {
-  scoped_ptr<base::ListValue> value(new base::ListValue());
+std::unique_ptr<base::ListValue> ModelTypeSetToValue(ModelTypeSet model_types) {
+  std::unique_ptr<base::ListValue> value(new base::ListValue());
   for (ModelTypeSet::Iterator it = model_types.First(); it.Good(); it.Inc()) {
     value->AppendString(ModelTypeToString(it.Get()));
   }

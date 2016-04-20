@@ -28,9 +28,11 @@ DisplaySnapshotVirtual::DisplaySnapshotVirtual(int64_t display_id,
                       DISPLAY_CONNECTION_TYPE_VIRTUAL,
                       false,
                       false,
+                      false,
                       "Virtual display",
                       base::FilePath(),
                       std::vector<const DisplayMode*>(),
+                      std::vector<uint8_t>(),  // Virtual displays have no EDID.
                       nullptr,
                       nullptr) {
   mode_.reset(new DisplayMode(display_size, false, 30));

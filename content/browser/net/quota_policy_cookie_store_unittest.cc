@@ -96,10 +96,10 @@ class QuotaPolicyCookieStoreTest : public testing::Test {
                  const std::string& domain,
                  const std::string& path,
                  const base::Time& creation) {
-    store_->AddCookie(
-        net::CanonicalCookie(
-            GURL(), name, value, domain, path, creation, creation, creation,
-            false, false, false, net::COOKIE_PRIORITY_DEFAULT));
+    store_->AddCookie(net::CanonicalCookie(
+        GURL(), name, value, domain, path, creation, creation, creation, false,
+        false, net::CookieSameSite::DEFAULT_MODE,
+        net::COOKIE_PRIORITY_DEFAULT));
   }
 
   void DestroyStore() {
@@ -121,7 +121,7 @@ class QuotaPolicyCookieStoreTest : public testing::Test {
   }
 
   TestBrowserThreadBundle bundle_;
-  scoped_ptr<base::SequencedWorkerPoolOwner> pool_owner_;
+  std::unique_ptr<base::SequencedWorkerPoolOwner> pool_owner_;
   base::WaitableEvent loaded_event_;
   base::WaitableEvent destroy_event_;
   base::ScopedTempDir temp_dir_;

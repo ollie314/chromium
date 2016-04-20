@@ -13,15 +13,15 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 
 #include "base/files/file.h"
 #include "base/files/memory_mapped_file.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/strings/string_piece.h"
+#include "ui/base/resource/data_pack_export.h"
 #include "ui/base/resource/resource_handle.h"
-#include "ui/base/ui_base_export.h"
 
 namespace base {
 class FilePath;
@@ -31,7 +31,7 @@ class RefCountedStaticMemory;
 namespace ui {
 enum ScaleFactor : int;
 
-class UI_BASE_EXPORT DataPack : public ResourceHandle {
+class UI_DATA_PACK_EXPORT DataPack : public ResourceHandle {
  public:
   explicit DataPack(ui::ScaleFactor scale_factor);
   ~DataPack() override;
@@ -79,7 +79,7 @@ class UI_BASE_EXPORT DataPack : public ResourceHandle {
   bool LoadImpl();
 
   // The memory-mapped data.
-  scoped_ptr<base::MemoryMappedFile> mmap_;
+  std::unique_ptr<base::MemoryMappedFile> mmap_;
 
   // Number of resources in the data.
   size_t resource_count_;

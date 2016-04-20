@@ -4,8 +4,9 @@
 
 #include "ui/gl/gl_surface_wgl.h"
 
+#include <memory>
+
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_gl_api_implementation.h"
@@ -163,7 +164,7 @@ bool GLSurfaceWGL::InitializeOneOff() {
     return true;
 
   DCHECK(g_display == NULL);
-  scoped_ptr<DisplayWGL> wgl_display(new DisplayWGL);
+  std::unique_ptr<DisplayWGL> wgl_display(new DisplayWGL);
   if (!wgl_display->Init())
     return false;
 
@@ -191,7 +192,7 @@ NativeViewGLSurfaceWGL::~NativeViewGLSurfaceWGL() {
   Destroy();
 }
 
-bool NativeViewGLSurfaceWGL::Initialize() {
+bool NativeViewGLSurfaceWGL::Initialize(GLSurface::Format format) {
   DCHECK(!device_context_);
 
   RECT rect;
@@ -305,7 +306,7 @@ PbufferGLSurfaceWGL::~PbufferGLSurfaceWGL() {
   Destroy();
 }
 
-bool PbufferGLSurfaceWGL::Initialize() {
+bool PbufferGLSurfaceWGL::Initialize(GLSurface::Format format) {
   DCHECK(!device_context_);
 
   if (!gfx::g_driver_wgl.fn.wglCreatePbufferARBFn) {

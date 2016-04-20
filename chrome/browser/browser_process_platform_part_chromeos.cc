@@ -19,7 +19,10 @@
 #include "chrome/browser/chromeos/system/device_disabling_manager.h"
 #include "chrome/browser/chromeos/system/device_disabling_manager_default_delegate.h"
 #include "chrome/browser/chromeos/system/system_clock.h"
+#include "chrome/browser/chromeos/system/timezone_resolver_manager.h"
 #include "chrome/browser/chromeos/system/timezone_util.h"
+#include "chrome/browser/lifetime/keep_alive_types.h"
+#include "chrome/browser/lifetime/scoped_keep_alive.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chromeos/geolocation/simple_geolocation_provider.h"
@@ -38,7 +41,7 @@ void BrowserProcessPlatformPart::InitializeAutomaticRebootManager() {
   DCHECK(!automatic_reboot_manager_);
 
   automatic_reboot_manager_.reset(new chromeos::system::AutomaticRebootManager(
-      scoped_ptr<base::TickClock>(new base::DefaultTickClock)));
+      std::unique_ptr<base::TickClock>(new base::DefaultTickClock)));
 }
 
 void BrowserProcessPlatformPart::ShutdownAutomaticRebootManager() {
@@ -91,6 +94,17 @@ session_manager::SessionManager* BrowserProcessPlatformPart::SessionManager() {
   return session_manager_.get();
 }
 
+void BrowserProcessPlatformPart::RegisterKeepAlive() {
+  DCHECK(!keep_alive_);
+  keep_alive_.reset(
+      new ScopedKeepAlive(KeepAliveOrigin::BROWSER_PROCESS_CHROMEOS,
+                          KeepAliveRestartOption::DISABLED));
+}
+
+void BrowserProcessPlatformPart::UnregisterKeepAlive() {
+  keep_alive_.reset();
+}
+
 chromeos::ProfileHelper* BrowserProcessPlatformPart::profile_helper() {
   DCHECK(CalledOnValidThread());
   if (!created_profile_helper_)
@@ -104,9 +118,19 @@ BrowserProcessPlatformPart::browser_policy_connector_chromeos() {
       g_browser_process->browser_policy_connector());
 }
 
+chromeos::system::TimeZoneResolverManager*
+BrowserProcessPlatformPart::GetTimezoneResolverManager() {
+  if (!timezone_resolver_manager_.get()) {
+    timezone_resolver_manager_.reset(
+        new chromeos::system::TimeZoneResolverManager());
+  }
+  return timezone_resolver_manager_.get();
+}
+
 chromeos::TimeZoneResolver* BrowserProcessPlatformPart::GetTimezoneResolver() {
   if (!timezone_resolver_.get()) {
     timezone_resolver_.reset(new chromeos::TimeZoneResolver(
+        GetTimezoneResolverManager(),
         g_browser_process->system_request_context(),
         chromeos::SimpleGeolocationProvider::DefaultGeolocationProviderURL(),
         base::Bind(&chromeos::system::ApplyTimeZone),
@@ -131,9 +155,9 @@ void BrowserProcessPlatformPart::StartTearDown() {
   profile_helper_.reset();
 }
 
-scoped_ptr<policy::BrowserPolicyConnector>
+std::unique_ptr<policy::BrowserPolicyConnector>
 BrowserProcessPlatformPart::CreateBrowserPolicyConnector() {
-  return scoped_ptr<policy::BrowserPolicyConnector>(
+  return std::unique_ptr<policy::BrowserPolicyConnector>(
       new policy::BrowserPolicyConnectorChromeOS());
 }
 

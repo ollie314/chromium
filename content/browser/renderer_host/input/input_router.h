@@ -26,7 +26,7 @@ class InputRouter : public IPC::Listener {
   // Send and take ownership of the the given InputMsg_*. This should be used
   // only for event types not associated with a WebInputEvent.  Returns true on
   // success and false otherwise.
-  virtual bool SendInput(scoped_ptr<IPC::Message> message) = 0;
+  virtual bool SendInput(std::unique_ptr<IPC::Message> message) = 0;
 
   // WebInputEvents
   virtual void SendMouseEvent(
@@ -58,6 +58,10 @@ class InputRouter : public IPC::Listener {
   // A scale factor to scale the coordinate in WebInputEvent from DIP
   // to viewport.
   virtual void SetDeviceScaleFactor(float device_scale_factor) = 0;
+
+  // Sets the frame tree node id of associated frame, used when tracing
+  // input event latencies to relate events to their target frames.
+  virtual void SetFrameTreeNodeId(int frameTreeNodeId) = 0;
 };
 
 }  // namespace content

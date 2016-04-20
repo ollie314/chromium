@@ -5,13 +5,14 @@
 #include "device/bluetooth/dbus/bluetooth_media_endpoint_service_provider.h"
 
 #include <stddef.h>
+
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/threading/platform_thread.h"
 #include "dbus/exported_object.h"
 #include "device/bluetooth/dbus/bluetooth_media_transport_client.h"
@@ -247,7 +248,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothMediaEndpointServiceProviderImpl
     DCHECK(OnOriginThread());
 
     // Generates the response to the method call.
-    scoped_ptr<dbus::Response> response(
+    std::unique_ptr<dbus::Response> response(
         dbus::Response::FromMethodCall(method_call));
     dbus::MessageWriter writer(response.get());
     if (configuration.empty()) {
@@ -306,7 +307,7 @@ BluetoothMediaEndpointServiceProvider::Create(
     const dbus::ObjectPath& object_path,
     Delegate* delegate) {
   // Returns a real implementation.
-  if (!bluez::BluezDBusManager::Get()->IsUsingStub()) {
+  if (!bluez::BluezDBusManager::Get()->IsUsingFakes()) {
     return new BluetoothMediaEndpointServiceProviderImpl(bus, object_path,
                                                          delegate);
   }

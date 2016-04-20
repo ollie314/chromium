@@ -6,11 +6,12 @@
 #define CONTENT_BROWSER_PUSH_MESSAGING_PUSH_MESSAGING_MESSAGE_FILTER_H_
 
 #include <stdint.h>
+
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/service_worker/service_worker_status_code.h"
 #include "content/public/browser/browser_message_filter.h"
@@ -23,6 +24,7 @@ namespace content {
 
 class PushMessagingService;
 class ServiceWorkerContextWrapper;
+struct PushSubscriptionOptions;
 
 extern const char kPushSenderIdServiceWorkerKey[];
 extern const char kPushRegistrationIdServiceWorkerKey[];
@@ -50,26 +52,25 @@ class PushMessagingMessageFilter : public BrowserMessageFilter {
 
   void OnSubscribeFromDocument(int render_frame_id,
                                int request_id,
-                               const std::string& sender_id,
-                               bool user_visible,
+                               const PushSubscriptionOptions& options,
                                int64_t service_worker_registration_id);
 
   void OnSubscribeFromWorker(int request_id,
                              int64_t service_worker_registration_id,
-                             bool user_visible);
+                             const PushSubscriptionOptions& options);
 
-  void DidPersistSenderId(const RegisterData& data,
-                          const std::string& sender_id,
-                          ServiceWorkerStatusCode service_worker_status);
+  void DidPersistSenderInfo(const RegisterData& data,
+                            const PushSubscriptionOptions& options,
+                            ServiceWorkerStatusCode service_worker_status);
 
   // sender_id is ignored if data.FromDocument() is false.
   void CheckForExistingRegistration(const RegisterData& data,
-                                    const std::string& sender_id);
+                                    const PushSubscriptionOptions& options);
 
   // sender_id is ignored if data.FromDocument() is false.
   void DidCheckForExistingRegistration(
       const RegisterData& data,
-      const std::string& sender_id,
+      const PushSubscriptionOptions& options,
       const std::string& push_registration_id,
       ServiceWorkerStatusCode service_worker_status);
 
@@ -162,10 +163,10 @@ class PushMessagingMessageFilter : public BrowserMessageFilter {
   // Helper methods on IO thread -----------------------------------------------
 
   // Called via PostTask from UI thread.
-  void SendIPC(scoped_ptr<IPC::Message> message);
+  void SendIPC(std::unique_ptr<IPC::Message> message);
 
   // Inner core of this message filter which lives on the UI thread.
-  scoped_ptr<Core, BrowserThread::DeleteOnUIThread> ui_core_;
+  std::unique_ptr<Core, BrowserThread::DeleteOnUIThread> ui_core_;
 
   scoped_refptr<ServiceWorkerContextWrapper> service_worker_context_;
 

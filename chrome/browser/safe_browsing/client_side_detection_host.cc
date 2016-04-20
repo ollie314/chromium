@@ -4,14 +4,13 @@
 
 #include "chrome/browser/safe_browsing/client_side_detection_host.h"
 
+#include <memory>
 #include <vector>
 
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -22,6 +21,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/safebrowsing_messages.h"
+#include "components/prefs/pref_service.h"
 #include "components/safe_browsing_db/database_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
@@ -487,7 +487,7 @@ void ClientSideDetectionHost::MaybeStartMalwareFeatureExtraction() {
   if (csd_service_ && browse_info_.get() &&
       should_classify_for_malware_ &&
       pageload_complete_) {
-    scoped_ptr<ClientMalwareRequest> malware_request(
+    std::unique_ptr<ClientMalwareRequest> malware_request(
         new ClientMalwareRequest);
     // Start browser-side malware feature extraction.  Once we're done it will
     // send the malware client verdict request.
@@ -518,11 +518,14 @@ void ClientSideDetectionHost::OnPhishingDetectionDone(
 
   // We parse the protocol buffer here.  If we're unable to parse it we won't
   // send the verdict further.
-  scoped_ptr<ClientPhishingRequest> verdict(new ClientPhishingRequest);
+  std::unique_ptr<ClientPhishingRequest> verdict(new ClientPhishingRequest);
   if (csd_service_ &&
       browse_info_.get() &&
       verdict->ParseFromString(verdict_str) &&
       verdict->IsInitialized()) {
+    UMA_HISTOGRAM_BOOLEAN(
+        "SBClientPhishing.ClientDeterminesPhishing",
+        verdict->is_phishing());
     // We only send phishing verdict to the server if the verdict is phishing or
     // if a SafeBrowsing interstitial was already shown for this site.  E.g., a
     // malware or phishing interstitial was shown but the user clicked
@@ -547,6 +550,9 @@ void ClientSideDetectionHost::MaybeShowPhishingWarning(GURL phishing_url,
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DVLOG(2) << "Received server phishing verdict for URL:" << phishing_url
            << " is_phishing:" << is_phishing;
+  UMA_HISTOGRAM_BOOLEAN(
+      "SBClientPhishing.ServerDeterminesPhishing",
+      is_phishing);
   if (is_phishing) {
     DCHECK(web_contents());
     if (ui_manager_.get()) {
@@ -555,6 +561,8 @@ void ClientSideDetectionHost::MaybeShowPhishingWarning(GURL phishing_url,
       resource.original_url = phishing_url;
       resource.is_subresource = false;
       resource.threat_type = SB_THREAT_TYPE_CLIENT_SIDE_PHISHING_URL;
+      resource.threat_source =
+          safe_browsing::ThreatSource::CLIENT_SIDE_DETECTION;
       resource.render_process_host_id =
           web_contents()->GetRenderProcessHost()->GetID();
       resource.render_frame_id = web_contents()->GetMainFrame()->GetRoutingID();
@@ -577,6 +585,9 @@ void ClientSideDetectionHost::MaybeShowMalwareWarning(GURL original_url,
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DVLOG(2) << "Received server malawre IP verdict for URL:" << malware_url
            << " is_malware:" << is_malware;
+  UMA_HISTOGRAM_BOOLEAN(
+      "SBClientMalware.ServerDeterminesMalware",
+      is_malware);
   if (is_malware && malware_url.is_valid() && original_url.is_valid()) {
     DCHECK(web_contents());
     if (ui_manager_.get()) {
@@ -585,6 +596,8 @@ void ClientSideDetectionHost::MaybeShowMalwareWarning(GURL original_url,
       resource.original_url = original_url;
       resource.is_subresource = (malware_url.host() != original_url.host());
       resource.threat_type = SB_THREAT_TYPE_CLIENT_SIDE_MALWARE_URL;
+      resource.threat_source =
+          safe_browsing::ThreatSource::CLIENT_SIDE_DETECTION;
       resource.render_process_host_id =
           web_contents()->GetRenderProcessHost()->GetID();
       resource.render_frame_id = web_contents()->GetMainFrame()->GetRoutingID();
@@ -604,7 +617,7 @@ void ClientSideDetectionHost::MaybeShowMalwareWarning(GURL original_url,
 
 void ClientSideDetectionHost::FeatureExtractionDone(
     bool success,
-    scoped_ptr<ClientPhishingRequest> request) {
+    std::unique_ptr<ClientPhishingRequest> request) {
   DCHECK(request);
   DVLOG(2) << "Feature extraction done (success:" << success << ") for URL: "
            << request->url() << ". Start sending client phishing request.";
@@ -627,11 +640,13 @@ void ClientSideDetectionHost::FeatureExtractionDone(
 
 void ClientSideDetectionHost::MalwareFeatureExtractionDone(
     bool feature_extraction_success,
-    scoped_ptr<ClientMalwareRequest> request) {
+    std::unique_ptr<ClientMalwareRequest> request) {
   DCHECK(request.get());
   DVLOG(2) << "Malware Feature extraction done for URL: " << request->url()
            << ", with badip url count:" << request->bad_ip_url_info_size();
-
+  UMA_HISTOGRAM_BOOLEAN(
+      "SBClientMalware.ResourceUrlMatchesBadIp",
+      request->bad_ip_url_info_size() > 0);
   // Send ping if there is matching features.
   if (feature_extraction_success && request->bad_ip_url_info_size() > 0) {
     DVLOG(1) << "Start sending client malware request.";

@@ -14,18 +14,15 @@
 
 namespace device {
 namespace usb {
+class ChooserService;
 class DeviceManager;
 class PermissionProvider;
 }
 }
 
-namespace webusb {
-class WebUsbPermissionBubble;
-}
-
 struct FrameUsbServices;
 
-typedef std::map<content::RenderFrameHost*, scoped_ptr<FrameUsbServices>>
+typedef std::map<content::RenderFrameHost*, std::unique_ptr<FrameUsbServices>>
     FrameUsbServicesMap;
 
 // Per-tab owner of USB services provided to render frames within that tab.
@@ -41,9 +38,13 @@ class UsbTabHelper : public content::WebContentsObserver,
       content::RenderFrameHost* render_frame_host,
       mojo::InterfaceRequest<device::usb::DeviceManager> request);
 
-  void CreatePermissionBubble(
+  void CreateChooserService(
       content::RenderFrameHost* render_frame_host,
-      mojo::InterfaceRequest<webusb::WebUsbPermissionBubble> request);
+      mojo::InterfaceRequest<device::usb::ChooserService> request);
+
+  void IncrementConnectionCount(content::RenderFrameHost* render_frame_host);
+  void DecrementConnectionCount(content::RenderFrameHost* render_frame_host);
+  bool IsDeviceConnected() const;
 
  private:
   explicit UsbTabHelper(content::WebContents* web_contents);
@@ -55,13 +56,14 @@ class UsbTabHelper : public content::WebContentsObserver,
   FrameUsbServices* GetFrameUsbService(
       content::RenderFrameHost* render_frame_host);
 
-  void GetPermissionProvider(
-      content::RenderFrameHost* render_frame_host,
-      mojo::InterfaceRequest<device::usb::PermissionProvider> request);
+  base::WeakPtr<device::usb::PermissionProvider> GetPermissionProvider(
+      content::RenderFrameHost* render_frame_host);
 
-  void GetPermissionBubble(
+  void GetChooserService(
       content::RenderFrameHost* render_frame_host,
-      mojo::InterfaceRequest<webusb::WebUsbPermissionBubble> request);
+      mojo::InterfaceRequest<device::usb::ChooserService> request);
+
+  void NotifyTabStateChanged() const;
 
   FrameUsbServicesMap frame_usb_services_;
 

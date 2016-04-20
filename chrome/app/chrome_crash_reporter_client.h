@@ -7,9 +7,10 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "components/crash/content/app/crash_reporter_client.h"
 
@@ -23,7 +24,7 @@ class ChromeCrashReporterClient : public crash_reporter::CrashReporterClient {
   ~ChromeCrashReporterClient() override;
 
   // crash_reporter::CrashReporterClient implementation.
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_WIN)
   void SetCrashReporterClientIdFromGUID(
       const std::string& client_guid) override;
 #endif
@@ -48,7 +49,7 @@ class ChromeCrashReporterClient : public crash_reporter::CrashReporterClient {
                                     bool succeeded) override;
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   void GetProductNameAndVersion(const char** product_name,
                                 const char** version) override;
   base::FilePath GetReporterLogFilename() override;
@@ -74,7 +75,8 @@ class ChromeCrashReporterClient : public crash_reporter::CrashReporterClient {
 
  private:
 #if defined(OS_WIN)
-  scoped_ptr<browser_watcher::CrashReportingMetrics> crash_reporting_metrics_;
+  std::unique_ptr<browser_watcher::CrashReportingMetrics>
+      crash_reporting_metrics_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(ChromeCrashReporterClient);

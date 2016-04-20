@@ -16,6 +16,7 @@ declare_args() {
 }
 
 config("system_libjpeg_config") {
+  libs = [ "jpeg" ]
   defines = [ "USE_SYSTEM_LIBJPEG" ]
 }
 
@@ -28,7 +29,6 @@ config("libjpeg_turbo_config") {
 # declared in this file.
 group("jpeg") {
   if (use_system_libjpeg) {
-    libs = [ "jpeg" ]
     public_configs = [ ":system_libjpeg_config" ]
   } else if (use_libjpeg_turbo) {
     public_deps = [

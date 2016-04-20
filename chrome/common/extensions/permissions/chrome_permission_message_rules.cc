@@ -294,6 +294,9 @@ ChromePermissionMessageRule::ChromePermissionMessageRule(
   DCHECK(!required_permissions_.empty());
 }
 
+ChromePermissionMessageRule::ChromePermissionMessageRule(
+    const ChromePermissionMessageRule& other) = default;
+
 ChromePermissionMessageRule::~ChromePermissionMessageRule() {
 }
 
@@ -478,6 +481,10 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_U2F_DEVICES,
        {APIPermission::kU2fDevices},
        {}},
+      // Notifications.
+      {IDS_EXTENSION_PROMPT_WARNING_NOTIFICATIONS,
+       {APIPermission::kNotifications},
+       {}},
 
       // Accessibility features.
       {IDS_EXTENSION_PROMPT_WARNING_ACCESSIBILITY_FEATURES_READ_MODIFY,
@@ -577,9 +584,6 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_GEOLOCATION,
        {APIPermission::kGeolocation},
        {}},
-      {IDS_EXTENSION_PROMPT_WARNING_GEOLOCATION,
-       {APIPermission::kLocation},
-       {}},
 
       {IDS_EXTENSION_PROMPT_WARNING_CONTENT_SETTINGS,
        {APIPermission::kContentSettings},
@@ -627,9 +631,6 @@ ChromePermissionMessageRule::GetAllRules() {
        {}},
       {IDS_EXTENSION_PROMPT_WARNING_MUSIC_MANAGER_PRIVATE,
        {APIPermission::kMusicManagerPrivate},
-       {}},
-      {IDS_EXTENSION_PROMPT_WARNING_SEARCH_ENGINES_PRIVATE,
-       {APIPermission::kSearchEnginesPrivate},
        {}},
       {IDS_EXTENSION_PROMPT_WARNING_SETTINGS_PRIVATE,
        {APIPermission::kSettingsPrivate},

@@ -4,7 +4,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,10 +21,9 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -69,6 +70,7 @@
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ssl/ssl_blocking_page.h"
+#include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/cld_data_harness.h"
 #include "chrome/browser/translate/cld_data_harness_factory.h"
@@ -79,7 +81,6 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
@@ -109,6 +110,7 @@
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_service_impl.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/prefs/pref_service.h"
 #include "components/search/search.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
@@ -141,6 +143,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_paths.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
@@ -150,6 +153,8 @@
 #include "content/public/test/mock_notification_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
+#include "device/bluetooth/bluetooth_adapter_factory.h"
+#include "device/bluetooth/test/mock_bluetooth_adapter.h"
 #include "extensions/browser/extension_dialog_auto_confirm.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_prefs.h"
@@ -163,7 +168,6 @@
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest_handlers/shared_module_info.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/base/url_util.h"
 #include "net/http/http_stream_factory.h"
 #include "net/ssl/ssl_config.h"
@@ -182,6 +186,7 @@
 #include "ui/base/page_transition_types.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 #if defined(OS_CHROMEOS)
 #include "ash/accelerators/accelerator_controller.h"
@@ -189,9 +194,25 @@
 #include "ash/shell.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
+#include "chrome/browser/chromeos/arc/arc_auth_service.h"
+#include "chrome/browser/chromeos/login/test/js_checker.h"
+#include "chrome/browser/chromeos/system/timezone_resolver_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/chrome_screenshot_grabber.h"
+#include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chromeos/audio/cras_audio_handler.h"
+#include "chromeos/chromeos_switches.h"
+#include "chromeos/cryptohome/cryptohome_parameters.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/fake_session_manager_client.h"
+#include "chromeos/dbus/session_manager_client.h"
+#include "components/arc/arc_bridge_service.h"
+#include "components/arc/arc_bridge_service_impl.h"
+#include "components/arc/arc_service_manager.h"
+#include "components/arc/test/fake_arc_bridge_bootstrap.h"
+#include "components/arc/test/fake_arc_bridge_instance.h"
+#include "components/signin/core/account_id/account_id.h"
+#include "components/user_manager/user_manager.h"
 #include "ui/chromeos/accessibility_types.h"
 #include "ui/keyboard/keyboard_util.h"
 #include "ui/snapshot/screenshot_grabber.h"
@@ -321,12 +342,12 @@ class MakeRequestFail {
   // Filters requests to the |host| such that they fail. Run on IO thread.
   static void MakeRequestFailOnIO(const std::string& host) {
     net::URLRequestFilter* filter = net::URLRequestFilter::GetInstance();
-    filter->AddHostnameInterceptor(
-        "http", host,
-        scoped_ptr<net::URLRequestInterceptor>(new FailedJobInterceptor()));
-    filter->AddHostnameInterceptor(
-        "https", host,
-        scoped_ptr<net::URLRequestInterceptor>(new FailedJobInterceptor()));
+    filter->AddHostnameInterceptor("http", host,
+                                   std::unique_ptr<net::URLRequestInterceptor>(
+                                       new FailedJobInterceptor()));
+    filter->AddHostnameInterceptor("https", host,
+                                   std::unique_ptr<net::URLRequestInterceptor>(
+                                       new FailedJobInterceptor()));
   }
 
   // Remove filters for requests to the |host|. Run on IO thread.
@@ -425,8 +446,8 @@ bool IsWebGLEnabled(content::WebContents* contents) {
 }
 
 bool IsJavascriptEnabled(content::WebContents* contents) {
-  scoped_ptr<base::Value> value = content::ExecuteScriptAndGetValue(
-      contents->GetMainFrame(), "123");
+  std::unique_ptr<base::Value> value =
+      content::ExecuteScriptAndGetValue(contents->GetMainFrame(), "123");
   int result = 0;
   if (!value->GetAsInteger(&result))
     EXPECT_EQ(base::Value::TYPE_NULL, value->GetType());
@@ -488,8 +509,7 @@ bool SetPluginEnabled(PluginPrefs* plugin_prefs,
 int CountPluginsOnIOThread() {
   int count = 0;
   for (content::BrowserChildProcessHostIterator iter; !iter.Done(); ++iter) {
-    if (iter.GetData().process_type == content::PROCESS_TYPE_PLUGIN ||
-        iter.GetData().process_type == content::PROCESS_TYPE_PPAPI_PLUGIN) {
+    if (iter.GetData().process_type == content::PROCESS_TYPE_PPAPI_PLUGIN) {
       count++;
     }
   }
@@ -708,7 +728,7 @@ class PolicyTest : public InProcessBrowserTest {
   void TestScreenshotFile(bool enabled) {
     // AddObserver is an ash-specific method, so just replace the screenshot
     // grabber with one we've created here.
-    scoped_ptr<ChromeScreenshotGrabber> chrome_screenshot_grabber(
+    std::unique_ptr<ChromeScreenshotGrabber> chrome_screenshot_grabber(
         new ChromeScreenshotGrabber);
     // ScreenshotGrabber doesn't own this observer, so the observer's lifetime
     // is tied to the test instead.
@@ -871,7 +891,7 @@ class PolicyTest : public InProcessBrowserTest {
   }
 
   MockConfigurationPolicyProvider provider_;
-  scoped_ptr<extensions::ExtensionCacheFake> test_extension_cache_;
+  std::unique_ptr<extensions::ExtensionCacheFake> test_extension_cache_;
 #if defined(OS_CHROMEOS)
   QuitMessageLoopAfterScreenshot observer_;
 #endif
@@ -1144,7 +1164,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, PolicyPreprocessing) {
 
   // It should be removed and replaced with a dictionary.
   PolicyMap expected;
-  scoped_ptr<base::DictionaryValue> expected_value(new base::DictionaryValue);
+  std::unique_ptr<base::DictionaryValue> expected_value(
+      new base::DictionaryValue);
   expected_value->SetInteger(key::kProxyServerMode, 3);
   expected.Set(key::kProxySettings,
                POLICY_LEVEL_MANDATORY,
@@ -1785,7 +1806,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallBlacklistSharedModules) {
   EXPECT_TRUE(shared_module->is_shared_module());
 
   // Verify the dependency.
-  scoped_ptr<extensions::ExtensionSet> set =
+  std::unique_ptr<extensions::ExtensionSet> set =
       service->shared_module_service()->GetDependentExtensions(shared_module);
   ASSERT_TRUE(set);
   EXPECT_EQ(1u, set->size());
@@ -2304,8 +2325,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, HomepageLocation) {
 IN_PROC_BROWSER_TEST_F(PolicyTest, IncognitoEnabled) {
   // Verifies that incognito windows can't be opened when disabled by policy.
 
-  const BrowserList* active_browser_list =
-      BrowserList::GetInstance(chrome::GetActiveDesktop());
+  const BrowserList* active_browser_list = BrowserList::GetInstance();
 
   // Disable incognito via policy and verify that incognito windows can't be
   // opened.
@@ -2447,7 +2467,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SavingBrowserHistoryDisabled) {
 #if !defined(USE_AURA)
 // http://crbug.com/241691 PolicyTest.TranslateEnabled is failing regularly.
 IN_PROC_BROWSER_TEST_F(PolicyTest, DISABLED_TranslateEnabled) {
-  scoped_ptr<test::CldDataHarness> cld_data_scope =
+  std::unique_ptr<test::CldDataHarness> cld_data_scope =
       test::CldDataHarnessFactory::Get()->CreateCldDataHarness();
   ASSERT_NO_FATAL_FAILURE(cld_data_scope->Init());
 
@@ -2731,12 +2751,12 @@ uint16_t GetSSLVersionFallbackMin(Profile* profile) {
 IN_PROC_BROWSER_TEST_F(PolicyTest, SSLVersionFallbackMin) {
   PrefService* prefs = g_browser_process->local_state();
 
-  const std::string new_value("tls1.2");
+  const std::string new_value("tls1.1");
   const std::string default_value(
       prefs->GetString(ssl_config::prefs::kSSLVersionFallbackMin));
 
   EXPECT_NE(default_value, new_value);
-  EXPECT_NE(net::SSL_PROTOCOL_VERSION_TLS1_2,
+  EXPECT_EQ(net::SSL_PROTOCOL_VERSION_TLS1_2,
             GetSSLVersionFallbackMin(browser()->profile()));
 
   PolicyMap policies;
@@ -2748,7 +2768,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SSLVersionFallbackMin) {
                NULL);
   UpdateProviderPolicy(policies);
 
-  EXPECT_EQ(net::SSL_PROTOCOL_VERSION_TLS1_2,
+  EXPECT_EQ(net::SSL_PROTOCOL_VERSION_TLS1_1,
             GetSSLVersionFallbackMin(browser()->profile()));
 }
 
@@ -2835,7 +2855,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, MAYBE_DisableScreenshotsFile) {
 IN_PROC_BROWSER_TEST_F(PolicyTest, DisableAudioOutput) {
   // Set up the mock observer.
   chromeos::CrasAudioHandler* audio_handler = chromeos::CrasAudioHandler::Get();
-  scoped_ptr<TestAudioObserver> test_observer(new TestAudioObserver);
+  std::unique_ptr<TestAudioObserver> test_observer(new TestAudioObserver);
   audio_handler->AddAudioObserver(test_observer.get());
 
   bool prior_state = audio_handler->IsOutputMuted();
@@ -3482,7 +3502,7 @@ class MediaStreamDevicesControllerBrowserTest
 
   void Accept(const content::MediaStreamDevices& devices,
               content::MediaStreamRequestResult result,
-              scoped_ptr<content::MediaStreamUI> ui) {
+              std::unique_ptr<content::MediaStreamUI> ui) {
     if (policy_value_ || request_url_allowed_via_whitelist_) {
       ASSERT_EQ(1U, devices.size());
       ASSERT_EQ("fake_dev", devices[0].id);
@@ -3655,6 +3675,53 @@ INSTANTIATE_TEST_CASE_P(MediaStreamDevicesControllerBrowserTestInstance,
                         MediaStreamDevicesControllerBrowserTest,
                         testing::Bool());
 
+class WebBluetoothPolicyTest : public PolicyTest {
+  void SetUpCommandLine(base::CommandLine* command_line)override {
+    // This is needed while Web Bluetooth is an Origin Trial, but can go away
+    // once it ships globally.
+    command_line->AppendSwitch(switches::kEnableWebBluetooth);
+    PolicyTest::SetUpCommandLine(command_line);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(WebBluetoothPolicyTest, Block) {
+  // Fake the BluetoothAdapter to say it's present.
+  scoped_refptr<device::MockBluetoothAdapter> adapter =
+      new testing::NiceMock<device::MockBluetoothAdapter>;
+  EXPECT_CALL(*adapter, IsPresent()).WillRepeatedly(testing::Return(true));
+  device::BluetoothAdapterFactory::SetAdapterForTesting(adapter);
+
+  // Navigate to a secure context.
+  embedded_test_server()->ServeFilesFromSourceDirectory("content/test/data");
+  ASSERT_TRUE(embedded_test_server()->Start());
+  ui_test_utils::NavigateToURL(
+      browser(),
+      embedded_test_server()->GetURL("localhost", "/simple_page.html"));
+  content::WebContents* const web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  EXPECT_THAT(
+      web_contents->GetMainFrame()->GetLastCommittedOrigin().Serialize(),
+      testing::StartsWith("http://localhost:"));
+
+  // Set the policy to block Web Bluetooth.
+  PolicyMap policies;
+  policies.Set(key::kDefaultWebBluetoothGuardSetting, POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
+               new base::FundamentalValue(2), nullptr);
+  UpdateProviderPolicy(policies);
+
+  std::string rejection;
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      web_contents,
+      "navigator.bluetooth.requestDevice({filters: [{name: 'Hello'}]})"
+      "  .then(() => { domAutomationController.send('Success'); },"
+      "        reason => {"
+      "      domAutomationController.send(reason.name + ': ' + reason.message);"
+      "  });",
+      &rejection));
+  EXPECT_THAT(rejection, testing::MatchesRegex("NotFoundError: .*policy.*"));
+}
+
 // Test that when extended reporting opt-in is disabled by policy, the
 // opt-in checkbox does not appear on SSL blocking pages.
 IN_PROC_BROWSER_TEST_F(PolicyTest, SafeBrowsingExtendedReportingOptInAllowed) {
@@ -3791,6 +3858,33 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SSLErrorOverridingDisallowed) {
                   ->ShowingInterstitialPage());
 }
 
+// Test that TaskManager::IsEndProcessEnabled is controlled by
+// TaskManagerEndProcessEnabled policy
+IN_PROC_BROWSER_TEST_F(PolicyTest, TaskManagerEndProcessEnabled) {
+  // By default it's allowed to end tasks.
+  EXPECT_TRUE(TaskManager::IsEndProcessEnabled());
+
+  // Disabling ending tasks in task manager by policy
+  PolicyMap policies1;
+  policies1.Set(key::kTaskManagerEndProcessEnabled, POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_MACHINE, POLICY_SOURCE_CLOUD,
+               new base::FundamentalValue(false), nullptr);
+  UpdateProviderPolicy(policies1);
+
+  // Policy should not allow ending tasks anymore.
+  EXPECT_FALSE(TaskManager::IsEndProcessEnabled());
+
+  // Enabling ending tasks in task manager by policy
+  PolicyMap policies2;
+  policies2.Set(key::kTaskManagerEndProcessEnabled, POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_MACHINE, POLICY_SOURCE_CLOUD,
+               new base::FundamentalValue(true), nullptr);
+  UpdateProviderPolicy(policies2);
+
+  // Policy should allow ending tasks again.
+  EXPECT_TRUE(TaskManager::IsEndProcessEnabled());
+}
+
 #if !defined(OS_CHROMEOS)
 // Similar to PolicyTest but sets the proper policy before the browser is
 // started.
@@ -3815,9 +3909,9 @@ IN_PROC_BROWSER_TEST_F(PolicyVariationsServiceTest, VariationsURLIsValid) {
 
   // g_browser_process->variations_service() is null by default in Chromium
   // builds, so construct a VariationsService locally instead.
-  scoped_ptr<variations::VariationsService> service =
+  std::unique_ptr<variations::VariationsService> service =
       variations::VariationsService::CreateForTesting(
-          make_scoped_ptr(new ChromeVariationsServiceClient()),
+          base::WrapUnique(new ChromeVariationsServiceClient()),
           g_browser_process->local_state());
 
   const GURL url = service->GetVariationsServerURL(
@@ -3942,6 +4036,230 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, UnifiedDesktopEnabledByDefault) {
                NULL);
   UpdateProviderPolicy(policies);
   EXPECT_FALSE(display_manager->unified_desktop_enabled());
+}
+
+class ArcPolicyTest : public PolicyTest {
+ public:
+  ArcPolicyTest() {}
+  ~ArcPolicyTest() override {}
+
+ protected:
+  void SetUpTest() {
+    arc::ArcAuthService::DisableUIForTesting();
+
+    browser()->profile()->GetPrefs()->SetBoolean(prefs::kArcSignedIn, true);
+    arc::ArcServiceManager::Get()->OnPrimaryUserProfilePrepared(
+        multi_user_util::GetAccountIdFromProfile(browser()->profile()));
+    arc::ArcAuthService::Get()->OnPrimaryUserProfilePrepared(
+        browser()->profile());
+  }
+
+  void TearDownTest() {
+    arc::ArcAuthService::Get()->Shutdown();
+  }
+
+  void SetUpInProcessBrowserTestFixture() override {
+    PolicyTest::SetUpInProcessBrowserTestFixture();
+    fake_session_manager_client_ = new chromeos::FakeSessionManagerClient;
+    fake_session_manager_client_->set_arc_available(true);
+    chromeos::DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
+        std::unique_ptr<chromeos::SessionManagerClient>(
+            fake_session_manager_client_));
+
+    fake_arc_bridge_instance_.reset(new arc::FakeArcBridgeInstance);
+    arc::ArcServiceManager::SetArcBridgeServiceForTesting(
+        base::WrapUnique(new arc::ArcBridgeServiceImpl(
+            base::WrapUnique(new arc::FakeArcBridgeBootstrap(
+                fake_arc_bridge_instance_.get())))));
+  }
+
+ private:
+  chromeos::FakeSessionManagerClient *fake_session_manager_client_;
+  std::unique_ptr<arc::FakeArcBridgeInstance> fake_arc_bridge_instance_;
+
+  DISALLOW_COPY_AND_ASSIGN(ArcPolicyTest);
+};
+
+// Test ArcEnabled policy.
+IN_PROC_BROWSER_TEST_F(ArcPolicyTest, ArcEnabled) {
+  SetUpTest();
+
+  const PrefService* const pref = browser()->profile()->GetPrefs();
+  const arc::ArcBridgeService* const arc_bridge_service
+      = arc::ArcBridgeService::Get();
+
+  // ARC is switched off by default.
+  EXPECT_EQ(arc::ArcBridgeService::State::STOPPED, arc_bridge_service->state());
+  EXPECT_FALSE(pref->GetBoolean(prefs::kArcEnabled));
+
+  // Enable ARC.
+  PolicyMap policies;
+  policies.Set(key::kArcEnabled,
+               POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER,
+               POLICY_SOURCE_CLOUD,
+               new base::FundamentalValue(true),
+               nullptr);
+  UpdateProviderPolicy(policies);
+  EXPECT_TRUE(pref->GetBoolean(prefs::kArcEnabled));
+  EXPECT_EQ(arc::ArcBridgeService::State::READY, arc_bridge_service->state());
+
+  // Disable ARC.
+  policies.Set(key::kArcEnabled,
+               POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER,
+               POLICY_SOURCE_CLOUD,
+               new base::FundamentalValue(false),
+               nullptr);
+  UpdateProviderPolicy(policies);
+  EXPECT_FALSE(pref->GetBoolean(prefs::kArcEnabled));
+  EXPECT_EQ(arc::ArcBridgeService::State::STOPPED, arc_bridge_service->state());
+
+  TearDownTest();
+}
+
+namespace {
+const char kTestUser1[] = "test1@domain.com";
+}  // anonymous namespace
+
+class ChromeOSPolicyTest : public PolicyTest {
+ public:
+  ChromeOSPolicyTest() {}
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    PolicyTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitchASCII(chromeos::switches::kLoginUser,
+                                    cryptohome_id1_.id());
+    command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile, "hash");
+    command_line->AppendSwitch(
+        chromeos::switches::kAllowFailedPolicyFetchForTest);
+
+    command_line->AppendSwitch(
+        chromeos::switches::kEnableSystemTimezoneAutomaticDetectionPolicy);
+  }
+
+ protected:
+  const AccountId test_account_id1_ = AccountId::FromUserEmail(kTestUser1);
+  const cryptohome::Identification cryptohome_id1_ =
+      cryptohome::Identification(test_account_id1_);
+
+  // Logs in |account_id|.
+  void LogIn(const AccountId& account_id, const std::string& user_id_hash) {
+    user_manager::UserManager::Get()->UserLoggedIn(account_id, user_id_hash,
+                                                   false);
+    base::RunLoop().RunUntilIdle();
+  }
+
+  void NavigateToUrl(const GURL& url) {
+    ui_test_utils::NavigateToURL(browser(), url);
+    base::RunLoop().RunUntilIdle();
+  }
+
+  void CheckSystemTimezoneAutomaticDetectionPolicyUnset() {
+    PrefService* local_state = g_browser_process->local_state();
+    EXPECT_FALSE(local_state->IsManagedPreference(
+        prefs::kSystemTimezoneAutomaticDetectionPolicy));
+    EXPECT_EQ(0, local_state->GetInteger(
+                     prefs::kSystemTimezoneAutomaticDetectionPolicy));
+  }
+
+  void SetAndTestSystemTimezoneAutomaticDetectionPolicy(int policy_value) {
+    PolicyMap policies;
+    policies.Set(key::kSystemTimezoneAutomaticDetection,
+                 POLICY_LEVEL_MANDATORY,
+                 POLICY_SCOPE_MACHINE,
+                 POLICY_SOURCE_CLOUD,
+                 new base::FundamentalValue(policy_value),
+                 NULL);
+    UpdateProviderPolicy(policies);
+
+    PrefService* local_state = g_browser_process->local_state();
+
+    EXPECT_TRUE(local_state->IsManagedPreference(
+        prefs::kSystemTimezoneAutomaticDetectionPolicy));
+    EXPECT_EQ(policy_value,
+              local_state->GetInteger(
+                  prefs::kSystemTimezoneAutomaticDetectionPolicy));
+  }
+
+  void SetEmptyPolicy() { UpdateProviderPolicy(PolicyMap()); }
+
+  bool CheckResolveTimezoneByGeolocation(bool checked, bool disabled) {
+    checker.set_web_contents(
+        browser()->tab_strip_model()->GetActiveWebContents());
+    const std::string expression = base::StringPrintf(
+        "(function () {\n"
+        "  var checkbox = "
+        "document.getElementById('resolve-timezone-by-geolocation');\n"
+        "  if (!checkbox) {\n"
+        "    console.log('resolve-timezone-by-geolocation not found.');\n"
+        "    return false;\n"
+        "  }\n"
+        "  var expected_checked = %s;\n"
+        "  var expected_disabled = %s;\n"
+        "  var checked = checkbox.checked;\n"
+        "  var disabled = checkbox.disabled;\n"
+        "  if (checked != expected_checked)\n"
+        "    console.log('ERROR: expected_checked=' + expected_checked + ' != "
+        "checked=' + checked);\n"
+        "\n"
+        "  if (disabled != expected_disabled)\n"
+        "    console.log('ERROR: expected_disabled=' + expected_disabled + ' "
+        "!= disabled=' + disabled);\n"
+        "\n"
+        "  return (checked == expected_checked && disabled == "
+        "expected_disabled);\n"
+        "})()",
+        checked ? "true" : "false", disabled ? "true" : "false");
+    return checker.GetBool(expression);
+  }
+
+ private:
+  chromeos::test::JSChecker checker;
+
+  DISALLOW_COPY_AND_ASSIGN(ChromeOSPolicyTest);
+};
+
+IN_PROC_BROWSER_TEST_F(ChromeOSPolicyTest, SystemTimezoneAutomaticDetection) {
+  ui_test_utils::NavigateToURL(browser(), GURL("chrome://settings"));
+  chromeos::system::TimeZoneResolverManager* manager =
+      g_browser_process->platform_part()->GetTimezoneResolverManager();
+
+  // Policy not set.
+  CheckSystemTimezoneAutomaticDetectionPolicyUnset();
+  EXPECT_TRUE(CheckResolveTimezoneByGeolocation(true, false));
+  EXPECT_TRUE(manager->TimeZoneResolverShouldBeRunningForTests());
+
+  int policy_value = 0 /* USERS_DECIDE */;
+  SetAndTestSystemTimezoneAutomaticDetectionPolicy(policy_value);
+  EXPECT_TRUE(CheckResolveTimezoneByGeolocation(true, false));
+  EXPECT_TRUE(manager->TimeZoneResolverShouldBeRunningForTests());
+
+  policy_value = 1 /* DISABLED */;
+  SetAndTestSystemTimezoneAutomaticDetectionPolicy(policy_value);
+  EXPECT_TRUE(CheckResolveTimezoneByGeolocation(false, true));
+  EXPECT_FALSE(manager->TimeZoneResolverShouldBeRunningForTests());
+
+  policy_value = 2 /* IP_ONLY */;
+  SetAndTestSystemTimezoneAutomaticDetectionPolicy(policy_value);
+  EXPECT_TRUE(CheckResolveTimezoneByGeolocation(true, true));
+  EXPECT_TRUE(manager->TimeZoneResolverShouldBeRunningForTests());
+
+  policy_value = 3 /* SEND_WIFI_ACCESS_POINTS */;
+  SetAndTestSystemTimezoneAutomaticDetectionPolicy(policy_value);
+  EXPECT_TRUE(CheckResolveTimezoneByGeolocation(true, true));
+  EXPECT_TRUE(manager->TimeZoneResolverShouldBeRunningForTests());
+
+  policy_value = 1 /* DISABLED */;
+  SetAndTestSystemTimezoneAutomaticDetectionPolicy(policy_value);
+  EXPECT_TRUE(CheckResolveTimezoneByGeolocation(false, true));
+  EXPECT_FALSE(manager->TimeZoneResolverShouldBeRunningForTests());
+
+  SetEmptyPolicy();
+  // Policy not set.
+  CheckSystemTimezoneAutomaticDetectionPolicyUnset();
+  EXPECT_TRUE(CheckResolveTimezoneByGeolocation(true, false));
+  EXPECT_TRUE(manager->TimeZoneResolverShouldBeRunningForTests());
 }
 #endif  // defined(OS_CHROMEOS)
 

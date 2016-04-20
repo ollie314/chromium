@@ -52,6 +52,14 @@ class Tool {
     default_output_extension_ = ext;
   }
 
+  const SubstitutionPattern& default_output_dir() const {
+    return default_output_dir_;
+  }
+  void set_default_output_dir(const SubstitutionPattern& dir) {
+    DCHECK(!complete_);
+    default_output_dir_ = dir;
+  }
+
   // Dependency file (if supported).
   const SubstitutionPattern& depfile() const {
     return depfile_;
@@ -125,6 +133,14 @@ class Tool {
     depend_output_ = dep_out;
   }
 
+  const SubstitutionPattern& runtime_link_output() const {
+    return runtime_link_output_;
+  }
+  void set_runtime_link_output(const SubstitutionPattern& run_out) {
+    DCHECK(!complete_);
+    runtime_link_output_ = run_out;
+  }
+
   const std::string& output_prefix() const {
     return output_prefix_;
   }
@@ -178,6 +194,7 @@ class Tool {
  private:
   SubstitutionPattern command_;
   std::string default_output_extension_;
+  SubstitutionPattern default_output_dir_;
   SubstitutionPattern depfile_;
   DepsFormat depsformat_;
   PrecompiledHeaderType precompiled_header_type_;
@@ -187,6 +204,7 @@ class Tool {
   SubstitutionList outputs_;
   SubstitutionPattern link_output_;
   SubstitutionPattern depend_output_;
+  SubstitutionPattern runtime_link_output_;
   std::string output_prefix_;
   bool restat_;
   SubstitutionPattern rspfile_;

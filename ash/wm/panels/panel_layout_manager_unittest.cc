@@ -5,7 +5,6 @@
 #include "ash/wm/panels/panel_layout_manager.h"
 
 #include "ash/ash_switches.h"
-#include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_button.h"
@@ -24,6 +23,7 @@
 #include "ash/test/test_shelf_delegate.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
@@ -33,7 +33,6 @@
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/views/widget/widget.h"
@@ -120,7 +119,7 @@ class PanelLayoutManagerTest : public test::AshTestBase {
     // Waits until all shelf view animations are done.
     shelf_view_test()->RunMessageLoopUntilAnimationsDone();
 
-    Shelf* shelf = RootWindowController::ForShelf(panel)->shelf()->shelf();
+    Shelf* shelf = Shelf::ForWindow(panel);
     gfx::Rect icon_bounds = shelf->GetScreenBoundsOfItemIconForWindow(panel);
     ASSERT_FALSE(icon_bounds.width() == 0 && icon_bounds.height() == 0);
 
@@ -142,20 +141,12 @@ class PanelLayoutManagerTest : public test::AshTestBase {
       EXPECT_GE(window_bounds.bottom(), icon_bounds.bottom());
     }
 
-    switch (alignment) {
-      case SHELF_ALIGNMENT_BOTTOM:
-        EXPECT_EQ(shelf_bounds.y(), window_bounds.bottom());
-        break;
-      case SHELF_ALIGNMENT_LEFT:
-        EXPECT_EQ(shelf_bounds.right(), window_bounds.x());
-        break;
-      case SHELF_ALIGNMENT_RIGHT:
-        EXPECT_EQ(shelf_bounds.x(), window_bounds.right());
-        break;
-      case SHELF_ALIGNMENT_TOP:
-        EXPECT_EQ(shelf_bounds.bottom(), window_bounds.y());
-        break;
-    }
+    if (alignment == SHELF_ALIGNMENT_LEFT)
+      EXPECT_EQ(shelf_bounds.right(), window_bounds.x());
+    else if (alignment == SHELF_ALIGNMENT_RIGHT)
+      EXPECT_EQ(shelf_bounds.x(), window_bounds.right());
+    else
+      EXPECT_EQ(shelf_bounds.y(), window_bounds.bottom());
   }
 
   void IsCalloutAboveLauncherIcon(aura::Window* panel) {
@@ -163,7 +154,7 @@ class PanelLayoutManagerTest : public test::AshTestBase {
     base::RunLoop().RunUntilIdle();
     views::Widget* widget = GetCalloutWidgetForPanel(panel);
 
-    Shelf* shelf = RootWindowController::ForShelf(panel)->shelf()->shelf();
+    Shelf* shelf = Shelf::ForWindow(panel);
     gfx::Rect icon_bounds = shelf->GetScreenBoundsOfItemIconForWindow(panel);
     ASSERT_FALSE(icon_bounds.IsEmpty());
 
@@ -174,20 +165,12 @@ class PanelLayoutManagerTest : public test::AshTestBase {
     EXPECT_TRUE(widget->IsVisible());
 
     ShelfAlignment alignment = GetAlignment(panel->GetRootWindow());
-    switch (alignment) {
-      case SHELF_ALIGNMENT_BOTTOM:
-        EXPECT_EQ(panel_bounds.bottom(), callout_bounds.y());
-        break;
-      case SHELF_ALIGNMENT_LEFT:
-        EXPECT_EQ(panel_bounds.x(), callout_bounds.right());
-        break;
-      case SHELF_ALIGNMENT_RIGHT:
-        EXPECT_EQ(panel_bounds.right(), callout_bounds.x());
-        break;
-      case SHELF_ALIGNMENT_TOP:
-        EXPECT_EQ(panel_bounds.y(), callout_bounds.bottom());
-        break;
-    }
+    if (alignment == SHELF_ALIGNMENT_LEFT)
+      EXPECT_EQ(panel_bounds.x(), callout_bounds.right());
+    else if (alignment == SHELF_ALIGNMENT_RIGHT)
+      EXPECT_EQ(panel_bounds.right(), callout_bounds.x());
+    else
+      EXPECT_EQ(panel_bounds.bottom(), callout_bounds.y());
 
     if (IsHorizontal(alignment)) {
       EXPECT_NEAR(icon_bounds.CenterPoint().x(),
@@ -227,32 +210,25 @@ class PanelLayoutManagerTest : public test::AshTestBase {
   }
 
   void SetAlignment(aura::Window* root_window, ShelfAlignment alignment) {
-    ash::Shell* shell = ash::Shell::GetInstance();
-    shell->SetShelfAlignment(alignment, root_window);
+    Shelf::ForWindow(root_window)->SetAlignment(alignment);
   }
 
   ShelfAlignment GetAlignment(const aura::Window* root_window) {
-    ash::Shell* shell = ash::Shell::GetInstance();
-    return shell->GetShelfAlignment(root_window);
+    return Shelf::ForWindow(root_window)->alignment();
   }
 
   void SetShelfAutoHideBehavior(aura::Window* window,
                                 ShelfAutoHideBehavior behavior) {
-    ShelfLayoutManager* shelf = RootWindowController::ForWindow(window)
-                                    ->shelf()
-                                    ->shelf_layout_manager();
-    shelf->SetAutoHideBehavior(behavior);
-    ShelfView* shelf_view = GetShelfView(Shelf::ForWindow(window));
-    test::ShelfViewTestAPI test_api(shelf_view);
+    Shelf* shelf = Shelf::ForWindow(window);
+    shelf->shelf_layout_manager()->SetAutoHideBehavior(behavior);
+    test::ShelfViewTestAPI test_api(GetShelfView(shelf));
     test_api.RunMessageLoopUntilAnimationsDone();
   }
 
   void SetShelfVisibilityState(aura::Window* window,
                                ShelfVisibilityState visibility_state) {
-    ShelfLayoutManager* shelf = RootWindowController::ForWindow(window)
-                                    ->shelf()
-                                    ->shelf_layout_manager();
-    shelf->SetState(visibility_state);
+    Shelf* shelf = Shelf::ForWindow(window);
+    shelf->shelf_layout_manager()->SetState(visibility_state);
   }
 
   ShelfView* GetShelfView(Shelf* shelf) {
@@ -260,11 +236,10 @@ class PanelLayoutManagerTest : public test::AshTestBase {
   }
 
  private:
-  scoped_ptr<test::ShelfViewTestAPI> shelf_view_test_;
+  std::unique_ptr<test::ShelfViewTestAPI> shelf_view_test_;
 
   bool IsHorizontal(ShelfAlignment alignment) {
-    return alignment == SHELF_ALIGNMENT_BOTTOM ||
-           alignment == SHELF_ALIGNMENT_TOP;
+    return alignment == SHELF_ALIGNMENT_BOTTOM;
   }
 
   DISALLOW_COPY_AND_ASSIGN(PanelLayoutManagerTest);
@@ -278,7 +253,7 @@ class PanelLayoutManagerTextDirectionTest
   virtual ~PanelLayoutManagerTextDirectionTest() {}
 
   void SetUp() override {
-    original_locale = l10n_util::GetApplicationLocale(std::string());
+    original_locale_ = base::i18n::GetConfiguredLocale();
     if (is_rtl_)
       base::i18n::SetICUDefaultLocale("he");
     PanelLayoutManagerTest::SetUp();
@@ -287,13 +262,13 @@ class PanelLayoutManagerTextDirectionTest
 
   void TearDown() override {
     if (is_rtl_)
-      base::i18n::SetICUDefaultLocale(original_locale);
+      base::i18n::SetICUDefaultLocale(original_locale_);
     PanelLayoutManagerTest::TearDown();
   }
 
  private:
   bool is_rtl_;
-  std::string original_locale;
+  std::string original_locale_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelLayoutManagerTextDirectionTest);
 };
@@ -301,7 +276,7 @@ class PanelLayoutManagerTextDirectionTest
 // Tests that a created panel window is above the shelf icon in LTR and RTL.
 TEST_P(PanelLayoutManagerTextDirectionTest, AddOnePanel) {
   gfx::Rect bounds(0, 0, 201, 201);
-  scoped_ptr<aura::Window> window(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(bounds));
   EXPECT_EQ(GetPanelContainer(window.get()), window->parent());
   EXPECT_NO_FATAL_FAILURE(IsPanelAboveLauncherIcon(window.get()));
   EXPECT_NO_FATAL_FAILURE(IsCalloutAboveLauncherIcon(window.get()));
@@ -313,8 +288,8 @@ TEST_F(PanelLayoutManagerTest, PanelAlignsToHiddenLauncherIcon) {
   gfx::Rect bounds(0, 0, 201, 201);
   SetShelfAutoHideBehavior(Shell::GetPrimaryRootWindow(),
                            SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
-  scoped_ptr<aura::Window> normal_window(CreateNormalWindow(bounds));
-  scoped_ptr<aura::Window> window(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> normal_window(CreateNormalWindow(bounds));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(bounds));
   EXPECT_EQ(GetPanelContainer(window.get()), window->parent());
   EXPECT_NO_FATAL_FAILURE(IsPanelAboveLauncherIcon(window.get()));
 }
@@ -328,9 +303,10 @@ TEST_F(PanelLayoutManagerTest, PanelAlignsToHiddenLauncherIconSecondDisplay) {
   UpdateDisplay("400x400,600x400");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
 
-  scoped_ptr<aura::Window> normal_window(
+  std::unique_ptr<aura::Window> normal_window(
       CreateNormalWindow(gfx::Rect(450, 0, 100, 100)));
-  scoped_ptr<aura::Window> panel(CreatePanelWindow(gfx::Rect(400, 0, 50, 50)));
+  std::unique_ptr<aura::Window> panel(
+      CreatePanelWindow(gfx::Rect(400, 0, 50, 50)));
   EXPECT_EQ(root_windows[1], panel->GetRootWindow());
   EXPECT_NO_FATAL_FAILURE(IsPanelAboveLauncherIcon(panel.get()));
   gfx::Rect shelf_visible_position = panel->GetBoundsInScreen();
@@ -349,14 +325,14 @@ TEST_F(PanelLayoutManagerTest, MultiplePanelsAreAboveIcons) {
   gfx::Rect odd_bounds(0, 0, 201, 201);
   gfx::Rect even_bounds(0, 0, 200, 200);
 
-  scoped_ptr<aura::Window> w1(CreatePanelWindow(odd_bounds));
+  std::unique_ptr<aura::Window> w1(CreatePanelWindow(odd_bounds));
   EXPECT_NO_FATAL_FAILURE(IsPanelAboveLauncherIcon(w1.get()));
 
-  scoped_ptr<aura::Window> w2(CreatePanelWindow(even_bounds));
+  std::unique_ptr<aura::Window> w2(CreatePanelWindow(even_bounds));
   EXPECT_NO_FATAL_FAILURE(IsPanelAboveLauncherIcon(w1.get()));
   EXPECT_NO_FATAL_FAILURE(IsPanelAboveLauncherIcon(w2.get()));
 
-  scoped_ptr<aura::Window> w3(CreatePanelWindow(odd_bounds));
+  std::unique_ptr<aura::Window> w3(CreatePanelWindow(odd_bounds));
   EXPECT_NO_FATAL_FAILURE(IsPanelAboveLauncherIcon(w1.get()));
   EXPECT_NO_FATAL_FAILURE(IsPanelAboveLauncherIcon(w2.get()));
   EXPECT_NO_FATAL_FAILURE(IsPanelAboveLauncherIcon(w3.get()));
@@ -364,9 +340,9 @@ TEST_F(PanelLayoutManagerTest, MultiplePanelsAreAboveIcons) {
 
 TEST_F(PanelLayoutManagerTest, MultiplePanelStacking) {
   gfx::Rect bounds(0, 0, 201, 201);
-  scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w2(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w3(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w1(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w2(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w3(CreatePanelWindow(bounds));
 
   // Default stacking order.
   EXPECT_TRUE(WindowIsAbove(w3.get(), w2.get()));
@@ -395,9 +371,12 @@ TEST_F(PanelLayoutManagerTest, MultiplePanelStackingVertical) {
 
   // Size panels in such a way that ordering them by X coordinate would cause
   // stacking order to be incorrect. Test that stacking order is based on Y.
-  scoped_ptr<aura::Window> w1(CreatePanelWindow(gfx::Rect(0, 0, 210, 201)));
-  scoped_ptr<aura::Window> w2(CreatePanelWindow(gfx::Rect(0, 0, 220, 201)));
-  scoped_ptr<aura::Window> w3(CreatePanelWindow(gfx::Rect(0, 0, 200, 201)));
+  std::unique_ptr<aura::Window> w1(
+      CreatePanelWindow(gfx::Rect(0, 0, 210, 201)));
+  std::unique_ptr<aura::Window> w2(
+      CreatePanelWindow(gfx::Rect(0, 0, 220, 201)));
+  std::unique_ptr<aura::Window> w3(
+      CreatePanelWindow(gfx::Rect(0, 0, 200, 201)));
 
   // Default stacking order.
   EXPECT_TRUE(WindowIsAbove(w3.get(), w2.get()));
@@ -422,10 +401,10 @@ TEST_F(PanelLayoutManagerTest, MultiplePanelStackingVertical) {
 
 TEST_F(PanelLayoutManagerTest, MultiplePanelCallout) {
   gfx::Rect bounds(0, 0, 200, 200);
-  scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w2(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w3(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w4(CreateNormalWindow(gfx::Rect()));
+  std::unique_ptr<aura::Window> w1(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w2(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w3(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w4(CreateNormalWindow(gfx::Rect()));
   shelf_view_test()->RunMessageLoopUntilAnimationsDone();
   EXPECT_TRUE(IsPanelCalloutVisible(w1.get()));
   EXPECT_TRUE(IsPanelCalloutVisible(w2.get()));
@@ -446,9 +425,9 @@ TEST_F(PanelLayoutManagerTest, MultiplePanelCallout) {
 // Tests removing panels.
 TEST_F(PanelLayoutManagerTest, RemoveLeftPanel) {
   gfx::Rect bounds(0, 0, 201, 201);
-  scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w2(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w3(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w1(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w2(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w3(CreatePanelWindow(bounds));
 
   // At this point, windows should be stacked with 1 < 2 < 3
   wm::ActivateWindow(w1.get());
@@ -462,9 +441,9 @@ TEST_F(PanelLayoutManagerTest, RemoveLeftPanel) {
 
 TEST_F(PanelLayoutManagerTest, RemoveMiddlePanel) {
   gfx::Rect bounds(0, 0, 201, 201);
-  scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w2(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w3(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w1(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w2(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w3(CreatePanelWindow(bounds));
 
   // At this point, windows should be stacked with 1 < 2 < 3
   wm::ActivateWindow(w2.get());
@@ -477,9 +456,9 @@ TEST_F(PanelLayoutManagerTest, RemoveMiddlePanel) {
 
 TEST_F(PanelLayoutManagerTest, RemoveRightPanel) {
   gfx::Rect bounds(0, 0, 201, 201);
-  scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w2(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w3(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w1(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w2(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w3(CreatePanelWindow(bounds));
 
   // At this point, windows should be stacked with 1 < 2 < 3
   wm::ActivateWindow(w3.get());
@@ -492,9 +471,9 @@ TEST_F(PanelLayoutManagerTest, RemoveRightPanel) {
 
 TEST_F(PanelLayoutManagerTest, RemoveNonActivePanel) {
   gfx::Rect bounds(0, 0, 201, 201);
-  scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w2(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w3(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w1(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w2(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w3(CreatePanelWindow(bounds));
 
   // At this point, windows should be stacked with 1 < 2 < 3
   wm::ActivateWindow(w2.get());
@@ -507,8 +486,8 @@ TEST_F(PanelLayoutManagerTest, RemoveNonActivePanel) {
 
 TEST_F(PanelLayoutManagerTest, SplitView) {
   gfx::Rect bounds(0, 0, 90, 201);
-  scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w2(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w1(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w2(CreatePanelWindow(bounds));
 
   EXPECT_NO_FATAL_FAILURE(PanelsNotOverlapping(w1.get(), w2.get()));
 }
@@ -522,8 +501,8 @@ TEST_F(PanelLayoutManagerTest, SplitView) {
 
 TEST_F(PanelLayoutManagerTest, MAYBE_SplitViewOverlapWhenLarge) {
   gfx::Rect bounds(0, 0, 600, 201);
-  scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w2(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w1(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w2(CreatePanelWindow(bounds));
 
   EXPECT_NO_FATAL_FAILURE(PanelInScreen(w1.get()));
   EXPECT_NO_FATAL_FAILURE(PanelInScreen(w2.get()));
@@ -531,9 +510,9 @@ TEST_F(PanelLayoutManagerTest, MAYBE_SplitViewOverlapWhenLarge) {
 
 TEST_F(PanelLayoutManagerTest, FanWindows) {
   gfx::Rect bounds(0, 0, 201, 201);
-  scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w2(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w3(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w1(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w2(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w3(CreatePanelWindow(bounds));
 
   shelf_view_test()->RunMessageLoopUntilAnimationsDone();
   int window_x1 = w1->GetBoundsInRootWindow().CenterPoint().x();
@@ -550,9 +529,9 @@ TEST_F(PanelLayoutManagerTest, FanWindows) {
 TEST_F(PanelLayoutManagerTest, FanLargeWindow) {
   gfx::Rect small_bounds(0, 0, 201, 201);
   gfx::Rect large_bounds(0, 0, 501, 201);
-  scoped_ptr<aura::Window> w1(CreatePanelWindow(small_bounds));
-  scoped_ptr<aura::Window> w2(CreatePanelWindow(large_bounds));
-  scoped_ptr<aura::Window> w3(CreatePanelWindow(small_bounds));
+  std::unique_ptr<aura::Window> w1(CreatePanelWindow(small_bounds));
+  std::unique_ptr<aura::Window> w2(CreatePanelWindow(large_bounds));
+  std::unique_ptr<aura::Window> w3(CreatePanelWindow(small_bounds));
 
   shelf_view_test()->RunMessageLoopUntilAnimationsDone();
   int window_x1 = w1->GetBoundsInRootWindow().CenterPoint().x();
@@ -566,7 +545,7 @@ TEST_F(PanelLayoutManagerTest, FanLargeWindow) {
 
 TEST_F(PanelLayoutManagerTest, MinimizeRestorePanel) {
   gfx::Rect bounds(0, 0, 201, 201);
-  scoped_ptr<aura::Window> window(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> window(CreatePanelWindow(bounds));
   // Activate the window, ensure callout is visible.
   wm::ActivateWindow(window.get());
   RunAllPendingInMessageLoop();
@@ -595,10 +574,14 @@ TEST_F(PanelLayoutManagerTest, PanelMoveBetweenMultipleDisplays) {
   UpdateDisplay("600x400,600x400");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
 
-  scoped_ptr<aura::Window> p1_d1(CreatePanelWindow(gfx::Rect(0, 0, 50, 50)));
-  scoped_ptr<aura::Window> p2_d1(CreatePanelWindow(gfx::Rect(0, 0, 50, 50)));
-  scoped_ptr<aura::Window> p1_d2(CreatePanelWindow(gfx::Rect(600, 0, 50, 50)));
-  scoped_ptr<aura::Window> p2_d2(CreatePanelWindow(gfx::Rect(600, 0, 50, 50)));
+  std::unique_ptr<aura::Window> p1_d1(
+      CreatePanelWindow(gfx::Rect(0, 0, 50, 50)));
+  std::unique_ptr<aura::Window> p2_d1(
+      CreatePanelWindow(gfx::Rect(0, 0, 50, 50)));
+  std::unique_ptr<aura::Window> p1_d2(
+      CreatePanelWindow(gfx::Rect(600, 0, 50, 50)));
+  std::unique_ptr<aura::Window> p2_d2(
+      CreatePanelWindow(gfx::Rect(600, 0, 50, 50)));
 
   ShelfView* shelf_view_1st = GetShelfView(Shelf::ForPrimaryDisplay());
   ShelfView* shelf_view_2nd =
@@ -675,8 +658,10 @@ TEST_F(PanelLayoutManagerTest, PanelAttachPositionMultipleDisplays) {
   UpdateDisplay("600x400,600x600");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
 
-  scoped_ptr<aura::Window> p1_d1(CreatePanelWindow(gfx::Rect(0, 0, 50, 50)));
-  scoped_ptr<aura::Window> p1_d2(CreatePanelWindow(gfx::Rect(600, 0, 50, 50)));
+  std::unique_ptr<aura::Window> p1_d1(
+      CreatePanelWindow(gfx::Rect(0, 0, 50, 50)));
+  std::unique_ptr<aura::Window> p1_d2(
+      CreatePanelWindow(gfx::Rect(600, 0, 50, 50)));
 
   EXPECT_EQ(root_windows[0], p1_d1->GetRootWindow());
   EXPECT_EQ(root_windows[1], p1_d2->GetRootWindow());
@@ -694,7 +679,8 @@ TEST_F(PanelLayoutManagerTest, PanelAlignmentSecondDisplay) {
   UpdateDisplay("600x400,600x400");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
 
-  scoped_ptr<aura::Window> p1_d2(CreatePanelWindow(gfx::Rect(600, 0, 50, 50)));
+  std::unique_ptr<aura::Window> p1_d2(
+      CreatePanelWindow(gfx::Rect(600, 0, 50, 50)));
   EXPECT_EQ(root_windows[1], p1_d2->GetRootWindow());
 
   IsPanelAboveLauncherIcon(p1_d2.get());
@@ -706,14 +692,11 @@ TEST_F(PanelLayoutManagerTest, PanelAlignmentSecondDisplay) {
   SetAlignment(root_windows[1], SHELF_ALIGNMENT_LEFT);
   IsPanelAboveLauncherIcon(p1_d2.get());
   IsCalloutAboveLauncherIcon(p1_d2.get());
-  SetAlignment(root_windows[1], SHELF_ALIGNMENT_TOP);
-  IsPanelAboveLauncherIcon(p1_d2.get());
-  IsCalloutAboveLauncherIcon(p1_d2.get());
 }
 
 TEST_F(PanelLayoutManagerTest, AlignmentLeft) {
   gfx::Rect bounds(0, 0, 201, 201);
-  scoped_ptr<aura::Window> w(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w(CreatePanelWindow(bounds));
   SetAlignment(Shell::GetPrimaryRootWindow(), SHELF_ALIGNMENT_LEFT);
   IsPanelAboveLauncherIcon(w.get());
   IsCalloutAboveLauncherIcon(w.get());
@@ -721,16 +704,8 @@ TEST_F(PanelLayoutManagerTest, AlignmentLeft) {
 
 TEST_F(PanelLayoutManagerTest, AlignmentRight) {
   gfx::Rect bounds(0, 0, 201, 201);
-  scoped_ptr<aura::Window> w(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w(CreatePanelWindow(bounds));
   SetAlignment(Shell::GetPrimaryRootWindow(), SHELF_ALIGNMENT_RIGHT);
-  IsPanelAboveLauncherIcon(w.get());
-  IsCalloutAboveLauncherIcon(w.get());
-}
-
-TEST_F(PanelLayoutManagerTest, AlignmentTop) {
-  gfx::Rect bounds(0, 0, 201, 201);
-  scoped_ptr<aura::Window> w(CreatePanelWindow(bounds));
-  SetAlignment(Shell::GetPrimaryRootWindow(), SHELF_ALIGNMENT_TOP);
   IsPanelAboveLauncherIcon(w.get());
   IsCalloutAboveLauncherIcon(w.get());
 }
@@ -741,9 +716,9 @@ TEST_F(PanelLayoutManagerTest, AlignmentTop) {
 TEST_F(PanelLayoutManagerTest, PanelsHideAndRestoreWithShelf) {
   gfx::Rect bounds(0, 0, 201, 201);
 
-  scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w2(CreatePanelWindow(bounds));
-  scoped_ptr<aura::Window> w3;
+  std::unique_ptr<aura::Window> w1(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w2(CreatePanelWindow(bounds));
+  std::unique_ptr<aura::Window> w3;
   // Minimize w2.
   wm::GetWindowState(w2.get())->Minimize();
   RunAllPendingInMessageLoop();
@@ -789,7 +764,7 @@ TEST_F(PanelLayoutManagerTest, PanelsHideAndRestoreWithShelf) {
 // target the panel itself.
 TEST_F(PanelLayoutManagerTest, TouchHitTestPanel) {
   aura::test::TestWindowDelegate delegate;
-  scoped_ptr<aura::Window> w(
+  std::unique_ptr<aura::Window> w(
       CreatePanelWindowWithDelegate(&delegate, gfx::Rect(0, 0, 200, 200)));
   ui::EventTarget* root = w->GetRootWindow();
   ui::EventTargeter* targeter = root->GetEventTargeter();
@@ -836,18 +811,6 @@ TEST_F(PanelLayoutManagerTest, TouchHitTestPanel) {
 
   // Hit test outside the left edge with a left-aligned shelf.
   touch.set_location(gfx::Point(bounds.x() - 1, bounds.y() + 5));
-  target = targeter->FindTargetForEvent(root, &touch);
-  EXPECT_NE(w.get(), target);
-
-  // Hit test outside the left edge with a top-aligned shelf.
-  SetAlignment(Shell::GetPrimaryRootWindow(), SHELF_ALIGNMENT_TOP);
-  bounds = w->bounds();
-  touch.set_location(gfx::Point(bounds.x() - 1, bounds.y() + 5));
-  target = targeter->FindTargetForEvent(root, &touch);
-  EXPECT_EQ(w.get(), target);
-
-  // Hit test outside the top edge with a top-aligned shelf.
-  touch.set_location(gfx::Point(bounds.x() + 4, bounds.y() - 6));
   target = targeter->FindTargetForEvent(root, &touch);
   EXPECT_NE(w.get(), target);
 }

@@ -31,7 +31,7 @@ def _GenerateTestCommand(script,
                          chrome_version=None,
                          android_package=None,
                          verbose=False):
-  _, log_path = tempfile.mkstemp(prefix='chromedriver_')
+  _, log_path = tempfile.mkstemp(prefix='chromedriver_log_')
   print 'chromedriver server log: %s' % log_path
   cmd = [
       sys.executable,
@@ -191,9 +191,9 @@ def main():
     latest_snapshot_revision = archive.GetLatestSnapshotVersion()
     versions = [
         ['HEAD', latest_snapshot_revision],
+        ['50', archive.CHROME_50_REVISION],
+        ['49', archive.CHROME_49_REVISION],
         ['48', archive.CHROME_48_REVISION],
-        ['47', archive.CHROME_47_REVISION],
-        ['46', archive.CHROME_46_REVISION],
     ]
     code = 0
     for version in versions:

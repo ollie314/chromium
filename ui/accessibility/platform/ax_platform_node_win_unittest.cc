@@ -2,18 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ui/accessibility/platform/ax_platform_node.h"
+
 #include <atlbase.h>
 #include <atlcom.h>
 #include <oleacc.h>
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_variant.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/iaccessible2/ia2_api_all.h"
 #include "ui/accessibility/ax_node_data.h"
-#include "ui/accessibility/platform/ax_platform_node.h"
 #include "ui/accessibility/platform/test_ax_node_wrapper.h"
 #include "ui/base/win/atl_module.h"
 
@@ -98,7 +100,7 @@ class AXPlatformNodeWinTest : public testing::Test {
     return result;
   }
 
-  scoped_ptr<AXTree> tree_;
+  std::unique_ptr<AXTree> tree_;
 };
 
 TEST_F(AXPlatformNodeWinTest, TestIAccessibleDetachedObject) {
@@ -315,7 +317,8 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleChildAndParent) {
     // Asking for child id 3 should fail.
     ScopedComPtr<IDispatch> result;
     ScopedVariant child3(3);
-    ASSERT_EQ(E_FAIL, root_iaccessible->get_accChild(child3, result.Receive()));
+    ASSERT_EQ(E_INVALIDARG,
+              root_iaccessible->get_accChild(child3, result.Receive()));
   }
 
   // We should be able to ask for the button by its unique id too.
@@ -330,6 +333,20 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleChildAndParent) {
     ASSERT_EQ(S_OK, root_iaccessible->get_accChild(button_id_variant,
                                                    result.Receive()));
     ASSERT_EQ(result.get(), button_iaccessible);
+  }
+
+  // We shouldn't be able to ask for the root node by its unique ID
+  // from one of its children, though.
+  LONG root_unique_id;
+  ScopedComPtr<IAccessible2> root_iaccessible2 =
+      ToIAccessible2(root_iaccessible);
+  root_iaccessible2->get_uniqueID(&root_unique_id);
+  ASSERT_LT(root_unique_id, 0);
+  {
+    ScopedComPtr<IDispatch> result;
+    ScopedVariant root_id_variant(root_unique_id);
+    ASSERT_EQ(E_INVALIDARG, button_iaccessible->get_accChild(root_id_variant,
+                                                             result.Receive()));
   }
 
   // Now check parents.

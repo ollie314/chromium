@@ -33,22 +33,22 @@ FETile::FETile(Filter* filter)
 {
 }
 
-PassRefPtrWillBeRawPtr<FETile> FETile::create(Filter* filter)
+FETile* FETile::create(Filter* filter)
 {
-    return adoptRefWillBeNoop(new FETile(filter));
+    return new FETile(filter);
 }
 
-FloatRect FETile::mapPaintRect(const FloatRect& rect, bool forward)
+FloatRect FETile::mapPaintRect(const FloatRect& rect, bool forward) const
 {
     return forward ? maxEffectRect() : inputEffect(0)->maxEffectRect();
 }
 
-PassRefPtr<SkImageFilter> FETile::createImageFilter(SkiaImageFilterBuilder& builder)
+sk_sp<SkImageFilter> FETile::createImageFilter()
 {
-    RefPtr<SkImageFilter> input(builder.build(inputEffect(0), operatingColorSpace()));
+    sk_sp<SkImageFilter> input(SkiaImageFilterBuilder::build(inputEffect(0), operatingColorSpace()));
     FloatRect srcRect = inputEffect(0)->filterPrimitiveSubregion();
-    FloatRect dstRect = applyEffectBoundaries(filter()->filterRegion());
-    return adoptRef(SkTileImageFilter::Create(srcRect, dstRect, input.get()));
+    FloatRect dstRect = applyEffectBoundaries(getFilter()->filterRegion());
+    return SkTileImageFilter::Make(srcRect, dstRect, std::move(input));
 }
 
 TextStream& FETile::externalRepresentation(TextStream& ts, int indent) const

@@ -17,7 +17,7 @@
 #include "chrome/browser/plugins/plugin_metadata.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/content_settings/content_setting_media_menu_model.h"
-#include "chrome/browser/ui/views/browser_dialogs.h"
+#include "chrome/browser/ui/layout_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/plugin_service.h"
@@ -118,7 +118,7 @@ struct ContentSettingBubbleContents::MediaMenuParts {
   ~MediaMenuParts();
 
   content::MediaStreamType type;
-  scoped_ptr<ui::SimpleMenuModel> menu_model;
+  std::unique_ptr<ui::SimpleMenuModel> menu_model;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MediaMenuParts);
@@ -138,14 +138,15 @@ ContentSettingBubbleContents::ContentSettingBubbleContents(
     views::View* anchor_view,
     views::BubbleBorder::Arrow arrow)
     : content::WebContentsObserver(web_contents),
-      BubbleDelegateView(anchor_view, arrow),
+      BubbleDialogDelegateView(anchor_view, arrow),
       content_setting_bubble_model_(content_setting_bubble_model),
       custom_link_(NULL),
       manage_link_(NULL),
       learn_more_link_(NULL),
       close_button_(NULL) {
   // Compensate for built-in vertical padding in the anchor view's image.
-  set_anchor_view_insets(gfx::Insets(5, 0, 5, 0));
+  set_anchor_view_insets(gfx::Insets(
+      GetLayoutConstant(LOCATION_BAR_BUBBLE_ANCHOR_VERTICAL_INSET), 0));
 }
 
 ContentSettingBubbleContents::~ContentSettingBubbleContents() {
@@ -156,8 +157,9 @@ gfx::Size ContentSettingBubbleContents::GetPreferredSize() const {
   gfx::Size preferred_size(views::View::GetPreferredSize());
   int preferred_width =
       (!content_setting_bubble_model_->bubble_content().domain_lists.empty() &&
-       (kMinMultiLineContentsWidth > preferred_size.width())) ?
-      kMinMultiLineContentsWidth : preferred_size.width();
+       (kMinMultiLineContentsWidth > preferred_size.width()))
+          ? kMinMultiLineContentsWidth
+          : preferred_size.width();
   preferred_size.set_width(std::min(preferred_width, kMaxContentsWidth));
   return preferred_size;
 }
@@ -169,6 +171,7 @@ void ContentSettingBubbleContents::UpdateMenuLabel(
        it != media_menus_.end(); ++it) {
     if (it->second->type == type) {
       it->first->SetText(base::UTF8ToUTF16(label));
+      it->first->Layout();
       return;
     }
   }
@@ -304,8 +307,7 @@ void ContentSettingBubbleContents::Init() {
       label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
       views::MenuButton* menu_button = new views::MenuButton(
-          NULL, base::UTF8ToUTF16((i->second.selected_device.name)),
-          this, true);
+          base::UTF8ToUTF16((i->second.selected_device.name)), this, true);
       menu_button->SetStyle(views::Button::STYLE_BUTTON);
       menu_button->SetHorizontalAlignment(gfx::ALIGN_LEFT);
       menu_button->set_animate_on_state_change(false);
@@ -371,34 +373,29 @@ void ContentSettingBubbleContents::Init() {
     bubble_content_empty = false;
   }
 
-  const int kDoubleColumnSetId = 1;
-  views::ColumnSet* double_column_set =
-      layout->AddColumnSet(kDoubleColumnSetId);
   if (!bubble_content_empty) {
-      layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
-      layout->StartRow(0, kSingleColumnSetId);
-      layout->AddView(new views::Separator(views::Separator::HORIZONTAL), 1, 1,
-                      GridLayout::FILL, GridLayout::FILL);
-      layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
-    }
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+    layout->StartRow(0, kSingleColumnSetId);
+    layout->AddView(new views::Separator(views::Separator::HORIZONTAL), 1, 1,
+                    GridLayout::FILL, GridLayout::FILL);
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+  }
+}
 
-    double_column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 1,
-                                 GridLayout::USE_PREF, 0, 0);
-    double_column_set->AddPaddingColumn(
-        0, views::kUnrelatedControlHorizontalSpacing);
-    double_column_set->AddColumn(GridLayout::TRAILING, GridLayout::CENTER, 0,
-                                 GridLayout::USE_PREF, 0, 0);
+views::View* ContentSettingBubbleContents::CreateExtraView() {
+  manage_link_ = new views::Link(base::UTF8ToUTF16(
+      content_setting_bubble_model_->bubble_content().manage_link));
+  manage_link_->set_listener(this);
+  return manage_link_;
+}
 
-    layout->StartRow(0, kDoubleColumnSetId);
-    manage_link_ =
-        new views::Link(base::UTF8ToUTF16(bubble_content.manage_link));
-    manage_link_->set_listener(this);
-    layout->AddView(manage_link_);
+int ContentSettingBubbleContents::GetDialogButtons() const {
+  return ui::DIALOG_BUTTON_OK;
+}
 
-    close_button_ =
-        new views::LabelButton(this, l10n_util::GetStringUTF16(IDS_DONE));
-    close_button_->SetStyle(views::Button::STYLE_BUTTON);
-    layout->AddView(close_button_);
+base::string16 ContentSettingBubbleContents::GetDialogButtonLabel(
+    ui::DialogButton button) const {
+  return l10n_util::GetStringUTF16(IDS_DONE);
 }
 
 void ContentSettingBubbleContents::DidNavigateMainFrame(
@@ -449,22 +446,21 @@ void ContentSettingBubbleContents::LinkClicked(views::Link* source,
 }
 
 void ContentSettingBubbleContents::OnMenuButtonClicked(
-    views::View* source,
-    const gfx::Point& point) {
-    MediaMenuPartsMap::iterator j(media_menus_.find(
-        static_cast<views::MenuButton*>(source)));
-    DCHECK(j != media_menus_.end());
-    menu_runner_.reset(new views::MenuRunner(j->second->menu_model.get(),
-                                             views::MenuRunner::HAS_MNEMONICS));
+    views::MenuButton* source,
+    const gfx::Point& point,
+    const ui::Event* event) {
+  MediaMenuPartsMap::iterator j(
+      media_menus_.find(static_cast<views::MenuButton*>(source)));
+  DCHECK(j != media_menus_.end());
+  menu_runner_.reset(new views::MenuRunner(j->second->menu_model.get(),
+                                           views::MenuRunner::HAS_MNEMONICS));
 
-    gfx::Point screen_location;
-    views::View::ConvertPointToScreen(j->first, &screen_location);
-    ignore_result(
-        menu_runner_->RunMenuAt(source->GetWidget(),
-                                j->first,
-                                gfx::Rect(screen_location, j->first->size()),
-                                views::MENU_ANCHOR_TOPLEFT,
-                                ui::MENU_SOURCE_NONE));
+  gfx::Point screen_location;
+  views::View::ConvertPointToScreen(j->first, &screen_location);
+  ignore_result(menu_runner_->RunMenuAt(
+      source->GetWidget(), j->first,
+      gfx::Rect(screen_location, j->first->size()), views::MENU_ANCHOR_TOPLEFT,
+      ui::MENU_SOURCE_NONE));
 }
 
 void ContentSettingBubbleContents::UpdateMenuButtonSizes() {

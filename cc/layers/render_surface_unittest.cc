@@ -13,6 +13,7 @@
 #include "cc/test/mock_occlusion_tracker.h"
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/test/test_task_graph_runner.h"
+#include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/single_thread_proxy.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -41,13 +42,14 @@ TEST(RenderSurfaceTest, VerifySurfaceChangesAreTrackedProperly) {
   TestTaskGraphRunner task_graph_runner;
   FakeLayerTreeHostImpl host_impl(&task_runner_provider, &shared_bitmap_manager,
                                   &task_graph_runner);
-  scoped_ptr<LayerImpl> owning_layer =
+  std::unique_ptr<LayerImpl> owning_layer =
       LayerImpl::Create(host_impl.active_tree(), 1);
   owning_layer->SetHasRenderSurface(true);
   ASSERT_TRUE(owning_layer->render_surface());
   RenderSurfaceImpl* render_surface = owning_layer->render_surface();
   gfx::Rect test_rect(3, 4, 5, 6);
-  owning_layer->ResetAllChangeTrackingForSubtree();
+  host_impl.active_tree()->ResetAllChangeTracking(
+      PropertyTrees::ResetFlags::ALL_TREES);
 
   // Currently, the content_rect, clip_rect, and
   // owning_layer->layerPropertyChanged() are the only sources of change.
@@ -56,7 +58,8 @@ TEST(RenderSurfaceTest, VerifySurfaceChangesAreTrackedProperly) {
 
   owning_layer->SetOpacity(0.5f);
   EXPECT_TRUE(render_surface->SurfacePropertyChanged());
-  owning_layer->ResetAllChangeTrackingForSubtree();
+  host_impl.active_tree()->ResetAllChangeTracking(
+      PropertyTrees::ResetFlags::ALL_TREES);
 
   // Setting the surface properties to the same values again should not be
   // considered "change".
@@ -65,7 +68,7 @@ TEST(RenderSurfaceTest, VerifySurfaceChangesAreTrackedProperly) {
   EXECUTE_AND_VERIFY_SURFACE_DID_NOT_CHANGE(
       render_surface->SetContentRect(test_rect));
 
-  scoped_ptr<LayerImpl> dummy_mask =
+  std::unique_ptr<LayerImpl> dummy_mask =
       LayerImpl::Create(host_impl.active_tree(), 2);
   gfx::Transform dummy_matrix;
   dummy_matrix.Translate(1.0, 2.0);
@@ -88,14 +91,13 @@ TEST(RenderSurfaceTest, SanityCheckSurfaceCreatesCorrectSharedQuadState) {
   TestTaskGraphRunner task_graph_runner;
   FakeLayerTreeHostImpl host_impl(&task_runner_provider, &shared_bitmap_manager,
                                   &task_graph_runner);
-  scoped_ptr<LayerImpl> root_layer =
+  std::unique_ptr<LayerImpl> root_layer =
       LayerImpl::Create(host_impl.active_tree(), 1);
 
-  scoped_ptr<LayerImpl> owning_layer =
+  std::unique_ptr<LayerImpl> owning_layer =
       LayerImpl::Create(host_impl.active_tree(), 2);
   owning_layer->SetHasRenderSurface(true);
   ASSERT_TRUE(owning_layer->render_surface());
-  owning_layer->draw_properties().render_target = owning_layer.get();
 
   SkXfermode::Mode blend_mode = SkXfermode::kSoftLight_Mode;
   owning_layer->SetBlendMode(blend_mode);
@@ -112,7 +114,7 @@ TEST(RenderSurfaceTest, SanityCheckSurfaceCreatesCorrectSharedQuadState) {
   render_surface->SetClipRect(clip_rect);
   render_surface->SetDrawOpacity(1.f);
 
-  scoped_ptr<RenderPass> render_pass = RenderPass::Create();
+  std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
   AppendQuadsData append_quads_data;
 
   render_surface->AppendQuads(render_pass.get(), origin, Occlusion(),
@@ -137,7 +139,7 @@ TEST(RenderSurfaceTest, SanityCheckSurfaceCreatesCorrectSharedQuadState) {
 
 class TestRenderPassSink : public RenderPassSink {
  public:
-  void AppendRenderPass(scoped_ptr<RenderPass> render_pass) override {
+  void AppendRenderPass(std::unique_ptr<RenderPass> render_pass) override {
     render_passes_.push_back(std::move(render_pass));
   }
 
@@ -155,14 +157,13 @@ TEST(RenderSurfaceTest, SanityCheckSurfaceCreatesCorrectRenderPass) {
   TestTaskGraphRunner task_graph_runner;
   FakeLayerTreeHostImpl host_impl(&task_runner_provider, &shared_bitmap_manager,
                                   &task_graph_runner);
-  scoped_ptr<LayerImpl> root_layer =
+  std::unique_ptr<LayerImpl> root_layer =
       LayerImpl::Create(host_impl.active_tree(), 1);
 
-  scoped_ptr<LayerImpl> owning_layer =
+  std::unique_ptr<LayerImpl> owning_layer =
       LayerImpl::Create(host_impl.active_tree(), 2);
   owning_layer->SetHasRenderSurface(true);
   ASSERT_TRUE(owning_layer->render_surface());
-  owning_layer->draw_properties().render_target = owning_layer.get();
   RenderSurfaceImpl* render_surface = owning_layer->render_surface();
 
   root_layer->AddChild(std::move(owning_layer));

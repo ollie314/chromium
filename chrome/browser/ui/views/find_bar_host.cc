@@ -24,15 +24,6 @@
 
 using content::NativeWebKeyboardEvent;
 
-namespace chrome {
-
-// Declared in browser_dialogs.h so others don't have to depend on our header.
-FindBar* CreateFindBar(BrowserView* browser_view) {
-  return new FindBarHost(browser_view);
-}
-
-}  // namespace chrome
-
 ////////////////////////////////////////////////////////////////////////////////
 // FindBarHost, public:
 
@@ -141,12 +132,10 @@ gfx::Range FindBarHost::GetSelectedRange() {
 
 void FindBarHost::UpdateUIForFindResult(const FindNotificationDetails& result,
                                         const base::string16& find_text) {
-  // Make sure match count is clear. It may get set again in UpdateForResult
-  // if enough data is available.
-  find_bar_view()->ClearMatchCount();
-
   if (!find_text.empty())
     find_bar_view()->UpdateForResult(result, find_text);
+  else
+    find_bar_view()->ClearMatchCount();
 
   // We now need to check if the window is obscuring the search results.
   MoveWindowIfNecessary(result.selection_rect());

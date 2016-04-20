@@ -9,13 +9,14 @@
 #include <keyhi.h>
 #include <pk11pub.h>
 #include <secmod.h>
+
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/task_runner.h"
 #include "base/task_runner_util.h"
@@ -78,6 +79,9 @@ NSSCertDatabase::ImportCertFailure::ImportCertFailure(
     int err)
     : certificate(cert), net_error(err) {}
 
+NSSCertDatabase::ImportCertFailure::ImportCertFailure(
+    const ImportCertFailure& other) = default;
+
 NSSCertDatabase::ImportCertFailure::~ImportCertFailure() {}
 
 NSSCertDatabase::NSSCertDatabase(crypto::ScopedPK11Slot public_slot,
@@ -103,8 +107,9 @@ void NSSCertDatabase::ListCertsSync(CertificateList* certs) {
 }
 
 void NSSCertDatabase::ListCerts(
-    const base::Callback<void(scoped_ptr<CertificateList> certs)>& callback) {
-  scoped_ptr<CertificateList> certs(new CertificateList());
+    const base::Callback<void(std::unique_ptr<CertificateList> certs)>&
+        callback) {
+  std::unique_ptr<CertificateList> certs(new CertificateList());
 
   // base::Passed will NULL out |certs|, so cache the underlying pointer here.
   CertificateList* raw_certs = certs.get();
@@ -119,7 +124,7 @@ void NSSCertDatabase::ListCerts(
 void NSSCertDatabase::ListCertsInSlot(const ListCertsCallback& callback,
                                       PK11SlotInfo* slot) {
   DCHECK(slot);
-  scoped_ptr<CertificateList> certs(new CertificateList());
+  std::unique_ptr<CertificateList> certs(new CertificateList());
 
   // base::Passed will NULL out |certs|, so cache the underlying pointer here.
   CertificateList* raw_certs = certs.get();
@@ -452,19 +457,19 @@ void NSSCertDatabase::NotifyCertRemovalAndCallBack(
 
 void NSSCertDatabase::NotifyObserversOfCertAdded(const X509Certificate* cert) {
   observer_list_->Notify(FROM_HERE, &Observer::OnCertAdded,
-                         make_scoped_refptr(cert));
+                         base::RetainedRef(cert));
 }
 
 void NSSCertDatabase::NotifyObserversOfCertRemoved(
     const X509Certificate* cert) {
   observer_list_->Notify(FROM_HERE, &Observer::OnCertRemoved,
-                         make_scoped_refptr(cert));
+                         base::RetainedRef(cert));
 }
 
 void NSSCertDatabase::NotifyObserversOfCACertChanged(
     const X509Certificate* cert) {
   observer_list_->Notify(FROM_HERE, &Observer::OnCACertChanged,
-                         make_scoped_refptr(cert));
+                         base::RetainedRef(cert));
 }
 
 // static

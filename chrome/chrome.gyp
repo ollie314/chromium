@@ -22,7 +22,6 @@
       'common',
       '../sync/sync.gyp:sync',
     ],
-    'allocator_target': '../base/allocator/allocator.gyp:allocator',
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
     'protoc_out_dir': '<(SHARED_INTERMEDIATE_DIR)/protoc_out',
     'conditions': [
@@ -33,7 +32,7 @@
         ],
         'chromium_child_dependencies': [
           'child',
-          'plugin',
+          'gpu',
           'renderer',
           'utility',
           '../content/content.gyp:content_gpu',
@@ -114,8 +113,8 @@
         'chrome_debugger.gypi',
         'chrome_dll.gypi',
         'chrome_exe.gypi',
+        'chrome_gpu.gypi',
         'chrome_installer.gypi',
-        'chrome_plugin.gypi',
         'chrome_renderer.gypi',
         'chrome_tests.gypi',
         'chrome_tests_unit.gypi',
@@ -231,6 +230,7 @@
               # never placed into the helper.
               'postbuild_name': 'Tweak Info.plist',
               'action': ['<(tweak_info_plist_path)',
+                         '--plist=${TARGET_BUILD_DIR}/${INFOPLIST_PATH}',
                          '--breakpad=0',
                          '--keystone=0',
                          '--scm=0'],
@@ -326,7 +326,7 @@
           'dependencies': [
             'chrome_resources.gyp:chrome_strings',
             '../base/base.gyp:base',
-            '../ui/base/ui_base.gyp:ui_base',
+            '../ui/base/ui_base.gyp:ui_data_pack',
             '../ui/gfx/gfx.gyp:gfx',
             '../ui/gfx/gfx.gyp:gfx_geometry',
           ],
@@ -457,6 +457,13 @@
             'common/safe_browsing/pe_image_reader_win.h',
             'tools/safe_browsing/sb_sigutil.cc',
           ],
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'AdditionalDependencies': [
+                'wintrust.lib',
+              ],
+            },
+          },
         },
       ],  # 'targets'
       'includes': [
@@ -533,6 +540,7 @@
           'type': 'none',
           'dependencies': [
             'activity_type_ids_java',
+            'browsing_data_time_period_java',
             'browsing_data_type_java',
             'chrome_locale_paks',
             'chrome_resources.gyp:chrome_strings',
@@ -541,6 +549,7 @@
             'content_setting_java',
             'content_settings_type_java',
             'connectivity_check_result_java',
+            'data_use_ui_message_enum_java',
             'document_tab_model_info_proto_java',
             'infobar_action_type_java',
             'most_visited_tile_type_java',
@@ -548,18 +557,27 @@
             'profile_account_management_metrics_java',
             'resource_id_java',
             'shortcut_source_java',
+            'signin_metrics_enum_java',
             'tab_load_status_java',
+            'website_settings_action_java',
             '../base/base.gyp:base',
+            '../base/base.gyp:base_build_config_gen',
             '../build/android/java_google_api_keys.gyp:google_api_keys_java',
             '../chrome/android/chrome_apk.gyp:custom_tabs_service_aidl',
+            '../components/components.gyp:app_restrictions_resources',
+            '../components/components.gyp:autocomplete_match_java',
             '../components/components.gyp:autocomplete_match_type_java',
             '../components/components.gyp:bookmarks_java',
             '../components/components.gyp:dom_distiller_core_java',
-            '../components/components.gyp:enhanced_bookmarks_java_enums_srcjar',
             '../components/components.gyp:gcm_driver_java',
+            '../components/components.gyp:infobar_delegate_java',
+            '../components/components.gyp:instance_id_driver_java',
             '../components/components.gyp:invalidation_java',
+            '../components/components.gyp:investigated_scenario_java',
             '../components/components.gyp:navigation_interception_java',
-            '../components/components.gyp:offline_pages_enums_java',
+            '../components/components.gyp:offline_page_feature_enums_java',
+            '../components/components.gyp:offline_page_model_enums_java',
+            '../components/components.gyp:policy_java',
             '../components/components.gyp:precache_java',
             '../components/components.gyp:safe_json_java',
             '../components/components.gyp:security_state_enums_java',
@@ -567,12 +585,15 @@
             '../components/components.gyp:signin_core_browser_java',
             '../components/components.gyp:variations_java',
             '../components/components.gyp:web_contents_delegate_android_java',
-            '../components/components.gyp:web_restriction_java',
+            '../components/components.gyp:web_restrictions_java',
             '../components/components_strings.gyp:components_strings',
             '../content/content.gyp:content_java',
             '../media/media.gyp:media_java',
+            '../mojo/mojo_public.gyp:mojo_bindings_java',
+            '../mojo/mojo_public.gyp:mojo_public_java',
             '../printing/printing.gyp:printing_java',
             '../sync/sync.gyp:sync_java',
+            '../third_party/WebKit/public/blink.gyp:android_mojo_bindings_java',
             '../third_party/android_data_chart/android_data_chart.gyp:android_data_chart_java',
             '../third_party/android_media/android_media.gyp:android_media_java',
             '../third_party/android_protobuf/android_protobuf.gyp:protobuf_nano_javalib',
@@ -585,12 +606,16 @@
             '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_javalib',
             '../third_party/gif_player/gif_player.gyp:gif_player_java',
             '../third_party/jsr-305/jsr-305.gyp:jsr_305_javalib',
+            '../third_party/leakcanary/leakcanary.gyp:leakcanary_java',
             '../ui/android/ui_android.gyp:ui_java',
           ],
           'variables': {
             'variables': {
               'android_branding_res_dirs%': ['<(java_in_dir)/res_chromium'],
             },
+            'jar_excluded_classes': [
+              '*/BuildConfig.class',
+            ],
             'java_in_dir': '../chrome/android/java',
             'has_java_resources': 1,
             'R_package': 'org.chromium.chrome',
@@ -607,14 +632,6 @@
               '<!@pymod_do_main(grit_info <@(grit_defines) --outputs "<(SHARED_INTERMEDIATE_DIR)/chrome" app/generated_resources.grd)',
             ],
           },
-          'conditions': [
-            ['configuration_policy == 1', {
-              'dependencies': [
-                '../components/components.gyp:app_restrictions_resources',
-                '../components/components.gyp:policy_java',
-              ],
-            }],
-          ],
           'includes': [
             '../build/java.gypi',
           ],
@@ -670,12 +687,39 @@
           },
           'includes': [ '../build/android/java_cpp_enum.gypi' ],
         },
+        {
+          # GN: //chrome:signin_metrics_enum_javagen
+          'target_name': 'signin_metrics_enum_java',
+          'type': 'none',
+          'variables': {
+            'source_file': '../components/signin/core/browser/signin_metrics.h',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
+        },
+        {
+          # GN: //chrome:website_settings_action_javagen
+          'target_name': 'website_settings_action_java',
+          'type': 'none',
+          'variables': {
+            'source_file': 'browser/ui/website_settings/website_settings.h',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
+        },
+        {
+          # GN: //chrome:data_use_ui_message_enum_javagen
+          'target_name': 'data_use_ui_message_enum_java',
+          'type': 'none',
+          'variables': {
+            'source_file': 'browser/android/data_usage/data_use_tab_ui_manager_android.cc',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
+        },
       ], # 'targets'
       'includes': [
         'chrome_android.gypi',
       ]}, # 'includes'
     ],  # OS=="android"
-    ['configuration_policy==1 and OS!="android" and OS!="ios"', {
+    ['OS!="android" and OS!="ios"', {
       'includes': [ 'policy.gypi', ],
     }],
     ['enable_extensions==1', {
@@ -743,8 +787,6 @@
             'service/service_process.h',
             'service/service_process_prefs.cc',
             'service/service_process_prefs.h',
-            'service/service_utility_process_host.cc',
-            'service/service_utility_process_host.h',
           ],
           'include_dirs': [
             '..',
@@ -763,10 +805,15 @@
                 'service/cloud_print/print_system_dummy.cc',
               ],
             }],
-            ['OS!="win"', {
-              'sources!': [
+            ['OS=="win"', {
+              'sources': [
                 'service/service_utility_process_host.cc',
                 'service/service_utility_process_host.h',
+              ],
+              'deps': [
+                # TODO(fdoray): Remove this once the PreRead field trial has
+                # expired. crbug.com/577698
+                '../components/components.gyp:startup_metric_utils_common',
               ],
             }],
           ],

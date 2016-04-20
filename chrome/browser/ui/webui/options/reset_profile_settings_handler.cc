@@ -10,7 +10,6 @@
 #include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -24,6 +23,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
@@ -151,12 +151,7 @@ void ResetProfileSettingsHandler::OnResetProfileSettingsDone(
     int difference = setting_snapshot_->FindDifferentFields(current_snapshot);
     if (difference) {
       setting_snapshot_->Subtract(current_snapshot);
-      std::string report = SerializeSettingsReport(*setting_snapshot_,
-                                                   difference);
-      SendSettingsFeedback(report, profile);
-
-      // Send the same report as a protobuf to a different endpoint.
-      scoped_ptr<reset_report::ChromeResetReport> report_proto =
+      std::unique_ptr<reset_report::ChromeResetReport> report_proto =
           SerializeSettingsReportToProto(*setting_snapshot_, difference);
       if (report_proto)
         SendSettingsFeedbackProto(*report_proto, profile);
@@ -200,7 +195,7 @@ void ResetProfileSettingsHandler::ResetProfile(bool send_settings) {
   DCHECK(resetter_);
   DCHECK(!resetter_->IsActive());
 
-  scoped_ptr<BrandcodedDefaultSettings> default_settings;
+  std::unique_ptr<BrandcodedDefaultSettings> default_settings;
   if (config_fetcher_) {
     DCHECK(!config_fetcher_->IsActive());
     default_settings = config_fetcher_->GetSettings();
@@ -224,9 +219,8 @@ void ResetProfileSettingsHandler::ResetProfile(bool send_settings) {
 void ResetProfileSettingsHandler::UpdateFeedbackUI() {
   if (!setting_snapshot_)
     return;
-  scoped_ptr<base::ListValue> list = GetReadableFeedbackForSnapshot(
-      Profile::FromWebUI(web_ui()),
-      *setting_snapshot_);
+  std::unique_ptr<base::ListValue> list = GetReadableFeedbackForSnapshot(
+      Profile::FromWebUI(web_ui()), *setting_snapshot_);
   base::DictionaryValue feedback_info;
   feedback_info.Set("feedbackInfo", list.release());
   web_ui()->CallJavascriptFunction(

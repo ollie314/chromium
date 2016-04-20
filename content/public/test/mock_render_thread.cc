@@ -4,12 +4,14 @@
 
 #include "content/public/test/mock_render_thread.h"
 
+#include "base/logging.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/common/frame_messages.h"
+#include "content/common/mojo/service_registry_impl.h"
 #include "content/common/view_messages.h"
-#include "content/public/renderer/render_process_observer.h"
+#include "content/public/renderer/render_thread_observer.h"
 #include "content/renderer/render_view_impl.h"
 #include "ipc/ipc_message_utils.h"
 #include "ipc/ipc_sync_message.h"
@@ -25,7 +27,8 @@ MockRenderThread::MockRenderThread()
       new_window_routing_id_(0),
       new_window_main_frame_routing_id_(0),
       new_window_main_frame_widget_routing_id_(0),
-      new_frame_routing_id_(0) {}
+      new_frame_routing_id_(0),
+      service_registry_(new ServiceRegistryImpl) {}
 
 MockRenderThread::~MockRenderThread() {
   while (!filters_.empty()) {
@@ -108,19 +111,16 @@ void MockRenderThread::RemoveFilter(IPC::MessageFilter* filter) {
   NOTREACHED() << "filter to be removed not found";
 }
 
-void MockRenderThread::AddObserver(RenderProcessObserver* observer) {
+void MockRenderThread::AddObserver(RenderThreadObserver* observer) {
   observers_.AddObserver(observer);
 }
 
-void MockRenderThread::RemoveObserver(RenderProcessObserver* observer) {
+void MockRenderThread::RemoveObserver(RenderThreadObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
 void MockRenderThread::SetResourceDispatcherDelegate(
     ResourceDispatcherDelegate* delegate) {
-}
-
-void MockRenderThread::EnsureWebKitInitialized() {
 }
 
 void MockRenderThread::RecordAction(const base::UserMetricsAction& action) {
@@ -129,16 +129,15 @@ void MockRenderThread::RecordAction(const base::UserMetricsAction& action) {
 void MockRenderThread::RecordComputedAction(const std::string& action) {
 }
 
-scoped_ptr<base::SharedMemory>
-    MockRenderThread::HostAllocateSharedMemoryBuffer(
-        size_t buffer_size) {
-  scoped_ptr<base::SharedMemory> shared_buf(new base::SharedMemory);
+std::unique_ptr<base::SharedMemory>
+MockRenderThread::HostAllocateSharedMemoryBuffer(size_t buffer_size) {
+  std::unique_ptr<base::SharedMemory> shared_buf(new base::SharedMemory);
   if (!shared_buf->CreateAnonymous(buffer_size)) {
     NOTREACHED() << "Cannot map shared memory buffer";
-    return scoped_ptr<base::SharedMemory>();
+    return std::unique_ptr<base::SharedMemory>();
   }
 
-  return scoped_ptr<base::SharedMemory>(shared_buf.release());
+  return std::unique_ptr<base::SharedMemory>(shared_buf.release());
 }
 
 cc::SharedBitmapManager* MockRenderThread::GetSharedBitmapManager() {
@@ -186,7 +185,8 @@ void MockRenderThread::ReleaseCachedFonts() {
 #endif  // OS_WIN
 
 ServiceRegistry* MockRenderThread::GetServiceRegistry() {
-  return NULL;
+  DCHECK(service_registry_);
+  return service_registry_.get();
 }
 
 void MockRenderThread::SendCloseMessage() {
@@ -214,18 +214,14 @@ void MockRenderThread::OnCreateWindow(
 
 // The Frame expects to be returned a valid route_id different from its own.
 void MockRenderThread::OnCreateChildFrame(
-    int new_frame_routing_id,
-    blink::WebTreeScopeType scope,
-    const std::string& frame_name,
-    blink::WebSandboxFlags sandbox_flags,
-    const blink::WebFrameOwnerProperties& frame_owner_properties,
+    const FrameHostMsg_CreateChildFrame_Params& params,
     int* new_render_frame_id) {
   *new_render_frame_id = new_frame_routing_id_++;
 }
 
 bool MockRenderThread::OnControlMessageReceived(const IPC::Message& msg) {
-  base::ObserverListBase<RenderProcessObserver>::Iterator it(&observers_);
-  RenderProcessObserver* observer;
+  base::ObserverListBase<RenderThreadObserver>::Iterator it(&observers_);
+  RenderThreadObserver* observer;
   while ((observer = it.GetNext()) != NULL) {
     if (observer->OnControlMessageReceived(msg))
       return true;

@@ -80,6 +80,7 @@ class UserScript {
          const base::FilePath& relative_path,
          const GURL& url);
     File();
+    File(const File& other);
     ~File();
 
     const base::FilePath& extension_root() const { return extension_root_; }
@@ -133,6 +134,7 @@ class UserScript {
   // Constructor. Default the run location to document end, which is like
   // Greasemonkey and probably more useful for typical scripts.
   UserScript();
+  UserScript(const UserScript& other);
   ~UserScript();
 
   const std::string& name_space() const { return name_space_; }
@@ -217,8 +219,6 @@ class UserScript {
 
   bool is_incognito_enabled() const { return incognito_enabled_; }
   void set_incognito_enabled(bool enabled) { incognito_enabled_ = enabled; }
-
-  bool is_standalone() const { return extension_id().empty(); }
 
   // Returns true if the script should be applied to the specified URL, false
   // otherwise.

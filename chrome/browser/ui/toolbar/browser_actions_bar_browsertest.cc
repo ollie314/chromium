@@ -21,7 +21,9 @@
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
+#include "chrome/common/pref_names.h"
 #include "components/crx_file/id_util.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_prefs.h"
@@ -43,9 +45,9 @@ scoped_refptr<const extensions::Extension> CreateExtension(
            Set("manifest_version", 2).
            Set("version", "1.0");
   if (has_browser_action)
-    manifest.Set("browser_action", extensions::DictionaryBuilder());
+    manifest.Set("browser_action", extensions::DictionaryBuilder().Build());
   return extensions::ExtensionBuilder()
-      .SetManifest(std::move(manifest))
+      .SetManifest(manifest.Build())
       .SetID(crx_file::id_util::GenerateId(name))
       .Build();
 }
@@ -65,6 +67,10 @@ void BrowserActionsBarBrowserTest::SetUpCommandLine(
     base::CommandLine* command_line) {
   ExtensionBrowserTest::SetUpCommandLine(command_line);
   ToolbarActionsBar::disable_animations_for_testing_ = true;
+  // We need to disable Media Router since having Media Router enabled will
+  // result in auto-enabling the redesign and breaking the test.
+  override_media_router_.reset(new extensions::FeatureSwitch::ScopedOverride(
+      extensions::FeatureSwitch::media_router(), false));
   // These tests are deliberately testing behavior without the redesign.
   // Forcefully disable it.
   override_redesign_.reset(new extensions::FeatureSwitch::ScopedOverride(
@@ -403,7 +409,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(BrowserActionsBarRedesignBrowserTest,
                        OverflowedBrowserActionPopupTest) {
-  scoped_ptr<BrowserActionTestUtil> overflow_bar =
+  std::unique_ptr<BrowserActionTestUtil> overflow_bar =
       browser_actions_bar()->CreateOverflowBar();
 
   // Load up two extensions that have browser action popups.
@@ -484,6 +490,47 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarRedesignBrowserTest,
             browser_actions_bar()->GetExtensionId(0));
   EXPECT_EQ(second_controller_main->GetId(),
             browser_actions_bar()->GetExtensionId(1));
+}
+
+// Test removing an extension that has an popup showing.
+// Regression test for crbug.com/599467.
+IN_PROC_BROWSER_TEST_F(BrowserActionsBarRedesignBrowserTest,
+                       OverflowedBrowserActionPopupTestRemoval) {
+  std::unique_ptr<BrowserActionTestUtil> overflow_bar =
+      browser_actions_bar()->CreateOverflowBar();
+
+  // Install an extension and shrink the visible count to zero so the extension
+  // is overflowed.
+  base::FilePath data_dir =
+      test_data_dir_.AppendASCII("api_test").AppendASCII("browser_action");
+  const extensions::Extension* extension =
+      LoadExtension(data_dir.AppendASCII("open_popup"));
+  ASSERT_TRUE(extension);
+  toolbar_model()->SetVisibleIconCount(0);
+  EXPECT_EQ(0, browser_actions_bar()->VisibleBrowserActions());
+  EXPECT_EQ(1, overflow_bar->VisibleBrowserActions());
+  EXPECT_FALSE(browser_actions_bar()->HasPopup());
+
+  // Click on the overflowed extension, causing it to pop out.
+  overflow_bar->Press(0);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(browser_actions_bar()->HasPopup());
+  EXPECT_EQ(1, browser_actions_bar()->VisibleBrowserActions());
+
+  {
+    content::WindowedNotificationObserver observer(
+        extensions::NOTIFICATION_EXTENSION_HOST_DESTROYED,
+        content::NotificationService::AllSources());
+    // Remove the extension. Nothing should crash.
+    extension_service()->UnloadExtension(
+        extension->id(),
+        extensions::UnloadedExtensionInfo::REASON_UNINSTALL);
+    observer.Wait();
+  }
+
+  EXPECT_EQ(0, browser_actions_bar()->VisibleBrowserActions());
+  EXPECT_EQ(0, overflow_bar->VisibleBrowserActions());
+  EXPECT_EQ(0u, toolbar_model()->toolbar_items().size());
 }
 
 // Test that page action popups work with the toolbar redesign.

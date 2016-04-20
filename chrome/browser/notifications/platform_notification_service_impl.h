@@ -6,25 +6,29 @@
 #define CHROME_BROWSER_NOTIFICATIONS_PLATFORM_NOTIFICATION_SERVICE_IMPL_H_
 
 #include <stdint.h>
+
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
+#include <unordered_set>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/platform_notification_service.h"
 #include "content/public/common/persistent_notification_status.h"
+#include "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h"
 
 class NotificationDelegate;
 class NotificationUIManager;
 
 namespace content {
 class BrowserContext;
+struct NotificationResources;
 }
 
 namespace gcm {
@@ -70,11 +74,10 @@ class PlatformNotificationServiceImpl
   // associated with the notification has to be pruned from the database in this
   // case, to make sure that it continues to be in sync. Must be called on the
   // UI thread.
-  void OnPersistentNotificationClose(
-      content::BrowserContext* browser_context,
-      int64_t persistent_notification_id,
-      const GURL& origin,
-      bool by_user) const;
+  void OnPersistentNotificationClose(content::BrowserContext* browser_context,
+                                     int64_t persistent_notification_id,
+                                     const GURL& origin,
+                                     bool by_user);
 
   // Returns the Notification UI Manager through which notifications can be
   // displayed to the user. Can be overridden for testing.
@@ -84,27 +87,27 @@ class PlatformNotificationServiceImpl
   void OpenNotificationSettings(content::BrowserContext* browser_context);
 
   // content::PlatformNotificationService implementation.
-  blink::WebNotificationPermission CheckPermissionOnUIThread(
+  blink::mojom::PermissionStatus CheckPermissionOnUIThread(
       content::BrowserContext* browser_context,
       const GURL& origin,
       int render_process_id) override;
-  blink::WebNotificationPermission CheckPermissionOnIOThread(
+  blink::mojom::PermissionStatus CheckPermissionOnIOThread(
       content::ResourceContext* resource_context,
       const GURL& origin,
       int render_process_id) override;
   void DisplayNotification(
       content::BrowserContext* browser_context,
       const GURL& origin,
-      const SkBitmap& icon,
       const content::PlatformNotificationData& notification_data,
-      scoped_ptr<content::DesktopNotificationDelegate> delegate,
+      const content::NotificationResources& notification_resources,
+      std::unique_ptr<content::DesktopNotificationDelegate> delegate,
       base::Closure* cancel_callback) override;
   void DisplayPersistentNotification(
       content::BrowserContext* browser_context,
       int64_t persistent_notification_id,
       const GURL& origin,
-      const SkBitmap& icon,
-      const content::PlatformNotificationData& notification_data) override;
+      const content::PlatformNotificationData& notification_data,
+      const content::NotificationResources& notification_resources) override;
   void ClosePersistentNotification(
       content::BrowserContext* browser_context,
       int64_t persistent_notification_id) override;
@@ -131,8 +134,8 @@ class PlatformNotificationServiceImpl
   Notification CreateNotificationFromData(
       Profile* profile,
       const GURL& origin,
-      const SkBitmap& icon,
       const content::PlatformNotificationData& notification_data,
+      const content::NotificationResources& notification_resources,
       NotificationDelegate* delegate) const;
 
   // Overrides the Notification UI Manager to use to |manager|. Only to be
@@ -145,7 +148,7 @@ class PlatformNotificationServiceImpl
 
   // Platforms that display native notification interact with them through this
   // object.
-  scoped_ptr<NotificationUIManager> native_notification_ui_manager_;
+  std::unique_ptr<NotificationUIManager> native_notification_ui_manager_;
 
   // Weak reference. Ownership maintains with the test.
   NotificationUIManager* notification_ui_manager_for_tests_;
@@ -153,6 +156,10 @@ class PlatformNotificationServiceImpl
   // Mapping between a persistent notification id and the id of the associated
   // message_center::Notification object. Must only be used on the UI thread.
   std::map<int64_t, std::string> persistent_notifications_;
+
+  // Tracks the id of persistent notifications that have been closed
+  // programmatically to avoid dispatching close events for them.
+  std::unordered_set<int64_t> closed_notifications_;
 
   DISALLOW_COPY_AND_ASSIGN(PlatformNotificationServiceImpl);
 };

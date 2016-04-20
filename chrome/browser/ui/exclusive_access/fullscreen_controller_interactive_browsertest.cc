@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/fullscreen.h"
@@ -9,8 +10,10 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller_test.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -18,6 +21,7 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
@@ -67,6 +71,45 @@ class FullscreenControllerInteractiveTest
                                      bool retry_until_success);
 };
 
+// Allow the test harness to pick the non-simplified fullscreen UI, which
+// prompts with an interactive dialog rather than just notifying the user how to
+// exit fullscreen. TODO(tapted): Remove this when "simplified" is the only way.
+enum TestType {
+  TEST_TYPE_START,
+  PROMPTING = TEST_TYPE_START,
+  SIMPLIFIED,
+  TEST_TYPE_END,
+};
+
+class ParamaterizedFullscreenControllerInteractiveTest
+    : public FullscreenControllerInteractiveTest,
+      public ::testing::WithParamInterface<int> {
+ public:
+  ParamaterizedFullscreenControllerInteractiveTest() {}
+
+  // content::BrowserTestBase:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    switch (GetParam()) {
+      case PROMPTING:
+        command_line->AppendSwitchASCII(switches::kDisableFeatures,
+                                        features::kSimplifiedFullscreenUI.name);
+        break;
+      case SIMPLIFIED:
+        command_line->AppendSwitchASCII(switches::kEnableFeatures,
+                                        features::kSimplifiedFullscreenUI.name);
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+
+  // Whether the test should be prompting the user (i.e. non-simplified UI).
+  bool ShouldPrompt() { return GetParam() == PROMPTING; }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ParamaterizedFullscreenControllerInteractiveTest);
+};
+
 void FullscreenControllerInteractiveTest::ToggleTabFullscreen(
     bool enter_fullscreen) {
   ToggleTabFullscreen_Internal(enter_fullscreen, true);
@@ -113,11 +156,8 @@ FullscreenControllerInteractiveTest::TestFullscreenMouseLockContentSettings() {
   // Add content setting to ALLOW fullscreen.
   HostContentSettingsMap* settings_map =
       HostContentSettingsMapFactory::GetForProfile(browser()->profile());
-  ContentSettingsPattern pattern =
-      ContentSettingsPattern::FromURL(url);
-  settings_map->SetContentSetting(
-      pattern, ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTINGS_TYPE_FULLSCREEN, std::string(),
+  settings_map->SetContentSettingDefaultScope(
+      url, url, CONTENT_SETTINGS_TYPE_FULLSCREEN, std::string(),
       CONTENT_SETTING_ALLOW);
 
   // Now, fullscreen should not prompt for permission.
@@ -134,9 +174,8 @@ FullscreenControllerInteractiveTest::TestFullscreenMouseLockContentSettings() {
   LostMouseLock();
 
   // Add content setting to ALLOW mouse lock.
-  settings_map->SetContentSetting(
-      pattern, ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTINGS_TYPE_MOUSELOCK, std::string(),
+  settings_map->SetContentSettingDefaultScope(
+      url, GURL(), CONTENT_SETTINGS_TYPE_MOUSELOCK, std::string(),
       CONTENT_SETTING_ALLOW);
 
   // Now, mouse lock should not prompt for permission.
@@ -148,9 +187,8 @@ FullscreenControllerInteractiveTest::TestFullscreenMouseLockContentSettings() {
   // Leaving tab in fullscreen, now test mouse lock BLOCK:
 
   // Add content setting to BLOCK mouse lock.
-  settings_map->SetContentSetting(
-      pattern, ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTINGS_TYPE_MOUSELOCK, std::string(),
+  settings_map->SetContentSettingDefaultScope(
+      url, GURL(), CONTENT_SETTINGS_TYPE_MOUSELOCK, std::string(),
       CONTENT_SETTING_BLOCK);
 
   // Now, mouse lock should not be pending.
@@ -373,15 +411,17 @@ IN_PROC_BROWSER_TEST_F(
   AddTabAtIndex(0, GURL(url::kAboutBlankURL), PAGE_TRANSITION_TYPED);
 
   WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+  ExclusiveAccessContext* context =
+      browser()->window()->GetExclusiveAccessContext();
 
   {
     FullscreenNotificationObserver fullscreen_observer;
     EXPECT_FALSE(browser()->window()->IsFullscreen());
-    EXPECT_FALSE(browser()->window()->IsFullscreenWithToolbar());
+    EXPECT_FALSE(context->IsFullscreenWithToolbar());
     browser()->EnterFullscreenModeForTab(tab, GURL());
     fullscreen_observer.Wait();
     EXPECT_TRUE(browser()->window()->IsFullscreen());
-    EXPECT_FALSE(browser()->window()->IsFullscreenWithToolbar());
+    EXPECT_FALSE(context->IsFullscreenWithToolbar());
   }
 
   {
@@ -389,7 +429,7 @@ IN_PROC_BROWSER_TEST_F(
     chrome::ToggleFullscreenMode(browser());
     fullscreen_observer.Wait();
     EXPECT_FALSE(browser()->window()->IsFullscreen());
-    EXPECT_FALSE(browser()->window()->IsFullscreenWithToolbar());
+    EXPECT_FALSE(context->IsFullscreenWithToolbar());
   }
 
   if (chrome::mac::SupportsSystemFullscreen()) {
@@ -399,7 +439,7 @@ IN_PROC_BROWSER_TEST_F(
     chrome::ToggleFullscreenMode(browser());
     fullscreen_observer.Wait();
     EXPECT_TRUE(browser()->window()->IsFullscreen());
-    EXPECT_TRUE(browser()->window()->IsFullscreenWithToolbar());
+    EXPECT_TRUE(context->IsFullscreenWithToolbar());
   }
 }
 #endif
@@ -674,7 +714,7 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 
 // Tests mouse lock can be exited and re-entered by an application silently
 // with no UI distraction for users.
-IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
+IN_PROC_BROWSER_TEST_P(ParamaterizedFullscreenControllerInteractiveTest,
                        MAYBE_MouseLockSilentAfterTargetUnlock) {
   ASSERT_TRUE(embedded_test_server()->Start());
   ui_test_utils::NavigateToURL(
@@ -688,11 +728,13 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
       chrome::NOTIFICATION_MOUSE_LOCK_CHANGED,
       content::NotificationService::AllSources()));
   ASSERT_TRUE(IsFullscreenBubbleDisplayed());
-  ASSERT_TRUE(IsMouseLockPermissionRequested());
-  ASSERT_FALSE(IsMouseLocked());
+  if (ShouldPrompt()) {
+    ASSERT_TRUE(IsMouseLockPermissionRequested());
+    ASSERT_FALSE(IsMouseLocked());
 
-  // Accept mouse lock.
-  AcceptCurrentFullscreenOrMouseLockRequest();
+    // Accept mouse lock.
+    AcceptCurrentFullscreenOrMouseLockRequest();
+  }
   ASSERT_TRUE(IsMouseLocked());
   ASSERT_TRUE(IsFullscreenBubbleDisplayed());
 
@@ -827,9 +869,11 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA)
 // TODO(erg): linux_aura bringup: http://crbug.com/163931
-#define MAYBE_TestTabDoesntExitMouseLockOnSubFrameNavigation DISABLED_TestTabDoesntExitMouseLockOnSubFrameNavigation
+#define MAYBE_TestTabDoesntExitMouseLockOnSubFrameNavigation \
+  DISABLED_TestTabDoesntExitMouseLockOnSubFrameNavigation
 #else
-#define MAYBE_TestTabDoesntExitMouseLockOnSubFrameNavigation TestTabDoesntExitMouseLockOnSubFrameNavigation
+#define MAYBE_TestTabDoesntExitMouseLockOnSubFrameNavigation \
+  TestTabDoesntExitMouseLockOnSubFrameNavigation
 #endif
 
 // Tests mouse lock is not exited on sub frame navigation.
@@ -958,3 +1002,8 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
   ASSERT_TRUE(IsFullscreenPermissionRequested());
   ASSERT_NO_FATAL_FAILURE(ToggleTabFullscreenNoRetries(false));
 }
+
+INSTANTIATE_TEST_CASE_P(
+    ParamaterizedFullscreenControllerInteractiveTestInstance,
+    ParamaterizedFullscreenControllerInteractiveTest,
+    ::testing::Range<int>(TEST_TYPE_START, TEST_TYPE_END));

@@ -6,6 +6,10 @@
 
 #include "base/files/file_path.h"
 #include "base/strings/string_split.h"
+#include "base/time/default_clock.h"
+#include "base/time/default_tick_clock.h"
+#include "components/network_time/network_time_tracker.h"
+#include "components/prefs/testing_pref_service.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_data_directory.h"
 #include "net/cert/x509_cert_types.h"
@@ -152,4 +156,103 @@ TEST_F(SSLErrorClassificationTest, TestPrivateURL) {
   EXPECT_TRUE(ssl_errors::IsHostnameNonUniqueOrDotless("go"));
   EXPECT_TRUE(ssl_errors::IsHostnameNonUniqueOrDotless("172.17.108.108"));
   EXPECT_TRUE(ssl_errors::IsHostnameNonUniqueOrDotless("foo.blah"));
+}
+
+TEST(ErrorClassification, LevenshteinDistance) {
+  EXPECT_EQ(0u, ssl_errors::GetLevenshteinDistance("banana", "banana"));
+
+  EXPECT_EQ(2u, ssl_errors::GetLevenshteinDistance("ab", "ba"));
+  EXPECT_EQ(2u, ssl_errors::GetLevenshteinDistance("ba", "ab"));
+
+  EXPECT_EQ(2u, ssl_errors::GetLevenshteinDistance("ananas", "banana"));
+  EXPECT_EQ(2u, ssl_errors::GetLevenshteinDistance("banana", "ananas"));
+
+  EXPECT_EQ(2u, ssl_errors::GetLevenshteinDistance("unclear", "nuclear"));
+  EXPECT_EQ(2u, ssl_errors::GetLevenshteinDistance("nuclear", "unclear"));
+
+  EXPECT_EQ(3u, ssl_errors::GetLevenshteinDistance("chrome", "chromium"));
+  EXPECT_EQ(3u, ssl_errors::GetLevenshteinDistance("chromium", "chrome"));
+
+  EXPECT_EQ(4u, ssl_errors::GetLevenshteinDistance("", "abcd"));
+  EXPECT_EQ(4u, ssl_errors::GetLevenshteinDistance("abcd", ""));
+
+  EXPECT_EQ(4u, ssl_errors::GetLevenshteinDistance("xxx", "xxxxxxx"));
+  EXPECT_EQ(4u, ssl_errors::GetLevenshteinDistance("xxxxxxx", "xxx"));
+
+  EXPECT_EQ(7u, ssl_errors::GetLevenshteinDistance("yyy", "xxxxxxx"));
+  EXPECT_EQ(7u, ssl_errors::GetLevenshteinDistance("xxxxxxx", "yyy"));
+}
+
+TEST_F(SSLErrorClassificationTest, GetClockState) {
+  // This test aims to obtain all possible return values of
+  // |GetClockState|.
+  TestingPrefServiceSimple pref_service;
+  network_time::NetworkTimeTracker::RegisterPrefs(pref_service.registry());
+  network_time::NetworkTimeTracker network_time_tracker(
+      make_scoped_ptr(new base::DefaultClock()),
+      make_scoped_ptr(new base::DefaultTickClock()), &pref_service);
+  EXPECT_EQ(
+      ssl_errors::ClockState::CLOCK_STATE_UNKNOWN,
+      ssl_errors::GetClockState(base::Time::Now(), &network_time_tracker));
+
+  ssl_errors::SetBuildTimeForTesting(base::Time::Now() -
+                                     base::TimeDelta::FromDays(367));
+  EXPECT_EQ(
+      ssl_errors::ClockState::CLOCK_STATE_FUTURE,
+      ssl_errors::GetClockState(base::Time::Now(), &network_time_tracker));
+
+  ssl_errors::SetBuildTimeForTesting(base::Time::Now() +
+                                     base::TimeDelta::FromDays(3));
+  EXPECT_EQ(
+      ssl_errors::ClockState::CLOCK_STATE_PAST,
+      ssl_errors::GetClockState(base::Time::Now(), &network_time_tracker));
+
+  // Intentionally leave the build time alone.  It should be ignored
+  // in favor of network time.
+  network_time_tracker.UpdateNetworkTime(
+      base::Time::Now() + base::TimeDelta::FromHours(1),
+      base::TimeDelta::FromSeconds(1),         // resolution
+      base::TimeDelta::FromMilliseconds(250),  // latency
+      base::TimeTicks::Now());                 // posting time
+  EXPECT_EQ(
+      ssl_errors::ClockState::CLOCK_STATE_PAST,
+      ssl_errors::GetClockState(base::Time::Now(), &network_time_tracker));
+
+  network_time_tracker.UpdateNetworkTime(
+      base::Time::Now() - base::TimeDelta::FromHours(1),
+      base::TimeDelta::FromSeconds(1),         // resolution
+      base::TimeDelta::FromMilliseconds(250),  // latency
+      base::TimeTicks::Now());                 // posting time
+  EXPECT_EQ(
+      ssl_errors::ClockState::CLOCK_STATE_FUTURE,
+      ssl_errors::GetClockState(base::Time::Now(), &network_time_tracker));
+
+  network_time_tracker.UpdateNetworkTime(
+      base::Time::Now(),
+      base::TimeDelta::FromSeconds(1),         // resolution
+      base::TimeDelta::FromMilliseconds(250),  // latency
+      base::TimeTicks::Now());                 // posting time
+  EXPECT_EQ(
+      ssl_errors::ClockState::CLOCK_STATE_OK,
+      ssl_errors::GetClockState(base::Time::Now(), &network_time_tracker));
+
+  // Now clear the network time.  The build time should reassert
+  // itself.
+  network_time_tracker.UpdateNetworkTime(
+      base::Time(),
+      base::TimeDelta::FromSeconds(1),         // resolution
+      base::TimeDelta::FromMilliseconds(250),  // latency
+      base::TimeTicks::Now());                 // posting time
+  ssl_errors::SetBuildTimeForTesting(base::Time::Now() +
+                                     base::TimeDelta::FromDays(3));
+  EXPECT_EQ(
+      ssl_errors::ClockState::CLOCK_STATE_PAST,
+      ssl_errors::GetClockState(base::Time::Now(), &network_time_tracker));
+
+  // Now set the build time to something reasonable.  We should be
+  // back to the know-nothing state.
+  ssl_errors::SetBuildTimeForTesting(base::Time::Now());
+  EXPECT_EQ(
+      ssl_errors::ClockState::CLOCK_STATE_UNKNOWN,
+      ssl_errors::GetClockState(base::Time::Now(), &network_time_tracker));
 }

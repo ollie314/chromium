@@ -41,8 +41,7 @@ void ThemeInstalledInfoBarDelegate::Create(
   // FindTabbedBrowser() is called with |match_original_profiles| true because a
   // theme install in either a normal or incognito window for a profile affects
   // all normal and incognito windows for that profile.
-  Browser* browser =
-      chrome::FindTabbedBrowser(profile, true, chrome::GetActiveDesktop());
+  Browser* browser = chrome::FindTabbedBrowser(profile, true);
   if (!browser)
     return;
   content::WebContents* web_contents =
@@ -52,9 +51,10 @@ void ThemeInstalledInfoBarDelegate::Create(
   InfoBarService* infobar_service =
       InfoBarService::FromWebContents(web_contents);
   ThemeService* theme_service = ThemeServiceFactory::GetForProfile(profile);
-  scoped_ptr<infobars::InfoBar> new_infobar(
+  std::unique_ptr<infobars::InfoBar> new_infobar(
       infobar_service->CreateConfirmInfoBar(
-          scoped_ptr<ConfirmInfoBarDelegate>(new ThemeInstalledInfoBarDelegate(
+          std::unique_ptr<
+              ConfirmInfoBarDelegate>(new ThemeInstalledInfoBarDelegate(
               extensions::ExtensionSystem::Get(profile)->extension_service(),
               theme_service, new_theme, previous_theme_id,
               previous_using_system_theme))));

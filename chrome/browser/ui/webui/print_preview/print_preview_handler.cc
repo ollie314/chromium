@@ -6,7 +6,9 @@
 
 #include <ctype.h>
 #include <stddef.h>
+
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -20,10 +22,8 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -63,6 +63,7 @@
 #include "components/cloud_devices/common/printer_description.h"
 #include "components/dom_distiller/core/dom_distiller_switches.h"
 #include "components/dom_distiller/core/url_utils.h"
+#include "components/prefs/pref_service.h"
 #include "components/printing/common/print_messages.h"
 #include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
@@ -167,9 +168,6 @@ const char kPrintAutomaticallyInKioskMode[] = "printAutomaticallyInKioskMode";
 const char kAppKioskMode[] = "appKioskMode";
 // Dictionary field to store Cloud Print base URL.
 const char kCloudPrintUrl[] = "cloudPrintUrl";
-#if defined(OS_WIN)
-const char kHidePrintWithSystemDialogLink[] = "hidePrintWithSystemDialogLink";
-#endif
 // Name of a dictionary field holding the state of selection for document.
 const char kDocumentHasSelection[] = "documentHasSelection";
 // Dictionary field holding the default destination selection rules.
@@ -185,7 +183,7 @@ const char kPrinterCapabilities[] = "capabilities";
 
 // Get the print job settings dictionary from |args|. The caller takes
 // ownership of the returned DictionaryValue. Returns NULL on failure.
-scoped_ptr<base::DictionaryValue> GetSettingsDictionary(
+std::unique_ptr<base::DictionaryValue> GetSettingsDictionary(
     const base::ListValue* args) {
   std::string json_str;
   if (!args->GetString(0, &json_str)) {
@@ -196,7 +194,7 @@ scoped_ptr<base::DictionaryValue> GetSettingsDictionary(
     NOTREACHED() << "Empty print job settings";
     return NULL;
   }
-  scoped_ptr<base::DictionaryValue> settings =
+  std::unique_ptr<base::DictionaryValue> settings =
       base::DictionaryValue::From(base::JSONReader::Read(json_str));
   if (!settings) {
     NOTREACHED() << "Print job settings must be a dictionary.";
@@ -329,7 +327,7 @@ class PrintingContextDelegate : public printing::PrintingContext::Delegate {
 
 gfx::Size GetDefaultPdfMediaSizeMicrons() {
   PrintingContextDelegate delegate;
-  scoped_ptr<printing::PrintingContext> printing_context(
+  std::unique_ptr<printing::PrintingContext> printing_context(
       printing::PrintingContext::Create(&delegate));
   if (printing::PrintingContext::OK != printing_context->UsePdfSettings() ||
       printing_context->settings().device_units_per_inch() <= 0) {
@@ -346,7 +344,7 @@ gfx::Size GetDefaultPdfMediaSizeMicrons() {
 typedef base::Callback<void(const base::DictionaryValue*)>
     GetPdfCapabilitiesCallback;
 
-scoped_ptr<base::DictionaryValue> GetPdfCapabilitiesOnFileThread(
+std::unique_ptr<base::DictionaryValue> GetPdfCapabilitiesOnFileThread(
     const std::string& locale) {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
 
@@ -368,10 +366,14 @@ scoped_ptr<base::DictionaryValue> GetPdfCapabilitiesOnFileThread(
   color.SaveTo(&description);
 
   static const cloud_devices::printer::MediaType kPdfMedia[] = {
-    ISO_A4,
+    ISO_A0,
+    ISO_A1,
+    ISO_A2,
     ISO_A3,
-    NA_LETTER,
+    ISO_A4,
+    ISO_A5,
     NA_LEGAL,
+    NA_LETTER,
     NA_LEDGER
   };
   const gfx::Size default_media_size = GetDefaultPdfMediaSizeMicrons();
@@ -391,10 +393,10 @@ scoped_ptr<base::DictionaryValue> GetPdfCapabilitiesOnFileThread(
   }
   media.SaveTo(&description);
 
-  return scoped_ptr<base::DictionaryValue>(description.root().DeepCopy());
+  return std::unique_ptr<base::DictionaryValue>(description.root().DeepCopy());
 }
 
-scoped_ptr<base::DictionaryValue> GetLocalPrinterCapabilitiesOnFileThread(
+std::unique_ptr<base::DictionaryValue> GetLocalPrinterCapabilitiesOnFileThread(
     const std::string& printer_name) {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
 
@@ -407,20 +409,20 @@ scoped_ptr<base::DictionaryValue> GetLocalPrinterCapabilitiesOnFileThread(
 
   if (!print_backend->IsValidPrinter(printer_name)) {
     LOG(WARNING) << "Invalid printer " << printer_name;
-    return scoped_ptr<base::DictionaryValue>();
+    return std::unique_ptr<base::DictionaryValue>();
   }
 
   printing::PrinterSemanticCapsAndDefaults info;
   if (!print_backend->GetPrinterSemanticCapsAndDefaults(printer_name, &info)) {
     LOG(WARNING) << "Failed to get capabilities for " << printer_name;
-    return scoped_ptr<base::DictionaryValue>();
+    return std::unique_ptr<base::DictionaryValue>();
   }
 
-  scoped_ptr<base::DictionaryValue> description(
+  std::unique_ptr<base::DictionaryValue> description(
       cloud_print::PrinterSemanticCapsAndDefaultsToCdd(info));
   if (!description) {
     LOG(WARNING) << "Failed to convert capabilities for " << printer_name;
-    return scoped_ptr<base::DictionaryValue>();
+    return std::unique_ptr<base::DictionaryValue>();
   }
 
   return description;
@@ -487,17 +489,18 @@ void GetPrinterCapabilitiesOnFileThread(
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   DCHECK(!printer_name.empty());
 
-  scoped_ptr<base::DictionaryValue> printer_capabilities(
-      printer_name == kLocalPdfPrinterId ?
-      GetPdfCapabilitiesOnFileThread(locale) :
-      GetLocalPrinterCapabilitiesOnFileThread(printer_name));
+  std::unique_ptr<base::DictionaryValue> printer_capabilities(
+      printer_name == kLocalPdfPrinterId
+          ? GetPdfCapabilitiesOnFileThread(locale)
+          : GetLocalPrinterCapabilitiesOnFileThread(printer_name));
   if (!printer_capabilities) {
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                             base::Bind(failure_cb, printer_name));
     return;
   }
 
-  scoped_ptr<base::DictionaryValue> printer_info(new base::DictionaryValue);
+  std::unique_ptr<base::DictionaryValue> printer_info(
+      new base::DictionaryValue);
   printer_info->SetString(kPrinterId, printer_name);
   printer_info->Set(kPrinterCapabilities, printer_capabilities.release());
 
@@ -563,7 +566,7 @@ class PrintPreviewHandler::AccessTokenService
     if (service) {
       OAuth2TokenService::ScopeSet oauth_scopes;
       oauth_scopes.insert(cloud_devices::kCloudPrintAuthScope);
-      scoped_ptr<OAuth2TokenService::Request> request(
+      std::unique_ptr<OAuth2TokenService::Request> request(
           service->StartRequest(account_id, oauth_scopes, this));
       requests_[type].reset(request.release());
     } else {
@@ -596,7 +599,7 @@ class PrintPreviewHandler::AccessTokenService
   }
 
   using Requests =
-      std::map<std::string, scoped_ptr<OAuth2TokenService::Request>>;
+      std::map<std::string, std::unique_ptr<OAuth2TokenService::Request>>;
   Requests requests_;
   PrintPreviewHandler* handler_;
 
@@ -791,7 +794,7 @@ void PrintPreviewHandler::HandleGetExtensionPrinterCapabilities(
 
 void PrintPreviewHandler::HandleGetPreview(const base::ListValue* args) {
   DCHECK_EQ(3U, args->GetSize());
-  scoped_ptr<base::DictionaryValue> settings = GetSettingsDictionary(args);
+  std::unique_ptr<base::DictionaryValue> settings = GetSettingsDictionary(args);
   if (!settings)
     return;
   int request_id = -1;
@@ -887,7 +890,7 @@ void PrintPreviewHandler::HandlePrint(const base::ListValue* args) {
   UMA_HISTOGRAM_COUNTS("PrintPreview.RegeneratePreviewRequest.BeforePrint",
                        regenerate_preview_request_count_);
 
-  scoped_ptr<base::DictionaryValue> settings = GetSettingsDictionary(args);
+  std::unique_ptr<base::DictionaryValue> settings = GetSettingsDictionary(args);
   if (!settings)
     return;
 
@@ -1142,8 +1145,7 @@ void PrintPreviewHandler::HandleSignin(const base::ListValue* args) {
 
   Profile* profile = Profile::FromBrowserContext(
       preview_web_contents()->GetBrowserContext());
-  chrome::ScopedTabbedBrowserDisplayer displayer(
-      profile, chrome::GetActiveDesktop());
+  chrome::ScopedTabbedBrowserDisplayer displayer(profile);
   print_dialog_cloud::CreateCloudPrintSigninTab(
       displayer.browser(),
       add_account,
@@ -1189,8 +1191,9 @@ void PrintPreviewHandler::HandleShowSystemDialog(
 
   printing::PrintViewManager* print_view_manager =
       printing::PrintViewManager::FromWebContents(initiator);
-  print_view_manager->set_observer(this);
-  print_view_manager->PrintForSystemDialogNow();
+  print_view_manager->PrintForSystemDialogNow(
+      base::Bind(&PrintPreviewHandler::ClosePreviewDialog,
+                 weak_factory_.GetWeakPtr()));
 
   // Cancel the pending preview request if exists.
   print_preview_ui()->OnCancelPendingPreviewRequest();
@@ -1289,13 +1292,6 @@ void PrintPreviewHandler::SendInitialSettings(
                               cmdline->HasSwitch(switches::kKioskModePrinting));
   initial_settings.SetBoolean(kAppKioskMode,
                               chrome::IsRunningInForcedAppMode());
-#if defined(OS_WIN)
-  // In Win8 metro, the system print dialog can only open on the desktop.  Doing
-  // so will cause the browser to appear hung, so we don't show the link in
-  // metro.
-  bool is_ash = (chrome::GetActiveDesktop() == chrome::HOST_DESKTOP_TYPE_ASH);
-  initial_settings.SetBoolean(kHidePrintWithSystemDialogLink, is_ash);
-#endif
   if (prefs) {
     const std::string rules_str =
         prefs->GetString(prefs::kPrintPreviewDefaultDestinationSelectionRules);
@@ -1366,8 +1362,8 @@ void PrintPreviewHandler::SendCloudPrintEnabled() {
 
 void PrintPreviewHandler::SendCloudPrintJob(const base::RefCountedBytes* data) {
   // BASE64 encode the job data.
-  std::string raw_data(reinterpret_cast<const char*>(data->front()),
-                       data->size());
+  const base::StringPiece raw_data(reinterpret_cast<const char*>(data->front()),
+                                   data->size());
   std::string base64_data;
   base::Base64Encode(raw_data, &base64_data);
   base::StringValue data_value(base64_data);
@@ -1381,10 +1377,6 @@ WebContents* PrintPreviewHandler::GetInitiator() const {
   if (!dialog_controller)
     return NULL;
   return dialog_controller->GetInitiator(preview_web_contents());
-}
-
-void PrintPreviewHandler::OnPrintDialogShown() {
-  ClosePreviewDialog();
 }
 
 void PrintPreviewHandler::OnAddAccountToCookieCompleted(
@@ -1450,16 +1442,6 @@ void PrintPreviewHandler::SelectFile(const base::FilePath& default_filename,
 
 void PrintPreviewHandler::OnGotUniqueFileName(const base::FilePath& path) {
   FileSelected(path, 0, nullptr);
-}
-
-void PrintPreviewHandler::OnPrintPreviewDialogDestroyed() {
-  WebContents* initiator = GetInitiator();
-  if (!initiator)
-    return;
-
-  printing::PrintViewManager* print_view_manager =
-      printing::PrintViewManager::FromWebContents(initiator);
-  print_view_manager->set_observer(NULL);
 }
 
 void PrintPreviewHandler::OnPrintPreviewFailed() {
@@ -1578,7 +1560,7 @@ void PrintPreviewHandler::LocalPrinterCacheFlushed() {
 }
 
 void PrintPreviewHandler::PrivetCapabilitiesUpdateClient(
-    scoped_ptr<cloud_print::PrivetHTTPClient> http_client) {
+    std::unique_ptr<cloud_print::PrivetHTTPClient> http_client) {
   if (!PrivetUpdateClient(std::move(http_client)))
     return;
 
@@ -1590,7 +1572,7 @@ void PrintPreviewHandler::PrivetCapabilitiesUpdateClient(
 }
 
 bool PrintPreviewHandler::PrivetUpdateClient(
-    scoped_ptr<cloud_print::PrivetHTTPClient> http_client) {
+    std::unique_ptr<cloud_print::PrivetHTTPClient> http_client) {
   if (!http_client) {
     SendPrivetCapabilitiesError(privet_http_resolution_->GetName());
     privet_http_resolution_.reset();
@@ -1611,7 +1593,7 @@ void PrintPreviewHandler::PrivetLocalPrintUpdateClient(
     std::string print_ticket,
     std::string capabilities,
     gfx::Size page_size,
-    scoped_ptr<cloud_print::PrivetHTTPClient> http_client) {
+    std::unique_ptr<cloud_print::PrivetHTTPClient> http_client) {
   if (!PrivetUpdateClient(std::move(http_client)))
     return;
 

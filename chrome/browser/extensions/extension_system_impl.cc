@@ -4,6 +4,8 @@
 
 #include "chrome/browser/extensions/extension_system_impl.h"
 
+#include <algorithm>
+
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -18,6 +20,7 @@
 #include "chrome/browser/extensions/chrome_content_verifier_delegate.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
+#include "chrome/browser/extensions/extension_garbage_collector.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
@@ -29,6 +32,7 @@
 #include "chrome/browser/extensions/shared_user_script_master.h"
 #include "chrome/browser/extensions/state_store_notification_observer.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
+#include "chrome/browser/extensions/update_install_gate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
@@ -47,7 +51,10 @@
 #include "extensions/browser/runtime_data.h"
 #include "extensions/browser/service_worker_manager.h"
 #include "extensions/browser/state_store.h"
+#include "extensions/browser/uninstall_ping_sender.h"
+#include "extensions/browser/value_store/value_store_factory_impl.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/manifest_url_handlers.h"
 
 #if defined(ENABLE_NOTIFICATIONS)
 #include "chrome/browser/notifications/notifier_state_tracker.h"
@@ -57,6 +64,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/app_mode/app_mode_utils.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_update_install_gate.h"
 #include "chrome/browser/chromeos/extensions/device_local_account_management_policy_provider.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chromeos/chromeos_switches.h"
@@ -67,14 +75,22 @@
 
 using content::BrowserThread;
 
-// Statistics are logged to UMA with this string as part of histogram name. They
-// can all be found under Extensions.Database.Open.<client>. Changing this needs
-// to synchronize with histograms.xml, AND will also become incompatible with
-// older browsers still reporting the previous values.
-const char kStateDatabaseUMAClientName[] = "State";
-const char kRulesDatabaseUMAClientName[] = "Rules";
-
 namespace extensions {
+
+namespace {
+
+// Helper to serve as an UninstallPingSender::Filter callback.
+UninstallPingSender::FilterResult ShouldSendUninstallPing(
+    const Extension* extension,
+    UninstallReason reason) {
+  if (extension && (extension->from_webstore() ||
+                    ManifestURL::UpdatesFromGallery(extension))) {
+    return UninstallPingSender::SEND_PING;
+  }
+  return UninstallPingSender::DO_NOT_SEND_PING;
+}
+
+}  // namespace
 
 //
 // ExtensionSystemImpl::Shared
@@ -88,18 +104,18 @@ ExtensionSystemImpl::Shared::~Shared() {
 }
 
 void ExtensionSystemImpl::Shared::InitPrefs() {
+  store_factory_ = new ValueStoreFactoryImpl(profile_->GetPath());
+
   // Two state stores. The latter, which contains declarative rules, must be
   // loaded immediately so that the rules are ready before we issue network
   // requests.
   state_store_.reset(new StateStore(
-      profile_, kStateDatabaseUMAClientName,
-      profile_->GetPath().AppendASCII(extensions::kStateStoreName), true));
+      profile_, store_factory_, ValueStoreFrontend::BackendType::STATE, true));
   state_store_notification_observer_.reset(
       new StateStoreNotificationObserver(state_store_.get()));
 
   rules_store_.reset(new StateStore(
-      profile_, kRulesDatabaseUMAClientName,
-      profile_->GetPath().AppendASCII(extensions::kRulesStoreName), false));
+      profile_, store_factory_, ValueStoreFrontend::BackendType::RULES, false));
 
 #if defined(OS_CHROMEOS)
   const user_manager::User* user =
@@ -127,6 +143,27 @@ void ExtensionSystemImpl::Shared::RegisterManagementPolicyProviders() {
 #endif  // defined(OS_CHROMEOS)
 
   management_policy_->RegisterProvider(InstallVerifier::Get(profile_));
+}
+
+void ExtensionSystemImpl::Shared::InitInstallGates() {
+  update_install_gate_.reset(new UpdateInstallGate(extension_service_.get()));
+  extension_service_->RegisterInstallGate(
+      ExtensionPrefs::DELAY_REASON_WAIT_FOR_IDLE, update_install_gate_.get());
+  extension_service_->RegisterInstallGate(
+      ExtensionPrefs::DELAY_REASON_GC,
+      ExtensionGarbageCollector::Get(profile_));
+  extension_service_->RegisterInstallGate(
+      ExtensionPrefs::DELAY_REASON_WAIT_FOR_IMPORTS,
+      extension_service_->shared_module_service());
+#if defined(OS_CHROMEOS)
+  if (chrome::IsRunningInForcedAppMode()) {
+    kiosk_app_update_install_gate_.reset(
+        new chromeos::KioskAppUpdateInstallGate(profile_));
+    extension_service_->RegisterInstallGate(
+        ExtensionPrefs::DELAY_REASON_WAIT_FOR_OS_UPDATE,
+        kiosk_app_update_install_gate_.get());
+  }
+#endif
 }
 
 void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
@@ -160,6 +197,9 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
       profile_->GetPath().AppendASCII(extensions::kInstallDirectoryName),
       ExtensionPrefs::Get(profile_), Blacklist::Get(profile_),
       autoupdate_enabled, extensions_enabled, &ready_));
+
+  uninstall_ping_sender_.reset(new UninstallPingSender(
+      ExtensionRegistry::Get(profile_), base::Bind(&ShouldSendUninstallPing)));
 
   // These services must be registered before the ExtensionService tries to
   // load any extensions.
@@ -211,6 +251,8 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
 
   app_sorting_.reset(new ChromeAppSorting(profile_));
 
+  InitInstallGates();
+
   extension_service_->Init();
 
   // Make sure ExtensionSyncService is created.
@@ -257,6 +299,11 @@ StateStore* ExtensionSystemImpl::Shared::state_store() {
 
 StateStore* ExtensionSystemImpl::Shared::rules_store() {
   return rules_store_.get();
+}
+
+scoped_refptr<ValueStoreFactory> ExtensionSystemImpl::Shared::store_factory()
+    const {
+  return store_factory_;
 }
 
 ExtensionService* ExtensionSystemImpl::Shared::extension_service() {
@@ -352,6 +399,10 @@ StateStore* ExtensionSystemImpl::rules_store() {
   return shared_->rules_store();
 }
 
+scoped_refptr<ValueStoreFactory> ExtensionSystemImpl::store_factory() {
+  return shared_->store_factory();
+}
+
 InfoMap* ExtensionSystemImpl::info_map() { return shared_->info_map(); }
 
 const OneShotEvent& ExtensionSystemImpl::ready() const {
@@ -370,7 +421,7 @@ ContentVerifier* ExtensionSystemImpl::content_verifier() {
   return shared_->content_verifier();
 }
 
-scoped_ptr<ExtensionSet> ExtensionSystemImpl::GetDependentExtensions(
+std::unique_ptr<ExtensionSet> ExtensionSystemImpl::GetDependentExtensions(
     const Extension* extension) {
   return extension_service()->shared_module_service()->GetDependentExtensions(
       extension);
@@ -407,7 +458,7 @@ void ExtensionSystemImpl::RegisterExtensionWithRequestContexts(
   BrowserThread::PostTaskAndReply(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&InfoMap::AddExtension, info_map(),
-                 make_scoped_refptr(extension), install_time, incognito_enabled,
+                 base::RetainedRef(extension), install_time, incognito_enabled,
                  notifications_disabled),
       callback);
 }

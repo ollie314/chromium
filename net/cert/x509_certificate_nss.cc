@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "net/cert/x509_certificate.h"
-
 #include <cert.h>
 #include <cryptohi.h>
 #include <keyhi.h>
@@ -14,14 +12,16 @@
 #include <secder.h>
 #include <sechash.h>
 
+#include <memory>
+
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/pickle.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "crypto/nss_util.h"
 #include "crypto/scoped_nss_types.h"
+#include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util_nss.h"
 
 namespace net {
@@ -40,7 +40,7 @@ void X509Certificate::Initialize() {
 }
 
 // static
-X509Certificate* X509Certificate::CreateFromBytesWithNickname(
+scoped_refptr<X509Certificate> X509Certificate::CreateFromBytesWithNickname(
     const char* data,
     size_t length,
     const char* nickname) {
@@ -50,7 +50,8 @@ X509Certificate* X509Certificate::CreateFromBytesWithNickname(
   if (!cert_handle)
     return NULL;
 
-  X509Certificate* cert = CreateFromHandle(cert_handle, OSCertHandles());
+  scoped_refptr<X509Certificate> cert =
+      CreateFromHandle(cert_handle, OSCertHandles());
   FreeOSCertHandle(cert_handle);
 
   if (nickname)

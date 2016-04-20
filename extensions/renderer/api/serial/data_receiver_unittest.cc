@@ -14,6 +14,7 @@
 #include "gin/dictionary.h"
 #include "gin/wrappable.h"
 #include "grit/extensions_renderer_resources.h"
+#include "mojo/edk/js/handle.h"
 
 namespace extensions {
 
@@ -125,12 +126,24 @@ class DataReceiverTest : public ApiTestBase {
   DISALLOW_COPY_AND_ASSIGN(DataReceiverTest);
 };
 
-TEST_F(DataReceiverTest, Receive) {
+// https://crbug.com/599898
+#if defined(LEAK_SANITIZER)
+#define MAYBE_Receive DISABLED_Receive
+#else
+#define MAYBE_Receive Receive
+#endif
+TEST_F(DataReceiverTest, MAYBE_Receive) {
   data_to_send_.push("a");
   RunTest("data_receiver_unittest.js", "testReceive");
 }
 
-TEST_F(DataReceiverTest, ReceiveError) {
+// https://crbug.com/599898
+#if defined(LEAK_SANITIZER)
+#define MAYBE_ReceiveError DISABLED_ReceiveError
+#else
+#define MAYBE_ReceiveError ReceiveError
+#endif
+TEST_F(DataReceiverTest, MAYBE_ReceiveError) {
   error_to_send_.push(1);
   RunTest("data_receiver_unittest.js", "testReceiveError");
 }
@@ -175,7 +188,13 @@ TEST_F(DataReceiverTest, SerializeDuringReceive) {
   RunTest("data_receiver_unittest.js", "testSerializeDuringReceive");
 }
 
-TEST_F(DataReceiverTest, SerializeAfterClose) {
+// https://crbug.com/599898
+#if defined(LEAK_SANITIZER)
+#define MAYBE_SerializeAfterClose DISABLED_SerializeAfterClose
+#else
+#define MAYBE_SerializeAfterClose SerializeAfterClose
+#endif
+TEST_F(DataReceiverTest, MAYBE_SerializeAfterClose) {
   data_to_send_.push("a");
   RunTest("data_receiver_unittest.js", "testSerializeAfterClose");
 }

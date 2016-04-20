@@ -338,7 +338,7 @@ void UserView::AddLogoutButton(user::LoginStatus login) {
   logout_button_ = logout_button;
   // In public account mode, the logout button border has a custom color.
   if (login == user::LOGGED_IN_PUBLIC) {
-    scoped_ptr<TrayPopupLabelButtonBorder> border(
+    std::unique_ptr<TrayPopupLabelButtonBorder> border(
         new TrayPopupLabelButtonBorder());
     border->SetPainter(false,
                        views::Button::STATE_NORMAL,
@@ -437,7 +437,7 @@ void UserView::ToggleAddUserMenuOption() {
   add_menu_option_->Init(params);
   add_menu_option_->SetOpacity(0xFF);
   add_menu_option_->GetNativeWindow()->set_owned_by_parent(false);
-  SetShadowType(add_menu_option_->GetNativeView(), wm::SHADOW_TYPE_NONE);
+  SetShadowType(add_menu_option_->GetNativeView(), ::wm::SHADOW_TYPE_NONE);
 
   // Position it below our user card.
   gfx::Rect bounds = user_card_view_->GetBoundsInScreen();

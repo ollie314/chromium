@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/browser/power_save_blocker_impl.h"
-
 #include <X11/Xlib.h>
-#include <stdint.h>
 #include <X11/extensions/dpms.h>
+#include <X11/extensions/scrnsaver.h>
+#include <stdint.h>
+
+#include <memory>
+
+#include "content/browser/power_save_blocker_impl.h"
 // Xlib #defines Status, but we can't have that for some of our headers.
 #ifdef Status
 #undef Status
@@ -20,7 +23,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/nix/xdg_util.h"
 #include "base/synchronization/lock.h"
@@ -108,11 +110,21 @@ class PowerSaveBlockerImpl::Delegate
   void ApplyBlockFinished(dbus::Response* response);
   void RemoveBlockFinished(dbus::Response* response);
 
+  // Wrapper for XScreenSaverSuspend. Checks whether the X11 Screen Saver
+  // Extension is available first. If it isn't, this is a no-op.
+  // Must be called on the UI thread.
+  static void XSSSuspendSet(bool suspend);
+
   // If DPMS (the power saving system in X11) is not enabled, then we don't want
   // to try to disable power saving, since on some desktop environments that may
   // enable DPMS with very poor default settings (e.g. turning off the display
   // after only 1 second). Must be called on the UI thread.
   static bool DPMSEnabled();
+
+  // If no other method is available (i.e. not running under a Desktop
+  // Environment) check whether the X11 Screen Saver Extension can be used
+  // to disable the screen saver. Must be called on the UI thread.
+  static bool XSSAvailable();
 
   // Returns an appropriate D-Bus API to use based on the desktop environment.
   // Must be called on the UI thread, as it may call DPMSEnabled() above.
@@ -180,9 +192,14 @@ void PowerSaveBlockerImpl::Delegate::CleanUp() {
     // initializing on the UI thread, then just cancel it. We don't need to
     // remove the block because we haven't even applied it yet.
     enqueue_apply_ = false;
-  } else if (ShouldBlock()) {
-    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                            base::Bind(&Delegate::RemoveBlock, this));
+  } else {
+    if (ShouldBlock()) {
+      BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                              base::Bind(&Delegate::RemoveBlock, this));
+    }
+
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(&Delegate::XSSSuspendSet, false));
   }
 }
 
@@ -190,12 +207,17 @@ void PowerSaveBlockerImpl::Delegate::InitOnUIThread() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::AutoLock lock(lock_);
   api_ = SelectAPI();
-  if (enqueue_apply_ && ShouldBlock()) {
-    // The thread we use here becomes the origin and D-Bus thread for the D-Bus
-    // library, so we need to use the same thread above for RemoveBlock(). It
-    // must be a thread that allows I/O operations, so we use the FILE thread.
-    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                            base::Bind(&Delegate::ApplyBlock, this));
+
+  if (enqueue_apply_) {
+    if (ShouldBlock()) {
+      // The thread we use here becomes the origin and D-Bus thread for the
+      // D-Bus library, so we need to use the same thread above for
+      // RemoveBlock(). It must be a thread that allows I/O operations, so we
+      // use the FILE thread.
+      BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                              base::Bind(&Delegate::ApplyBlock, this));
+    }
+    XSSSuspendSet(true);
   }
   enqueue_apply_ = false;
 }
@@ -215,8 +237,8 @@ void PowerSaveBlockerImpl::Delegate::ApplyBlock() {
   bus_ = new dbus::Bus(options);
 
   scoped_refptr<dbus::ObjectProxy> object_proxy;
-  scoped_ptr<dbus::MethodCall> method_call;
-  scoped_ptr<dbus::MessageWriter> message_writer;
+  std::unique_ptr<dbus::MethodCall> method_call;
+  std::unique_ptr<dbus::MessageWriter> message_writer;
 
   switch (api_) {
     case NO_API:
@@ -326,7 +348,7 @@ void PowerSaveBlockerImpl::Delegate::RemoveBlock() {
   }
 
   scoped_refptr<dbus::ObjectProxy> object_proxy;
-  scoped_ptr<dbus::MethodCall> method_call;
+  std::unique_ptr<dbus::MethodCall> method_call;
 
   switch (api_) {
     case NO_API:
@@ -384,6 +406,17 @@ void PowerSaveBlockerImpl::Delegate::RemoveBlockFinished(
 }
 
 // static
+void PowerSaveBlockerImpl::Delegate::XSSSuspendSet(bool suspend) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  if (!XSSAvailable())
+    return;
+
+  XDisplay* display = gfx::GetXDisplay();
+  XScreenSaverSuspend(display, suspend);
+}
+
+// static
 bool PowerSaveBlockerImpl::Delegate::DPMSEnabled() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   XDisplay* display = gfx::GetXDisplay();
@@ -397,9 +430,26 @@ bool PowerSaveBlockerImpl::Delegate::DPMSEnabled() {
 }
 
 // static
+bool PowerSaveBlockerImpl::Delegate::XSSAvailable() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  XDisplay* display = gfx::GetXDisplay();
+  int dummy;
+  int major;
+  int minor;
+
+  if (!XScreenSaverQueryExtension(display, &dummy, &dummy))
+    return false;
+
+  if (!XScreenSaverQueryVersion(display, &major, &minor))
+    return false;
+
+  return major > 1 || (major == 1 && minor >= 1);
+}
+
+// static
 DBusAPI PowerSaveBlockerImpl::Delegate::SelectAPI() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  scoped_ptr<base::Environment> env(base::Environment::Create());
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
   switch (base::nix::GetDesktopEnvironment(env.get())) {
     case base::nix::DESKTOP_ENVIRONMENT_GNOME:
     case base::nix::DESKTOP_ENVIRONMENT_UNITY:

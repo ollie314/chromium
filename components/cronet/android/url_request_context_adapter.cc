@@ -19,9 +19,9 @@
 #include "components/cronet/url_request_context_config.h"
 #include "net/android/network_change_notifier_factory_android.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/network_delegate_impl.h"
+#include "net/base/url_util.h"
 #include "net/cert/cert_verifier.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_network_layer.h"
@@ -147,14 +147,15 @@ void URLRequestContextAdapter::InitRequestContextOnNetworkThread() {
   // TODO(mef): Remove this work around for crbug.com/543366 once it is fixed.
   net::URLRequestContextBuilder::HttpNetworkSessionParams
       custom_http_network_session_params;
-  custom_http_network_session_params.use_alternative_services = false;
+  custom_http_network_session_params.parse_alternative_services = false;
   context_builder.set_http_network_session_params(
       custom_http_network_session_params);
 
   context_builder.set_network_delegate(
       make_scoped_ptr(new BasicNetworkDelegate()));
   context_builder.set_proxy_config_service(std::move(proxy_config_service_));
-  config_->ConfigureURLRequestContextBuilder(&context_builder, nullptr);
+  config_->ConfigureURLRequestContextBuilder(&context_builder, nullptr,
+                                             nullptr);
 
   context_ = context_builder.Build();
 
@@ -164,10 +165,7 @@ void URLRequestContextAdapter::InitRequestContextOnNetworkThread() {
         new net::SdchOwner(context_->sdch_manager(), context_.get()));
   }
 
-  // Currently (circa M39) enabling QUIC requires setting probability threshold.
   if (config_->enable_quic) {
-    context_->http_server_properties()
-        ->SetAlternativeServiceProbabilityThreshold(0.0f);
     for (size_t hint = 0; hint < config_->quic_hints.size(); ++hint) {
       const URLRequestContextConfig::QuicHint& quic_hint =
           *config_->quic_hints[hint];
@@ -204,8 +202,7 @@ void URLRequestContextAdapter::InitRequestContextOnNetworkThread() {
           net::AlternateProtocol::QUIC, "",
           static_cast<uint16_t>(quic_hint.alternate_port));
       context_->http_server_properties()->SetAlternativeService(
-          quic_hint_host_port_pair, alternative_service, 1.0f,
-          base::Time::Max());
+          quic_hint_host_port_pair, alternative_service, base::Time::Max());
     }
   }
   load_disable_cache_ = config_->load_disable_cache;

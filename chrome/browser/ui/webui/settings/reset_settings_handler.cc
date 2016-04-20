@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -25,12 +24,12 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 
 #if defined(OS_CHROMEOS)
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
@@ -38,6 +37,7 @@
 #include "chrome/common/pref_names.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
+#include "components/prefs/pref_service.h"
 #include "components/user_manager/user_manager.h"
 #endif  // defined(OS_CHROMEOS)
 
@@ -110,10 +110,12 @@ void ResetSettingsHandler::RegisterMessages() {
 }
 
 void ResetSettingsHandler::HandleResetProfileSettings(
-    const base::ListValue* value) {
+    const base::ListValue* args) {
+  CHECK_EQ(2U, args->GetSize());
+  std::string callback_id;
+  CHECK(args->GetString(0, &callback_id));
   bool send_settings = false;
-  bool success = value->GetBoolean(0, &send_settings);
-  DCHECK(success);
+  CHECK(args->GetBoolean(1, &send_settings));
 
   DCHECK(brandcode_.empty() || config_fetcher_);
   if (config_fetcher_ && config_fetcher_->IsActive()) {
@@ -121,26 +123,23 @@ void ResetSettingsHandler::HandleResetProfileSettings(
     config_fetcher_->SetCallback(
         base::Bind(&ResetSettingsHandler::ResetProfile,
                    base::Unretained(this),
+                   callback_id,
                    send_settings));
   } else {
-    ResetProfile(send_settings);
+    ResetProfile(callback_id, send_settings);
   }
 }
 
 void ResetSettingsHandler::OnResetProfileSettingsDone(
-    bool send_feedback) {
-  web_ui()->CallJavascriptFunction("SettingsResetPage.doneResetting");
+    std::string callback_id, bool send_feedback) {
+  ResolveJavascriptCallback(
+      base::StringValue(callback_id), *base::Value::CreateNullValue());
   if (send_feedback && setting_snapshot_) {
     ResettableSettingsSnapshot current_snapshot(profile_);
     int difference = setting_snapshot_->FindDifferentFields(current_snapshot);
     if (difference) {
       setting_snapshot_->Subtract(current_snapshot);
-      std::string report = SerializeSettingsReport(*setting_snapshot_,
-                                                   difference);
-      SendSettingsFeedback(report, profile_);
-
-      // Send the same report as a protobuf to a different endpoint.
-      scoped_ptr<reset_report::ChromeResetReport> report_proto =
+      std::unique_ptr<reset_report::ChromeResetReport> report_proto =
           SerializeSettingsReportToProto(*setting_snapshot_, difference);
       if (report_proto)
         SendSettingsFeedbackProto(*report_proto, profile_);
@@ -150,7 +149,7 @@ void ResetSettingsHandler::OnResetProfileSettingsDone(
 }
 
 void ResetSettingsHandler::OnShowResetProfileDialog(
-    const base::ListValue* value) {
+    const base::ListValue* args) {
   if (!GetResetter()->IsActive()) {
     setting_snapshot_.reset(new ResettableSettingsSnapshot(profile_));
     setting_snapshot_->RequestShortcuts(base::Bind(
@@ -169,13 +168,13 @@ void ResetSettingsHandler::OnShowResetProfileDialog(
 }
 
 void ResetSettingsHandler::OnHideResetProfileDialog(
-    const base::ListValue* value) {
+    const base::ListValue* args) {
   if (!GetResetter()->IsActive())
     setting_snapshot_.reset();
 }
 
 void ResetSettingsHandler::OnHideResetProfileBanner(
-    const base::ListValue* value) {
+    const base::ListValue* args) {
   chrome_prefs::ClearResetTime(profile_);
 }
 
@@ -185,10 +184,11 @@ void ResetSettingsHandler::OnSettingsFetched() {
   // The master prefs is fetched. We are waiting for user pressing 'Reset'.
 }
 
-void ResetSettingsHandler::ResetProfile(bool send_settings) {
+void ResetSettingsHandler::ResetProfile(std::string callback_id,
+                                        bool send_settings) {
   DCHECK(!GetResetter()->IsActive());
 
-  scoped_ptr<BrandcodedDefaultSettings> default_settings;
+  std::unique_ptr<BrandcodedDefaultSettings> default_settings;
   if (config_fetcher_) {
     DCHECK(!config_fetcher_->IsActive());
     default_settings = config_fetcher_->GetSettings();
@@ -206,6 +206,7 @@ void ResetSettingsHandler::ResetProfile(bool send_settings) {
       ProfileResetter::ALL, std::move(default_settings),
       base::Bind(&ResetSettingsHandler::OnResetProfileSettingsDone,
                  weak_ptr_factory_.GetWeakPtr(),
+                 callback_id,
                  send_settings));
   content::RecordAction(base::UserMetricsAction("ResetProfile"));
   UMA_HISTOGRAM_BOOLEAN("ProfileReset.SendFeedback", send_settings);
@@ -214,12 +215,11 @@ void ResetSettingsHandler::ResetProfile(bool send_settings) {
 void ResetSettingsHandler::UpdateFeedbackUI() {
   if (!setting_snapshot_)
     return;
-  scoped_ptr<base::ListValue> list = GetReadableFeedbackForSnapshot(
-      profile_, *setting_snapshot_);
-  base::DictionaryValue feedback_info;
-  feedback_info.Set("feedbackInfo", list.release());
-  web_ui()->CallJavascriptFunction(
-      "SettingsResetPage.setFeedbackInfo", feedback_info);
+  std::unique_ptr<base::ListValue> list =
+      GetReadableFeedbackForSnapshot(profile_, *setting_snapshot_);
+  web_ui()->CallJavascriptFunction("cr.webUIListenerCallback",
+                                   base::StringValue("feedback-info-changed"),
+                                   *list.release());
 }
 
 ProfileResetter* ResetSettingsHandler::GetResetter() {

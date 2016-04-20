@@ -21,7 +21,7 @@ void ProxyGetOrDownloadCallback(
     const scoped_refptr<base::SequencedTaskRunner>& task_runner,
     const AttachmentService::GetOrDownloadCallback& callback,
     const AttachmentService::GetOrDownloadResult& result,
-    scoped_ptr<AttachmentMap> attachments) {
+    std::unique_ptr<AttachmentMap> attachments) {
   task_runner->PostTask(
       FROM_HERE, base::Bind(callback, result, base::Passed(&attachments)));
 }
@@ -45,6 +45,9 @@ AttachmentServiceProxy::AttachmentServiceProxy(
   DCHECK(wrapped_task_runner_.get());
   DCHECK(core_.get());
 }
+
+AttachmentServiceProxy::AttachmentServiceProxy(
+    const AttachmentServiceProxy& other) = default;
 
 AttachmentServiceProxy::~AttachmentServiceProxy() {
 }

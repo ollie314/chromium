@@ -5,6 +5,8 @@
 #ifndef CONTENT_PUBLIC_BROWSER_NAVIGATION_HANDLE_H_
 #define CONTENT_PUBLIC_BROWSER_NAVIGATION_HANDLE_H_
 
+#include <memory>
+
 #include "content/common/content_export.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/common/referrer.h"
@@ -19,6 +21,11 @@ class RenderFrameHost;
 class WebContents;
 
 // A NavigationHandle tracks information related to a single navigation.
+// NavigationHandles are provided to several WebContentsObserver methods to
+// allow observers to track specific navigations. Observers should clear any
+// references to a NavigationHandle at the time of
+// WebContentsObserver::DidFinishNavigation, just before the handle is
+// destroyed.
 class CONTENT_EXPORT NavigationHandle {
  public:
   virtual ~NavigationHandle() {}
@@ -35,6 +42,29 @@ class CONTENT_EXPORT NavigationHandle {
   // Whether the navigation is taking place in the main frame or in a subframe.
   // This remains constant over the navigation lifetime.
   virtual bool IsInMainFrame() = 0;
+
+  // Whether the navigation is taking place in a frame that is a direct child
+  // of the main frame. This remains constant over the navigation lifetime.
+  virtual bool IsParentMainFrame() = 0;
+
+  // Whether the navigation is synchronous or not. Examples of synchronous
+  // navigations are:
+  // * reference fragment navigations
+  // * pushState/popState
+  virtual bool IsSynchronousNavigation() = 0;
+
+  // Whether the navigation is for an iframe with srcdoc attribute.
+  virtual bool IsSrcdoc() = 0;
+
+  // Returns the FrameTreeNode ID for the frame in which the navigation is
+  // performed. This ID is browser-global and uniquely identifies a frame that
+  // hosts content. The identifier is fixed at the creation of the frame and
+  // stays constant for the lifetime of the frame.
+  virtual int GetFrameTreeNodeId() = 0;
+
+  // Returns the FrameTreeNode ID for the parent frame. If this navigation is
+  // taking place in the main frame, the value returned is -1.
+  virtual int GetParentFrameTreeNodeId() = 0;
 
   // The WebContents the navigation is taking place in.
   WebContents* GetWebContents();
@@ -85,6 +115,9 @@ class CONTENT_EXPORT NavigationHandle {
   // before the navigation has committed.
   virtual bool IsSamePage() = 0;
 
+  // Whether the navigation has encountered a server redirect or not.
+  virtual bool WasServerRedirect() = 0;
+
   // Whether the navigation has committed. This returns true for either
   // successful commits or error pages that replace the previous page
   // (distinguished by |IsErrorPage|), and false for errors that leave the user
@@ -107,7 +140,7 @@ class CONTENT_EXPORT NavigationHandle {
   //
   // The following methods should be used exclusively for writing unit tests.
 
-  static scoped_ptr<NavigationHandle> CreateNavigationHandleForTesting(
+  static std::unique_ptr<NavigationHandle> CreateNavigationHandleForTesting(
       const GURL& url,
       RenderFrameHost* render_frame_host);
 
@@ -119,7 +152,7 @@ class CONTENT_EXPORT NavigationHandle {
   // ContentBrowserClient::CreateThrottlesForNavigation. This ensures proper
   // ordering of the throttles.
   virtual void RegisterThrottleForTesting(
-      scoped_ptr<NavigationThrottle> navigation_throttle) = 0;
+      std::unique_ptr<NavigationThrottle> navigation_throttle) = 0;
 
   // Simulates the network request starting.
   virtual NavigationThrottle::ThrottleCheckResult

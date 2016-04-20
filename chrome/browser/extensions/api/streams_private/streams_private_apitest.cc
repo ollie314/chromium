@@ -6,7 +6,6 @@
 
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_service.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -17,6 +16,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/render_process_host.h"
@@ -54,8 +54,8 @@ namespace {
 
 // Test server's request handler.
 // Returns response that should be sent by the test server.
-scoped_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
-  scoped_ptr<BasicHttpResponse> response(new BasicHttpResponse());
+std::unique_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
+  std::unique_ptr<BasicHttpResponse> response(new BasicHttpResponse());
 
   // For relative path "/doc_path.doc", return success response with MIME type
   // "application/msword".
@@ -182,7 +182,7 @@ class StreamsPrivateApiTest : public ExtensionApiTest {
     info.tab_id = 10;
     info.expected_content_size = 20;
 
-    scoped_ptr<Event> event(new Event(
+    std::unique_ptr<Event> event(new Event(
         extensions::events::STREAMS_PRIVATE_ON_EXECUTE_MIME_TYPE_HANDLER,
         streams_private::OnExecuteMimeTypeHandler::kEventName,
         streams_private::OnExecuteMimeTypeHandler::Create(info)));
@@ -237,7 +237,7 @@ class StreamsPrivateApiTest : public ExtensionApiTest {
  protected:
   std::string test_extension_id_;
   // The HTTP server used in the tests.
-  scoped_ptr<net::EmbeddedTestServer> test_server_;
+  std::unique_ptr<net::EmbeddedTestServer> test_server_;
   base::ScopedTempDir downloads_dir_;
 };
 
@@ -357,7 +357,7 @@ IN_PROC_BROWSER_TEST_F(StreamsPrivateApiTest, NavigateToAnAttachment) {
 
   // The test should start a download.
   DownloadManager* download_manager = GetDownloadManager();
-  scoped_ptr<content::DownloadTestObserver> download_observer(
+  std::unique_ptr<content::DownloadTestObserver> download_observer(
       new content::DownloadTestObserverInProgress(download_manager, 1));
 
   ui_test_utils::NavigateToURL(browser(),
@@ -394,7 +394,7 @@ IN_PROC_BROWSER_TEST_F(StreamsPrivateApiTest, DirectDownload) {
   ResultCatcher catcher;
 
   DownloadManager* download_manager = GetDownloadManager();
-  scoped_ptr<content::DownloadTestObserver> download_observer(
+  std::unique_ptr<content::DownloadTestObserver> download_observer(
       new content::DownloadTestObserverInProgress(download_manager, 1));
 
   // The resource's URL on the test server.
@@ -408,7 +408,7 @@ IN_PROC_BROWSER_TEST_F(StreamsPrivateApiTest, DirectDownload) {
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(web_contents);
-  scoped_ptr<DownloadUrlParameters> params(
+  std::unique_ptr<DownloadUrlParameters> params(
       DownloadUrlParameters::FromWebContents(web_contents, url));
   params->set_file_path(target_path);
 

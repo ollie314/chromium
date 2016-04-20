@@ -248,6 +248,15 @@ string CryptoHandshakeMessage::DebugStringInternal(size_t indent) const {
           done = true;
         }
         break;
+      case kRCID:
+        // uint64_t value
+        if (it->second.size() == 8) {
+          uint64_t value;
+          memcpy(&value, it->second.data(), sizeof(value));
+          ret += base::Uint64ToString(value);
+          done = true;
+        }
+        break;
       case kTBKP:
       case kKEXS:
       case kAEAD:
@@ -295,7 +304,7 @@ string CryptoHandshakeMessage::DebugStringInternal(size_t indent) const {
       case kSCFG:
         // nested messages.
         if (!it->second.empty()) {
-          scoped_ptr<CryptoHandshakeMessage> msg(
+          std::unique_ptr<CryptoHandshakeMessage> msg(
               CryptoFramer::ParseMessage(it->second));
           if (msg.get()) {
             ret += "\n";

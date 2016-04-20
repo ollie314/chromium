@@ -264,6 +264,13 @@ void ContentSettingsRegistry::Init() {
            WebsiteSettingsInfo::REQUESTING_ORIGIN_ONLY_SCOPE,
            ContentSettingsInfo::INHERIT_IN_INCOGNITO);
 
+  Register(CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC, "background-sync",
+           CONTENT_SETTING_ALLOW, WebsiteSettingsInfo::UNSYNCABLE,
+           WhitelistedSchemes(),
+           ValidSettings(CONTENT_SETTING_ALLOW, CONTENT_SETTING_BLOCK),
+           WebsiteSettingsInfo::REQUESTING_ORIGIN_ONLY_SCOPE,
+           ContentSettingsInfo::INHERIT_IN_INCOGNITO);
+
   // Content settings that aren't used to store any data. TODO(raymes): use a
   // different mechanism rather than content settings to represent these.
   // Since nothing is stored in them, there is no real point in them being a
@@ -278,6 +285,13 @@ void ContentSettingsRegistry::Init() {
            CONTENT_SETTING_DEFAULT, WebsiteSettingsInfo::UNSYNCABLE,
            WhitelistedSchemes(), ValidSettings(),
            WebsiteSettingsInfo::TOP_LEVEL_DOMAIN_ONLY_SCOPE,
+           ContentSettingsInfo::INHERIT_IN_INCOGNITO);
+
+  Register(CONTENT_SETTINGS_TYPE_BLUETOOTH_GUARD, "bluetooth-guard",
+           CONTENT_SETTING_ASK, WebsiteSettingsInfo::UNSYNCABLE,
+           WhitelistedSchemes(),
+           ValidSettings(CONTENT_SETTING_ASK, CONTENT_SETTING_BLOCK),
+           WebsiteSettingsInfo::REQUESTING_ORIGIN_AND_TOP_LEVEL_ORIGIN_SCOPE,
            ContentSettingsInfo::INHERIT_IN_INCOGNITO);
 }
 
@@ -302,7 +316,8 @@ void ContentSettingsRegistry::Register(
   const WebsiteSettingsInfo* website_settings_info =
       website_settings_registry_->Register(
           type, name, std::move(default_value), sync_status,
-          WebsiteSettingsInfo::NOT_LOSSY, scoping_type);
+          WebsiteSettingsInfo::NOT_LOSSY, scoping_type,
+          WebsiteSettingsInfo::INHERIT_IN_INCOGNITO);
   DCHECK(!ContainsKey(content_settings_info_, type));
   content_settings_info_[type] = make_scoped_ptr(
       new ContentSettingsInfo(website_settings_info, whitelisted_schemes,

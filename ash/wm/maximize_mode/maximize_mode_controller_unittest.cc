@@ -118,7 +118,7 @@ class MaximizeModeControllerTest : public test::AshTestBase {
   // Attaches a SimpleTestTickClock to the MaximizeModeController with a non
   // null value initial value.
   void AttachTickClockForTest() {
-    scoped_ptr<base::TickClock> tick_clock(
+    std::unique_ptr<base::TickClock> tick_clock(
         test_tick_clock_ = new base::SimpleTestTickClock());
     test_tick_clock_->Advance(base::TimeDelta::FromSeconds(1));
     maximize_mode_controller()->SetTickClockForTest(std::move(tick_clock));
@@ -153,6 +153,10 @@ class MaximizeModeControllerTest : public test::AshTestBase {
 
   bool WasLidOpenedRecently() {
     return maximize_mode_controller()->WasLidOpenedRecently();
+  }
+
+  bool AreEventsBlocked() {
+    return !!maximize_mode_controller()->event_blocker_.get();
   }
 
   base::UserActionTester* user_action_tester() { return &user_action_tester_; }
@@ -428,9 +432,9 @@ TEST_F(MaximizeModeControllerTest, DisplayDisconnectionDuringOverview) {
     return;
 
   UpdateDisplay("800x600,800x600");
-  scoped_ptr<aura::Window> w1(
+  std::unique_ptr<aura::Window> w1(
       CreateTestWindowInShellWithBounds(gfx::Rect(0, 0, 100, 100)));
-  scoped_ptr<aura::Window> w2(
+  std::unique_ptr<aura::Window> w2(
       CreateTestWindowInShellWithBounds(gfx::Rect(800, 0, 100, 100)));
   ASSERT_NE(w1->GetRootWindow(), w2->GetRootWindow());
 
@@ -454,6 +458,7 @@ TEST_F(MaximizeModeControllerTest, NoMaximizeModeWithDisabledInternalDisplay) {
 
   OpenLidToAngle(270.0f);
   EXPECT_TRUE(IsMaximizeModeStarted());
+  EXPECT_TRUE(AreEventsBlocked());
 
   // Deactivate internal display to simulate Docked Mode.
   std::vector<DisplayInfo> secondary_only;
@@ -462,9 +467,11 @@ TEST_F(MaximizeModeControllerTest, NoMaximizeModeWithDisabledInternalDisplay) {
   display_manager->OnNativeDisplaysChanged(secondary_only);
   ASSERT_FALSE(display_manager->IsActiveDisplayId(internal_display_id));
   EXPECT_FALSE(IsMaximizeModeStarted());
+  EXPECT_FALSE(AreEventsBlocked());
 
   OpenLidToAngle(270.0f);
   EXPECT_FALSE(IsMaximizeModeStarted());
+  EXPECT_FALSE(AreEventsBlocked());
 }
 
 class MaximizeModeControllerSwitchesTest : public MaximizeModeControllerTest {

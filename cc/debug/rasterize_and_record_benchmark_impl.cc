@@ -25,7 +25,7 @@ namespace {
 
 const int kDefaultRasterizeRepeatCount = 100;
 
-void RunBenchmark(DisplayListRasterSource* raster_source,
+void RunBenchmark(RasterSource* raster_source,
                   const gfx::Rect& content_rect,
                   float contents_scale,
                   size_t repeat_count,
@@ -54,7 +54,8 @@ void RunBenchmark(DisplayListRasterSource* raster_source,
       SkCanvas canvas(bitmap);
 
       raster_source->PlaybackToCanvas(&canvas, content_rect, content_rect,
-                                      contents_scale);
+                                      contents_scale,
+                                      RasterSource::PlaybackSettings());
 
       timer.NextLap();
     } while (!timer.HasTimeLimitExpired());
@@ -124,13 +125,15 @@ RasterizeAndRecordBenchmarkImpl::~RasterizeAndRecordBenchmarkImpl() {}
 
 void RasterizeAndRecordBenchmarkImpl::DidCompleteCommit(
     LayerTreeHostImpl* host) {
-  LayerTreeHostCommon::CallFunctionForSubtree(
-      host->RootLayer(), [this](LayerImpl* layer) {
+  LayerTreeHostCommon::CallFunctionForEveryLayer(
+      host->active_tree(),
+      [this](LayerImpl* layer) {
         rasterize_results_.total_layers++;
         layer->RunMicroBenchmark(this);
-      });
+      },
+      CallFunctionLayerType::ALL_LAYERS);
 
-  scoped_ptr<base::DictionaryValue> result(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   result->SetDouble("rasterize_time_ms",
                     rasterize_results_.total_best_time.InMillisecondsF());
   result->SetDouble("total_pictures_in_pile_size",
@@ -169,16 +172,17 @@ void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
   // it takes to rasterize content. As such, the actual settings used here don't
   // really matter.
   const LayerTreeSettings& settings = layer->layer_tree_impl()->settings();
-  scoped_ptr<PictureLayerTilingSet> tiling_set = PictureLayerTilingSet::Create(
-      layer->GetTree(), &client, settings.tiling_interest_area_padding,
-      settings.skewport_target_time_in_seconds,
-      settings.skewport_extrapolation_limit_in_content_pixels);
+  std::unique_ptr<PictureLayerTilingSet> tiling_set =
+      PictureLayerTilingSet::Create(
+          layer->GetTree(), &client, settings.tiling_interest_area_padding,
+          settings.skewport_target_time_in_seconds,
+          settings.skewport_extrapolation_limit_in_content_pixels);
 
   PictureLayerTiling* tiling =
       tiling_set->AddTiling(1.f, layer->GetRasterSource());
   tiling->set_resolution(HIGH_RESOLUTION);
   tiling->CreateAllTilesForTesting();
-  DisplayListRasterSource* raster_source = tiling->raster_source();
+  RasterSource* raster_source = tiling->raster_source().get();
   for (PictureLayerTiling::CoverageIterator it(tiling, 1.f,
                                                layer->visible_layer_rect());
        it; ++it) {
@@ -203,7 +207,7 @@ void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
     rasterize_results_.total_best_time += min_time;
   }
 
-  const DisplayListRasterSource* layer_raster_source = layer->GetRasterSource();
+  const RasterSource* layer_raster_source = layer->GetRasterSource();
   rasterize_results_.total_memory_usage +=
       layer_raster_source->GetPictureMemoryUsage();
 }

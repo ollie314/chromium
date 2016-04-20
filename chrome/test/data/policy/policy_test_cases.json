@@ -204,6 +204,9 @@
   "RemoteAccessClientFirewallTraversal": {
   },
 
+  "RemoteAccessHostClientDomain": {
+  },
+
   "RemoteAccessHostFirewallTraversal": {
   },
 
@@ -331,11 +334,7 @@
   },
 
   "PasswordManagerAllowShowPasswords": {
-    "os": ["win", "linux", "mac", "chromeos"],
-    "test_policy": { "PasswordManagerAllowShowPasswords": false },
-    "pref_mappings": [
-      { "pref": "profile.password_manager_allow_show_passwords" }
-    ]
+    "note": "This policy is retired, see http://crbug.com/598698."
   },
 
   "ContextualSearchEnabled": {
@@ -992,6 +991,24 @@
     "note": "TODO(bartfab): Flag this with can_be_recommended when http://crbug.com/106682 is fixed."
   },
 
+  "DefaultKeygenSetting": {
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "test_policy": { "DefaultKeygenSetting": 2 },
+    "pref_mappings": [
+      { "pref": "profile.managed_default_content_settings.keygen",
+        "indicator_selector": "[content-setting=keygen]",
+        "indicator_tests": [
+          { "policy": { "DefaultKeygenSetting": 1 },
+            "value": "allow"},
+          { "policy": { "DefaultKeygenSetting": 2 },
+            "value": "block"}
+        ]
+      }
+    ],
+
+    "note": "TODO(bartfab): Flag this with can_be_recommended when http://crbug.com/106682 is fixed."
+  },
+
   "DefaultPluginsSetting": {
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "DefaultPluginsSetting": 2 },
@@ -1194,6 +1211,14 @@
     ]
   },
 
+  "DefaultWebBluetoothGuardSetting": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "DefaultWebBluetoothGuardSetting": 2 },
+    "pref_mappings": [
+      { "pref": "profile.managed_default_content_settings.web_bluetooth_guard" }
+    ]
+  },
+
   "AutoSelectCertificateForUrls": {
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "AutoSelectCertificateForUrls": ["{'pattern':'https://example.com','filter':{'ISSUER':{'CN': 'issuer-name'}}}"] },
@@ -1309,6 +1334,38 @@
         "indicator_selector": "[content-exception=javascript]",
         "indicator_tests": [
           { "policy": { "JavaScriptBlockedForUrls": ["[*.]google.com"] } }
+        ]
+      }
+    ],
+
+    "note": "TODO(bartfab): Flag this with can_be_recommended when http://crbug.com/106682 is fixed."
+  },
+
+  "KeygenAllowedForUrls": {
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "test_policy": { "KeygenAllowedForUrls": ["[*.]google.com"] },
+    "pref_mappings": [
+      { "pref": "profile.managed_keygen_allowed_for_urls",
+        "indicator_test_setup_js": "document.querySelector('button.exceptions-list-button[contentType=keygen]').click();",
+        "indicator_selector": "[content-exception=keygen]",
+        "indicator_tests": [
+          { "policy": { "KeygenAllowedForUrls": ["[*.]google.com"] } }
+        ]
+      }
+    ],
+
+    "note": "TODO(bartfab): Flag this with can_be_recommended when http://crbug.com/106682 is fixed."
+  },
+
+  "KeygenBlockedForUrls": {
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "test_policy": { "KeygenBlockedForUrls": ["[*.]google.com"] },
+    "pref_mappings": [
+      { "pref": "profile.managed_keygen_blocked_for_urls",
+        "indicator_test_setup_js": "document.querySelector('button.exceptions-list-button[contentType=keygen]').click();",
+        "indicator_selector": "[content-exception=keygen]",
+        "indicator_tests": [
+          { "policy": { "KeygenBlockedForUrls": ["[*.]google.com"] } }
         ]
       }
     ],
@@ -1815,6 +1872,16 @@
     "test_policy": { "WelcomePageOnOSUpgradeEnabled": false },
     "pref_mappings": [
       { "pref": "browser.welcome_page_on_os_upgrade_enabled",
+        "local_state": true
+      }
+    ]
+  },
+
+  "SuppressUnsupportedOSWarning": {
+    "os": ["chromeos", "linux", "mac", "win"],
+    "test_policy": { "SuppressUnsupportedOSWarning": true },
+    "pref_mappings": [
+      { "pref": "browser.suppress_unsupported_os_warning",
         "local_state": true
       }
     ]
@@ -2372,6 +2439,21 @@
     ]
   },
 
+  "ArcEnabled": {
+    "os": ["chromeos"],
+    "can_be_recommended": false,
+    "test_policy": { "ArcEnabled": false },
+    "pref_mappings": [
+      { "pref": "arc.enabled" }
+    ]
+  },
+
+  "ArcPolicy": {
+    "os": ["chromeos"],
+    "can_be_recommended": false,
+    "test_policy": { "ArcPolicy": "" }
+  },
+
   "----- Chrome OS device policies ---------------------------------------": {},
 
   "DevicePolicyRefreshRate": {
@@ -2589,6 +2671,51 @@
   },
 
   "DeviceLoginScreenDomainAutoComplete": {
+  },
+
+  "AllowKioskAppControlChromeVersion": {
+  },
+  
+  "LoginAuthenticationBehavior": {
+    "os": ["chromeos"],
+    "test_policy": { "LoginAuthenticationBehavior": 1 },
+    "pref_mappings": [
+      { "pref": "cros.device.login_authentication_behavior" }
+    ]
+  },
+
+  "UsbDetachableWhitelist": {
+  },
+
+  "DeviceAllowBluetooth": {
+  },
+
+  "DeviceQuirksDownloadEnabled": {
+    "os": ["chromeos"],
+    "can_be_recommended": false,
+    "test_policy": { "DeviceQuirksDownloadEnabled": true },
+    "pref_mappings": [
+      { "pref": "cros.device.quirks_download_enabled" }
+    ]
+  },
+
+  "SystemTimezoneAutomaticDetection": {
+    "os": ["chromeos"],
+    "test_policy": { "SystemTimezoneAutomaticDetection": 1 },
+    "pref_mappings": [
+      { "pref": "cros.device.system_timezone_automatic_detection" }
+    ]
+  },
+
+  "TaskManagerEndProcessEnabled": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "TaskManagerEndProcessEnabled": false },
+    "pref_mappings": [
+      {
+        "pref": "task_manager.end_process_enabled",
+        "local_state": true
+      }
+    ]
   },
 
   "----- Chrome Frame policies -------------------------------------------": {},

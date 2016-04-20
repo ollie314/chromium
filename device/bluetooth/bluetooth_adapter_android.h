@@ -5,6 +5,8 @@
 #ifndef DEVICE_BLUETOOTH_BLUETOOTH_ADAPTER_ANDROID_H_
 #define DEVICE_BLUETOOTH_BLUETOOTH_ADAPTER_ANDROID_H_
 
+#include <memory>
+
 #include "base/android/jni_android.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
@@ -64,6 +66,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterAndroid final
                        const base::Closure& callback,
                        const ErrorCallback& error_callback) override;
   bool IsDiscovering() const override;
+  UUIDList GetUUIDs() const override;
   void CreateRfcommService(
       const BluetoothUUID& uuid,
       const ServiceOptions& options,
@@ -79,17 +82,14 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterAndroid final
       const AcquiredCallback& callback,
       const BluetoothAudioSink::ErrorCallback& error_callback) override;
   void RegisterAdvertisement(
-      scoped_ptr<BluetoothAdvertisement::Data> advertisement_data,
+      std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
       const CreateAdvertisementCallback& callback,
       const CreateAdvertisementErrorCallback& error_callback) override;
 
-  // Returns BluetoothAdapter Observers for use by Android platform
-  // implementation classes to send event notifications. Intentionally not
-  // exposed on the public base class BluetoothAdapter as it is an
-  // implementation detail.
-  base::ObserverList<device::BluetoothAdapter::Observer>& GetObservers() {
-    return observers_;
-  }
+  // Called when adapter state changes.
+  void OnAdapterStateChanged(JNIEnv* env,
+                             const base::android::JavaParamRef<jobject>& caller,
+                             const bool powered);
 
   // Handles a scan error event by invalidating all discovery sessions.
   void OnScanFailed(JNIEnv* env,
@@ -120,7 +120,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterAndroid final
       const base::Closure& callback,
       const DiscoverySessionErrorCallback& error_callback) override;
   void SetDiscoveryFilter(
-      scoped_ptr<BluetoothDiscoveryFilter> discovery_filter,
+      std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter,
       const base::Closure& callback,
       const DiscoverySessionErrorCallback& error_callback) override;
   void RemovePairingDelegateInternal(

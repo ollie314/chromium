@@ -14,18 +14,21 @@
 #include "base/path_service.h"
 #include "build/build_config.h"
 #include "cc/base/switches.h"
-#include "components/test_runner/blink_test_platform_support.h"
 #include "content/common/content_constants_internal.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/layouttest_support.h"
 #include "content/public/test/ppapi_test_utils.h"
+#include "content/shell/app/blink_test_platform_support.h"
 #include "content/shell/app/shell_crash_reporter_client.h"
 #include "content/shell/browser/layout_test/layout_test_browser_main.h"
 #include "content/shell/browser/layout_test/layout_test_content_browser_client.h"
 #include "content/shell/browser/shell_browser_main.h"
 #include "content/shell/browser/shell_content_browser_client.h"
+#include "content/shell/common/layout_test/layout_test_content_client.h"
+#include "content/shell/common/layout_test/layout_test_switches.h"
+#include "content/shell/common/shell_content_client.h"
 #include "content/shell/common/shell_switches.h"
 #include "content/shell/renderer/layout_test/layout_test_content_renderer_client.h"
 #include "content/shell/renderer/shell_content_renderer_client.h"
@@ -144,7 +147,7 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
     // If CheckLayoutSystemDeps succeeds, we don't exit early. Instead we
     // continue and try to load the fonts in BlinkTestPlatformInitialize
     // below, and then try to bring up the rest of the content module.
-    if (!test_runner::CheckLayoutSystemDeps()) {
+    if (!CheckLayoutSystemDeps()) {
       *exit_code = 1;
       return true;
     }
@@ -194,12 +197,12 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
     command_line.AppendSwitch(switches::kEnableInbandTextTracks);
     command_line.AppendSwitch(switches::kMuteAudio);
 
-    command_line.AppendSwitch(cc::switches::kEnablePropertyTreeVerification);
-
     command_line.AppendSwitch(switches::kEnablePreciseMemoryInfo);
 
     command_line.AppendSwitchASCII(switches::kHostResolverRules,
                                    "MAP *.test 127.0.0.1");
+
+    command_line.AppendSwitch(switches::kEnablePartialRaster);
 
     // Unless/until WebM files are added to the media layout tests, we need to
     // avoid removing MP4/H264/AAC so that layout tests can run on Android.
@@ -207,12 +210,18 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
     media::RemoveProprietaryMediaTypesAndCodecsForTests();
 #endif
 
-    if (!test_runner::BlinkTestPlatformInitialize()) {
+    if (!BlinkTestPlatformInitialize()) {
       *exit_code = 1;
       return true;
     }
   }
-  SetContentClient(&content_client_);
+
+  content_client_.reset(base::CommandLine::ForCurrentProcess()->HasSwitch(
+                            switches::kRunLayoutTest)
+                            ? new LayoutTestContentClient
+                            : new ShellContentClient);
+  SetContentClient(content_client_.get());
+
   return false;
 }
 
@@ -264,7 +273,7 @@ int ShellMainDelegate::RunProcess(
 #if !defined(OS_ANDROID)
   // Android stores the BrowserMainRunner instance as a scoped member pointer
   // on the ShellMainDelegate class because of different object lifetime.
-  scoped_ptr<BrowserMainRunner> browser_runner_;
+  std::unique_ptr<BrowserMainRunner> browser_runner_;
 #endif
 
   base::trace_event::TraceLog::GetInstance()->SetProcessName("Browser");

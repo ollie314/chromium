@@ -7,7 +7,6 @@
 #include "cc/animation/animation_delegate.h"
 #include "cc/animation/animation_host.h"
 #include "cc/animation/animation_id_provider.h"
-#include "cc/animation/animation_registrar.h"
 #include "cc/animation/animation_timeline.h"
 #include "cc/animation/element_animations.h"
 #include "cc/test/animation_test_common.h"
@@ -123,20 +122,20 @@ TEST_F(AnimationPlayerTest, PropertiesMutate) {
   host_->PushPropertiesTo(host_impl_);
 
   EXPECT_FALSE(client_.IsPropertyMutated(layer_id_, LayerTreeType::ACTIVE,
-                                         Animation::OPACITY));
+                                         TargetProperty::OPACITY));
   EXPECT_FALSE(client_.IsPropertyMutated(layer_id_, LayerTreeType::ACTIVE,
-                                         Animation::TRANSFORM));
+                                         TargetProperty::TRANSFORM));
   EXPECT_FALSE(client_.IsPropertyMutated(layer_id_, LayerTreeType::ACTIVE,
-                                         Animation::FILTER));
+                                         TargetProperty::FILTER));
 
   EXPECT_FALSE(client_impl_.IsPropertyMutated(layer_id_, LayerTreeType::ACTIVE,
-                                              Animation::OPACITY));
+                                              TargetProperty::OPACITY));
   EXPECT_FALSE(client_impl_.IsPropertyMutated(layer_id_, LayerTreeType::ACTIVE,
-                                              Animation::TRANSFORM));
+                                              TargetProperty::TRANSFORM));
   EXPECT_FALSE(client_impl_.IsPropertyMutated(layer_id_, LayerTreeType::ACTIVE,
-                                              Animation::FILTER));
+                                              TargetProperty::FILTER));
 
-  host_impl_->animation_registrar()->ActivateAnimations();
+  host_impl_->ActivateAnimations();
 
   base::TimeTicks time;
   time += base::TimeDelta::FromSecondsD(0.1);
@@ -205,7 +204,7 @@ TEST_F(AnimationPlayerTest, AttachTwoPlayersToOneLayer) {
                                transform_y);
 
   host_->PushPropertiesTo(host_impl_);
-  host_impl_->animation_registrar()->ActivateAnimations();
+  host_impl_->ActivateAnimations();
 
   EXPECT_FALSE(delegate1.started_);
   EXPECT_FALSE(delegate1.finished_);
@@ -269,25 +268,23 @@ TEST_F(AnimationPlayerTest, AddRemoveAnimationToNonAttachedPlayer) {
 
   EXPECT_TRUE(player_->element_animations());
   EXPECT_FALSE(player_->element_animations()
-                   ->layer_animation_controller()
                    ->GetAnimationById(filter_id));
   EXPECT_TRUE(player_->element_animations()
-                  ->layer_animation_controller()
                   ->GetAnimationById(opacity_id));
 
   host_->PushPropertiesTo(host_impl_);
 
   EXPECT_FALSE(client_.IsPropertyMutated(layer_id_, LayerTreeType::ACTIVE,
-                                         Animation::OPACITY));
+                                         TargetProperty::OPACITY));
   EXPECT_FALSE(client_impl_.IsPropertyMutated(layer_id_, LayerTreeType::ACTIVE,
-                                              Animation::OPACITY));
+                                              TargetProperty::OPACITY));
 
   EXPECT_FALSE(client_.IsPropertyMutated(layer_id_, LayerTreeType::ACTIVE,
-                                         Animation::FILTER));
+                                         TargetProperty::FILTER));
   EXPECT_FALSE(client_impl_.IsPropertyMutated(layer_id_, LayerTreeType::ACTIVE,
-                                              Animation::FILTER));
+                                              TargetProperty::FILTER));
 
-  host_impl_->animation_registrar()->ActivateAnimations();
+  host_impl_->ActivateAnimations();
 
   base::TimeTicks time;
   time += base::TimeDelta::FromSecondsD(0.1);
@@ -304,9 +301,9 @@ TEST_F(AnimationPlayerTest, AddRemoveAnimationToNonAttachedPlayer) {
                                             end_opacity);
 
   EXPECT_FALSE(client_.IsPropertyMutated(layer_id_, LayerTreeType::ACTIVE,
-                                         Animation::FILTER));
+                                         TargetProperty::FILTER));
   EXPECT_FALSE(client_impl_.IsPropertyMutated(layer_id_, LayerTreeType::ACTIVE,
-                                              Animation::FILTER));
+                                              TargetProperty::FILTER));
 }
 
 TEST_F(AnimationPlayerTest, AddRemoveAnimationCausesSetNeedsCommit) {

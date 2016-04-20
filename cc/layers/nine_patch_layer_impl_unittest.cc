@@ -4,7 +4,6 @@
 
 #include <stddef.h>
 
-#include "base/containers/hash_tables.h"
 #include "cc/layers/append_quads_data.h"
 #include "cc/layers/nine_patch_layer_impl.h"
 #include "cc/quads/texture_draw_quad.h"
@@ -38,7 +37,7 @@ void NinePatchLayerLayoutTest(const gfx::Size& bitmap_size,
                               const gfx::Rect& border,
                               bool fill_center,
                               size_t expected_quad_size) {
-  scoped_ptr<RenderPass> render_pass = RenderPass::Create();
+  std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
   gfx::Rect visible_layer_rect(layer_size);
   gfx::Rect expected_remaining(border.x(),
                                border.y(),
@@ -48,18 +47,17 @@ void NinePatchLayerLayoutTest(const gfx::Size& bitmap_size,
   FakeImplTaskRunnerProvider task_runner_provider;
   TestSharedBitmapManager shared_bitmap_manager;
   TestTaskGraphRunner task_graph_runner;
-  scoped_ptr<OutputSurface> output_surface = FakeOutputSurface::Create3d();
+  std::unique_ptr<OutputSurface> output_surface = FakeOutputSurface::Create3d();
   FakeUIResourceLayerTreeHostImpl host_impl(
       &task_runner_provider, &shared_bitmap_manager, &task_graph_runner);
   host_impl.SetVisible(true);
   host_impl.InitializeRenderer(output_surface.get());
 
-  scoped_ptr<NinePatchLayerImpl> layer =
+  std::unique_ptr<NinePatchLayerImpl> layer =
       NinePatchLayerImpl::Create(host_impl.active_tree(), 1);
   layer->draw_properties().visible_layer_rect = visible_layer_rect;
   layer->SetBounds(layer_size);
   layer->SetForceRenderSurface(true);
-  layer->draw_properties().render_target = layer.get();
 
   UIResourceId uid = 1;
   bool is_opaque = false;
@@ -68,7 +66,7 @@ void NinePatchLayerLayoutTest(const gfx::Size& bitmap_size,
   host_impl.CreateUIResource(uid, bitmap);
   layer->SetUIResourceId(uid);
   layer->SetImageBounds(bitmap_size);
-  layer->SetLayout(aperture_rect, border, fill_center);
+  layer->SetLayout(aperture_rect, border, fill_center, false);
   AppendQuadsData data;
   layer->AppendQuads(render_pass.get(), &data);
 
@@ -240,7 +238,7 @@ TEST(NinePatchLayerImplTest, Occlusion) {
 
   gfx::Rect aperture = gfx::Rect(3, 3, 4, 4);
   gfx::Rect border = gfx::Rect(300, 300, 400, 400);
-  nine_patch_layer_impl->SetLayout(aperture, border, true);
+  nine_patch_layer_impl->SetLayout(aperture, border, true, false);
 
   impl.CalcDrawProps(viewport_size);
 
@@ -318,7 +316,7 @@ TEST(NinePatchLayerImplTest, OpaqueRect) {
 
     gfx::Rect aperture = gfx::Rect(3, 3, 4, 4);
     gfx::Rect border = gfx::Rect(300, 300, 400, 400);
-    nine_patch_layer_impl->SetLayout(aperture, border, true);
+    nine_patch_layer_impl->SetLayout(aperture, border, true, false);
 
     impl.AppendQuadsWithOcclusion(nine_patch_layer_impl, gfx::Rect());
 

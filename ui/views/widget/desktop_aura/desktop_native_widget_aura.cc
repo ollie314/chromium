@@ -32,7 +32,6 @@
 #include "ui/views/view_constants_aura.h"
 #include "ui/views/widget/desktop_aura/desktop_capture_client.h"
 #include "ui/views/widget/desktop_aura/desktop_cursor_loader_updater.h"
-#include "ui/views/widget/desktop_aura/desktop_dispatcher_client.h"
 #include "ui/views/widget/desktop_aura/desktop_event_client.h"
 #include "ui/views/widget/desktop_aura/desktop_focus_rules.h"
 #include "ui/views/widget/desktop_aura/desktop_native_cursor_manager.h"
@@ -61,7 +60,6 @@
 
 #if defined(OS_WIN)
 #include "ui/base/win/shell.h"
-#include "ui/gfx/win/dpi.h"
 #endif
 
 DECLARE_EXPORTED_WINDOW_PROPERTY_TYPE(VIEWS_EXPORT,
@@ -222,7 +220,7 @@ class FocusManagerEventHandler : public ui::EventHandler {
     Widget* widget = desktop_native_widget_aura_->GetWidget();
     if (widget && widget->GetFocusManager()->GetFocusedView() &&
         !widget->GetFocusManager()->OnKeyEvent(*event)) {
-      event->SetHandled();
+      event->StopPropagation();
     }
   }
 
@@ -341,11 +339,6 @@ void DesktopNativeWidgetAura::OnHostClosed() {
 
 void DesktopNativeWidgetAura::OnDesktopWindowTreeHostDestroyed(
     aura::WindowTreeHost* host) {
-  // |dispatcher_| is still valid, but DesktopWindowTreeHost is nearly
-  // destroyed. Do cleanup here of members DesktopWindowTreeHost may also use.
-  aura::client::SetDispatcherClient(host->window(), NULL);
-  dispatcher_client_.reset();
-
   // We explicitly do NOT clear the cursor client property. Since the cursor
   // manager is a singleton, it can outlive any window hierarchy, and it's
   // important that objects attached to this destroying window hierarchy have
@@ -408,6 +401,7 @@ void DesktopNativeWidgetAura::InitNativeWidget(
     const Widget::InitParams& params) {
   ownership_ = params.ownership;
   widget_type_ = params.type;
+  name_ = params.name;
 
   NativeWidgetAura::RegisterNativeWidgetForWindow(this, content_window_);
   // Animations on TYPE_WINDOW are handled by the OS. Additionally if we animate
@@ -465,7 +459,7 @@ void DesktopNativeWidgetAura::InitNativeWidget(
   }
   if (!cursor_manager_) {
     cursor_manager_ = new wm::CursorManager(
-        scoped_ptr<wm::NativeCursorManager>(native_cursor_manager_));
+        std::unique_ptr<wm::NativeCursorManager>(native_cursor_manager_));
   }
   native_cursor_manager_->AddHost(host());
   aura::client::SetCursorClient(host_->window(), cursor_manager_);
@@ -482,10 +476,6 @@ void DesktopNativeWidgetAura::InitNativeWidget(
   aura::client::SetFocusClient(host_->window(), focus_controller);
   aura::client::SetActivationClient(host_->window(), focus_controller);
   host_->window()->AddPreTargetHandler(focus_controller);
-
-  dispatcher_client_.reset(new DesktopDispatcherClient);
-  aura::client::SetDispatcherClient(host_->window(),
-                                    dispatcher_client_.get());
 
   position_client_.reset(new DesktopScreenPositionClient(host_->window()));
 
@@ -689,18 +679,9 @@ gfx::Rect DesktopNativeWidgetAura::GetRestoredBounds() const {
 void DesktopNativeWidgetAura::SetBounds(const gfx::Rect& bounds) {
   if (!content_window_)
     return;
-  // TODO(ananta)
-  // This code by default scales the bounds rectangle by 1.
-  // We could probably get rid of this and similar logic from
-  // the DesktopNativeWidgetAura::OnWindowTreeHostResized function.
-  float scale = 1;
   aura::Window* root = host_->window();
-  if (root) {
-    scale = gfx::Screen::GetScreenFor(root)->
-        GetDisplayNearestWindow(root).device_scale_factor();
-  }
-  gfx::Rect bounds_in_pixels =
-    gfx::ScaleToEnclosingRect(bounds, scale, scale);
+  gfx::Screen* screen = gfx::Screen::GetScreen();
+  gfx::Rect bounds_in_pixels = screen->DIPToScreenRectInWindow(root, bounds);
   desktop_window_tree_host_->AsWindowTreeHost()->SetBounds(bounds_in_pixels);
 }
 
@@ -840,9 +821,6 @@ void DesktopNativeWidgetAura::SetOpacity(unsigned char opacity) {
     desktop_window_tree_host_->SetOpacity(opacity);
 }
 
-void DesktopNativeWidgetAura::SetUseDragFrame(bool use_drag_frame) {
-}
-
 void DesktopNativeWidgetAura::FlashFrame(bool flash_frame) {
   if (content_window_)
     desktop_window_tree_host_->FlashFrame(flash_frame);
@@ -969,6 +947,10 @@ void DesktopNativeWidgetAura::RepostNativeEvent(gfx::NativeEvent native_event) {
   OnEvent(native_event);
 }
 
+std::string DesktopNativeWidgetAura::GetName() const {
+  return name_;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopNativeWidgetAura, aura::WindowDelegate implementation:
 
@@ -1051,12 +1033,6 @@ void DesktopNativeWidgetAura::OnKeyEvent(ui::KeyEvent* event) {
     return;
 
   native_widget_delegate_->OnKeyEvent(event);
-  if (event->handled())
-    return;
-
-  if (GetWidget()->HasFocusManager() &&
-      !GetWidget()->GetFocusManager()->OnKeyEvent(*event))
-    event->SetHandled();
 }
 
 void DesktopNativeWidgetAura::OnMouseEvent(ui::MouseEvent* event) {
@@ -1075,7 +1051,7 @@ void DesktopNativeWidgetAura::OnScrollEvent(ui::ScrollEvent* event) {
       return;
 
     // Convert unprocessed scroll events into wheel events.
-    ui::MouseWheelEvent mwe(*static_cast<ui::ScrollEvent*>(event));
+    ui::MouseWheelEvent mwe(*event->AsScrollEvent());
     native_widget_delegate_->OnMouseEvent(&mwe);
     if (mwe.handled())
       event->SetHandled();

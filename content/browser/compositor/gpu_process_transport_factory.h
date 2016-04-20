@@ -8,16 +8,17 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 
 #include "base/id_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "build/build_config.h"
 #include "content/browser/compositor/image_transport_factory.h"
-#include "content/common/gpu/client/gpu_channel_host.h"
+#include "gpu/ipc/client/gpu_channel_host.h"
+#include "gpu/ipc/common/surface_handle.h"
 #include "ui/compositor/compositor.h"
 
 namespace base {
@@ -47,13 +48,10 @@ class GpuProcessTransportFactory
 
   ~GpuProcessTransportFactory() override;
 
-  scoped_ptr<WebGraphicsContext3DCommandBufferImpl>
-  CreateOffscreenCommandBufferContext();
-
   // ui::ContextFactory implementation.
   void CreateOutputSurface(base::WeakPtr<ui::Compositor> compositor) override;
-  scoped_ptr<ui::Reflector> CreateReflector(ui::Compositor* source,
-                                            ui::Layer* target) override;
+  std::unique_ptr<ui::Reflector> CreateReflector(ui::Compositor* source,
+                                                 ui::Layer* target) override;
   void RemoveReflector(ui::Reflector* reflector) override;
   void RemoveCompositor(ui::Compositor* compositor) override;
   scoped_refptr<cc::ContextProvider> SharedMainThreadContextProvider() override;
@@ -63,7 +61,7 @@ class GpuProcessTransportFactory
   cc::SharedBitmapManager* GetSharedBitmapManager() override;
   gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() override;
   cc::TaskGraphRunner* GetTaskGraphRunner() override;
-  scoped_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator() override;
+  std::unique_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator() override;
   void ResizeDisplay(ui::Compositor* compositor,
                      const gfx::Size& size) override;
 
@@ -88,14 +86,11 @@ class GpuProcessTransportFactory
   struct PerCompositorData;
 
   PerCompositorData* CreatePerCompositorData(ui::Compositor* compositor);
-  scoped_ptr<cc::SoftwareOutputDevice> CreateSoftwareOutputDevice(
+  std::unique_ptr<cc::SoftwareOutputDevice> CreateSoftwareOutputDevice(
       ui::Compositor* compositor);
   void EstablishedGpuChannel(base::WeakPtr<ui::Compositor> compositor,
                              bool create_gpu_output_surface,
                              int num_attempts);
-  scoped_ptr<WebGraphicsContext3DCommandBufferImpl> CreateContextCommon(
-      scoped_refptr<GpuChannelHost> gpu_channel_host,
-      int surface_id);
 
   void OnLostMainThreadSharedContextInsideCallback();
   void OnLostMainThreadSharedContext();
@@ -103,15 +98,15 @@ class GpuProcessTransportFactory
   typedef std::map<ui::Compositor*, PerCompositorData*> PerCompositorDataMap;
   PerCompositorDataMap per_compositor_data_;
   scoped_refptr<ContextProviderCommandBuffer> shared_main_thread_contexts_;
-  scoped_ptr<GLHelper> gl_helper_;
+  std::unique_ptr<GLHelper> gl_helper_;
   base::ObserverList<ImageTransportFactoryObserver> observer_list_;
-  scoped_ptr<cc::SurfaceManager> surface_manager_;
+  std::unique_ptr<cc::SurfaceManager> surface_manager_;
   uint32_t next_surface_id_namespace_;
-  scoped_ptr<cc::SingleThreadTaskGraphRunner> task_graph_runner_;
+  std::unique_ptr<cc::SingleThreadTaskGraphRunner> task_graph_runner_;
   scoped_refptr<ContextProviderCommandBuffer> shared_worker_context_provider_;
 
 #if defined(OS_WIN)
-  scoped_ptr<OutputDeviceBacking> software_backing_;
+  std::unique_ptr<OutputDeviceBacking> software_backing_;
 #endif
 
   // The contents of this map and its methods may only be used on the compositor

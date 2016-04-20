@@ -96,7 +96,7 @@ TEST(MotionEventAuraTest, PointerCountAndIds) {
 
   // Test cloning of pointer count and id information.
   // TODO(mustaq): Make a separate clone test, crbug.com/450655
-  scoped_ptr<MotionEvent> clone = event.Clone();
+  std::unique_ptr<MotionEvent> clone = event.Clone();
   EXPECT_EQ(2U, clone->GetPointerCount());
   EXPECT_EQ(ids[0], clone->GetPointerId(0));
   EXPECT_EQ(ids[2], clone->GetPointerId(1));
@@ -194,7 +194,7 @@ TEST(MotionEventAuraTest, PointerLocations) {
   EXPECT_FLOAT_EQ(raw_y, event.GetRawY(1));
 
   // Test cloning of pointer location information.
-  scoped_ptr<MotionEvent> clone = event.Clone();
+  std::unique_ptr<MotionEvent> clone = event.Clone();
   EXPECT_EQ(event.GetUniqueEventId(), clone->GetUniqueEventId());
   EXPECT_EQ(test::ToString(event), test::ToString(*clone));
   EXPECT_EQ(2U, clone->GetPointerCount());
@@ -275,7 +275,7 @@ TEST(MotionEventAuraTest, TapParams) {
 
   // Test cloning of tap params
   // TODO(mustaq): Make a separate clone test, crbug.com/450655
-  scoped_ptr<MotionEvent> clone = event.Clone();
+  std::unique_ptr<MotionEvent> clone = event.Clone();
   EXPECT_EQ(event.GetUniqueEventId(), clone->GetUniqueEventId());
   EXPECT_EQ(test::ToString(event), test::ToString(*clone));
   EXPECT_EQ(2U, clone->GetPointerCount());
@@ -358,7 +358,7 @@ TEST(MotionEventAuraTest, Timestamps) {
   EXPECT_EQ(MsToTicks(times_in_ms[2]), event.GetEventTime());
 
   // Test cloning of timestamp information.
-  scoped_ptr<MotionEvent> clone = event.Clone();
+  std::unique_ptr<MotionEvent> clone = event.Clone();
   EXPECT_EQ(MsToTicks(times_in_ms[2]), clone->GetEventTime());
 }
 
@@ -379,7 +379,7 @@ TEST(MotionEventAuraTest, CachedAction) {
   EXPECT_EQ(2U, event.GetPointerCount());
 
   // Test cloning of CachedAction information.
-  scoped_ptr<MotionEvent> clone = event.Clone();
+  std::unique_ptr<MotionEvent> clone = event.Clone();
   EXPECT_EQ(MotionEvent::ACTION_POINTER_DOWN, clone->GetAction());
   EXPECT_EQ(1, clone->GetActionIndex());
 
@@ -419,21 +419,23 @@ TEST(MotionEventAuraTest, Cancel) {
   EXPECT_EQ(1, event.GetActionIndex());
   EXPECT_EQ(2U, event.GetPointerCount());
 
-  scoped_ptr<MotionEvent> cancel = event.Cancel();
+  std::unique_ptr<MotionEvent> cancel = event.Cancel();
   EXPECT_EQ(MotionEvent::ACTION_CANCEL, cancel->GetAction());
   EXPECT_EQ(2U, cancel->GetPointerCount());
 }
 
 TEST(MotionEventAuraTest, ToolType) {
   MotionEventAura event;
-
-  EXPECT_TRUE(event.OnTouch(TouchWithType(ET_TOUCH_PRESSED, 7)));
+  TouchEvent touch_event = TouchWithType(ET_TOUCH_PRESSED, 7);
+  EXPECT_TRUE(event.OnTouch(touch_event));
   ASSERT_EQ(1U, event.GetPointerCount());
   EXPECT_EQ(MotionEvent::TOOL_TYPE_FINGER, event.GetToolType(0));
 
-  // TODO(robert.bradford): crbug.com/575162: Test TOOL_TYPE_PEN when
-  // TouchEvents can have their PointerDetails::pointer_type() something other
-  // than POINTER_TYPE_TOUCH
+  PointerDetails pointer_details(EventPointerType::POINTER_TYPE_PEN, 5.0f, 5.0f,
+                                 1.0f, 0.0f, 0.0f);
+  touch_event.set_pointer_details(pointer_details);
+  EXPECT_TRUE(event.OnTouch(touch_event));
+  EXPECT_EQ(MotionEvent::TOOL_TYPE_STYLUS, event.GetToolType(0));
 }
 
 TEST(MotionEventAuraTest, Flags) {

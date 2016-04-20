@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -27,7 +26,9 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/favicon_base/favicon_types.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/sessions/core/tab_restore_service.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/sync_sessions/open_tabs_ui_delegate.h"
 #include "components/sync_sessions/synced_session.h"
 #include "content/public/browser/user_metrics.h"
@@ -272,6 +273,8 @@ bool RecentTabsSubMenuModel::GetAcceleratorForCommandId(
 }
 
 void RecentTabsSubMenuModel::ExecuteCommand(int command_id, int event_flags) {
+  UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction",
+                             menu_opened_timer_.Elapsed());
   if (command_id == IDC_SHOW_HISTORY) {
     UMA_HISTOGRAM_ENUMERATION("WrenchMenu.RecentTabsSubMenu", SHOW_MORE,
                               LIMIT_RECENT_TAB_ACTION);
@@ -308,8 +311,7 @@ void RecentTabsSubMenuModel::ExecuteCommand(int command_id, int event_flags) {
             base::UserMetricsAction("WrenchMenu_OpenRecentTabFromLocal"));
         UMA_HISTOGRAM_ENUMERATION("WrenchMenu.RecentTabsSubMenu",
                                   LOCAL_SESSION_TAB, LIMIT_RECENT_TAB_ACTION);
-        service->RestoreEntryById(context, item.tab_id,
-                                  browser_->host_desktop_type(), disposition);
+        service->RestoreEntryById(context, item.tab_id, disposition);
       }
     } else {  // Restore tab of session from other devices.
       sync_driver::OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate();
@@ -339,7 +341,7 @@ void RecentTabsSubMenuModel::ExecuteCommand(int command_id, int event_flags) {
       UMA_HISTOGRAM_ENUMERATION("WrenchMenu.RecentTabsSubMenu", RESTORE_WINDOW,
                                 LIMIT_RECENT_TAB_ACTION);
       service->RestoreEntryById(context, local_window_items_[window_items_idx],
-                                browser_->host_desktop_type(), disposition);
+                                disposition);
     }
   }
   UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.OpenRecentTab",
@@ -402,7 +404,7 @@ void RecentTabsSubMenuModel::Build() {
   // only contain navigatable (and hence executable) tab items for local
   // recently closed tabs and tabs from other devices respectively.
   // |local_window_items_| contains the local recently closed windows.
-  InsertItemWithStringIdAt(0, IDC_SHOW_HISTORY, IDS_SHOW_HISTORY);
+  InsertItemWithStringIdAt(0, IDC_SHOW_HISTORY, IDS_HISTORY_SHOW_HISTORY);
   InsertSeparatorAt(1, ui::NORMAL_SEPARATOR);
   BuildLocalEntries();
   BuildTabsFromOtherDevices();

@@ -16,7 +16,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -45,6 +44,7 @@
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -55,9 +55,11 @@
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/util_constants.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_tracker.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -235,10 +237,15 @@ void SetImportItem(PrefService* user_prefs,
 // |target_profile| for the items specified in the |items_to_import| bitfield.
 // This may be done in a separate process depending on the platform, but it will
 // always block until done.
-void ImportFromSourceProfile(ExternalProcessImporterHost* importer_host,
-                             const importer::SourceProfile& source_profile,
+void ImportFromSourceProfile(const importer::SourceProfile& source_profile,
                              Profile* target_profile,
                              uint16_t items_to_import) {
+  // Deletes itself.
+  ExternalProcessImporterHost* importer_host =
+      new ExternalProcessImporterHost;
+  // Don't show the warning dialog if import fails.
+  importer_host->set_headless();
+
   ImportEndedObserver observer;
   importer_host->set_observer(&observer);
   importer_host->StartImportSettings(source_profile,
@@ -257,7 +264,6 @@ void ImportFromSourceProfile(ExternalProcessImporterHost* importer_host,
 // Imports bookmarks from an html file whose path is provided by
 // |import_bookmarks_path|.
 void ImportFromFile(Profile* profile,
-                    ExternalProcessImporterHost* file_importer_host,
                     const std::string& import_bookmarks_path) {
   importer::SourceProfile source_profile;
   source_profile.importer_type = importer::TYPE_BOOKMARKS_FILE;
@@ -270,15 +276,13 @@ void ImportFromFile(Profile* profile,
 #endif
   source_profile.source_path = base::FilePath(import_bookmarks_path_str);
 
-  ImportFromSourceProfile(file_importer_host, source_profile, profile,
-                          importer::FAVORITES);
+  ImportFromSourceProfile(source_profile, profile, importer::FAVORITES);
   g_auto_import_state |= first_run::AUTO_IMPORT_BOOKMARKS_FILE_IMPORTED;
 }
 
 // Imports settings from the first profile in |importer_list|.
 void ImportSettings(Profile* profile,
-                    ExternalProcessImporterHost* importer_host,
-                    scoped_ptr<ImporterList> importer_list,
+                    std::unique_ptr<ImporterList> importer_list,
                     int items_to_import) {
   const importer::SourceProfile& source_profile =
       importer_list->GetSourceProfileAt(0);
@@ -290,8 +294,7 @@ void ImportSettings(Profile* profile,
   // support. If there is no overlap, skip.
   items_to_import &= source_profile.services_supported;
   if (items_to_import) {
-    ImportFromSourceProfile(importer_host, source_profile, profile,
-                            items_to_import);
+    ImportFromSourceProfile(source_profile, profile, items_to_import);
   }
 
   g_auto_import_state |= first_run::AUTO_IMPORT_PROFILE_IMPORTED;
@@ -398,13 +401,13 @@ void FirstRunBubbleLauncher::Observe(
   if (contents && contents->GetURL().SchemeIs(content::kChromeUIScheme)) {
 #if defined(OS_WIN)
     // Suppress the first run bubble if 'make chrome metro' flow is showing.
-    if (contents->GetURL().host() == chrome::kChromeUIMetroFlowHost)
+    if (contents->GetURL().host_piece() == chrome::kChromeUIMetroFlowHost)
       return;
 #endif
 
     // Suppress the first run bubble if the NTP sync promo bubble is showing
     // or if sign in is in progress.
-    if (contents->GetURL().host() == chrome::kChromeUINewTabHost) {
+    if (contents->GetURL().host_piece() == chrome::kChromeUINewTabHost) {
       Profile* profile =
           Profile::FromBrowserContext(contents->GetBrowserContext());
       SigninManagerBase* manager =
@@ -460,19 +463,19 @@ installer::MasterPreferences* LoadMasterPrefs() {
 // Makes chrome the user's default browser according to policy or
 // |make_chrome_default_for_user| if no policy is set.
 void ProcessDefaultBrowserPolicy(bool make_chrome_default_for_user) {
-  // Only proceed if chrome can be made default unattended. The interactive case
-  // (Windows 8+) is handled by the first run default browser prompt.
-  if (ShellIntegration::CanSetAsDefaultBrowser() ==
-          ShellIntegration::SET_DEFAULT_UNATTENDED) {
+  // Only proceed if chrome can be made default unattended. In other cases, this
+  // is handled by the first run default browser prompt (on Windows 8+).
+  if (shell_integration::GetDefaultWebClientSetPermission() ==
+      shell_integration::SET_DEFAULT_UNATTENDED) {
     // The policy has precedence over the user's choice.
     if (g_browser_process->local_state()->IsManagedPreference(
             prefs::kDefaultBrowserSettingEnabled)) {
       if (g_browser_process->local_state()->GetBoolean(
           prefs::kDefaultBrowserSettingEnabled)) {
-        ShellIntegration::SetAsDefaultBrowser();
+        shell_integration::SetAsDefaultBrowser();
       }
     } else if (make_chrome_default_for_user) {
-        ShellIntegration::SetAsDefaultBrowser();
+      shell_integration::SetAsDefaultBrowser();
     }
   }
 }
@@ -638,6 +641,26 @@ bool IsFirstRunSuppressed(const base::CommandLine& command_line) {
 }
 #endif
 
+bool IsMetricsReportingOptIn() {
+#if defined(OS_CHROMEOS)
+  return false;
+#elif defined(OS_ANDROID)
+  return chrome::GetChannel() == version_info::Channel::STABLE;
+#elif defined(OS_MACOSX)
+  return chrome::GetChannel() != version_info::Channel::CANARY;
+#elif defined(OS_LINUX) || defined(OS_BSD) || defined(OS_SOLARIS)
+  // Treat BSD and SOLARIS like Linux to not break those builds, although these
+  // platforms are not officially supported by Chrome.
+  return true;
+#elif defined(OS_WIN)
+  // TODO(jwd): Get this data directly from the download page.
+  // Metrics reporting for Windows is initially enabled on the download page. If
+  // it's opt-in or out can change without changes to Chrome. We should get this
+  // information directly from the download page for it to be accurate.
+  return chrome::GetChannel() == version_info::Channel::STABLE;
+#endif
+}
+
 void CreateSentinelIfNeeded() {
   if (IsChromeFirstRun())
     internal::CreateSentinel();
@@ -701,7 +724,8 @@ ProcessMasterPreferencesResult ProcessMasterPreferences(
     MasterPrefs* out_prefs) {
   DCHECK(!user_data_dir.empty());
 
-  scoped_ptr<installer::MasterPreferences> install_prefs(LoadMasterPrefs());
+  std::unique_ptr<installer::MasterPreferences> install_prefs(
+      LoadMasterPrefs());
 
   // Default value in case master preferences is missing or corrupt, or
   // ping_delay is missing.
@@ -737,7 +761,7 @@ void AutoImport(
   // It may be possible to do the if block below asynchronously. In which case,
   // get rid of this RunLoop. http://crbug.com/366116.
   base::RunLoop run_loop;
-  scoped_ptr<ImporterList> importer_list(new ImporterList());
+  std::unique_ptr<ImporterList> importer_list(new ImporterList());
   importer_list->DetectSourceProfiles(
       g_browser_process->GetApplicationLocale(),
       false,  // include_interactive_profiles?
@@ -791,26 +815,14 @@ void AutoImport(
                   importer::FAVORITES,
                   &items);
 
-    // Deletes itself.
-    ExternalProcessImporterHost* importer_host =
-        new ExternalProcessImporterHost;
-
-    // Don't show the warning dialog if import fails.
-    importer_host->set_headless();
-
     importer::LogImporterUseToMetrics(
         "AutoImport", importer_list->GetSourceProfileAt(0).importer_type);
 
-    ImportSettings(profile, importer_host, std::move(importer_list), items);
+    ImportSettings(profile, std::move(importer_list), items);
   }
 
   if (!import_bookmarks_path.empty()) {
-    // Deletes itself.
-    ExternalProcessImporterHost* file_importer_host =
-        new ExternalProcessImporterHost;
-    file_importer_host->set_headless();
-
-    ImportFromFile(profile, file_importer_host, import_bookmarks_path);
+    ImportFromFile(profile, import_bookmarks_path);
   }
 
   content::RecordAction(UserMetricsAction("FirstRunDef_Accept"));

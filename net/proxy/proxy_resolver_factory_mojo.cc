@@ -31,11 +31,11 @@
 namespace net {
 namespace {
 
-scoped_ptr<base::Value> NetLogErrorCallback(
+std::unique_ptr<base::Value> NetLogErrorCallback(
     int line_number,
     const base::string16* message,
     NetLogCaptureMode /* capture_mode */) {
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("line_number", line_number);
   dict->SetString("message", *message);
   return std::move(dict);
@@ -109,8 +109,8 @@ class ProxyResolverMojo : public ProxyResolver {
   ProxyResolverMojo(
       interfaces::ProxyResolverPtr resolver_ptr,
       HostResolver* host_resolver,
-      scoped_ptr<base::ScopedClosureRunner> on_delete_callback_runner,
-      scoped_ptr<ProxyResolverErrorObserver> error_observer,
+      std::unique_ptr<base::ScopedClosureRunner> on_delete_callback_runner,
+      std::unique_ptr<ProxyResolverErrorObserver> error_observer,
       NetLog* net_log);
   ~ProxyResolverMojo() override;
 
@@ -136,7 +136,7 @@ class ProxyResolverMojo : public ProxyResolver {
 
   HostResolver* host_resolver_;
 
-  scoped_ptr<ProxyResolverErrorObserver> error_observer_;
+  std::unique_ptr<ProxyResolverErrorObserver> error_observer_;
 
   NetLog* net_log_;
 
@@ -144,7 +144,7 @@ class ProxyResolverMojo : public ProxyResolver {
 
   base::ThreadChecker thread_checker_;
 
-  scoped_ptr<base::ScopedClosureRunner> on_delete_callback_runner_;
+  std::unique_ptr<base::ScopedClosureRunner> on_delete_callback_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(ProxyResolverMojo);
 };
@@ -198,12 +198,10 @@ ProxyResolverMojo::Job::Job(ProxyResolverMojo* resolver,
       results_(results),
       callback_(callback),
       binding_(this) {
-  interfaces::ProxyResolverRequestClientPtr client_ptr;
-  binding_.Bind(mojo::GetProxy(&client_ptr));
+  resolver_->mojo_proxy_resolver_ptr_->GetProxyForUrl(
+      mojo::String::From(url_), binding_.CreateInterfacePtrAndBind());
   binding_.set_connection_error_handler(base::Bind(
       &ProxyResolverMojo::Job::OnConnectionError, base::Unretained(this)));
-  resolver_->mojo_proxy_resolver_ptr_->GetProxyForUrl(mojo::String::From(url_),
-                                                      std::move(client_ptr));
 }
 
 ProxyResolverMojo::Job::~Job() {
@@ -249,8 +247,8 @@ void ProxyResolverMojo::Job::ReportResult(
 ProxyResolverMojo::ProxyResolverMojo(
     interfaces::ProxyResolverPtr resolver_ptr,
     HostResolver* host_resolver,
-    scoped_ptr<base::ScopedClosureRunner> on_delete_callback_runner,
-    scoped_ptr<ProxyResolverErrorObserver> error_observer,
+    std::unique_ptr<base::ScopedClosureRunner> on_delete_callback_runner,
+    std::unique_ptr<ProxyResolverErrorObserver> error_observer,
     NetLog* net_log)
     : mojo_proxy_resolver_ptr_(std::move(resolver_ptr)),
       host_resolver_(host_resolver),
@@ -327,9 +325,9 @@ class ProxyResolverFactoryMojo::Job
  public:
   Job(ProxyResolverFactoryMojo* factory,
       const scoped_refptr<ProxyResolverScriptData>& pac_script,
-      scoped_ptr<ProxyResolver>* resolver,
+      std::unique_ptr<ProxyResolver>* resolver,
       const CompletionCallback& callback,
-      scoped_ptr<ProxyResolverErrorObserver> error_observer)
+      std::unique_ptr<ProxyResolverErrorObserver> error_observer)
       : ClientMixin<interfaces::ProxyResolverFactoryRequestClient>(
             factory->host_resolver_,
             error_observer.get(),
@@ -340,11 +338,9 @@ class ProxyResolverFactoryMojo::Job
         callback_(callback),
         binding_(this),
         error_observer_(std::move(error_observer)) {
-    interfaces::ProxyResolverFactoryRequestClientPtr client_ptr;
-    binding_.Bind(mojo::GetProxy(&client_ptr));
     on_delete_callback_runner_ = factory_->mojo_proxy_factory_->CreateResolver(
         mojo::String::From(pac_script->utf16()), mojo::GetProxy(&resolver_ptr_),
-        std::move(client_ptr));
+        binding_.CreateInterfacePtrAndBind());
     resolver_ptr_.set_connection_error_handler(
         base::Bind(&ProxyResolverFactoryMojo::Job::OnConnectionError,
                    base::Unretained(this)));
@@ -370,34 +366,33 @@ class ProxyResolverFactoryMojo::Job
   }
 
   ProxyResolverFactoryMojo* const factory_;
-  scoped_ptr<ProxyResolver>* resolver_;
+  std::unique_ptr<ProxyResolver>* resolver_;
   const CompletionCallback callback_;
   interfaces::ProxyResolverPtr resolver_ptr_;
   mojo::Binding<interfaces::ProxyResolverFactoryRequestClient> binding_;
-  scoped_ptr<base::ScopedClosureRunner> on_delete_callback_runner_;
-  scoped_ptr<ProxyResolverErrorObserver> error_observer_;
+  std::unique_ptr<base::ScopedClosureRunner> on_delete_callback_runner_;
+  std::unique_ptr<ProxyResolverErrorObserver> error_observer_;
 };
 
 ProxyResolverFactoryMojo::ProxyResolverFactoryMojo(
     MojoProxyResolverFactory* mojo_proxy_factory,
     HostResolver* host_resolver,
-    const base::Callback<scoped_ptr<ProxyResolverErrorObserver>()>&
+    const base::Callback<std::unique_ptr<ProxyResolverErrorObserver>()>&
         error_observer_factory,
     NetLog* net_log)
     : ProxyResolverFactory(true),
       mojo_proxy_factory_(mojo_proxy_factory),
       host_resolver_(host_resolver),
       error_observer_factory_(error_observer_factory),
-      net_log_(net_log) {
-}
+      net_log_(net_log) {}
 
 ProxyResolverFactoryMojo::~ProxyResolverFactoryMojo() = default;
 
 int ProxyResolverFactoryMojo::CreateProxyResolver(
     const scoped_refptr<ProxyResolverScriptData>& pac_script,
-    scoped_ptr<ProxyResolver>* resolver,
+    std::unique_ptr<ProxyResolver>* resolver,
     const CompletionCallback& callback,
-    scoped_ptr<ProxyResolverFactory::Request>* request) {
+    std::unique_ptr<ProxyResolverFactory::Request>* request) {
   DCHECK(resolver);
   DCHECK(request);
   if (pac_script->type() != ProxyResolverScriptData::TYPE_SCRIPT_CONTENTS ||

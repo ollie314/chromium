@@ -463,6 +463,9 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
         mUpdateHost.startHiding(nextTabId, hintAtTabSelection);
         mIsHiding = true;
         mNextTabId = nextTabId;
+        for (int i = 0; i < mSceneOverlays.size(); i++) {
+            mSceneOverlays.get(i).onHideLayout();
+        }
     }
 
     /**
@@ -738,6 +741,10 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
      * @return Whether or not the layout consumed the event.
      */
     public boolean onBackPressed() {
+        for (int i = 0; i < mSceneOverlays.size(); i++) {
+            // If the back button was consumed by any overlays, return true.
+            if (mSceneOverlays.get(i).onBackPressed()) return true;
+        }
         return false;
     }
 
@@ -1070,6 +1077,15 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
      * @return Whether the layout is handling the model updates when a tab is creating.
      */
     public boolean handlesTabCreating() {
+        if (mLayoutTabs == null || mLayoutTabs.length != 1) return false;
+        for (int i = 0; i < mSceneOverlays.size(); i++) {
+            if (mSceneOverlays.get(i).handlesTabCreating()) {
+                // Prevent animation from happening if the overlay handles creation.
+                startHiding(mLayoutTabs[0].getId(), false);
+                doneHiding();
+                return true;
+            }
+        }
         return false;
     }
 
@@ -1120,7 +1136,9 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
      */
     public EventFilter findInterceptingEventFilter(
             MotionEvent e, Point offsets, boolean isKeyboardShowing) {
-        for (int i = 0; i < mSceneOverlays.size(); i++) {
+        // The last added overlay will be drawn on top of everything else, therefore the last
+        // filter added should have the first chance to intercept any touch events.
+        for (int i = mSceneOverlays.size() - 1; i >= 0; i--) {
             EventFilter eventFilter = mSceneOverlays.get(i).getEventFilter();
             if (offsets != null) eventFilter.setCurrentMotionEventOffsets(offsets.x, offsets.y);
             if (eventFilter.onInterceptTouchEvent(e, isKeyboardShowing)) return eventFilter;
@@ -1173,6 +1191,10 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
      * @return Whether or not to force the top controls Android view to hide.
      */
     public boolean forceHideTopControlsAndroidView() {
+        for (int i = 0; i < mSceneOverlays.size(); i++) {
+            // If any overlay wants to hide tha Android version of the top controls, hide them.
+            if (mSceneOverlays.get(i).shouldHideAndroidTopControls()) return true;
+        }
         return false;
     }
 

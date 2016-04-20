@@ -18,13 +18,20 @@ namespace battor {
 namespace {
 
 // The number of seconds that it takes a BattOr to reset.
-const uint8_t kBattOrResetTimeSeconds = 2;
+const uint8_t kBattOrResetTimeSeconds = 5;
 
 // The maximum number of times to retry when reading a message.
 const uint8_t kMaxReadAttempts = 20;
 
 // The number of milliseconds to wait before trying to read a message again.
 const uint8_t kReadRetryDelayMilliseconds = 1;
+
+// The amount of time we need to wait after recording a clock sync marker in
+// order to ensure that the sample we synced to doesn't get thrown out.
+const uint8_t kStopTracingClockSyncDelayMilliseconds = 100;
+
+// The number of seconds allowed for a given action before timing out.
+const uint8_t kBattOrTimeoutSeconds = 10;
 
 // Returns true if the specified vector of bytes decodes to a message that is an
 // ack for the specified control message type.
@@ -48,15 +55,15 @@ bool IsAckOfControlCommand(BattOrMessageType message_type,
 
 // Attempts to decode the specified vector of bytes decodes to a valid EEPROM.
 // Returns the new EEPROM, or nullptr if unsuccessful.
-scoped_ptr<BattOrEEPROM> ParseEEPROM(BattOrMessageType message_type,
-                                     const vector<char>& msg) {
+std::unique_ptr<BattOrEEPROM> ParseEEPROM(BattOrMessageType message_type,
+                                          const vector<char>& msg) {
   if (message_type != BATTOR_MESSAGE_TYPE_CONTROL_ACK)
     return nullptr;
 
   if (msg.size() != sizeof(BattOrEEPROM))
     return nullptr;
 
-  scoped_ptr<BattOrEEPROM> eeprom(new BattOrEEPROM());
+  std::unique_ptr<BattOrEEPROM> eeprom(new BattOrEEPROM());
   memcpy(eeprom.get(), msg.data(), sizeof(BattOrEEPROM));
   return eeprom;
 }
@@ -66,6 +73,7 @@ scoped_ptr<BattOrEEPROM> ParseEEPROM(BattOrMessageType message_type,
 // and samples paramaters.
 bool ParseSampleFrame(BattOrMessageType type,
                       const vector<char>& msg,
+                      uint32_t expected_sequence_number,
                       BattOrFrameHeader* frame_header,
                       vector<RawBattOrSample>* samples) {
   if (type != BATTOR_MESSAGE_TYPE_SAMPLES)
@@ -79,6 +87,13 @@ bool ParseSampleFrame(BattOrMessageType type,
   const char* frame_ptr = reinterpret_cast<const char*>(msg.data());
   memcpy(frame_header, frame_ptr, sizeof(BattOrFrameHeader));
   frame_ptr += sizeof(BattOrFrameHeader);
+
+  if (frame_header->sequence_number != expected_sequence_number) {
+    LOG(WARNING) << "Unexpected sequence number: wanted "
+                 << expected_sequence_number << ", but got "
+                 << frame_header->sequence_number << ".";
+    return false;
+  }
 
   size_t remaining_bytes = msg.size() - sizeof(BattOrFrameHeader);
   if (remaining_bytes != frame_header->length)
@@ -117,6 +132,10 @@ BattOrAgent::~BattOrAgent() {
 void BattOrAgent::StartTracing() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  // When tracing is restarted, all previous clock sync markers are invalid.
+  clock_sync_markers_.clear();
+  last_clock_sync_time_ = base::TimeTicks();
+
   command_ = Command::START_TRACING;
   PerformAction(Action::REQUEST_CONNECTION);
 }
@@ -128,6 +147,14 @@ void BattOrAgent::StopTracing() {
   PerformAction(Action::REQUEST_CONNECTION);
 }
 
+void BattOrAgent::RecordClockSyncMarker(const std::string& marker) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  command_ = Command::RECORD_CLOCK_SYNC_MARKER;
+  pending_clock_sync_marker_ = marker;
+  PerformAction(Action::REQUEST_CONNECTION);
+}
+
 void BattOrAgent::BeginConnect() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -135,6 +162,11 @@ void BattOrAgent::BeginConnect() {
 }
 
 void BattOrAgent::OnConnectionOpened(bool success) {
+  // Return immediately if opening the connection already timed out.
+  if (timeout_callback_.IsCancelled())
+    return;
+  timeout_callback_.Cancel();
+
   if (!success) {
     CompleteCommand(BATTOR_ERROR_CONNECTION_FAILED);
     return;
@@ -142,10 +174,17 @@ void BattOrAgent::OnConnectionOpened(bool success) {
 
   switch (command_) {
     case Command::START_TRACING:
+      // TODO(charliea): Ideally, we'd just like to send an init, and the BattOr
+      // firmware can handle whether a reset is necessary or not, sending an
+      // init ack regardless. This reset can be removed once this is true.
+      // https://github.com/aschulm/battor/issues/30 tracks this.
       PerformAction(Action::SEND_RESET);
       return;
     case Command::STOP_TRACING:
       PerformAction(Action::SEND_EEPROM_REQUEST);
+      return;
+    case Command::RECORD_CLOCK_SYNC_MARKER:
+      PerformAction(Action::SEND_CURRENT_SAMPLE_REQUEST);
       return;
     case Command::INVALID:
       NOTREACHED();
@@ -155,6 +194,12 @@ void BattOrAgent::OnConnectionOpened(bool success) {
 void BattOrAgent::OnBytesSent(bool success) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  // Return immediately if whatever action we were trying to perform already
+  // timed out.
+  if (timeout_callback_.IsCancelled())
+    return;
+  timeout_callback_.Cancel();
+
   if (!success) {
     CompleteCommand(BATTOR_ERROR_SEND_ERROR);
     return;
@@ -162,6 +207,11 @@ void BattOrAgent::OnBytesSent(bool success) {
 
   switch (last_action_) {
     case Action::SEND_RESET:
+      // TODO(charliea): Ideally, we'd just like to send an init, and the BattOr
+      // firmware can handle whether a reset is necessary or not, sending an
+      // init ack regardless. This reset can be removed once this is true.
+      // https://github.com/aschulm/battor/issues/30 tracks this.
+
       // Wait for the reset to happen before sending the init message.
       PerformDelayedAction(Action::SEND_INIT, base::TimeDelta::FromSeconds(
                                                   kBattOrResetTimeSeconds));
@@ -183,7 +233,10 @@ void BattOrAgent::OnBytesSent(bool success) {
       num_read_attempts_ = 1;
       PerformAction(Action::READ_CALIBRATION_FRAME);
       return;
-
+    case Action::SEND_CURRENT_SAMPLE_REQUEST:
+      num_read_attempts_ = 1;
+      PerformAction(Action::READ_CURRENT_SAMPLE);
+      return;
     default:
       CompleteCommand(BATTOR_ERROR_UNEXPECTED_MESSAGE);
   }
@@ -191,12 +244,19 @@ void BattOrAgent::OnBytesSent(bool success) {
 
 void BattOrAgent::OnMessageRead(bool success,
                                 BattOrMessageType type,
-                                scoped_ptr<vector<char>> bytes) {
+                                std::unique_ptr<vector<char>> bytes) {
+  // Return immediately if whatever action we were trying to perform already
+  // timed out.
+  if (timeout_callback_.IsCancelled())
+    return;
+  timeout_callback_.Cancel();
+
   if (!success) {
     switch (last_action_) {
       case Action::READ_EEPROM:
       case Action::READ_CALIBRATION_FRAME:
       case Action::READ_DATA_FRAME:
+      case Action::READ_CURRENT_SAMPLE:
         if (++num_read_attempts_ > kMaxReadAttempts) {
           CompleteCommand(BATTOR_ERROR_RECEIVE_ERROR);
           return;
@@ -243,19 +303,29 @@ void BattOrAgent::OnMessageRead(bool success,
       CompleteCommand(BATTOR_ERROR_NONE);
       return;
 
-    case Action::READ_EEPROM:
+    case Action::READ_EEPROM: {
       battor_eeprom_ = ParseEEPROM(type, *bytes);
       if (!battor_eeprom_) {
         CompleteCommand(BATTOR_ERROR_UNEXPECTED_MESSAGE);
         return;
       }
 
-      PerformAction(Action::SEND_SAMPLES_REQUEST);
-      return;
+      // Make sure that we don't request samples until a safe amount of time has
+      // elapsed since recording the last clock sync marker: we need to ensure
+      // that the sample we synced to doesn't get thrown out.
+      base::TimeTicks min_request_samples_time =
+          last_clock_sync_time_ + base::TimeDelta::FromMilliseconds(
+                                      kStopTracingClockSyncDelayMilliseconds);
+      base::TimeDelta request_samples_delay = std::max(
+          min_request_samples_time - base::TimeTicks::Now(), base::TimeDelta());
 
+      PerformDelayedAction(Action::SEND_SAMPLES_REQUEST, request_samples_delay);
+      return;
+    }
     case Action::READ_CALIBRATION_FRAME: {
       BattOrFrameHeader frame_header;
-      if (!ParseSampleFrame(type, *bytes, &frame_header, &calibration_frame_)) {
+      if (!ParseSampleFrame(type, *bytes, next_sequence_number_++,
+                            &frame_header, &calibration_frame_)) {
         CompleteCommand(BATTOR_ERROR_UNEXPECTED_MESSAGE);
         return;
       }
@@ -274,7 +344,8 @@ void BattOrAgent::OnMessageRead(bool success,
     case Action::READ_DATA_FRAME: {
       BattOrFrameHeader frame_header;
       vector<RawBattOrSample> frame;
-      if (!ParseSampleFrame(type, *bytes, &frame_header, &frame)) {
+      if (!ParseSampleFrame(type, *bytes, next_sequence_number_++,
+                            &frame_header, &frame)) {
         CompleteCommand(BATTOR_ERROR_UNEXPECTED_MESSAGE);
         return;
       }
@@ -293,6 +364,20 @@ void BattOrAgent::OnMessageRead(bool success,
       return;
     }
 
+    case Action::READ_CURRENT_SAMPLE:
+      if (type != BATTOR_MESSAGE_TYPE_CONTROL_ACK ||
+          bytes->size() != sizeof(uint32_t)) {
+        CompleteCommand(BATTOR_ERROR_UNEXPECTED_MESSAGE);
+        return;
+      }
+
+      uint32_t sample_num;
+      memcpy(&sample_num, bytes->data(), sizeof(uint32_t));
+      clock_sync_markers_[sample_num] = pending_clock_sync_marker_;
+      last_clock_sync_time_ = base::TimeTicks::Now();
+      CompleteCommand(BATTOR_ERROR_NONE);
+      return;
+
     default:
       CompleteCommand(BATTOR_ERROR_UNEXPECTED_MESSAGE);
   }
@@ -300,6 +385,12 @@ void BattOrAgent::OnMessageRead(bool success,
 
 void BattOrAgent::PerformAction(Action action) {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  timeout_callback_.Reset(
+      base::Bind(&BattOrAgent::OnActionTimeout, AsWeakPtr()));
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, timeout_callback_.callback(),
+      base::TimeDelta::FromSeconds(kBattOrTimeoutSeconds));
 
   last_action_ = action;
 
@@ -357,6 +448,10 @@ void BattOrAgent::PerformAction(Action action) {
       SendControlMessage(BATTOR_CONTROL_MESSAGE_TYPE_READ_SD_UART, 0, 0);
       return;
     case Action::READ_CALIBRATION_FRAME:
+      // Data frames are numbered starting at zero and counting up by one each
+      // data frame. We keep track of the next frame sequence number we expect
+      // to see to ensure we don't miss any data.
+      next_sequence_number_ = 0;
     case Action::READ_DATA_FRAME:
       // The first frame sent back from the BattOr contains voltage and current
       // data that excludes whatever device is being measured from the
@@ -368,6 +463,14 @@ void BattOrAgent::PerformAction(Action action) {
       connection_->ReadMessage(BATTOR_MESSAGE_TYPE_SAMPLES);
       return;
 
+    // The following actions are required for RecordClockSyncMarker:
+    case Action::SEND_CURRENT_SAMPLE_REQUEST:
+      SendControlMessage(BATTOR_CONTROL_MESSAGE_TYPE_READ_SAMPLE_COUNT, 0, 0);
+      return;
+    case Action::READ_CURRENT_SAMPLE:
+      connection_->ReadMessage(BATTOR_MESSAGE_TYPE_CONTROL_ACK);
+      return;
+
     case Action::INVALID:
       NOTREACHED();
   }
@@ -377,6 +480,11 @@ void BattOrAgent::PerformDelayedAction(Action action, base::TimeDelta delay) {
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::Bind(&BattOrAgent::PerformAction, AsWeakPtr(), action),
       delay);
+}
+
+void BattOrAgent::OnActionTimeout() {
+  CompleteCommand(BATTOR_ERROR_TIMEOUT);
+  timeout_callback_.Cancel();
 }
 
 void BattOrAgent::SendControlMessage(BattOrControlMessageType type,
@@ -391,21 +499,32 @@ void BattOrAgent::SendControlMessage(BattOrControlMessageType type,
 void BattOrAgent::CompleteCommand(BattOrError error) {
   switch (command_) {
     case Command::START_TRACING:
-      listener_->OnStartTracingComplete(error);
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, base::Bind(&Listener::OnStartTracingComplete,
+                                base::Unretained(listener_), error));
       break;
-    case Command::STOP_TRACING: {
-      listener_->OnStopTracingComplete(SamplesToString(), error);
+    case Command::STOP_TRACING:
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE,
+          base::Bind(&Listener::OnStopTracingComplete,
+                     base::Unretained(listener_), SamplesToString(), error));
       break;
-    }
+    case Command::RECORD_CLOCK_SYNC_MARKER:
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, base::Bind(&Listener::OnRecordClockSyncMarkerComplete,
+                                base::Unretained(listener_), error));
+      break;
     case Command::INVALID:
       NOTREACHED();
   }
 
   last_action_ = Action::INVALID;
   command_ = Command::INVALID;
+  pending_clock_sync_marker_.clear();
   battor_eeprom_.reset();
   calibration_frame_.clear();
   samples_.clear();
+  next_sequence_number_ = 0;
 }
 
 std::string BattOrAgent::SamplesToString() {
@@ -416,11 +535,33 @@ std::string BattOrAgent::SamplesToString() {
 
   std::stringstream trace_stream;
   trace_stream << std::fixed;
+
+  // Create a header that indicates the BattOr's parameters for these samples.
+  BattOrSample min_sample = converter.MinSample();
+  BattOrSample max_sample = converter.MaxSample();
+  trace_stream << "# BattOr" << std::endl
+               << std::setprecision(1) << "# voltage_range ["
+               << min_sample.voltage_mV << ", " << max_sample.voltage_mV
+               << "] mV" << std::endl
+               << "# current_range [" << min_sample.current_mA << ", "
+               << max_sample.current_mA << "] mA" << std::endl
+               << "# sample_rate " << battor_eeprom_->sd_sample_rate << " Hz"
+               << ", gain " << battor_eeprom_->low_gain << "x" << std::endl;
+
+  // Create a string representation of the BattOr samples.
   for (size_t i = 0; i < samples_.size(); i++) {
     BattOrSample sample = converter.ToSample(samples_[i], i);
     trace_stream << std::setprecision(2) << sample.time_ms << " "
                  << std::setprecision(1) << sample.current_mA << " "
-                 << sample.voltage_mV << std::endl;
+                 << sample.voltage_mV;
+
+    // If there's a clock sync marker for the current sample, print it.
+    auto clock_sync_marker = clock_sync_markers_.find(
+        static_cast<uint32_t>(calibration_frame_.size() + i));
+    if (clock_sync_marker != clock_sync_markers_.end())
+      trace_stream << " <" << clock_sync_marker->second << ">";
+
+    trace_stream << std::endl;
   }
 
   return trace_stream.str();

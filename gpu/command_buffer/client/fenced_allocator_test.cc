@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/aligned_memory.h"
@@ -13,7 +15,7 @@
 #include "gpu/command_buffer/client/fenced_allocator.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
-#include "gpu/command_buffer/service/gpu_scheduler.h"
+#include "gpu/command_buffer/service/command_executor.h"
 #include "gpu/command_buffer/service/mocks.h"
 #include "gpu/command_buffer/service/transfer_buffer_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -54,14 +56,14 @@ class BaseFencedAllocatorTest : public testing::Test {
         new CommandBufferService(transfer_buffer_manager_.get()));
     EXPECT_TRUE(command_buffer_->Initialize());
 
-    gpu_scheduler_.reset(new GpuScheduler(
-        command_buffer_.get(), api_mock_.get(), NULL));
+    executor_.reset(
+        new CommandExecutor(command_buffer_.get(), api_mock_.get(), NULL));
     command_buffer_->SetPutOffsetChangeCallback(base::Bind(
-        &GpuScheduler::PutChanged, base::Unretained(gpu_scheduler_.get())));
+        &CommandExecutor::PutChanged, base::Unretained(executor_.get())));
     command_buffer_->SetGetBufferChangeCallback(base::Bind(
-        &GpuScheduler::SetGetBuffer, base::Unretained(gpu_scheduler_.get())));
+        &CommandExecutor::SetGetBuffer, base::Unretained(executor_.get())));
 
-    api_mock_->set_engine(gpu_scheduler_.get());
+    api_mock_->set_engine(executor_.get());
 
     helper_.reset(new CommandBufferHelper(command_buffer_.get()));
     helper_->Initialize(kBufferSize);
@@ -69,11 +71,11 @@ class BaseFencedAllocatorTest : public testing::Test {
 
   int32_t GetToken() { return command_buffer_->GetLastState().token; }
 
-  scoped_ptr<AsyncAPIMock> api_mock_;
+  std::unique_ptr<AsyncAPIMock> api_mock_;
   scoped_refptr<TransferBufferManagerInterface> transfer_buffer_manager_;
-  scoped_ptr<CommandBufferService> command_buffer_;
-  scoped_ptr<GpuScheduler> gpu_scheduler_;
-  scoped_ptr<CommandBufferHelper> helper_;
+  std::unique_ptr<CommandBufferService> command_buffer_;
+  std::unique_ptr<CommandExecutor> executor_;
+  std::unique_ptr<CommandBufferHelper> helper_;
   base::MessageLoop message_loop_;
 };
 
@@ -93,7 +95,7 @@ class FencedAllocatorTest : public BaseFencedAllocatorTest {
   }
 
   void TearDown() override {
-    // If the GpuScheduler posts any tasks, this forces them to run.
+    // If the CommandExecutor posts any tasks, this forces them to run.
     base::MessageLoop::current()->RunUntilIdle();
 
     EXPECT_TRUE(allocator_->CheckConsistency());
@@ -101,7 +103,7 @@ class FencedAllocatorTest : public BaseFencedAllocatorTest {
     BaseFencedAllocatorTest::TearDown();
   }
 
-  scoped_ptr<FencedAllocator> allocator_;
+  std::unique_ptr<FencedAllocator> allocator_;
 };
 
 // Checks basic alloc and free.
@@ -405,7 +407,7 @@ class FencedAllocatorWrapperTest : public BaseFencedAllocatorTest {
   }
 
   void TearDown() override {
-    // If the GpuScheduler posts any tasks, this forces them to run.
+    // If the CommandExecutor posts any tasks, this forces them to run.
     base::MessageLoop::current()->RunUntilIdle();
 
     EXPECT_TRUE(allocator_->CheckConsistency());
@@ -413,8 +415,8 @@ class FencedAllocatorWrapperTest : public BaseFencedAllocatorTest {
     BaseFencedAllocatorTest::TearDown();
   }
 
-  scoped_ptr<FencedAllocatorWrapper> allocator_;
-  scoped_ptr<char, base::AlignedFreeDeleter> buffer_;
+  std::unique_ptr<FencedAllocatorWrapper> allocator_;
+  std::unique_ptr<char, base::AlignedFreeDeleter> buffer_;
 };
 
 // Checks basic alloc and free.

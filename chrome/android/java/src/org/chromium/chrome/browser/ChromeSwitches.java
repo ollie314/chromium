@@ -89,11 +89,6 @@ public abstract class ChromeSwitches {
     public static final String DISABLE_LOFI_SNACKBAR = "disable-lo-fi-snackbar";
 
     /**
-     * Enable content snippets on the NTP
-     */
-    public static final String ENABLE_NTP_SNIPPETS = "enable-ntp-snippets";
-
-    /**
      * Enable interests on the NTP
      */
     public static final String ENABLE_INTERESTS = "enable-interests";
@@ -176,9 +171,30 @@ public abstract class ChromeSwitches {
     public static final String NTP_SWITCH_TO_EXISTING_TAB = "ntp-switch-to-existing-tab";
 
     /**
-     * Enable offline pages.
+     * Enables offline pages.
+     * Native switch - switches::kEnableOfflinePages
      */
     public static final String ENABLE_OFFLINE_PAGES = "enable-offline-pages";
+
+    /**
+     * Enables offline pages, showing 'bookmarks' name in UI strings.
+     * Native switch - switches::kEnableOfflinePagesAsBookmarks
+     */
+    public static final String ENABLE_OFFLINE_PAGES_AS_BOOKMARKS =
+            "enable-offline-pages-as-bookmarks";
+
+    /**
+     * Enables offline pages, showing 'saved pages' name in UI strings.
+     * Native switch - switches::kEnableOfflinePagesAsSavedPages
+     */
+    public static final String ENABLE_OFFLINE_PAGES_AS_SAVED_PAGES =
+            "enable-offline-pages-as-saved-pages";
+
+    /**
+     * Disables offline pages.
+     * Native switch - switches::kDisableOfflinePages
+     */
+    public static final String DISABLE_OFFLINE_PAGES = "disable-offline-pages";
 
     /**
      * Enable keyboard accessory view that shows autofill suggestions on top of the keyboard.
@@ -186,6 +202,13 @@ public abstract class ChromeSwitches {
      */
     public static final String ENABLE_AUTOFILL_KEYBOARD_ACCESSORY =
             "enable-autofill-keyboard-accessory-view";
+
+    /**
+     * Enables overscroll of the on screen keyboard. With this flag on, the OSK will only resize the
+     * visual viewport.
+     * Native switch - switches::kEnableOSKOverscroll
+     */
+    public static final String ENABLE_OSK_OVERSCROLL = "enable-osk-overscroll";
 
     /**
      * Enables hung renderer InfoBar activation for unresponsive web content.
@@ -208,10 +231,37 @@ public abstract class ChromeSwitches {
             "disable-web-notification-custom-layouts";
 
     /**
+     * Determines which of the Herb prototypes is being tested.
+     * See about:flags for descriptions.
+     */
+    public static final String HERB_FLAVOR_DISABLED_SWITCH =
+            "tab-management-experiment-type-disabled";
+    public static final String HERB_FLAVOR_ANISE_SWITCH = "tab-management-experiment-type-anise";
+    public static final String HERB_FLAVOR_BASIL_SWITCH = "tab-management-experiment-type-basil";
+    public static final String HERB_FLAVOR_CHIVE_SWITCH = "tab-management-experiment-type-chive";
+    public static final String HERB_FLAVOR_DILL_SWITCH = "tab-management-experiment-type-dill";
+    public static final String HERB_FLAVOR_ELDERBERRY_SWITCH =
+            "tab-management-experiment-type-elderberry";
+
+    public static final String HERB_FLAVOR_DEFAULT = "Default";
+    public static final String HERB_FLAVOR_CONTROL = "Control";
+    public static final String HERB_FLAVOR_DISABLED = "Disabled";
+    public static final String HERB_FLAVOR_ANISE = "Anise";
+    public static final String HERB_FLAVOR_BASIL = "Basil";
+    public static final String HERB_FLAVOR_CHIVE = "Chive";
+    public static final String HERB_FLAVOR_DILL = "Dill";
+    public static final String HERB_FLAVOR_ELDERBERRY = "Elderberry";
+
+    /**
      * Enable tab switcher in document mode (merged tabs and apps option).
      */
     public static final String ENABLE_TAB_SWITCHER_IN_DOCUMENT_MODE =
             "enable-tab-switcher-in-document-mode";
+
+    /**
+     * Set the partner-defined homepage URL, for testing.
+     */
+    public static final String PARTNER_HOMEPAGE_FOR_TESTING = "partner-homepage-for-testing";
 
     // Prevent instantiation.
     private ChromeSwitches() {}

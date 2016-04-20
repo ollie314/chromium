@@ -29,7 +29,7 @@ class ArcBridgeServiceImpl : public ArcBridgeService,
   explicit ArcBridgeServiceImpl(scoped_ptr<ArcBridgeBootstrap> bootstrap);
   ~ArcBridgeServiceImpl() override;
 
-  void DetectAvailability() override;
+  void SetDetectedAvailability(bool available) override;
 
   void HandleStartup() override;
 
@@ -48,11 +48,8 @@ class ArcBridgeServiceImpl : public ArcBridgeService,
   void StopInstance();
 
   // ArcBridgeBootstrap::Delegate:
-  void OnConnectionEstablished(ArcBridgeInstancePtr instance) override;
+  void OnConnectionEstablished(mojom::ArcBridgeInstancePtr instance) override;
   void OnStopped() override;
-
-  // DBus callbacks.
-  void OnArcAvailable(bool available);
 
   // Called when the bridge channel is closed. This typically only happens when
   // the ARC instance crashes. This is not called during shutdown.
@@ -61,8 +58,8 @@ class ArcBridgeServiceImpl : public ArcBridgeService,
   scoped_ptr<ArcBridgeBootstrap> bootstrap_;
 
   // Mojo endpoints.
-  mojo::Binding<ArcBridgeHost> binding_;
-  ArcBridgeInstancePtr instance_ptr_;
+  mojo::Binding<mojom::ArcBridgeHost> binding_;
+  mojom::ArcBridgeInstancePtr instance_ptr_;
 
   // If the user's session has started.
   bool session_started_;

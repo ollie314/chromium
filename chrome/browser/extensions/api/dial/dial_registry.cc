@@ -4,7 +4,8 @@
 
 #include "chrome/browser/extensions/api/dial/dial_registry.h"
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
@@ -106,7 +107,14 @@ bool DialRegistry::DiscoverNow() {
 
   if (!dial_->HasObserver(this))
     NOTREACHED() << "DiscoverNow() called without observing dial_";
-  return dial_->Discover();
+
+  // Force increment |registry_generation_| to ensure an event is sent even if
+  // the device list did not change.
+  bool started = dial_->Discover();
+  if (started)
+    ++registry_generation_;
+
+  return started;
 }
 
 void DialRegistry::StartPeriodicDiscovery() {

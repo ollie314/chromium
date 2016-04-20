@@ -15,8 +15,6 @@ component("aura") {
     "../wm/public/activation_delegate.h",
     "../wm/public/animation_host.cc",
     "../wm/public/animation_host.h",
-    "../wm/public/dispatcher_client.cc",
-    "../wm/public/dispatcher_client.h",
     "../wm/public/drag_drop_client.cc",
     "../wm/public/drag_drop_client.h",
     "../wm/public/drag_drop_delegate.cc",
@@ -133,7 +131,6 @@ component("aura") {
 
     deps += [
       "//ipc",
-      "//ui/metro_viewer",
       "//ui/platform_window/win",
     ]
   }
@@ -239,6 +236,7 @@ executable("demo") {
     "//ui/base",
     "//ui/compositor",
     "//ui/compositor:test_support",
+    "//ui/display",
     "//ui/events",
     "//ui/gfx",
     "//ui/gfx/geometry",
@@ -248,46 +246,6 @@ executable("demo") {
   if (use_x11) {
     deps += [ "//ui/gfx/x" ]
   }
-}
-
-executable("bench") {
-  output_name = "aura_bench"
-  testonly = true
-
-  sources = [
-    "bench/bench_main.cc",
-  ]
-
-  deps = [
-    ":test_support",
-    "//base",
-    "//base:i18n",
-    "//build/config/sanitizers:deps",
-    "//cc",
-    "//gpu/command_buffer/client:gles2_interface",
-    "//skia",
-    "//third_party/icu",
-    "//ui/base",
-    "//ui/compositor",
-    "//ui/compositor:test_support",
-    "//ui/events",
-    "//ui/gfx",
-    "//ui/gfx/geometry",
-    "//ui/gl",
-  ]
-
-  if (use_x11) {
-    deps += [ "//ui/gfx/x" ]
-  }
-}
-
-# TODO(GYP): Delete this after we've converted everything to GN.
-# The _run targets exist only for compatibility w/ GYP.
-group("aura_unittests_run") {
-  testonly = true
-  deps = [
-    ":aura_unittests",
-  ]
 }
 
 test("aura_unittests") {
@@ -301,7 +259,6 @@ test("aura_unittests") {
 
   deps = [
     ":test_support",
-    "//base/allocator",
     "//base/test:test_support",
     "//skia",
     "//testing/gtest",

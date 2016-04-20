@@ -11,9 +11,13 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "content/public/browser/browser_message_filter.h"
-#include "content/public/common/permission_status.mojom.h"
+#include "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h"
 
 class GURL;
+
+namespace base {
+class DictionaryValue;
+}
 
 namespace net {
 class URLRequestContextGetter;
@@ -56,16 +60,18 @@ class LayoutTestMessageFilter : public BrowserMessageFilter {
   void OnClearWebNotificationPermissions();
   void OnSimulateWebNotificationClick(const std::string& title,
                                       int action_index);
+  void OnSimulateWebNotificationClose(const std::string& title, bool by_user);
   void OnSetPushMessagingPermission(const GURL& origin, bool allowed);
   void OnClearPushMessagingPermissions();
   void OnAcceptAllCookies(bool accept);
   void OnDeleteAllCookies();
   void OnSetPermission(const std::string& name,
-                       PermissionStatus status,
+                       blink::mojom::PermissionStatus status,
                        const GURL& origin,
                        const GURL& embedding_origin);
   void OnResetPermissions();
-  void OnSetBluetoothAdapter(const std::string& name);
+  void OnLayoutTestRuntimeFlagsChanged(
+      const base::DictionaryValue& changed_layout_test_runtime_flags);
 
   int render_process_id_;
 

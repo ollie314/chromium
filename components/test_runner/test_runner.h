@@ -15,9 +15,10 @@
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "components/test_runner/layout_test_runtime_flags.h"
 #include "components/test_runner/test_runner_export.h"
-#include "components/test_runner/web_task.h"
 #include "components/test_runner/web_test_runner.h"
+#include "third_party/WebKit/public/platform/WebImage.h"
 #include "v8/include/v8.h"
 
 class GURL;
@@ -40,13 +41,17 @@ class Arguments;
 namespace test_runner {
 
 class InvokeCallbackTask;
+class MockContentSettingsClient;
+class MockCredentialManagerClient;
+class MockScreenOrientationClient;
+class MockWebSpeechRecognizer;
+class MockWebUserMediaClient;
+class SpellCheckClient;
 class TestInterfaces;
-class WebContentSettings;
 class WebTestDelegate;
 class WebTestProxyBase;
 
-class TestRunner : public WebTestRunner,
-                   public base::SupportsWeakPtr<TestRunner> {
+class TestRunner : public WebTestRunner {
  public:
   explicit TestRunner(TestInterfaces*);
   virtual ~TestRunner();
@@ -54,38 +59,43 @@ class TestRunner : public WebTestRunner,
   void Install(blink::WebFrame* frame);
 
   void SetDelegate(WebTestDelegate*);
-  void SetWebView(blink::WebView*, WebTestProxyBase*);
+  void SetWebView(blink::WebView*);
 
   void Reset();
-
-  WebTaskList* mutable_task_list() { return &task_list_; }
 
   void SetTestIsRunning(bool);
   bool TestIsRunning() const { return test_is_running_; }
 
   bool UseMockTheme() const { return use_mock_theme_; }
 
-  void InvokeCallback(scoped_ptr<InvokeCallbackTask> callback);
-
   // WebTestRunner implementation.
   bool ShouldGeneratePixelResults() override;
-  bool ShouldStayOnPageAfterHandlingBeforeUnload() const override;
   bool ShouldDumpAsAudio() const override;
   void GetAudioData(std::vector<unsigned char>* buffer_view) const override;
+  bool IsRecursiveLayoutDumpRequested() override;
+  std::string DumpLayout(blink::WebLocalFrame* frame) override;
+  void DumpPixelsAsync(
+      blink::WebView* web_view,
+      const base::Callback<void(const SkBitmap&)>& callback) override;
+  void ReplicateLayoutTestRuntimeFlagsChanges(
+      const base::DictionaryValue& changed_values) override;
+  bool HasCustomTextDump(std::string* custom_text_dump) const override;
   bool ShouldDumpBackForwardList() const override;
   blink::WebContentSettingsClient* GetWebContentSettings() const override;
+  void InitializeWebViewWithMocks(blink::WebView* web_view) override;
+  void SetFocus(blink::WebView* web_view, bool focus) override;
 
-  // Methods used by WebTestProxyBase.
-  bool shouldDumpSelectionRect() const;
+  // Methods used by WebViewTestClient and WebFrameTestClient.
+  void OnAnimationScheduled(blink::WebView* view);
+  void OnAnimationBegun(blink::WebView* view);
+  std::string GetAcceptLanguages() const;
+  bool shouldStayOnPageAfterHandlingBeforeUnload() const;
+  MockScreenOrientationClient* getMockScreenOrientationClient();
+  MockWebUserMediaClient* getMockWebUserMediaClient();
+  MockWebSpeechRecognizer* getMockWebSpeechRecognizer();
   bool isPrinting() const;
-  bool shouldDumpAsText();
-  bool shouldDumpAsTextWithPixelResults();
   bool shouldDumpAsCustomText() const;
   std:: string customDumpText() const;
-  bool shouldDumpAsMarkup();
-  bool shouldDumpChildFrameScrollPositions() const;
-  bool shouldDumpChildFramesAsMarkup() const;
-  bool shouldDumpChildFramesAsText() const;
   void ShowDevTools(const std::string& settings,
                     const std::string& frontend_url);
   void ClearDevToolsLocalStorage();
@@ -94,7 +104,6 @@ class TestRunner : public WebTestRunner,
   void setCustomTextOutput(const std::string& text);
   void setShouldGeneratePixelResults(bool);
   void setShouldDumpFrameLoadCallbacks(bool);
-  void setShouldDumpPingLoaderCallbacks(bool);
   void setShouldEnableViewSource(bool);
   bool shouldDumpEditingCallbacks() const;
   bool shouldDumpFrameLoadCallbacks() const;
@@ -105,7 +114,6 @@ class TestRunner : public WebTestRunner,
   bool shouldDumpCreateView() const;
   bool canOpenWindows() const;
   bool shouldDumpResourceLoadCallbacks() const;
-  bool shouldDumpResourceRequestCallbacks() const;
   bool shouldDumpResourceResponseMIMETypes() const;
   bool shouldDumpStatusCallbacks() const;
   bool shouldDumpSpellCheckCallbacks() const;
@@ -123,10 +131,14 @@ class TestRunner : public WebTestRunner,
   void RequestPointerUnlock();
   bool isPointerLocked();
   void setToolTipText(const blink::WebString&);
-  bool shouldDumpDragImage();
+  void setDragImage(const blink::WebImage& drag_image);
   bool shouldDumpNavigationPolicy() const;
 
   bool midiAccessorResult();
+
+  // Methods used by MockColorChooser:
+  void DidOpenChooser();
+  void DidCloseChooser();
 
   // A single item in the work queue.
   class WorkItem {
@@ -138,9 +150,22 @@ class TestRunner : public WebTestRunner,
   };
 
  private:
-  friend class InvokeCallbackTask;
   friend class TestRunnerBindings;
   friend class WorkQueue;
+
+  // Helpers for working with base and V8 callbacks.
+  void PostTask(const base::Closure& callback);
+  void PostDelayedTask(long long delay, const base::Closure& callback);
+  void PostV8Callback(const v8::Local<v8::Function>& callback);
+  void PostV8CallbackWithArgs(v8::UniquePersistent<v8::Function> callback,
+                              int argc,
+                              v8::Local<v8::Value> argv[]);
+  void InvokeV8Callback(const v8::UniquePersistent<v8::Function>& callback);
+  void InvokeV8CallbackWithArgs(
+      const v8::UniquePersistent<v8::Function>& callback,
+      const std::vector<v8::UniquePersistent<v8::Value>>& args);
+  base::Closure CreateClosureThatPostsV8Callback(
+      const v8::Local<v8::Function>& callback);
 
   // Helper class for managing events queued by methods like queueLoad or
   // queueScript.
@@ -157,22 +182,15 @@ class TestRunner : public WebTestRunner,
 
     void set_frozen(bool frozen) { frozen_ = frozen; }
     bool is_empty() { return queue_.empty(); }
-    WebTaskList* mutable_task_list() { return &task_list_; }
 
    private:
     void ProcessWork();
 
-    class WorkQueueTask : public WebMethodTask<WorkQueue> {
-     public:
-      WorkQueueTask(WorkQueue* object) : WebMethodTask<WorkQueue>(object) {}
-
-      void RunIfValid() override;
-    };
-
-    WebTaskList task_list_;
     std::deque<WorkItem*> queue_;
     bool frozen_;
     TestRunner* controller_;
+
+    base::WeakPtrFactory<WorkQueue> weak_factory_;
   };
 
   ///////////////////////////////////////////////////////////////////////////
@@ -191,7 +209,6 @@ class TestRunner : public WebTestRunner,
   void QueueLoadingScript(const std::string& script);
   void QueueNonLoadingScript(const std::string& script);
   void QueueLoad(const std::string& url, const std::string& target);
-  void QueueLoadHTMLString(gin::Arguments* args);
 
   // Causes navigation actions just printout the intended navigation instead
   // of taking you to the page. This is used for cases like mailto, where you
@@ -306,15 +323,10 @@ class TestRunner : public WebTestRunner,
   void SetMockDeviceOrientation(bool has_alpha, double alpha,
                                 bool has_beta, double beta,
                                 bool has_gamma, double gamma,
-                                bool has_absolute, bool absolute);
+                                bool absolute);
 
   void SetMockScreenOrientation(const std::string& orientation);
-
-  void DidChangeBatteryStatus(bool charging,
-                              double chargingTime,
-                              double dischargingTime,
-                              double level);
-  void ResetBatteryStatus();
+  void DisableMockScreenOrientation();
 
   void DidAcquirePointerLock();
   void DidNotAcquirePointerLock();
@@ -339,6 +351,10 @@ class TestRunner : public WebTestRunner,
 
   // Enable or disable plugins.
   void SetPluginsEnabled(bool enabled);
+
+  // Returns |true| if an animation has been scheduled in one or more WebViews
+  // participating in the layout test.
+  bool GetAnimationScheduled() const;
 
   ///////////////////////////////////////////////////////////////////////////
   // Methods that modify the state of TestRunner
@@ -413,11 +429,6 @@ class TestRunner : public WebTestRunner,
   // any that may be present.
   void DumpResourceLoadCallbacks();
 
-  // This function sets a flag that tells the test_shell to print a line of
-  // descriptive text for each element that requested a resource. It takes no
-  // arguments, and ignores any that may be present.
-  void DumpResourceRequestCallbacks();
-
   // This function sets a flag that tells the test_shell to dump the MIME type
   // for each resource that was loaded. It takes no arguments, and ignores any
   // that may be present.
@@ -471,10 +482,9 @@ class TestRunner : public WebTestRunner,
   // WebFrameClient receives a loadURLExternally() call.
   void WaitUntilExternalURLLoad();
 
-  // This function sets a flag which tells the WebTestProxy to dump the drag
-  // image when the next drag-and-drop is initiated. It is equivalent to
-  // DumpAsTextWithPixelResults but the pixel results will be the drag image
-  // instead of a snapshot of the page.
+  // This function sets a flag to dump the drag image when the next drag&drop is
+  // initiated. It is equivalent to DumpAsTextWithPixelResults but the pixel
+  // results will be the drag image instead of a snapshot of the page.
   void DumpDragImage();
 
   // Sets a flag that tells the WebTestProxy to dump the default navigation
@@ -513,7 +523,7 @@ class TestRunner : public WebTestRunner,
   // Changes the cookie policy from the default to allow all cookies.
   void SetAlwaysAcceptCookies(bool accept);
 
-  // Gives focus to the window.
+  // Gives focus to the main test window.
   void SetWindowIsKey(bool value);
 
   // Converts a URL starting with file:///tmp/ to the local mapping.
@@ -530,13 +540,14 @@ class TestRunner : public WebTestRunner,
   void SetColorProfile(const std::string& name,
                        v8::Local<v8::Function> callback);
 
-  // Change the bluetooth test data while running a layout test and resets the
-  // chooser to accept the first device.
-  void SetBluetoothMockDataSet(const std::string& name);
+  // Change the bluetooth test data while running a layout test.
+  void SetBluetoothFakeAdapter(const std::string& adapter_name,
+                               v8::Local<v8::Function> callback);
 
-  // Makes the Bluetooth chooser record its input and wait for instructions from
-  // the test program on how to proceed.
-  void SetBluetoothManualChooser();
+  // If |enable| is true, makes the Bluetooth chooser record its input and wait
+  // for instructions from the test program on how to proceed. Otherwise falls
+  // back to the browser's default chooser.
+  void SetBluetoothManualChooser(bool enable);
 
   // Calls |callback| with a DOMString[] representing the events recorded since
   // the last call to this function.
@@ -578,6 +589,11 @@ class TestRunner : public WebTestRunner,
   void ResolveBeforeInstallPromptPromise(int request_id,
                                          const std::string& platform);
 
+  // Immediately run all pending idle tasks, including all pending
+  // requestIdleCallback calls.  Invoke the callback when all
+  // idle tasks are complete.
+  void RunIdleTasks(v8::Local<v8::Function> callback);
+
   // Calls setlocale(LC_ALL, ...) for a specified locale.
   // Resets between tests.
   void SetPOSIXLocale(const std::string& locale);
@@ -588,12 +604,14 @@ class TestRunner : public WebTestRunner,
   // Simulates a click on a Web Notification.
   void SimulateWebNotificationClick(const std::string& title, int action_index);
 
+  // Simulates closing a Web Notification.
+  void SimulateWebNotificationClose(const std::string& title, bool by_user);
+
   // Speech recognition related functions.
   void AddMockSpeechRecognitionResult(const std::string& transcript,
                                       double confidence);
   void SetMockSpeechRecognitionError(const std::string& error,
                                      const std::string& message);
-  bool WasMockSpeechRecognitionAborted();
 
   // Credential Manager mock functions
   // TODO(mkwst): Support FederatedCredential.
@@ -601,6 +619,7 @@ class TestRunner : public WebTestRunner,
                                         const std::string& name,
                                         const std::string& avatar,
                                         const std::string& password);
+  void AddMockCredentialManagerError(const std::string& error);
 
   // WebPageOverlay related functions. Permits the adding and removing of only
   // one opaque overlay.
@@ -623,18 +642,23 @@ class TestRunner : public WebTestRunner,
 
   void GetManifestThen(v8::Local<v8::Function> callback);
 
+  // Takes care of notifying the delegate after a change to layout test runtime
+  // flags.
+  void OnLayoutTestRuntimeFlagsChanged();
+
   ///////////////////////////////////////////////////////////////////////////
   // Internal helpers
 
-  void GetManifestCallback(scoped_ptr<InvokeCallbackTask> task,
+  void GetManifestCallback(v8::UniquePersistent<v8::Function> callback,
                            const blink::WebURLResponse& response,
                            const std::string& data);
-  void CapturePixelsCallback(scoped_ptr<InvokeCallbackTask> task,
+  void CapturePixelsCallback(v8::UniquePersistent<v8::Function> callback,
                              const SkBitmap& snapshot);
-  void DispatchBeforeInstallPromptCallback(scoped_ptr<InvokeCallbackTask> task,
-                                           bool canceled);
+  void DispatchBeforeInstallPromptCallback(
+      v8::UniquePersistent<v8::Function> callback,
+      bool canceled);
   void GetBluetoothManualChooserEventsCallback(
-      scoped_ptr<InvokeCallbackTask> task,
+      v8::UniquePersistent<v8::Function> callback,
       const std::vector<std::string>& events);
 
   void CheckResponseMimeType();
@@ -662,24 +686,9 @@ class TestRunner : public WebTestRunner,
   // setCloseRemainingWindowsWhenComplete().
   bool close_remaining_windows_;
 
-  // If true, don't dump output until notifyDone is called.
-  bool wait_until_done_;
-
   // If true, ends the test when a URL is loaded externally via
   // WebFrameClient::loadURLExternally().
   bool wait_until_external_url_load_;
-
-  // Causes navigation actions just printout the intended navigation instead
-  // of taking you to the page. This is used for cases like mailto, where you
-  // don't actually want to open the mail program.
-  bool policy_delegate_enabled_;
-
-  // Toggles the behavior of the policy delegate. If true, then navigations
-  // will be allowed. Otherwise, they will be ignored (dropped).
-  bool policy_delegate_is_permissive_;
-
-  // If true, the policy delegate will signal layout test completion.
-  bool policy_delegate_should_notify_done_;
 
   WorkQueue work_queue_;
 
@@ -688,12 +697,6 @@ class TestRunner : public WebTestRunner,
 
   // Bound variable to store the last tooltip text
   std::string tooltip_text_;
-
-  // Bound variable to disable notifyDone calls. This is used in GC leak
-  // tests, where existing LayoutTests are loaded within an iframe. The GC
-  // test harness will set this flag to ignore the notifyDone calls from the
-  // target LayoutTest.
-  bool disable_notify_done_;
 
   // Bound variable counting the number of top URLs visited.
   int web_history_item_count_;
@@ -705,29 +708,8 @@ class TestRunner : public WebTestRunner,
   // command.
   bool dump_editting_callbacks_;
 
-  // If true, the test_shell will generate pixel results in DumpAsText mode
-  bool generate_pixel_results_;
-
-  // If true, the test_shell will produce a plain text dump rather than a
-  // text representation of the renderer.
-  bool dump_as_text_;
-
-  // If true and if dump_as_text_ is true, the test_shell will recursively
-  // dump all frames as plain text.
-  bool dump_child_frames_as_text_;
-
-  // If true, the test_shell will produce a dump of the DOM rather than a text
-  // representation of the renderer.
-  bool dump_as_markup_;
-
-  // If true and if dump_as_markup_ is true, the test_shell will recursively
-  // produce a dump of the DOM rather than a text representation of the
-  // renderer.
-  bool dump_child_frames_as_markup_;
-
-  // If true, the test_shell will print out the child frame scroll offsets as
-  // well.
-  bool dump_child_frame_scroll_positions_;
+  // Flags controlling what content gets dumped as a layout text result.
+  LayoutTestRuntimeFlags layout_test_runtime_flags_;
 
   // If true, the test_shell will print out the icon change notifications.
   bool dump_icon_changes_;
@@ -763,10 +745,6 @@ class TestRunner : public WebTestRunner,
   // load callback.
   bool dump_resource_load_callbacks_;
 
-  // If true, the test_shell will output a descriptive line for each resource
-  // request callback.
-  bool dump_resource_request_callbacks_;
-
   // If true, the test_shell will output the MIME type for each resource that
   // was loaded.
   bool dump_resource_response_mime_types_;
@@ -782,13 +760,6 @@ class TestRunner : public WebTestRunner,
   // well.
   bool dump_back_forward_list_;
 
-  // If true, the test_shell will draw the bounds of the current selection rect
-  // taking possible transforms of the selection rect into account.
-  bool dump_selection_rect_;
-
-  // If true, the test_shell will dump the drag image as pixel results.
-  bool dump_drag_image_;
-
   // If true, content_shell will dump the default navigation policy passed to
   // WebFrameClient::decidePolicyForNavigation.
   bool dump_navigation_policy_;
@@ -800,9 +771,6 @@ class TestRunner : public WebTestRunner,
   // If true and test_repaint_ is true as well, pixel dump will be produced as
   // a series of 1px-wide, view-tall paints across the width of the view.
   bool sweep_horizontally_;
-
-  // If true, layout is to target printed pages.
-  bool is_printing_;
 
   // If false, MockWebMIDIAccessor fails on startSession() for testing.
   bool midi_accessor_result_;
@@ -819,19 +787,15 @@ class TestRunner : public WebTestRunner,
   // WAV audio data is stored here.
   std::vector<unsigned char> audio_data_;
 
-  // Used for test timeouts.
-  WebTaskList task_list_;
-
   TestInterfaces* test_interfaces_;
   WebTestDelegate* delegate_;
   blink::WebView* web_view_;
-  WebTestProxyBase* proxy_;
 
   // This is non-0 IFF a load is in progress.
   blink::WebFrame* top_loading_frame_;
 
   // WebContentSettingsClient mock object.
-  scoped_ptr<WebContentSettings> web_content_settings_;
+  scoped_ptr<MockContentSettingsClient> mock_content_settings_client_;
 
   bool pointer_locked_;
   enum {
@@ -840,6 +804,25 @@ class TestRunner : public WebTestRunner,
     PointerLockWillFailSync,
   } pointer_lock_planned_result_;
   bool use_mock_theme_;
+
+  scoped_ptr<MockCredentialManagerClient> credential_manager_client_;
+  scoped_ptr<MockScreenOrientationClient> mock_screen_orientation_client_;
+  scoped_ptr<MockWebSpeechRecognizer> speech_recognizer_;
+  scoped_ptr<MockWebUserMediaClient> user_media_client_;
+  scoped_ptr<SpellCheckClient> spellcheck_;
+
+  // Number of currently active color choosers.
+  int chooser_count_;
+
+  // Captured drag image.
+  blink::WebImage drag_image_;
+
+  // View that was focused by a previous call to TestRunner::SetFocus method.
+  // Note - this can be a dangling pointer to an already destroyed WebView (this
+  // is ok, because this is taken care of in WebTestDelegate::SetFocus).
+  blink::WebView* previously_focused_view_;
+
+  std::set<blink::WebView*> views_with_scheduled_animations_;
 
   base::WeakPtrFactory<TestRunner> weak_factory_;
 

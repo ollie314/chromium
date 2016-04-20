@@ -4,9 +4,11 @@
 
 #include "net/url_request/url_request_job_factory_impl.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
@@ -22,12 +24,8 @@ namespace {
 
 class MockURLRequestJob : public URLRequestJob {
  public:
-  MockURLRequestJob(URLRequest* request,
-                    NetworkDelegate* network_delegate,
-                    const URLRequestStatus& status)
-      : URLRequestJob(request, network_delegate),
-        status_(status),
-        weak_factory_(this) {}
+  MockURLRequestJob(URLRequest* request, NetworkDelegate* network_delegate)
+      : URLRequestJob(request, network_delegate), weak_factory_(this) {}
 
   void Start() override {
     // Start reading asynchronously so that all error reporting and data
@@ -42,11 +40,9 @@ class MockURLRequestJob : public URLRequestJob {
 
  private:
   void StartAsync() {
-    SetStatus(status_);
     NotifyHeadersComplete();
   }
 
-  URLRequestStatus status_;
   base::WeakPtrFactory<MockURLRequestJob> weak_factory_;
 };
 
@@ -55,17 +51,14 @@ class DummyProtocolHandler : public URLRequestJobFactory::ProtocolHandler {
   URLRequestJob* MaybeCreateJob(
       URLRequest* request,
       NetworkDelegate* network_delegate) const override {
-    return new MockURLRequestJob(
-        request,
-        network_delegate,
-        URLRequestStatus(URLRequestStatus::SUCCESS, OK));
+    return new MockURLRequestJob(request, network_delegate);
   }
 };
 
 TEST(URLRequestJobFactoryTest, NoProtocolHandler) {
   TestDelegate delegate;
   TestURLRequestContext request_context;
-  scoped_ptr<URLRequest> request(request_context.CreateRequest(
+  std::unique_ptr<URLRequest> request(request_context.CreateRequest(
       GURL("foo://bar"), DEFAULT_PRIORITY, &delegate));
   request->Start();
 
@@ -80,8 +73,8 @@ TEST(URLRequestJobFactoryTest, BasicProtocolHandler) {
   TestURLRequestContext request_context;
   request_context.set_job_factory(&job_factory);
   job_factory.SetProtocolHandler("foo",
-                                 make_scoped_ptr(new DummyProtocolHandler));
-  scoped_ptr<URLRequest> request(request_context.CreateRequest(
+                                 base::WrapUnique(new DummyProtocolHandler));
+  std::unique_ptr<URLRequest> request(request_context.CreateRequest(
       GURL("foo://bar"), DEFAULT_PRIORITY, &delegate));
   request->Start();
 
@@ -95,7 +88,7 @@ TEST(URLRequestJobFactoryTest, DeleteProtocolHandler) {
   TestURLRequestContext request_context;
   request_context.set_job_factory(&job_factory);
   job_factory.SetProtocolHandler("foo",
-                                 make_scoped_ptr(new DummyProtocolHandler));
+                                 base::WrapUnique(new DummyProtocolHandler));
   job_factory.SetProtocolHandler("foo", nullptr);
 }
 

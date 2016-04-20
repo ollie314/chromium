@@ -243,8 +243,13 @@ content::WebUIDataSource* CreatePrintPreviewUISource() {
   source->AddString(
       "noDestsPromoLearnMoreUrl",
       chrome::kCloudPrintNoDestinationsLearnMoreURL);
-  source->AddLocalizedString("pageRangeInstruction",
-                             IDS_PRINT_PREVIEW_PAGE_RANGE_INSTRUCTION);
+  source->AddLocalizedString("pageRangeLimitInstruction",
+                             IDS_PRINT_PREVIEW_PAGE_RANGE_LIMIT_INSTRUCTION);
+  source->AddLocalizedString(
+      "pageRangeLimitInstructionWithValue",
+      IDS_PRINT_PREVIEW_PAGE_RANGE_LIMIT_INSTRUCTION_WITH_VALUE);
+  source->AddLocalizedString("pageRangeSyntaxInstruction",
+                             IDS_PRINT_PREVIEW_PAGE_RANGE_SYNTAX_INSTRUCTION);
   source->AddLocalizedString("copiesInstruction",
                              IDS_PRINT_PREVIEW_COPIES_INSTRUCTION);
   source->AddLocalizedString("incrementTitle",
@@ -437,8 +442,8 @@ void PrintPreviewUI::GetPrintPreviewDataForIndex(
 
 void PrintPreviewUI::SetPrintPreviewDataForIndex(
     int index,
-    const base::RefCountedBytes* data) {
-  print_preview_data_service()->SetDataEntry(id_, index, data);
+    scoped_refptr<base::RefCountedBytes> data) {
+  print_preview_data_service()->SetDataEntry(id_, index, std::move(data));
 }
 
 void PrintPreviewUI::ClearAllPreviewData() {
@@ -591,10 +596,6 @@ void PrintPreviewUI::OnPreviewDataIsAvailable(int expected_pages_count,
   base::FundamentalValue ui_preview_request_id(preview_request_id);
   web_ui()->CallJavascriptFunction("updatePrintPreview", ui_identifier,
                                    ui_preview_request_id);
-}
-
-void PrintPreviewUI::OnPrintPreviewDialogDestroyed() {
-  handler_->OnPrintPreviewDialogDestroyed();
 }
 
 void PrintPreviewUI::OnFileSelectionCancelled() {

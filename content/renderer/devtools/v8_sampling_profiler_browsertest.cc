@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "base/json/json_reader.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/run_loop.h"
 #include "base/trace_event/trace_buffer.h"
 #include "base/trace_event/trace_event.h"
@@ -55,7 +56,7 @@ class V8SamplingProfilerTest : public RenderViewTest {
     trace_buffer_.AddFragment(events_str->data());
     trace_buffer_.Finish();
 
-    scoped_ptr<Value> root;
+    std::unique_ptr<Value> root;
     root = base::JSONReader::Read(
         json_output_.json_output,
         base::JSON_PARSE_RFC | base::JSON_DETACHABLE_CHILDREN);
@@ -70,7 +71,7 @@ class V8SamplingProfilerTest : public RenderViewTest {
 
     // Move items into our aggregate collection
     while (root_list->GetSize()) {
-      scoped_ptr<Value> item;
+      std::unique_ptr<Value> item;
       root_list->Remove(0, &item);
       trace_parsed_.Append(item.release());
     }
@@ -113,7 +114,7 @@ class V8SamplingProfilerTest : public RenderViewTest {
     return events_count;
   }
 
-  scoped_ptr<V8SamplingProfiler> sampling_profiler_;
+  std::unique_ptr<V8SamplingProfiler> sampling_profiler_;
   base::Lock lock_;
 
   ListValue trace_parsed_;

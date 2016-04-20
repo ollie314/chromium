@@ -8,19 +8,19 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "v8/include/v8.h"
 
-class ChromeRenderProcessObserver;
+class ChromeRenderThreadObserver;
 #if defined(ENABLE_PRINT_PREVIEW)
 class ChromePDFPrintClient;
 #endif
@@ -59,15 +59,11 @@ class VisitedLinkSlave;
 }
 
 namespace web_cache {
-class WebCacheRenderProcessObserver;
+class WebCacheRenderThreadObserver;
 }
 
 namespace blink {
 class WebSecurityOrigin;
-}
-
-namespace password_manager {
-class CredentialManagerClient;
 }
 
 #if defined(ENABLE_WEBRTC)
@@ -123,7 +119,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   bool ShouldOverridePageVisibilityState(
       const content::RenderFrame* render_frame,
       blink::WebPageVisibilityState* override_state) override;
-  const void* CreatePPAPIInterface(const std::string& interface_name) override;
   bool IsExternalPepperPlugin(const std::string& module_name) override;
   blink::WebSpeechSynthesizer* OverrideSpeechSynthesizer(
       blink::WebSpeechSynthesizerClient* client) override;
@@ -145,11 +140,13 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   void RecordRappor(const std::string& metric,
                     const std::string& sample) override;
   void RecordRapporURL(const std::string& metric, const GURL& url) override;
-  scoped_ptr<blink::WebAppBannerClient> CreateAppBannerClient(
+  std::unique_ptr<blink::WebAppBannerClient> CreateAppBannerClient(
       content::RenderFrame* render_frame) override;
   void AddImageContextMenuProperties(
       const blink::WebURLResponse& response,
       std::map<std::string, std::string>* properties) override;
+  void RunScriptsAtDocumentStart(content::RenderFrame* render_frame) override;
+  void RunScriptsAtDocumentEnd(content::RenderFrame* render_frame) override;
   void DidInitializeServiceWorkerContextOnWorkerThread(
       v8::Local<v8::Context> context,
       const GURL& url) override;
@@ -185,6 +182,10 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   static GURL GetNaClContentHandlerURL(const std::string& actual_mime_type,
                                        const content::WebPluginInfo& plugin);
 
+  // Time at which this object was created. This is very close to the time at
+  // which the RendererMain function was entered.
+  base::TimeTicks main_entry_time_;
+
 #if !defined(DISABLE_NACL)
   // Determines if a NaCl app is allowed, and modifies params to pass the app's
   // permissions to the trusted NaCl plugin.
@@ -195,25 +196,23 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                             blink::WebPluginParams* params);
 #endif
 
-  scoped_ptr<ChromeRenderProcessObserver> chrome_observer_;
-  scoped_ptr<web_cache::WebCacheRenderProcessObserver> web_cache_observer_;
+  std::unique_ptr<ChromeRenderThreadObserver> chrome_observer_;
+  std::unique_ptr<web_cache::WebCacheRenderThreadObserver> web_cache_observer_;
 
-  scoped_ptr<network_hints::PrescientNetworkingDispatcher>
+  std::unique_ptr<network_hints::PrescientNetworkingDispatcher>
       prescient_networking_dispatcher_;
-  scoped_ptr<password_manager::CredentialManagerClient>
-      credential_manager_client_;
 
 #if defined(ENABLE_SPELLCHECK)
-  scoped_ptr<SpellCheck> spellcheck_;
+  std::unique_ptr<SpellCheck> spellcheck_;
 #endif
-  scoped_ptr<visitedlink::VisitedLinkSlave> visited_link_slave_;
-  scoped_ptr<safe_browsing::PhishingClassifierFilter> phishing_classifier_;
-  scoped_ptr<prerender::PrerenderDispatcher> prerender_dispatcher_;
+  std::unique_ptr<visitedlink::VisitedLinkSlave> visited_link_slave_;
+  std::unique_ptr<safe_browsing::PhishingClassifierFilter> phishing_classifier_;
+  std::unique_ptr<prerender::PrerenderDispatcher> prerender_dispatcher_;
 #if defined(ENABLE_WEBRTC)
   scoped_refptr<WebRtcLoggingMessageFilter> webrtc_logging_message_filter_;
 #endif
 #if defined(ENABLE_PRINT_PREVIEW)
-  scoped_ptr<ChromePDFPrintClient> pdf_print_client_;
+  std::unique_ptr<ChromePDFPrintClient> pdf_print_client_;
 #endif
 #if defined(ENABLE_PLUGINS)
   std::set<std::string> allowed_camera_device_origins_;

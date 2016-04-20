@@ -9,10 +9,13 @@
 
 #include "chrome/installer/util/browser_distribution.h"
 
+#include <utility>
+
 #include "base/atomicops.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/chrome_icon_resources_win.h"
@@ -52,14 +55,13 @@ BrowserDistribution::Type GetCurrentDistributionType() {
 
 BrowserDistribution::BrowserDistribution()
     : type_(CHROME_BROWSER),
-      app_reg_data_(make_scoped_ptr(
-          new NonUpdatingAppRegistrationData(L"Software\\Chromium"))) {
-}
+      app_reg_data_(base::WrapUnique(
+          new NonUpdatingAppRegistrationData(L"Software\\Chromium"))) {}
 
 BrowserDistribution::BrowserDistribution(
-    Type type, scoped_ptr<AppRegistrationData> app_reg_data)
-    : type_(type), app_reg_data_(app_reg_data.Pass()) {
-}
+    Type type,
+    std::unique_ptr<AppRegistrationData> app_reg_data)
+    : type_(type), app_reg_data_(std::move(app_reg_data)) {}
 
 BrowserDistribution::~BrowserDistribution() {}
 

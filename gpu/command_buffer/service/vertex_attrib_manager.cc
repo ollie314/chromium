@@ -9,7 +9,6 @@
 #include <list>
 
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
@@ -40,6 +39,8 @@ VertexAttrib::VertexAttrib()
       is_client_side_array_(false),
       list_(NULL) {
 }
+
+VertexAttrib::VertexAttrib(const VertexAttrib& other) = default;
 
 VertexAttrib::~VertexAttrib() {
 }
@@ -88,7 +89,7 @@ bool VertexAttrib::CanAccess(GLuint index) const {
   uint32_t usable_size = buffer_size - offset_;
   GLuint num_elements = usable_size / real_stride_ +
       ((usable_size % real_stride_) >=
-       (GLES2Util::GetGLTypeSizeForTexturesAndBuffers(type_) * size_) ? 1 : 0);
+       (GLES2Util::GetGroupSizeForBufferType(size_, type_)) ? 1 : 0);
   return index < num_elements;
 }
 

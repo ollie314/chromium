@@ -4,21 +4,41 @@
 
 #include "modules/indexeddb/IndexedDBClient.h"
 
+#include "core/dom/Document.h"
+#include "core/dom/ExecutionContext.h"
+#include "core/frame/LocalFrame.h"
+#include "core/workers/WorkerClients.h"
+#include "core/workers/WorkerGlobalScope.h"
+
 namespace blink {
 
-static CreateIndexedDBClient* idbClientCreateFunction = nullptr;
-
-void setIndexedDBClientCreateFunction(CreateIndexedDBClient createFunction)
+IndexedDBClient::IndexedDBClient()
 {
-    idbClientCreateFunction = createFunction;
 }
 
-IndexedDBClient* IndexedDBClient::create()
+IndexedDBClient* IndexedDBClient::from(ExecutionContext* context)
 {
-    ASSERT(idbClientCreateFunction);
-    // There's no reason why we need to allocate a new proxy each time, but
-    // there's also no strong reason not to.
-    return idbClientCreateFunction();
+    if (context->isDocument())
+        return static_cast<IndexedDBClient*>(Supplement<LocalFrame>::from(toDocument(*context).frame(), supplementName()));
+
+    WorkerClients* clients = toWorkerGlobalScope(*context).clients();
+    ASSERT(clients);
+    return static_cast<IndexedDBClient*>(Supplement<WorkerClients>::from(clients, supplementName()));
+}
+
+const char* IndexedDBClient::supplementName()
+{
+    return "IndexedDBClient";
+}
+
+void provideIndexedDBClientTo(LocalFrame& frame, IndexedDBClient* client)
+{
+    frame.provideSupplement(IndexedDBClient::supplementName(), client);
+}
+
+void provideIndexedDBClientToWorker(WorkerClients* clients, IndexedDBClient* client)
+{
+    clients->provideSupplement(IndexedDBClient::supplementName(), client);
 }
 
 } // namespace blink

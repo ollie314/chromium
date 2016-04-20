@@ -9,9 +9,8 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/page_navigator.h"
 
-#if !defined(OS_ANDROID) || defined(USE_AURA)
+#if !defined(OS_ANDROID)
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/host_desktop.h"
 #endif
 
 using content::GlobalRequestID;
@@ -19,18 +18,6 @@ using content::NavigationController;
 using content::WebContents;
 
 namespace chrome {
-
-#if !defined(OS_ANDROID) || defined(USE_AURA)
-namespace {
-
-HostDesktopType GetHostDesktop(Browser* browser) {
-  if (browser)
-    return browser->host_desktop_type();
-  return GetActiveDesktop();
-}
-
-}  // namespace
-#endif
 
 #if defined(OS_ANDROID)
 NavigateParams::NavigateParams(WebContents* a_target_contents)
@@ -49,13 +36,10 @@ NavigateParams::NavigateParams(WebContents* a_target_contents)
       path_behavior(RESPECT),
       ref_behavior(IGNORE_REF),
       initiating_profile(nullptr),
-      host_desktop_type(GetActiveDesktop()),
       should_replace_current_entry(false),
       created_with_opener(false) {
 }
-#endif  // defined(OS_ANDROID)
-
-#if !defined(OS_ANDROID) || defined(USE_AURA)
+#else
 NavigateParams::NavigateParams(Browser* a_browser,
                                const GURL& a_url,
                                ui::PageTransition a_transition)
@@ -76,7 +60,6 @@ NavigateParams::NavigateParams(Browser* a_browser,
       ref_behavior(IGNORE_REF),
       browser(a_browser),
       initiating_profile(NULL),
-      host_desktop_type(GetHostDesktop(a_browser)),
       should_replace_current_entry(false),
       created_with_opener(false) {
 }
@@ -99,11 +82,10 @@ NavigateParams::NavigateParams(Browser* a_browser,
       ref_behavior(IGNORE_REF),
       browser(a_browser),
       initiating_profile(NULL),
-      host_desktop_type(GetHostDesktop(a_browser)),
       should_replace_current_entry(false),
       created_with_opener(false) {
 }
-#endif  // !defined(OS_ANDROID) || defined(USE_AURA)
+#endif  // !defined(OS_ANDROID)
 
 NavigateParams::NavigateParams(Profile* a_profile,
                                const GURL& a_url,
@@ -123,14 +105,15 @@ NavigateParams::NavigateParams(Profile* a_profile,
       user_gesture(true),
       path_behavior(RESPECT),
       ref_behavior(IGNORE_REF),
-#if !defined(OS_ANDROID) || defined(USE_AURA)
+#if !defined(OS_ANDROID)
       browser(NULL),
 #endif
       initiating_profile(a_profile),
-      host_desktop_type(GetActiveDesktop()),
       should_replace_current_entry(false),
       created_with_opener(false) {
 }
+
+NavigateParams::NavigateParams(const NavigateParams& other) = default;
 
 NavigateParams::~NavigateParams() {}
 

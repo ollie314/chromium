@@ -25,7 +25,6 @@
 
 #include "core/html/forms/BaseChooserOnlyDateAndTimeInputType.h"
 
-#if !ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/dom/Document.h"
 #include "core/dom/shadow/ShadowRoot.h"
@@ -37,26 +36,28 @@
 
 namespace blink {
 
-BaseChooserOnlyDateAndTimeInputType::BaseChooserOnlyDateAndTimeInputType(HTMLInputElement& element)
-    : BaseDateAndTimeInputType(element)
+BaseChooserOnlyDateAndTimeInputType::BaseChooserOnlyDateAndTimeInputType(HTMLInputElement& element, BaseDateAndTimeInputType& inputType)
+    : InputTypeView(element)
+    , m_inputType(inputType)
 {
-#if ENABLE(OILPAN)
     ThreadState::current()->registerPreFinalizer(this);
-#endif
+}
+
+BaseChooserOnlyDateAndTimeInputType* BaseChooserOnlyDateAndTimeInputType::create(HTMLInputElement& element, BaseDateAndTimeInputType& inputType)
+{
+    return new BaseChooserOnlyDateAndTimeInputType(element, inputType);
 }
 
 BaseChooserOnlyDateAndTimeInputType::~BaseChooserOnlyDateAndTimeInputType()
 {
-#if !ENABLE(OILPAN)
-    closeDateTimeChooser();
-#endif
     ASSERT(!m_dateTimeChooser);
 }
 
 DEFINE_TRACE(BaseChooserOnlyDateAndTimeInputType)
 {
+    visitor->trace(m_inputType);
     visitor->trace(m_dateTimeChooser);
-    BaseDateAndTimeInputType::trace(visitor);
+    InputTypeView::trace(visitor);
     DateTimeChooserClient::trace(visitor);
 }
 
@@ -77,11 +78,11 @@ void BaseChooserOnlyDateAndTimeInputType::handleDOMActivateEvent(Event*)
 
 void BaseChooserOnlyDateAndTimeInputType::createShadowSubtree()
 {
-    DEFINE_STATIC_LOCAL(AtomicString, valueContainerPseudo, ("-webkit-date-and-time-value", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, valueContainerPseudo, ("-webkit-date-and-time-value"));
 
-    RefPtrWillBeRawPtr<HTMLDivElement> valueContainer = HTMLDivElement::create(element().document());
+    HTMLDivElement* valueContainer = HTMLDivElement::create(element().document());
     valueContainer->setShadowPseudoId(valueContainerPseudo);
-    element().userAgentShadowRoot()->appendChild(valueContainer.get());
+    element().userAgentShadowRoot()->appendChild(valueContainer);
     updateView();
 }
 
@@ -94,17 +95,16 @@ void BaseChooserOnlyDateAndTimeInputType::updateView()
     if (!element().suggestedValue().isNull())
         displayValue = element().suggestedValue();
     else
-        displayValue = visibleValue();
+        displayValue = m_inputType->visibleValue();
     if (displayValue.isEmpty()) {
         // Need to put something to keep text baseline.
         displayValue = " ";
     }
-    toHTMLElement(node)->setInnerText(displayValue, ASSERT_NO_EXCEPTION);
+    toHTMLElement(node)->setTextContent(displayValue);
 }
 
-void BaseChooserOnlyDateAndTimeInputType::setValue(const String& value, bool valueChanged, TextFieldEventBehavior eventBehavior)
+void BaseChooserOnlyDateAndTimeInputType::didSetValue(const String& value, bool valueChanged)
 {
-    BaseDateAndTimeInputType::setValue(value, valueChanged, eventBehavior);
     if (valueChanged)
         updateView();
 }
@@ -161,9 +161,8 @@ void BaseChooserOnlyDateAndTimeInputType::handleKeyupEvent(KeyboardEvent* event)
 
 void BaseChooserOnlyDateAndTimeInputType::accessKeyAction(bool sendMouseEvents)
 {
-    BaseDateAndTimeInputType::accessKeyAction(sendMouseEvents);
+    InputTypeView::accessKeyAction(sendMouseEvents);
     BaseClickableWithKeyInputType::accessKeyAction(element(), sendMouseEvents);
 }
 
-}
-#endif
+} // namespace blink

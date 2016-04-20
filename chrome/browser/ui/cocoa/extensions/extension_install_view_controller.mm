@@ -15,11 +15,9 @@
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #import "chrome/browser/ui/chrome_style.h"
-#include "chrome/browser/ui/cocoa/extensions/bundle_util.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -35,7 +33,6 @@
 
 using content::OpenURLParams;
 using content::Referrer;
-using extensions::BundleInstaller;
 
 namespace {
 
@@ -55,7 +52,6 @@ typedef NSUInteger CellAttributes;
 }  // namespace.
 
 @interface ExtensionInstallViewController ()
-- (BOOL)isBundleInstall;
 - (BOOL)hasWebstoreData;
 - (void)appendRatingStar:(const gfx::ImageSkia*)skiaImage;
 - (void)onOutlineViewRowCountDidChange;
@@ -228,14 +224,11 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
 - (id)initWithProfile:(Profile*)profile
             navigator:(content::PageNavigator*)navigator
              delegate:(ExtensionInstallViewDelegate*)delegate
-               prompt:(scoped_ptr<ExtensionInstallPrompt::Prompt>)prompt {
-  // We use a different XIB in the case of bundle installs, installs with
-  // webstore data, or no permission warnings. These are laid out nicely for
-  // the data they display.
+               prompt:(std::unique_ptr<ExtensionInstallPrompt::Prompt>)prompt {
+  // We use a different XIB in the case of installs with webstore data, or no
+  // permission warnings. These are laid out nicely for the data they display.
   NSString* nibName = nil;
-  if (prompt->type() == ExtensionInstallPrompt::BUNDLE_INSTALL_PROMPT) {
-    nibName = @"ExtensionInstallPromptBundle";
-  } else if (prompt->has_webstore_data()) {
+  if (prompt->has_webstore_data()) {
     nibName = @"ExtensionInstallPromptWebstoreData";
   } else if (!prompt->ShouldShowPermissions() &&
              prompt->GetRetainedFileCount() == 0 &&
@@ -264,8 +257,7 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
   if (navigator_) {
     navigator_->OpenURL(params);
   } else {
-    chrome::ScopedTabbedBrowserDisplayer displayer(
-        profile_, chrome::GetActiveDesktop());
+    chrome::ScopedTabbedBrowserDisplayer displayer(profile_);
     displayer.browser()->OpenURL(params);
   }
 
@@ -361,15 +353,6 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
                                          -buttonDelta.width, 0)];
   }
 
-  if ([self isBundleInstall]) {
-    BundleInstaller::ItemList items = prompt_->bundle()->GetItemsWithState(
-        BundleInstaller::Item::STATE_PENDING);
-    PopulateBundleItemsList(items, itemsField_);
-
-    // Adjust the view to fit the list of extensions.
-    OffsetViewVerticallyToFitContent(itemsField_, &totalOffset);
-  }
-
   // If there are any warnings, retained devices or retained files, then we
   // have to do some special layout.
   if (prompt_->ShouldShowPermissions() || prompt_->GetRetainedFileCount() > 0) {
@@ -383,10 +366,10 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
 
     // Adjust the outline view to fit the warnings.
     OffsetOutlineViewVerticallyToFitContent(outlineView_, &totalOffset);
-  } else if ([self hasWebstoreData] || [self isBundleInstall]) {
-    // Installs with webstore data and bundle installs that don't have a
-    // permissions section need to hide controls related to that and shrink the
-    // window by the space they take up.
+  } else if ([self hasWebstoreData]) {
+    // Installs with webstore data that don't have a permissions section need to
+    // hide controls related to that and shrink the window by the space they
+    // take up.
     NSRect hiddenRect = NSUnionRect([warningsSeparator_ frame],
                                     [[outlineView_ enclosingScrollView] frame]);
     [warningsSeparator_ setHidden:YES];
@@ -400,10 +383,6 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
     currentRect.size.height += totalOffset;
     [self updateViewFrame:currentRect];
   }
-}
-
-- (BOOL)isBundleInstall {
-  return prompt_->type() == ExtensionInstallPrompt::BUNDLE_INSTALL_PROMPT;
 }
 
 - (BOOL)hasWebstoreData {

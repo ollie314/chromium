@@ -5,12 +5,12 @@
 #ifndef CHROME_TEST_CHROMEDRIVER_CHROME_NAVIGATION_TRACKER_H_
 #define CHROME_TEST_CHROMEDRIVER_CHROME_NAVIGATION_TRACKER_H_
 
+#include <memory>
 #include <set>
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "chrome/test/chromedriver/chrome/devtools_event_listener.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 
@@ -20,7 +20,9 @@ class DictionaryValue;
 
 struct BrowserInfo;
 class DevToolsClient;
+class JavaScriptDialogManager;
 class Status;
+class Timeout;
 
 // Tracks the navigation state of the page.
 class NavigationTracker : public DevToolsEventListener {
@@ -31,17 +33,22 @@ class NavigationTracker : public DevToolsEventListener {
     kNotLoading,
   };
 
-  NavigationTracker(DevToolsClient* client, const BrowserInfo* browser_info);
+  NavigationTracker(DevToolsClient* client,
+                    const BrowserInfo* browser_info,
+                    const JavaScriptDialogManager* dialog_manager);
 
   NavigationTracker(DevToolsClient* client,
                     LoadingState known_state,
-                    const BrowserInfo* browser_info);
+                    const BrowserInfo* browser_info,
+                    const JavaScriptDialogManager* dialog_manager);
 
   ~NavigationTracker() override;
 
   // Gets whether a navigation is pending for the specified frame. |frame_id|
   // may be empty to signify the main frame.
-  Status IsPendingNavigation(const std::string& frame_id, bool* is_pending);
+  Status IsPendingNavigation(const std::string& frame_id,
+                             const Timeout* timeout,
+                             bool* is_pending);
 
   void set_timed_out(bool timed_out);
 
@@ -58,6 +65,7 @@ class NavigationTracker : public DevToolsEventListener {
   DevToolsClient* client_;
   LoadingState loading_state_;
   const BrowserInfo* browser_info_;
+  const JavaScriptDialogManager* dialog_manager_;
   std::set<std::string> pending_frame_set_;
   std::set<std::string> scheduled_frame_set_;
   std::set<int> execution_context_set_;

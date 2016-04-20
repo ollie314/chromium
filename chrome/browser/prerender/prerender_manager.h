@@ -8,11 +8,11 @@
 #include <stdint.h>
 
 #include <list>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
@@ -134,6 +134,14 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
       content::SessionStorageNamespace* session_storage_namespace,
       const gfx::Size& size);
 
+  // Adds a prerender from an external request that will prerender even on
+  // cellular networks as long as the user setting for prerendering is ON.
+  PrerenderHandle* AddPrerenderOnCellularFromExternalRequest(
+      const GURL& url,
+      const content::Referrer& referrer,
+      content::SessionStorageNamespace* session_storage_namespace,
+      const gfx::Size& size);
+
   // Adds a prerender for Instant Search |url| if valid. The
   // |session_storage_namespace| matches the namespace of the active tab at the
   // time the prerender is generated. Returns a caller-owned PrerenderHandle* or
@@ -192,8 +200,15 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
                                  Origin* origin) const;
 
   // Whether the PrerenderManager has an active prerender with the given url and
-  // SessionStorageNamespace associated with the given WebContens.
+  // SessionStorageNamespace associated with the given WebContents.
   bool HasPrerenderedUrl(GURL url, content::WebContents* web_contents) const;
+
+  // Whether the PrerenderManager has an active prerender with the given url and
+  // SessionStorageNamespace associated with the given WebContents, and that
+  // prerender has finished loading..
+  bool HasPrerenderedAndFinishedLoadingUrl(
+      GURL url,
+      content::WebContents* web_contents) const;
 
   // Returns the PrerenderContents object for the given web_contents, otherwise
   // returns NULL. Note that the PrerenderContents may have been Destroy()ed,
@@ -337,7 +352,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
    private:
     PrerenderManager* manager_;
-    scoped_ptr<PrerenderContents> contents_;
+    std::unique_ptr<PrerenderContents> contents_;
 
     // The number of distinct PrerenderHandles created for |this|, including
     // ones that have called PrerenderData::OnHandleNavigatedAway(), but not
@@ -387,6 +402,11 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // Returns whether prerendering is currently enabled or the reason why it is
   // disabled.
   chrome_browser_net::NetworkPredictionStatus GetPredictionStatus() const;
+
+  // Returns whether prerendering is currently enabled or the reason why it is
+  // disabled after taking into account the origin of the request.
+  chrome_browser_net::NetworkPredictionStatus GetPredictionStatusForOrigin(
+      Origin origin) const;
 
   // Adds a prerender for |url| from |referrer|. The |origin| specifies how the
   // prerender was added. If |size| is empty, then
@@ -506,7 +526,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // navigate_time_.
   std::list<NavigationRecord> navigations_;
 
-  scoped_ptr<PrerenderContents::Factory> prerender_contents_factory_;
+  std::unique_ptr<PrerenderContents::Factory> prerender_contents_factory_;
 
   static PrerenderManagerMode mode_;
 
@@ -525,9 +545,9 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   ScopedVector<OnCloseWebContentsDeleter> on_close_web_contents_deleters_;
 
-  scoped_ptr<PrerenderHistory> prerender_history_;
+  std::unique_ptr<PrerenderHistory> prerender_history_;
 
-  scoped_ptr<PrerenderHistograms> histograms_;
+  std::unique_ptr<PrerenderHistograms> histograms_;
 
   content::NotificationRegistrar notification_registrar_;
 

@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -16,21 +17,22 @@
 #include "base/files/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/policy/cloud_external_data_manager_base_test_util.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_factory_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_paths.h"
 #include "chromeos/chromeos_paths.h"
 #include "chromeos/chromeos_switches.h"
+#include "chromeos/cryptohome/system_salt_getter.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_session_manager_client.h"
@@ -126,6 +128,12 @@ SkColor GetAverageBackgroundColor() {
   return ComputeAverageColor(bitmap);
 }
 
+// Initialize system salt to calculate wallpaper file names.
+void SetSystemSalt() {
+  chromeos::SystemSaltGetter::Get()->SetRawSaltForTesting(
+      chromeos::SystemSaltGetter::RawSalt({1, 2, 3, 4, 5, 6, 7, 8}));
+}
+
 }  // namespace
 
 class WallpaperManagerPolicyTest
@@ -142,14 +150,15 @@ class WallpaperManagerPolicyTest
         AccountId::FromUserEmail(LoginManagerTest::kEnterpriseUser2));
   }
 
-  scoped_ptr<policy::UserPolicyBuilder> GetUserPolicyBuilder(
+  std::unique_ptr<policy::UserPolicyBuilder> GetUserPolicyBuilder(
       const AccountId& account_id) {
-    scoped_ptr<policy::UserPolicyBuilder>
-        user_policy_builder(new policy::UserPolicyBuilder());
+    std::unique_ptr<policy::UserPolicyBuilder> user_policy_builder(
+        new policy::UserPolicyBuilder());
     base::FilePath user_keys_dir;
     EXPECT_TRUE(PathService::Get(DIR_USER_POLICY_KEYS, &user_keys_dir));
     const std::string sanitized_user_id =
-        CryptohomeClient::GetStubSanitizedUsername(account_id.GetUserEmail());
+        CryptohomeClient::GetStubSanitizedUsername(
+            cryptohome::Identification(account_id));
     const base::FilePath user_key_file =
         user_keys_dir.AppendASCII(sanitized_user_id)
                      .AppendASCII("policy.pub");
@@ -169,7 +178,7 @@ class WallpaperManagerPolicyTest
   // LoginManagerTest:
   void SetUpInProcessBrowserTestFixture() override {
     DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
-        scoped_ptr<SessionManagerClient>(fake_session_manager_client_));
+        std::unique_ptr<SessionManagerClient>(fake_session_manager_client_));
 
     LoginManagerTest::SetUpInProcessBrowserTestFixture();
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir_));
@@ -182,6 +191,10 @@ class WallpaperManagerPolicyTest
     // start-up of user profiles.
     command_line->AppendSwitch(switches::kLoginManager);
     command_line->AppendSwitch(switches::kForceLoginManagerInTests);
+
+    // Allow policy fetches to fail - these tests instead invoke InjectPolicy()
+    // to directly inject and modify policy dynamically.
+    command_line->AppendSwitch(switches::kAllowFailedPolicyFetchForTest);
 
     LoginManagerTest::SetUpCommandLine(command_line);
   }
@@ -247,8 +260,8 @@ class WallpaperManagerPolicyTest
       builder->payload().Clear();
     }
     builder->Build();
-    fake_session_manager_client_->set_user_policy(account_id.GetUserEmail(),
-                                                  builder->GetBlob());
+    fake_session_manager_client_->set_user_policy(
+        cryptohome::Identification(account_id), builder->GetBlob());
     const user_manager::User* user =
         user_manager::UserManager::Get()->FindUser(account_id);
     ASSERT_TRUE(user);
@@ -268,9 +281,9 @@ class WallpaperManagerPolicyTest
   }
 
   base::FilePath test_data_dir_;
-  scoped_ptr<base::RunLoop> run_loop_;
+  std::unique_ptr<base::RunLoop> run_loop_;
   int wallpaper_change_count_;
-  scoped_ptr<policy::UserPolicyBuilder> user_policy_builders_[2];
+  std::unique_ptr<policy::UserPolicyBuilder> user_policy_builders_[2];
   FakeSessionManagerClient* fake_session_manager_client_;
   std::vector<AccountId> testUsers_;
 
@@ -289,6 +302,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerPolicyTest, PRE_SetResetClear) {
 // user.  Also verifies that after the policy has been cleared, the wallpaper
 // reverts to default.
 IN_PROC_BROWSER_TEST_F(WallpaperManagerPolicyTest, SetResetClear) {
+  SetSystemSalt();
   wallpaper::WallpaperInfo info;
   LoginUser(testUsers_[0].GetUserEmail());
   base::RunLoop().RunUntilIdle();
@@ -375,20 +389,20 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerPolicyTest,
 
   // Select the second pod (belonging to user 1).
   ASSERT_TRUE(content::ExecuteScript(
-      static_cast<chromeos::LoginDisplayHostImpl*>(
-          chromeos::LoginDisplayHostImpl::default_host())->GetOobeUI()->
-              web_ui()->GetWebContents(),
+      LoginDisplayHost::default_host()->GetOobeUI()->web_ui()->GetWebContents(),
       "document.getElementsByClassName('pod')[1].focus();"));
   RunUntilWallpaperChangeCount(2);
   ASSERT_EQ(kRedImageColor, GetAverageBackgroundColor());
 }
 
 IN_PROC_BROWSER_TEST_F(WallpaperManagerPolicyTest, PRE_PRE_PersistOverLogout) {
+  SetSystemSalt();
   RegisterUser(testUsers_[0].GetUserEmail());
   StartupUtils::MarkOobeCompleted();
 }
 
 IN_PROC_BROWSER_TEST_F(WallpaperManagerPolicyTest, PRE_PersistOverLogout) {
+  SetSystemSalt();
   LoginUser(testUsers_[0].GetUserEmail());
 
   // Wait until default wallpaper has been loaded.

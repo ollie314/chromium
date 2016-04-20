@@ -13,8 +13,8 @@
 #include "components/dom_distiller/core/proto/distilled_article.pb.h"
 #include "components/dom_distiller/core/task_tracker.h"
 #include "components/dom_distiller/core/viewer.h"
+#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/dom_distiller/dom_distiller_service_factory.h"
-#include "ios/public/provider/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace dom_distiller {
@@ -32,7 +32,7 @@ DistillerViewer::DistillerViewer(ios::ChromeBrowserState* browser_state,
       dom_distiller::DomDistillerServiceFactory::GetForBrowserState(
           browser_state);
 
-  scoped_ptr<ViewerHandle> viewer_handle = distillerService->ViewUrl(
+  std::unique_ptr<ViewerHandle> viewer_handle = distillerService->ViewUrl(
       this, distillerService->CreateDefaultDistillerPage(gfx::Size()), url);
 
   TakeViewerHandle(std::move(viewer_handle));

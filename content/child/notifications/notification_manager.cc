@@ -4,31 +4,37 @@
 
 #include "content/child/notifications/notification_manager.h"
 
-#include <cmath>
 #include <utility>
 
 #include "base/lazy_instance.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_local.h"
 #include "content/child/notifications/notification_data_conversions.h"
 #include "content/child/notifications/notification_dispatcher.h"
 #include "content/child/service_worker/web_service_worker_registration_impl.h"
 #include "content/child/thread_safe_sender.h"
-#include "content/common/notification_constants.h"
+#include "content/public/common/notification_resources.h"
 #include "content/public/common/platform_notification_data.h"
+#include "third_party/WebKit/public/platform/URLConversion.h"
 #include "third_party/WebKit/public/platform/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/platform/modules/notifications/WebNotificationDelegate.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-
-using blink::WebNotificationPermission;
 
 namespace content {
 namespace {
 
 int CurrentWorkerId() {
   return WorkerThread::GetCurrentId();
+}
+
+NotificationResources ToNotificationResources(
+    std::unique_ptr<blink::WebNotificationResources> web_resources) {
+  NotificationResources resources;
+  resources.notification_icon = web_resources->icon;
+  resources.badge = web_resources->badge;
+  for (const auto& action_icon : web_resources->actionIcons)
+    resources.action_icons.push_back(action_icon);
+  return resources;
 }
 
 }  // namespace
@@ -38,11 +44,9 @@ static base::LazyInstance<base::ThreadLocalPointer<NotificationManager>>::Leaky
 
 NotificationManager::NotificationManager(
     ThreadSafeSender* thread_safe_sender,
-    base::SingleThreadTaskRunner* main_thread_task_runner,
     NotificationDispatcher* notification_dispatcher)
     : thread_safe_sender_(thread_safe_sender),
-      notification_dispatcher_(notification_dispatcher),
-      pending_notifications_(main_thread_task_runner) {
+      notification_dispatcher_(notification_dispatcher) {
   g_notification_manager_tls.Pointer()->Set(this);
 }
 
@@ -52,13 +56,12 @@ NotificationManager::~NotificationManager() {
 
 NotificationManager* NotificationManager::ThreadSpecificInstance(
     ThreadSafeSender* thread_safe_sender,
-    base::SingleThreadTaskRunner* main_thread_task_runner,
     NotificationDispatcher* notification_dispatcher) {
   if (g_notification_manager_tls.Pointer()->Get())
     return g_notification_manager_tls.Pointer()->Get();
 
-  NotificationManager* manager = new NotificationManager(
-      thread_safe_sender, main_thread_task_runner, notification_dispatcher);
+  NotificationManager* manager =
+      new NotificationManager(thread_safe_sender, notification_dispatcher);
   if (CurrentWorkerId())
     WorkerThread::AddObserver(manager);
   return manager;
@@ -71,31 +74,41 @@ void NotificationManager::WillStopCurrentWorkerThread() {
 void NotificationManager::show(
     const blink::WebSecurityOrigin& origin,
     const blink::WebNotificationData& notification_data,
+    std::unique_ptr<blink::WebNotificationResources> notification_resources,
     blink::WebNotificationDelegate* delegate) {
-  if (notification_data.icon.isEmpty()) {
-    DisplayPageNotification(origin, notification_data, delegate, SkBitmap());
-    return;
-  }
+  DCHECK_EQ(0u, notification_data.actions.size());
+  DCHECK_EQ(0u, notification_resources->actionIcons.size());
 
-  pending_notifications_.FetchPageNotificationResources(
-      notification_data, delegate,
-      base::Bind(&NotificationManager::DisplayPageNotification,
-                 base::Unretained(this),  // this owns |pending_notifications_|
-                 origin, notification_data, delegate));
+  int notification_id =
+      notification_dispatcher_->GenerateNotificationId(CurrentWorkerId());
+
+  active_page_notifications_[notification_id] = delegate;
+  // TODO(mkwst): This is potentially doing the wrong thing with unique
+  // origins. Perhaps also 'file:', 'blob:' and 'filesystem:'. See
+  // https://crbug.com/490074 for detail.
+  thread_safe_sender_->Send(new PlatformNotificationHostMsg_Show(
+      notification_id, blink::WebStringToGURL(origin.toString()),
+      ToPlatformNotificationData(notification_data),
+      ToNotificationResources(std::move(notification_resources))));
 }
 
 void NotificationManager::showPersistent(
     const blink::WebSecurityOrigin& origin,
     const blink::WebNotificationData& notification_data,
+    std::unique_ptr<blink::WebNotificationResources> notification_resources,
     blink::WebServiceWorkerRegistration* service_worker_registration,
     blink::WebNotificationShowCallbacks* callbacks) {
   DCHECK(service_worker_registration);
+  DCHECK_EQ(notification_data.actions.size(),
+            notification_resources->actionIcons.size());
+
   int64_t service_worker_registration_id =
       static_cast<WebServiceWorkerRegistrationImpl*>(
           service_worker_registration)
           ->registration_id();
 
-  scoped_ptr<blink::WebNotificationShowCallbacks> owned_callbacks(callbacks);
+  std::unique_ptr<blink::WebNotificationShowCallbacks> owned_callbacks(
+      callbacks);
 
   // Verify that the author-provided payload size does not exceed our limit.
   // This is an implementation-defined limit to prevent abuse of notification
@@ -106,27 +119,30 @@ void NotificationManager::showPersistent(
   // is outside of the boundaries set by the specification, but it gives authors
   // an indication that something has gone wrong.
   size_t author_data_size = notification_data.data.size();
-  UMA_HISTOGRAM_MEMORY_KB("Notifications.AuthorDataSizeKB",
-                          static_cast<int>(ceil(author_data_size / 1024.0)));
+
+  UMA_HISTOGRAM_COUNTS_1000("Notifications.AuthorDataSize", author_data_size);
 
   if (author_data_size > PlatformNotificationData::kMaximumDeveloperDataSize) {
     owned_callbacks->onError();
     return;
   }
 
-  if (notification_data.icon.isEmpty()) {
-    DisplayPersistentNotification(origin, notification_data,
-                                  service_worker_registration_id,
-                                  std::move(owned_callbacks), SkBitmap());
-    return;
-  }
+  // TODO(peter): GenerateNotificationId is more of a request id. Consider
+  // renaming the method in the NotificationDispatcher if this makes sense.
+  int request_id =
+      notification_dispatcher_->GenerateNotificationId(CurrentWorkerId());
 
-  pending_notifications_.FetchPersistentNotificationResources(
-      notification_data,
-      base::Bind(&NotificationManager::DisplayPersistentNotification,
-                 base::Unretained(this),  // this owns |pending_notifications_|
-                 origin, notification_data, service_worker_registration_id,
-                 base::Passed(&owned_callbacks)));
+  pending_show_notification_requests_.AddWithID(owned_callbacks.release(),
+                                                request_id);
+
+  // TODO(mkwst): This is potentially doing the wrong thing with unique
+  // origins. Perhaps also 'file:', 'blob:' and 'filesystem:'. See
+  // https://crbug.com/490074 for detail.
+  thread_safe_sender_->Send(new PlatformNotificationHostMsg_ShowPersistent(
+      request_id, service_worker_registration_id,
+      blink::WebStringToGURL(origin.toString()),
+      ToPlatformNotificationData(notification_data),
+      ToNotificationResources(std::move(notification_resources))));
 }
 
 void NotificationManager::getNotifications(
@@ -157,9 +173,6 @@ void NotificationManager::getNotifications(
 }
 
 void NotificationManager::close(blink::WebNotificationDelegate* delegate) {
-  if (pending_notifications_.CancelPageNotificationFetches(delegate))
-    return;
-
   for (auto& iter : active_page_notifications_) {
     if (iter.second != delegate)
       continue;
@@ -182,14 +195,11 @@ void NotificationManager::closePersistent(
       // TODO(mkwst): This is potentially doing the wrong thing with unique
       // origins. Perhaps also 'file:', 'blob:' and 'filesystem:'. See
       // https://crbug.com/490074 for detail.
-      GURL(origin.toString()), persistent_notification_id));
+      blink::WebStringToGURL(origin.toString()), persistent_notification_id));
 }
 
 void NotificationManager::notifyDelegateDestroyed(
     blink::WebNotificationDelegate* delegate) {
-  if (pending_notifications_.CancelPageNotificationFetches(delegate))
-    return;
-
   for (auto& iter : active_page_notifications_) {
     if (iter.second != delegate)
       continue;
@@ -199,21 +209,18 @@ void NotificationManager::notifyDelegateDestroyed(
   }
 }
 
-WebNotificationPermission NotificationManager::checkPermission(
+blink::mojom::PermissionStatus NotificationManager::checkPermission(
     const blink::WebSecurityOrigin& origin) {
-  WebNotificationPermission permission =
-      blink::WebNotificationPermissionAllowed;
+  blink::mojom::PermissionStatus permission_status =
+      blink::mojom::PermissionStatus::DENIED;
+
   // TODO(mkwst): This is potentially doing the wrong thing with unique
   // origins. Perhaps also 'file:', 'blob:' and 'filesystem:'. See
   // https://crbug.com/490074 for detail.
   thread_safe_sender_->Send(new PlatformNotificationHostMsg_CheckPermission(
-      GURL(origin.toString()), &permission));
+      blink::WebStringToGURL(origin.toString()), &permission_status));
 
-  return permission;
-}
-
-size_t NotificationManager::maxActions() {
-  return kPlatformNotificationMaxActions;
+  return permission_status;
 }
 
 bool NotificationManager::OnMessageReceived(const IPC::Message& message) {
@@ -297,45 +304,6 @@ void NotificationManager::OnDidGetNotifications(
   callbacks->onSuccess(notifications);
 
   pending_get_notification_requests_.Remove(request_id);
-}
-
-void NotificationManager::DisplayPageNotification(
-    const blink::WebSecurityOrigin& origin,
-    const blink::WebNotificationData& notification_data,
-    blink::WebNotificationDelegate* delegate,
-    const SkBitmap& icon) {
-  int notification_id =
-      notification_dispatcher_->GenerateNotificationId(CurrentWorkerId());
-
-  active_page_notifications_[notification_id] = delegate;
-  // TODO(mkwst): This is potentially doing the wrong thing with unique
-  // origins. Perhaps also 'file:', 'blob:' and 'filesystem:'. See
-  // https://crbug.com/490074 for detail.
-  thread_safe_sender_->Send(new PlatformNotificationHostMsg_Show(
-      notification_id, GURL(origin.toString()), icon,
-      ToPlatformNotificationData(notification_data)));
-}
-
-void NotificationManager::DisplayPersistentNotification(
-    const blink::WebSecurityOrigin& origin,
-    const blink::WebNotificationData& notification_data,
-    int64_t service_worker_registration_id,
-    scoped_ptr<blink::WebNotificationShowCallbacks> callbacks,
-    const SkBitmap& icon) {
-  // TODO(peter): GenerateNotificationId is more of a request id. Consider
-  // renaming the method in the NotificationDispatcher if this makes sense.
-  int request_id =
-      notification_dispatcher_->GenerateNotificationId(CurrentWorkerId());
-
-  pending_show_notification_requests_.AddWithID(callbacks.release(),
-                                                request_id);
-
-  // TODO(mkwst): This is potentially doing the wrong thing with unique
-  // origins. Perhaps also 'file:', 'blob:' and 'filesystem:'. See
-  // https://crbug.com/490074 for detail.
-  thread_safe_sender_->Send(new PlatformNotificationHostMsg_ShowPersistent(
-      request_id, service_worker_registration_id, GURL(origin.toString()), icon,
-      ToPlatformNotificationData(notification_data)));
 }
 
 }  // namespace content

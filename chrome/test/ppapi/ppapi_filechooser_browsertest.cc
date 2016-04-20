@@ -239,7 +239,7 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest,
 
   ASSERT_TRUE(base::PathExists(actual_filename));
   std::string file_contents;
-  ASSERT_TRUE(base::ReadFileToString(actual_filename, &file_contents, 100));
+  ASSERT_TRUE(base::ReadFileToString(actual_filename, &file_contents));
   EXPECT_EQ("Hello from PPAPI", file_contents);
 }
 
@@ -260,7 +260,7 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest,
 
   ASSERT_TRUE(base::PathExists(actual_filename));
   std::string file_contents;
-  ASSERT_TRUE(base::ReadFileToString(actual_filename, &file_contents, 100));
+  ASSERT_TRUE(base::ReadFileToString(actual_filename, &file_contents));
   EXPECT_EQ("Hello from PPAPI", file_contents);
 }
 
@@ -295,7 +295,7 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest,
 
   ASSERT_TRUE(base::PathExists(actual_filename));
   std::string file_contents;
-  ASSERT_TRUE(base::ReadFileToString(actual_filename, &file_contents, 100));
+  ASSERT_TRUE(base::ReadFileToString(actual_filename, &file_contents));
   EXPECT_EQ("Hello from PPAPI", file_contents);
 }
 
@@ -307,6 +307,16 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest,
       TestSelectFileDialogFactory::NOT_REACHED,
       TestSelectFileDialogFactory::SelectedFileInfoList());
   RunTestViaHTTP("FileChooser_SaveAsDangerousExecutableDisallowed");
+}
+
+IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest,
+                       FileChooser_SaveAs_DangerousExtensionList_Disallowed) {
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kDisallowUncheckedDangerousDownloads);
+  TestSelectFileDialogFactory test_dialog_factory(
+      TestSelectFileDialogFactory::NOT_REACHED,
+      TestSelectFileDialogFactory::SelectedFileInfoList());
+  RunTestViaHTTP("FileChooser_SaveAsDangerousExtensionListDisallowed");
 }
 
 // The kDisallowUncheckedDangerousDownloads switch (whose behavior is verified
@@ -333,7 +343,7 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTestWithSBService,
 
   ASSERT_TRUE(base::PathExists(actual_filename));
   std::string file_contents;
-  ASSERT_TRUE(base::ReadFileToString(actual_filename, &file_contents, 100));
+  ASSERT_TRUE(base::ReadFileToString(actual_filename, &file_contents));
   EXPECT_EQ("Hello from PPAPI", file_contents);
 }
 

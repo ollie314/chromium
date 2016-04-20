@@ -82,12 +82,12 @@ WebRange WebRange::fromDocumentRange(WebLocalFrame* frame, int start, int length
     return createRange(PlainTextRange(start, start + length).createRange(*scope));
 }
 
-WebRange::WebRange(const PassRefPtrWillBeRawPtr<Range>& range)
+WebRange::WebRange(Range*range)
     : m_private(range)
 {
 }
 
-WebRange::operator PassRefPtrWillBeRawPtr<Range>() const
+WebRange::operator Range*() const
 {
     return m_private.get();
 }

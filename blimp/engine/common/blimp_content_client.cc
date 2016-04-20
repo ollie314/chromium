@@ -12,9 +12,16 @@
 namespace blimp {
 namespace engine {
 
+std::string client_os_info = "Linux; Android 5.1.1";
+
 std::string GetBlimpEngineUserAgent() {
-  return content::BuildUserAgentFromProduct(
+  return content::BuildUserAgentFromOSAndProduct(
+      client_os_info,
       version_info::GetProductNameAndVersionForUserAgent() + " Mobile");
+}
+
+void SetClientOSInfo(std::string os_version_info) {
+  client_os_info = os_version_info;
 }
 
 BlimpContentClient::~BlimpContentClient() {}

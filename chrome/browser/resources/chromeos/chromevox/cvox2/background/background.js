@@ -17,6 +17,7 @@ goog.require('LiveRegions');
 goog.require('NextEarcons');
 goog.require('Output');
 goog.require('Output.EventType');
+goog.require('PanelCommand');
 goog.require('constants');
 goog.require('cursors.Cursor');
 goog.require('cvox.BrailleKeyCommand');
@@ -61,6 +62,12 @@ Background = function() {
    * @private
    */
   this.currentRange_ = null;
+
+  /**
+   * @type {cursors.Range}
+   * @private
+   */
+  this.savedRange_ = null;
 
   /**
    * Which variant of ChromeVox is active.
@@ -115,7 +122,8 @@ Background = function() {
 
   cvox.ExtensionBridge.addMessageListener(this.onMessage_);
 
-  document.addEventListener('keydown', this.onKeyDown.bind(this), true);
+  document.addEventListener('keydown', this.onKeyDown.bind(this), false);
+  document.addEventListener('keyup', this.onKeyUp.bind(this), false);
   cvox.ChromeVoxKbHandler.commandHandler = this.onGotCommand.bind(this);
 
   // Classic keymap.
@@ -123,7 +131,24 @@ Background = function() {
 
   // Live region handler.
   this.liveRegions_ = new LiveRegions(this);
+
+  /** @type {number} @private */
+  this.passThroughKeyUpCount_ = 0;
+
+  /** @type {boolean} @private */
+  this.inExcursion_ = false;
+
+  if (!chrome.accessibilityPrivate.setKeyboardListener)
+    chrome.accessibilityPrivate.setKeyboardListener = function() {};
 };
+
+/**
+ * @const {string}
+ */
+Background.ISSUE_URL = 'https://code.google.com/p/chromium/issues/entry?' +
+    'labels=Type-Bug,Pri-2,cvox2,OS-Chrome&' +
+    'components=UI>accessibility&' +
+    'description=';
 
 Background.prototype = {
   __proto__: ChromeVoxState.prototype,
@@ -145,20 +170,27 @@ Background.prototype = {
     // cvox.KeySequence.deserialize which gets called by cvox.KeyMap.
     cvox.ChromeVox.sequenceSwitchKeyCodes = [];
     if (mode === ChromeVoxMode.CLASSIC || mode === ChromeVoxMode.COMPAT)
-      cvox.ChromeVoxKbHandler.handlerKeyMap = cvox.KeyMap.fromDefaults();
+      window['prefs'].switchToKeyMap('keymap_classic');
     else
-      cvox.ChromeVoxKbHandler.handlerKeyMap = cvox.KeyMap.fromNext();
+      window['prefs'].switchToKeyMap('keymap_next');
 
     if (mode == ChromeVoxMode.CLASSIC) {
       if (chrome.commands &&
           chrome.commands.onCommand.hasListener(this.onGotCommand))
         chrome.commands.onCommand.removeListener(this.onGotCommand);
+      chrome.accessibilityPrivate.setKeyboardListener(false, false);
     } else {
       if (chrome.commands &&
           !chrome.commands.onCommand.hasListener(this.onGotCommand))
         chrome.commands.onCommand.addListener(this.onGotCommand);
+        chrome.accessibilityPrivate.setKeyboardListener(
+            true, cvox.ChromeVox.isStickyPrefOn);
     }
 
+    // note that |this.currentRange_| can *change* because the request is
+    // async. Save it to ensure we're looking at the currentRange at this moment
+    // in time.
+    var cur = this.currentRange_;
     chrome.tabs.query({active: true}, function(tabs) {
       if (mode === ChromeVoxMode.CLASSIC) {
         // Generally, we don't want to inject classic content scripts as it is
@@ -169,7 +201,7 @@ Background.prototype = {
       } else {
         // When in compat mode, if the focus is within the desktop tree proper,
         // then do not disable content scripts.
-        if (this.currentRange_ && !this.currentRange_.isWebRange())
+        if (cur && !cur.isWebRange())
           return;
 
         this.disableClassicChromeVox_();
@@ -182,6 +214,29 @@ Background.prototype = {
          this.mode_ === ChromeVoxMode.FORCE_NEXT) &&
         this.mode_ != mode) {
       cvox.ChromeVox.earcons.cancelEarcon(cvox.Earcon.PAGE_START_LOADING);
+    }
+
+    if (mode === ChromeVoxMode.NEXT ||
+        mode === ChromeVoxMode.FORCE_NEXT) {
+      (new PanelCommand(PanelCommandType.ENABLE_MENUS)).send();
+    } else {
+      (new PanelCommand(PanelCommandType.DISABLE_MENUS)).send();
+    }
+
+    // If switching to Classic from any automation-API-based mode,
+    // clear the focus ring.
+    if (mode === ChromeVoxMode.CLASSIC && mode != this.mode_) {
+      if (cvox.ChromeVox.isChromeOS)
+        chrome.accessibilityPrivate.setFocusRing([]);
+    }
+
+    // If switching away from Classic to any automation-API-based mode,
+    // update the range based on what's focused.
+    if (this.mode_ === ChromeVoxMode.CLASSIC && mode != this.mode_) {
+      chrome.automation.getFocus((function(focus) {
+        if (focus)
+          this.setCurrentRange(cursors.Range.fromNode(focus));
+      }).bind(this));
     }
 
     this.mode_ = mode;
@@ -225,6 +280,18 @@ Background.prototype = {
     if (!newRange)
       return;
 
+    // Is the range invalid?
+    if (newRange.start.node.role === undefined ||
+        newRange.end.node.role === undefined) {
+      // Restore range to the focused location.
+      chrome.automation.getFocus(function(f) {
+        newRange = cursors.Range.fromNode(f);
+      });
+    }
+
+    if (!this.inExcursion_)
+      this.savedRange_ = new cursors.Range(newRange.start, newRange.end);
+
     this.currentRange_ = newRange;
 
     if (this.currentRange_)
@@ -244,6 +311,13 @@ Background.prototype = {
    * @return {boolean} True if the command should propagate.
    */
   onGotCommand: function(command, opt_bypassModeCheck) {
+    // Check for loss of focus which results in us invalidating our current
+    // range. Note this call is synchronis.
+    chrome.automation.getFocus(function(focusedNode) {
+      if (!focusedNode)
+        this.currentRange_ = null;
+    }.bind(this));
+
     if (!this.currentRange_)
       return true;
 
@@ -285,12 +359,12 @@ Background.prototype = {
         pred = AutomationPredicate.button;
         predErrorMsg = 'no_previous_button';
         break;
-      case 'nextCheckBox':
+      case 'nextCheckbox':
         dir = Dir.FORWARD;
         pred = AutomationPredicate.checkBox;
         predErrorMsg = 'no_next_checkbox';
         break;
-      case 'previousCheckBox':
+      case 'previousCheckbox':
         dir = Dir.BACKWARD;
         pred = AutomationPredicate.checkBox;
         predErrorMsg = 'no_previous_checkbox';
@@ -366,14 +440,14 @@ Background.prototype = {
         predErrorMsg = 'no_previous_visited_link';
         break;
       case 'right':
-      case 'nextElement':
+      case 'nextObject':
         current = current.move(cursors.Unit.DOM_NODE, Dir.FORWARD);
         break;
       case 'left':
-      case 'previousElement':
+      case 'previousObject':
         current = current.move(cursors.Unit.DOM_NODE, Dir.BACKWARD);
         break;
-      case 'goToBeginning':
+      case 'jumpToTop':
         var node =
             AutomationUtil.findNodePost(current.start.node.root,
                                         Dir.FORWARD,
@@ -381,7 +455,7 @@ Background.prototype = {
         if (node)
           current = cursors.Range.fromNode(node);
         break;
-      case 'goToEnd':
+      case 'jumpToBottom':
         var node =
             AutomationUtil.findNodePost(current.start.node.root,
                                         Dir.BACKWARD,
@@ -390,7 +464,7 @@ Background.prototype = {
           current = cursors.Range.fromNode(node);
         break;
       case 'forceClickOnCurrentItem':
-      case 'doDefault':
+      case 'performDefaultAction':
         if (this.currentRange_) {
           var actionNode = this.currentRange_.start.node;
           if (actionNode.role == RoleType.inlineTextBox)
@@ -400,27 +474,39 @@ Background.prototype = {
         // Skip all other processing; if focus changes, we should get an event
         // for that.
         return false;
-      case 'continuousRead':
+      case 'readFromHere':
         global.isReadingContinuously = true;
-        var continueReading = function(prevRange) {
+        var continueReading = function() {
           if (!global.isReadingContinuously || !this.currentRange_)
             return;
 
-          new Output().withSpeechAndBraille(
-                  this.currentRange_, prevRange, Output.EventType.NAVIGATE)
-              .onSpeechEnd(function() { continueReading(prevRange); })
-              .go();
-          prevRange = this.currentRange_;
-          this.setCurrentRange(
-              this.currentRange_.move(cursors.Unit.NODE, Dir.FORWARD));
+          var prevRange = this.currentRange_;
+          var newRange =
+              this.currentRange_.move(cursors.Unit.DOM_NODE, Dir.FORWARD);
 
-          if (!this.currentRange_ || this.currentRange_.equals(prevRange))
+          // Stop if we've wrapped back to the document.
+          var maybeDoc = newRange.start.node;
+          if (maybeDoc.role == RoleType.rootWebArea &&
+              maybeDoc.parent.root.role == RoleType.desktop) {
             global.isReadingContinuously = false;
+            return;
+          }
+
+          this.setCurrentRange(newRange);
+
+          new Output().withRichSpeechAndBraille(
+                  this.currentRange_, prevRange, Output.EventType.NAVIGATE)
+              .onSpeechEnd(continueReading)
+              .go();
         }.bind(this);
 
-        continueReading(null);
+        new Output().withRichSpeechAndBraille(
+                this.currentRange_, null, Output.EventType.NAVIGATE)
+            .onSpeechEnd(continueReading)
+            .go();
+
         return false;
-      case 'showContextMenu':
+      case 'contextMenu':
         if (this.currentRange_) {
           var actionNode = this.currentRange_.start.node;
           if (actionNode.role == RoleType.inlineTextBox)
@@ -459,12 +545,135 @@ Background.prototype = {
         // Leaving unlocalized as 'next' isn't an official name.
         cvox.ChromeVox.tts.speak(isClassic ?
             'classic' : 'next', cvox.QueueMode.FLUSH, {doNotInterrupt: true});
+
+        // If the new mode is Classic, return now so we don't announce
+        // anything more.
+        if (newMode == ChromeVoxMode.CLASSIC)
+          return false;
         break;
       case 'toggleStickyMode':
         cvox.ChromeVoxBackground.setPref('sticky',
                                          !cvox.ChromeVox.isStickyPrefOn,
                                          true);
+
+        if (cvox.ChromeVox.isStickyPrefOn)
+          chrome.accessibilityPrivate.setKeyboardListener(true, true);
+        else
+          chrome.accessibilityPrivate.setKeyboardListener(true, false);
+        return false;
+      case 'passThroughMode':
+        cvox.ChromeVox.passThroughMode = true;
+        cvox.ChromeVox.tts.speak(
+            Msgs.getMsg('pass_through_key'), cvox.QueueMode.QUEUE);
+        return true;
+      case 'openChromeVoxMenus':
+        this.startExcursion();
+        (new PanelCommand(PanelCommandType.OPEN_MENUS)).send();
+        return false;
+      case 'toggleSearchWidget':
+        (new PanelCommand(PanelCommandType.SEARCH)).send();
+        return false;
+      case 'showKbExplorerPage':
+        var explorerPage = {url: 'chromevox/background/kbexplorer.html'};
+        chrome.tabs.create(explorerPage);
         break;
+      case 'decreaseTtsRate':
+        this.increaseOrDecreaseSpeechProperty_(cvox.AbstractTts.RATE, false);
+        return false;
+      case 'increaseTtsRate':
+        this.increaseOrDecreaseSpeechProperty_(cvox.AbstractTts.RATE, true);
+        return false;
+      case 'decreaseTtsPitch':
+        this.increaseOrDecreaseSpeechProperty_(cvox.AbstractTts.PITCH, false);
+        return false;
+      case 'increaseTtsPitch':
+        this.increaseOrDecreaseSpeechProperty_(cvox.AbstractTts.PITCH, true);
+        return false;
+      case 'decreaseTtsVolume':
+        this.increaseOrDecreaseSpeechProperty_(cvox.AbstractTts.VOLUME, false);
+        return false;
+      case 'increaseTtsVolume':
+        this.increaseOrDecreaseSpeechProperty_(cvox.AbstractTts.VOLUME, true);
+        return false;
+      case 'stopSpeech':
+        cvox.ChromeVox.tts.stop();
+        global.isReadingContinuously = false;
+        return false;
+      case 'toggleEarcons':
+        cvox.AbstractEarcons.enabled = !cvox.AbstractEarcons.enabled;
+        var announce = cvox.AbstractEarcons.enabled ?
+            Msgs.getMsg('earcons_on') :
+            Msgs.getMsg('earcons_off');
+        cvox.ChromeVox.tts.speak(
+            announce, cvox.QueueMode.FLUSH,
+            cvox.AbstractTts.PERSONALITY_ANNOTATION);
+        return false;
+      case 'cycleTypingEcho':
+        cvox.ChromeVox.typingEcho =
+            cvox.TypingEcho.cycle(cvox.ChromeVox.typingEcho);
+        var announce = '';
+        switch (cvox.ChromeVox.typingEcho) {
+          case cvox.TypingEcho.CHARACTER:
+            announce = Msgs.getMsg('character_echo');
+            break;
+          case cvox.TypingEcho.WORD:
+            announce = Msgs.getMsg('word_echo');
+            break;
+          case cvox.TypingEcho.CHARACTER_AND_WORD:
+            announce = Msgs.getMsg('character_and_word_echo');
+            break;
+          case cvox.TypingEcho.NONE:
+            announce = Msgs.getMsg('none_echo');
+            break;
+        }
+        cvox.ChromeVox.tts.speak(
+            announce, cvox.QueueMode.FLUSH,
+            cvox.AbstractTts.PERSONALITY_ANNOTATION);
+        return false;
+      case 'cyclePunctuationEcho':
+        cvox.ChromeVox.tts.speak(Msgs.getMsg(
+            global.backgroundTts.cyclePunctuationEcho()),
+                       cvox.QueueMode.FLUSH);
+        return false;
+      case 'speakTimeAndDate':
+        var output = new Output();
+        var dateTime = new Date();
+        output.withString(
+            dateTime.toLocaleTimeString() +
+                ', ' + dateTime.toLocaleDateString()).go();
+        return false;
+      case 'readCurrentTitle':
+        var target = this.currentRange_.start.node;
+        var output = new Output();
+
+        if (target.root.role == RoleType.rootWebArea) {
+          // Web.
+          target = target.root;
+          output.withString(target.name || target.docUrl);
+        } else {
+          // Views.
+          while (target.role != RoleType.window)
+            target = target.parent;
+          if (target)
+            output.withString(target.name || '');
+        }
+        output.go();
+        return false;
+      case 'readCurrentURL':
+        var output = new Output();
+        var target = this.currentRange_.start.node.root;
+        output.withString(target.docUrl || '').go();
+        return false;
+      case 'reportIssue':
+        var url = Background.ISSUE_URL;
+        var description = {};
+        description['Mode'] = this.mode_;
+        description['Version'] = chrome.app.getDetails().version;
+        description['Reproduction Steps'] = '%0a1.%0a2.%0a3.';
+        for (var key in description)
+          url += key + ':%20' + description[key] + '%0a';
+        chrome.tabs.create({url: url});
+        return false;
       default:
         return true;
     }
@@ -484,23 +693,67 @@ Background.prototype = {
       }
     }
 
-    if (current) {
-      // TODO(dtseng): Figure out what it means to focus a range.
-      var actionNode = current.start.node;
-      if (actionNode.role == RoleType.inlineTextBox)
-        actionNode = actionNode.parent;
-      actionNode.focus();
-
-      var prevRange = this.currentRange_;
-      this.setCurrentRange(current);
-
-      new Output().withSpeechAndBraille(
-              this.currentRange_, prevRange, Output.EventType.NAVIGATE)
-          .withQueueMode(cvox.QueueMode.FLUSH)
-          .go();
-    }
+    if (current)
+      this.navigateToRange_(current);
 
     return false;
+  },
+
+  /**
+   * Increase or decrease a speech property and make an announcement.
+   * @param {string} propertyName The name of the property to change.
+   * @param {boolean} increase If true, increases the property value by one
+   *     step size, otherwise decreases.
+   */
+  increaseOrDecreaseSpeechProperty_: function(propertyName, increase) {
+    cvox.ChromeVox.tts.increaseOrDecreaseProperty(propertyName, increase);
+    var announcement;
+    var valueAsPercent = Math.round(
+        cvox.ChromeVox.tts.propertyToPercentage(propertyName) * 100);
+    switch (propertyName) {
+      case cvox.AbstractTts.RATE:
+        announcement = Msgs.getMsg('announce_rate', [valueAsPercent]);
+        break;
+      case cvox.AbstractTts.PITCH:
+        announcement = Msgs.getMsg('announce_pitch', [valueAsPercent]);
+        break;
+      case cvox.AbstractTts.VOLUME:
+        announcement = Msgs.getMsg('announce_volume', [valueAsPercent]);
+        break;
+    }
+    if (announcement) {
+      cvox.ChromeVox.tts.speak(
+          announcement, cvox.QueueMode.FLUSH,
+          cvox.AbstractTts.PERSONALITY_ANNOTATION);
+    }
+  },
+
+  /**
+   * Navigate to the given range - it both sets the range and outputs it.
+   * @param {!cursors.Range} range The new range.
+   * @private
+   */
+  navigateToRange_: function(range) {
+    // TODO(dtseng): Figure out what it means to focus a range.
+    var actionNode = range.start.node;
+    if (actionNode.role == RoleType.inlineTextBox)
+      actionNode = actionNode.parent;
+
+    // Iframes, when focused, causes the child webArea to fire focus event.
+    // This can result in getting stuck when navigating backward.
+    if (actionNode.role != RoleType.iframe && !actionNode.state.focused &&
+        !AutomationPredicate.container(actionNode))
+      actionNode.focus();
+
+    var prevRange = this.currentRange_;
+    this.setCurrentRange(range);
+
+    range.select();
+
+    new Output().withRichSpeechAndBraille(
+        range, prevRange, Output.EventType.NAVIGATE)
+        .withQueueMode(cvox.QueueMode.FLUSH)
+        .go();
   },
 
   /**
@@ -510,13 +763,35 @@ Background.prototype = {
    */
   onKeyDown: function(evt) {
     evt.stickyMode = cvox.ChromeVox.isStickyModeOn() && cvox.ChromeVox.isActive;
+    if (cvox.ChromeVox.passThroughMode)
+      return false;
+
     if (this.mode_ != ChromeVoxMode.CLASSIC &&
         !cvox.ChromeVoxKbHandler.basicKeyDownActionsListener(evt)) {
       evt.preventDefault();
       evt.stopPropagation();
     }
-
     Output.flushNextSpeechUtterance();
+    return false;
+  },
+
+  /**
+   * Handles key up events.
+   * @param {Event} evt The key down event to process.
+   * @return {boolean} True if the default action should be performed.
+   */
+  onKeyUp: function(evt) {
+    // Reset pass through mode once a keyup (not involving the pass through key)
+    // is seen. The pass through command involves three keys.
+    if (cvox.ChromeVox.passThroughMode) {
+      if (this.passThroughKeyUpCount_ >= 3) {
+        cvox.ChromeVox.passThroughMode = false;
+        this.passThroughKeyUpCount_ = 0;
+      } else {
+        this.passThroughKeyUpCount_++;
+      }
+    }
+    return false;
   },
 
   /**
@@ -539,10 +814,10 @@ Background.prototype = {
 
     switch (evt.command) {
       case cvox.BrailleKeyCommand.PAN_LEFT:
-        this.onGotCommand('previousElement');
+        this.onGotCommand('previousObject');
         break;
       case cvox.BrailleKeyCommand.PAN_RIGHT:
-        this.onGotCommand('nextElement');
+        this.onGotCommand('nextObject');
         break;
       case cvox.BrailleKeyCommand.LINE_UP:
         this.onGotCommand('previousLine');
@@ -551,10 +826,10 @@ Background.prototype = {
         this.onGotCommand('nextLine');
         break;
       case cvox.BrailleKeyCommand.TOP:
-        this.onGotCommand('goToBeginning');
+        this.onGotCommand('jumpToTop');
         break;
       case cvox.BrailleKeyCommand.BOTTOM:
-        this.onGotCommand('goToEnd');
+        this.onGotCommand('jumpToBottom');
         break;
       case cvox.BrailleKeyCommand.ROUTING:
         this.brailleRoutingCommand_(
@@ -635,7 +910,8 @@ Background.prototype = {
     actionNode.doDefault();
     if (selectionSpan) {
       var start = text.getSpanStart(selectionSpan);
-      actionNode.setSelection(position - start, position - start);
+      var targetPosition = position - start + selectionSpan.offset;
+      actionNode.setSelection(targetPosition, targetPosition);
     }
   },
 
@@ -664,7 +940,59 @@ Background.prototype = {
         }
         break;
     }
-  }
+  },
+
+  /**
+   * Restore the range to the last range that was *not* in the ChromeVox
+   * panel. This is used when the ChromeVox Panel closes.
+   * @private
+   */
+  restoreCurrentRange_: function() {
+    if (this.savedRange_) {
+      var node = this.savedRange_.start.node;
+      var containingWebView = node;
+      while (containingWebView && containingWebView.role != RoleType.webView)
+        containingWebView = containingWebView.parent;
+
+      if (containingWebView) {
+        // Focusing the webView causes a focus change event which steals focus
+        // away from the saved range.
+        var saved = this.savedRange_;
+        var setSavedRange = function(e) {
+          if (e.target.root == saved.start.node.root)
+            this.navigateToRange_(saved);
+          node.root.removeEventListener(EventType.focus, setSavedRange, true);
+        }.bind(this);
+        node.root.addEventListener(EventType.focus, setSavedRange, true);
+        containingWebView.focus();
+      }
+      this.navigateToRange_(this.savedRange_);
+      this.savedRange_ = null;
+    }
+  },
+
+  /**
+   * Move ChromeVox without saving any ranges.
+   */
+  startExcursion: function() {
+    this.inExcursion_ = true;
+  },
+
+  /**
+   * Move ChromeVox back to the last saved range.
+   */
+  endExcursion: function() {
+    this.inExcursion_ = false;
+    this.restoreCurrentRange_();
+  },
+
+  /**
+   * Move ChromeVox back to the last saved range.
+   */
+  saveExcursion: function() {
+    this.savedRange_ =
+        new cursors.Range(this.currentRange_.start, this.currentRange_.end);
+  },
 };
 
 /**

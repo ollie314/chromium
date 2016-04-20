@@ -43,10 +43,10 @@ void AppearanceHandler::Observe(
     const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_BROWSER_THEME_CHANGED: {
-      base::StringValue event("reset-theme-enabled-changed");
-      base::FundamentalValue enabled(QueryResetThemeEnabledState());
       web_ui()->CallJavascriptFunction(
-          "cr.webUIListenerCallback", event, enabled);
+          "cr.webUIListenerCallback",
+          base::StringValue("reset-theme-enabled-changed"),
+          base::FundamentalValue(ResetThemeEnabled()));
       break;
     }
     default:
@@ -55,31 +55,21 @@ void AppearanceHandler::Observe(
 }
 
 void AppearanceHandler::ResetTheme(const base::ListValue* /* args */) {
-  Profile* profile = Profile::FromWebUI(web_ui());
-  ThemeServiceFactory::GetForProfile(profile)->UseDefaultTheme();
+  ThemeServiceFactory::GetForProfile(profile_)->UseDefaultTheme();
 }
 
-base::FundamentalValue AppearanceHandler::QueryResetThemeEnabledState() {
-  ThemeService* theme_service = ThemeServiceFactory::GetForProfile(profile_);
-  bool is_system_theme = false;
-
+bool AppearanceHandler::ResetThemeEnabled() const {
   // TODO(jhawkins): Handle native/system theme button.
-
-  bool is_classic_theme = !is_system_theme &&
-                          theme_service->UsingDefaultTheme();
-  return base::FundamentalValue(!is_classic_theme);
+  return !ThemeServiceFactory::GetForProfile(profile_)->UsingDefaultTheme();
 }
 
 void AppearanceHandler::GetResetThemeEnabled(const base::ListValue* args) {
-  CHECK_EQ(2U, args->GetSize());
+  CHECK_EQ(1U, args->GetSize());
+  const base::Value* callback_id;
+  CHECK(args->Get(0, &callback_id));
 
-  std::string callbackFn;
-  CHECK(args->GetString(0, &callbackFn));
-  const base::Value* callbackId;
-  CHECK(args->Get(1, &callbackId));
-
-  base::FundamentalValue enabled(QueryResetThemeEnabledState());
-  web_ui()->CallJavascriptFunction(callbackFn, *callbackId, enabled);
+  ResolveJavascriptCallback(*callback_id,
+                            base::FundamentalValue(ResetThemeEnabled()));
 }
 
 }  // namespace settings

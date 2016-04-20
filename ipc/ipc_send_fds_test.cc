@@ -8,7 +8,7 @@
 #if defined(OS_MACOSX)
 extern "C" {
 #include <sandbox.h>
-}
+};
 #endif
 #include <fcntl.h>
 #include <stddef.h>
@@ -31,6 +31,10 @@ extern "C" {
 
 #if defined(OS_POSIX)
 #include "base/macros.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "sandbox/mac/seatbelt.h"
 #endif
 
 namespace {
@@ -193,13 +197,13 @@ MULTIPROCESS_IPC_TEST_CLIENT_MAIN(SendFdsSandboxedClient) {
 
   // Enable the sandbox.
   char* error_buff = NULL;
-  int error = sandbox_init(kSBXProfilePureComputation, SANDBOX_NAMED,
-                           &error_buff);
+  int error = sandbox::Seatbelt::Init(kSBXProfilePureComputation, SANDBOX_NAMED,
+                                      &error_buff);
   bool success = (error == 0 && error_buff == NULL);
   if (!success)
     return -1;
 
-  sandbox_free_error(error_buff);
+  sandbox::Seatbelt::FreeError(error_buff);
 
   // Make sure sandbox is really enabled.
   if (open(kDevZeroPath, O_RDONLY) != -1) {

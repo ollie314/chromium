@@ -47,6 +47,11 @@ class WebDialogDelegate;
 
 namespace chrome {
 
+// Shows or hides the Task Manager. |browser| can be NULL when called from Ash.
+void ShowTaskManager(Browser* browser);
+void HideTaskManager();
+
+#if !defined(OS_MACOSX)
 // Creates and shows an HTML dialog with the given delegate and context.
 // The window is automatically destroyed when it is closed.
 // Returns the created window.
@@ -57,11 +62,6 @@ gfx::NativeWindow ShowWebDialog(gfx::NativeView parent,
                                 content::BrowserContext* context,
                                 ui::WebDialogDelegate* delegate);
 
-// Shows or hides the Task Manager. |browser| can be NULL when called from Ash.
-void ShowTaskManager(Browser* browser);
-void HideTaskManager();
-
-#if !defined(OS_MACOSX)
 // Shows the create web app shortcut dialog box.
 void ShowCreateWebAppShortcutsDialog(gfx::NativeWindow parent_window,
                                      content::WebContents* web_contents);
@@ -85,6 +85,11 @@ content::ColorChooser* ShowColorChooser(content::WebContents* web_contents,
 // dialog using one of the functions below, rather than showing a Cocoa dialog.
 bool ToolkitViewsDialogsEnabled();
 
+// For Mac, returns true if Chrome should show an equivalent toolkit-views based
+// dialog instead of a WebUI-styled Cocoa dialog. ToolkitViewsDialogsEnabled()
+// implies ToolkitViewsWebUIDialogsEnabled().
+bool ToolkitViewsWebUIDialogsEnabled();
+
 // Shows a Views website settings bubble at the given anchor point.
 void ShowWebsiteSettingsBubbleViewsAtPoint(
     const gfx::Point& anchor_point,
@@ -102,6 +107,10 @@ void ShowBookmarkBubbleViewsAtPoint(const gfx::Point& anchor_point,
                                     Browser* browser,
                                     const GURL& url,
                                     bool newly_bookmarked);
+
+// Bridging methods that show/hide the toolkit-views based Task Manager on Mac.
+void ShowTaskManagerViews(Browser* browser);
+void HideTaskManagerViews();
 
 #endif  // OS_MACOSX
 

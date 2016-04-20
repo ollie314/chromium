@@ -72,7 +72,7 @@ DOMPatchSupport::DOMPatchSupport(DOMEditor* domEditor, Document& document)
 
 void DOMPatchSupport::patchDocument(const String& markup)
 {
-    RefPtrWillBeRawPtr<Document> newDocument = nullptr;
+    Document* newDocument = nullptr;
     if (document().isHTMLDocument())
         newDocument = HTMLDocument::create();
     else if (document().isSVGDocument())
@@ -85,20 +85,20 @@ void DOMPatchSupport::patchDocument(const String& markup)
     ASSERT(newDocument);
     newDocument->setContextFeatures(document().contextFeatures());
     if (!document().isHTMLDocument()) {
-        RefPtrWillBeRawPtr<DocumentParser> parser = XMLDocumentParser::create(*newDocument, nullptr);
+        DocumentParser* parser = XMLDocumentParser::create(*newDocument, nullptr);
         parser->append(markup);
         parser->finish();
         parser->detach();
 
         // Avoid breakage on non-well-formed documents.
-        if (!static_cast<XMLDocumentParser*>(parser.get())->wellFormed())
+        if (!static_cast<XMLDocumentParser*>(parser)->wellFormed())
             return;
     }
     newDocument->setContent(markup);
-    OwnPtrWillBeRawPtr<Digest> oldInfo = createDigest(document().documentElement(), nullptr);
-    OwnPtrWillBeRawPtr<Digest> newInfo = createDigest(newDocument->documentElement(), &m_unusedNodesMap);
+    Digest* oldInfo = createDigest(document().documentElement(), nullptr);
+    Digest* newInfo = createDigest(newDocument->documentElement(), &m_unusedNodesMap);
 
-    if (!innerPatchNode(oldInfo.get(), newInfo.get(), IGNORE_EXCEPTION)) {
+    if (!innerPatchNode(oldInfo, newInfo, IGNORE_EXCEPTION)) {
         // Fall back to rewrite.
         document().write(markup);
         document().close();
@@ -114,7 +114,7 @@ Node* DOMPatchSupport::patchNode(Node* node, const String& markup, ExceptionStat
     }
 
     Node* previousSibling = node->previousSibling();
-    RefPtrWillBeRawPtr<DocumentFragment> fragment = DocumentFragment::create(document());
+    DocumentFragment* fragment = DocumentFragment::create(document());
     Node* targetNode = node->parentElementOrShadowRoot() ? node->parentElementOrShadowRoot() : document().documentElement();
 
     // Use the document BODY as the context element when editing immediate shadow root children,
@@ -131,13 +131,13 @@ Node* DOMPatchSupport::patchNode(Node* node, const String& markup, ExceptionStat
 
     // Compose the old list.
     ContainerNode* parentNode = node->parentNode();
-    WillBeHeapVector<OwnPtrWillBeMember<Digest>> oldList;
+    HeapVector<Member<Digest>> oldList;
     for (Node* child = parentNode->firstChild(); child; child = child->nextSibling())
         oldList.append(createDigest(child, 0));
 
     // Compose the new list.
     String markupCopy = markup.lower();
-    WillBeHeapVector<OwnPtrWillBeMember<Digest>> newList;
+    HeapVector<Member<Digest>> newList;
     for (Node* child = parentNode->firstChild(); child != node; child = child->nextSibling())
         newList.append(createDigest(child, 0));
     for (Node* child = fragment->firstChild(); child; child = child->nextSibling()) {
@@ -152,7 +152,7 @@ Node* DOMPatchSupport::patchNode(Node* node, const String& markup, ExceptionStat
 
     if (!innerPatchChildren(parentNode, oldList, newList, exceptionState)) {
         // Fall back to total replace.
-        if (!m_domEditor->replaceChild(parentNode, fragment.release(), node, exceptionState))
+        if (!m_domEditor->replaceChild(parentNode, fragment, node, exceptionState))
             return nullptr;
     }
     return previousSibling ? previousSibling->nextSibling() : parentNode->firstChild();
@@ -166,7 +166,7 @@ bool DOMPatchSupport::innerPatchNode(Digest* oldDigest, Digest* newDigest, Excep
     Node* oldNode = oldDigest->m_node;
     Node* newNode = newDigest->m_node;
 
-    if (newNode->nodeType() != oldNode->nodeType() || newNode->nodeName() != oldNode->nodeName())
+    if (newNode->getNodeType() != oldNode->getNodeType() || newNode->nodeName() != oldNode->nodeName())
         return m_domEditor->replaceChild(oldNode->parentNode(), newNode, oldNode, exceptionState);
 
     if (oldNode->nodeValue() != newNode->nodeValue()) {
@@ -201,7 +201,7 @@ bool DOMPatchSupport::innerPatchNode(Digest* oldDigest, Digest* newDigest, Excep
 }
 
 std::pair<DOMPatchSupport::ResultMap, DOMPatchSupport::ResultMap>
-DOMPatchSupport::diff(const WillBeHeapVector<OwnPtrWillBeMember<Digest>>& oldList, const WillBeHeapVector<OwnPtrWillBeMember<Digest>>& newList)
+DOMPatchSupport::diff(const HeapVector<Member<Digest>>& oldList, const HeapVector<Member<Digest>>& newList)
 {
     ResultMap newMap(newList.size());
     ResultMap oldMap(oldList.size());
@@ -232,7 +232,7 @@ DOMPatchSupport::diff(const WillBeHeapVector<OwnPtrWillBeMember<Digest>>& oldLis
         newMap[newIndex].second = oldIndex;
     }
 
-    typedef HashMap<String, Vector<size_t> > DiffTable;
+    typedef HashMap<String, Vector<size_t>> DiffTable;
     DiffTable newTable;
     DiffTable oldTable;
 
@@ -286,7 +286,7 @@ DOMPatchSupport::diff(const WillBeHeapVector<OwnPtrWillBeMember<Digest>>& oldLis
     return std::make_pair(oldMap, newMap);
 }
 
-bool DOMPatchSupport::innerPatchChildren(ContainerNode* parentNode, const WillBeHeapVector<OwnPtrWillBeMember<Digest>>& oldList, const WillBeHeapVector<OwnPtrWillBeMember<Digest>>& newList, ExceptionState& exceptionState)
+bool DOMPatchSupport::innerPatchChildren(ContainerNode* parentNode, const HeapVector<Member<Digest>>& oldList, const HeapVector<Member<Digest>>& newList, ExceptionState& exceptionState)
 {
     std::pair<ResultMap, ResultMap> resultMaps = diff(oldList, newList);
     ResultMap& oldMap = resultMaps.first;
@@ -296,8 +296,8 @@ bool DOMPatchSupport::innerPatchChildren(ContainerNode* parentNode, const WillBe
     Digest* oldBody = nullptr;
 
     // 1. First strip everything except for the nodes that retain. Collect pending merges.
-    WillBeHeapHashMap<RawPtrWillBeMember<Digest>, RawPtrWillBeMember<Digest>> merges;
-    HashSet<size_t, WTF::IntHash<size_t>, WTF::UnsignedWithZeroKeyHashTraits<size_t> > usedNewOrdinals;
+    HeapHashMap<Member<Digest>, Member<Digest>> merges;
+    HashSet<size_t, WTF::IntHash<size_t>, WTF::UnsignedWithZeroKeyHashTraits<size_t>> usedNewOrdinals;
     for (size_t i = 0; i < oldList.size(); ++i) {
         if (oldMap[i].first) {
             if (usedNewOrdinals.add(oldMap[i].second).isNewEntry)
@@ -334,7 +334,7 @@ bool DOMPatchSupport::innerPatchChildren(ContainerNode* parentNode, const WillBe
     }
 
     // Mark retained nodes as used, do not reuse node more than once.
-    HashSet<size_t, WTF::IntHash<size_t>, WTF::UnsignedWithZeroKeyHashTraits<size_t> >  usedOldOrdinals;
+    HashSet<size_t, WTF::IntHash<size_t>, WTF::UnsignedWithZeroKeyHashTraits<size_t>>  usedOldOrdinals;
     for (size_t i = 0; i < newList.size(); ++i) {
         if (!newMap[i].first)
             continue;
@@ -377,14 +377,14 @@ bool DOMPatchSupport::innerPatchChildren(ContainerNode* parentNode, const WillBe
     for (size_t i = 0; i < oldMap.size(); ++i) {
         if (!oldMap[i].first)
             continue;
-        RefPtrWillBeRawPtr<Node> node = oldMap[i].first->m_node;
+        Node* node = oldMap[i].first->m_node;
         Node* anchorNode = NodeTraversal::childAt(*parentNode, oldMap[i].second);
         if (node == anchorNode)
             continue;
         if (isHTMLBodyElement(*node) || isHTMLHeadElement(*node))
             continue; // Never move head or body, move the rest of the nodes around them.
 
-        if (!m_domEditor->insertBefore(parentNode, node.release(), anchorNode, exceptionState))
+        if (!m_domEditor->insertBefore(parentNode, node, anchorNode, exceptionState))
             return false;
     }
     return true;
@@ -395,14 +395,14 @@ static void addStringToDigestor(WebCryptoDigestor* digestor, const String& strin
     digestor->consume(reinterpret_cast<const unsigned char*>(string.utf8().data()), string.length());
 }
 
-PassOwnPtrWillBeRawPtr<DOMPatchSupport::Digest> DOMPatchSupport::createDigest(Node* node, UnusedNodesMap* unusedNodesMap)
+DOMPatchSupport::Digest* DOMPatchSupport::createDigest(Node* node, UnusedNodesMap* unusedNodesMap)
 {
     Digest* digest = new Digest(node);
 
     OwnPtr<WebCryptoDigestor> digestor = createDigestor(HashAlgorithmSha1);
     DigestValue digestResult;
 
-    Node::NodeType nodeType = node->nodeType();
+    Node::NodeType nodeType = node->getNodeType();
     digestor->consume(reinterpret_cast<const unsigned char*>(&nodeType), sizeof(nodeType));
     addStringToDigestor(digestor.get(), node->nodeName());
     addStringToDigestor(digestor.get(), node->nodeValue());
@@ -411,10 +411,10 @@ PassOwnPtrWillBeRawPtr<DOMPatchSupport::Digest> DOMPatchSupport::createDigest(No
         Element& element = toElement(*node);
         Node* child = element.firstChild();
         while (child) {
-            OwnPtrWillBeRawPtr<Digest> childInfo = createDigest(child, unusedNodesMap);
+            Digest* childInfo = createDigest(child, unusedNodesMap);
             addStringToDigestor(digestor.get(), childInfo->m_sha1);
             child = child->nextSibling();
-            digest->m_children.append(childInfo.release());
+            digest->m_children.append(childInfo);
         }
 
         AttributeCollection attributes = element.attributesWithoutUpdate();
@@ -422,7 +422,7 @@ PassOwnPtrWillBeRawPtr<DOMPatchSupport::Digest> DOMPatchSupport::createDigest(No
             OwnPtr<WebCryptoDigestor> attrsDigestor = createDigestor(HashAlgorithmSha1);
             for (auto& attribute : attributes) {
                 addStringToDigestor(attrsDigestor.get(), attribute.name().toString());
-                addStringToDigestor(attrsDigestor.get(), attribute.value().string());
+                addStringToDigestor(attrsDigestor.get(), attribute.value().getString());
             }
             finishDigestor(attrsDigestor.get(), digestResult);
             digest->m_attrsSHA1 = base64Encode(reinterpret_cast<const char*>(digestResult.data()), 10);
@@ -435,7 +435,7 @@ PassOwnPtrWillBeRawPtr<DOMPatchSupport::Digest> DOMPatchSupport::createDigest(No
 
     if (unusedNodesMap)
         unusedNodesMap->add(digest->m_sha1, digest);
-    return adoptPtrWillBeNoop(digest);
+    return digest;
 }
 
 bool DOMPatchSupport::insertBeforeAndMarkAsUsed(ContainerNode* parentNode, Digest* digest, Node* anchor, ExceptionState& exceptionState)
@@ -447,8 +447,8 @@ bool DOMPatchSupport::insertBeforeAndMarkAsUsed(ContainerNode* parentNode, Diges
 
 bool DOMPatchSupport::removeChildAndMoveToNew(Digest* oldDigest, ExceptionState& exceptionState)
 {
-    RefPtrWillBeRawPtr<Node> oldNode = oldDigest->m_node;
-    if (!m_domEditor->removeChild(oldNode->parentNode(), oldNode.get(), exceptionState))
+    Node* oldNode = oldDigest->m_node;
+    if (!m_domEditor->removeChild(oldNode->parentNode(), oldNode, exceptionState))
         return false;
 
     // Diff works within levels. In order not to lose the node identity when user
@@ -462,7 +462,7 @@ bool DOMPatchSupport::removeChildAndMoveToNew(Digest* oldDigest, ExceptionState&
         Node* newNode = newDigest->m_node;
         if (!m_domEditor->replaceChild(newNode->parentNode(), oldNode, newNode, exceptionState))
             return false;
-        newDigest->m_node = oldNode.get();
+        newDigest->m_node = oldNode;
         markNodeAsUsed(newDigest);
         return true;
     }
@@ -476,7 +476,7 @@ bool DOMPatchSupport::removeChildAndMoveToNew(Digest* oldDigest, ExceptionState&
 
 void DOMPatchSupport::markNodeAsUsed(Digest* digest)
 {
-    WillBeHeapDeque<RawPtrWillBeMember<Digest>> queue;
+    HeapDeque<Member<Digest>> queue;
     queue.append(digest);
     while (!queue.isEmpty()) {
         Digest* first = queue.takeFirst();

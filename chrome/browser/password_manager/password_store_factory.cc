@@ -4,13 +4,12 @@
 
 #include "chrome/browser/password_manager/password_store_factory.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/command_line.h"
 #include "base/environment.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -29,6 +28,7 @@
 #include "components/password_manager/core/browser/password_store_factory_util.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 
 #if defined(OS_WIN)
@@ -150,7 +150,7 @@ PasswordStoreFactory::BuildServiceInstanceFor(
 #endif
   Profile* profile = static_cast<Profile*>(context);
 
-  scoped_ptr<password_manager::LoginDatabase> login_db(
+  std::unique_ptr<password_manager::LoginDatabase> login_db(
       password_manager::CreateLoginDatabase(profile->GetPath()));
 
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner(
@@ -162,11 +162,11 @@ PasswordStoreFactory::BuildServiceInstanceFor(
   scoped_refptr<PasswordStore> ps;
 #if defined(OS_WIN)
   ps = new PasswordStoreWin(main_thread_runner, db_thread_runner,
-                            login_db.Pass(),
+                            std::move(login_db),
                             WebDataServiceFactory::GetPasswordWebDataForProfile(
                                 profile, ServiceAccessType::EXPLICIT_ACCESS));
 #elif defined(OS_MACOSX)
-  scoped_ptr<crypto::AppleKeychain> keychain(
+  std::unique_ptr<crypto::AppleKeychain> keychain(
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           os_crypt::switches::kUseMockKeychain)
           ? new crypto::MockAppleKeychain()
@@ -207,7 +207,7 @@ PasswordStoreFactory::BuildServiceInstanceFor(
   PrefService* prefs = profile->GetPrefs();
   LocalProfileId id = GetLocalProfileId(prefs);
 
-  scoped_ptr<PasswordStoreX::NativeBackend> backend;
+  std::unique_ptr<PasswordStoreX::NativeBackend> backend;
   if (used_desktop_env == base::nix::DESKTOP_ENVIRONMENT_KDE4 ||
       used_desktop_env == base::nix::DESKTOP_ENVIRONMENT_KDE5) {
     // KDE3 didn't use DBus, which our KWallet store uses.
@@ -248,8 +248,9 @@ PasswordStoreFactory::BuildServiceInstanceFor(
 
   if (!backend.get()) {
     LOG(WARNING) << "Using basic (unencrypted) store for password storage. "
-        "See http://code.google.com/p/chromium/wiki/LinuxPasswordStorage for "
-        "more information about password storage options.";
+        "See "
+        "https://chromium.googlesource.com/chromium/src/+/master/docs/linux_password_storage.md"
+        " for more information about password storage options.";
   }
 
   ps = new PasswordStoreX(main_thread_runner, db_thread_runner,
@@ -257,7 +258,7 @@ PasswordStoreFactory::BuildServiceInstanceFor(
   RecordBackendStatistics(desktop_env, store_type, used_backend);
 #elif defined(USE_OZONE)
   ps = new password_manager::PasswordStoreDefault(
-      main_thread_runner, db_thread_runner, login_db.Pass());
+      main_thread_runner, db_thread_runner, std::move(login_db));
 #else
   NOTIMPLEMENTED();
 #endif
@@ -293,7 +294,7 @@ bool PasswordStoreFactory::ServiceIsNULLWhileTesting() const {
 
 #if defined(USE_X11)
 base::nix::DesktopEnvironment PasswordStoreFactory::GetDesktopEnvironment() {
-  scoped_ptr<base::Environment> env(base::Environment::Create());
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
   return base::nix::GetDesktopEnvironment(env.get());
 }
 

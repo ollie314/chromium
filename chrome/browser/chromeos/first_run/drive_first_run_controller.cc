@@ -21,7 +21,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/grit/generated_resources.h"
@@ -105,9 +104,7 @@ void DriveOfflineNotificationDelegate::ButtonClick(int button_index) {
   // The support page will be localized based on the user's GAIA account.
   const GURL url = GURL(kDriveOfflineSupportUrl);
 
-  chrome::ScopedTabbedBrowserDisplayer displayer(
-       profile_,
-       chrome::HOST_DESKTOP_TYPE_ASH);
+  chrome::ScopedTabbedBrowserDisplayer displayer(profile_);
   chrome::ShowSingletonTabOverwritingNTP(
       displayer.browser(),
       chrome::GetSingletonTabNavigateParams(displayer.browser(), url));
@@ -183,7 +180,7 @@ class DriveWebContentsManager : public content::WebContentsObserver,
   Profile* profile_;
   const std::string app_id_;
   const std::string endpoint_url_;
-  scoped_ptr<content::WebContents> web_contents_;
+  std::unique_ptr<content::WebContents> web_contents_;
   content::NotificationRegistrar registrar_;
   bool started_;
   CompletionCallback completion_callback_;
@@ -462,7 +459,7 @@ void DriveFirstRunController::ShowNotification() {
   data.buttons.push_back(message_center::ButtonInfo(
       l10n_util::GetStringUTF16(IDS_DRIVE_OFFLINE_NOTIFICATION_BUTTON)));
   ui::ResourceBundle& resource_bundle = ui::ResourceBundle::GetSharedInstance();
-  scoped_ptr<message_center::Notification> notification(
+  std::unique_ptr<message_center::Notification> notification(
       new message_center::Notification(
           message_center::NOTIFICATION_TYPE_SIMPLE, kDriveOfflineNotificationId,
           base::string16(),  // title

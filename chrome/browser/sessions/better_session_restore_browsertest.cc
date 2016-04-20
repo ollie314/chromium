@@ -12,7 +12,6 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/background/background_mode_manager.h"
@@ -20,7 +19,8 @@
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/lifetime/keep_alive_types.h"
+#include "chrome/browser/lifetime/scoped_keep_alive.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_impl.h"
@@ -30,7 +30,7 @@
 #include "chrome/browser/sessions/session_service_test_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_iterator.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -42,10 +42,10 @@
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
-#include "net/base/net_util.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_data_stream.h"
 #include "net/url_request/url_request.h"
@@ -102,7 +102,7 @@ class URLRequestFakerForPostRequestsInterceptor
     const net::UploadDataStream* upload_data = request->get_upload();
     last_upload_bytes_.clear();
     if (upload_data) {
-      const std::vector<scoped_ptr<net::UploadElementReader>>* readers =
+      const std::vector<std::unique_ptr<net::UploadElementReader>>* readers =
           upload_data->GetElementReaders();
       if (readers) {
         for (size_t i = 0; i < readers->size(); ++i) {
@@ -140,7 +140,8 @@ class FakeBackgroundModeManager : public BackgroundModeManager {
   FakeBackgroundModeManager()
       : BackgroundModeManager(
             *base::CommandLine::ForCurrentProcess(),
-            &g_browser_process->profile_manager()->GetProfileInfoCache()),
+            &g_browser_process->profile_manager()->
+                GetProfileAttributesStorage()),
         background_mode_active_(false) {}
 
   void SetBackgroundModeActive(bool active) {
@@ -186,13 +187,13 @@ class BetterSessionRestoreTest : public InProcessBrowserTest {
       CHECK(base::ReadFileToString(path, &contents));
       net::URLRequestFilter::GetInstance()->AddUrlInterceptor(
           GURL(fake_server_address_ + test_path_ + *it),
-          scoped_ptr<net::URLRequestInterceptor>(
+          std::unique_ptr<net::URLRequestInterceptor>(
               new URLRequestFakerInterceptor(contents)));
     }
     post_interceptor_ = new URLRequestFakerForPostRequestsInterceptor();
     net::URLRequestFilter::GetInstance()->AddUrlInterceptor(
         GURL(fake_server_address_ + test_path_ + "posted.php"),
-        scoped_ptr<net::URLRequestInterceptor>(post_interceptor_));
+        std::unique_ptr<net::URLRequestInterceptor>(post_interceptor_));
   }
 
  protected:
@@ -202,7 +203,7 @@ class BetterSessionRestoreTest : public InProcessBrowserTest {
     helper.SetForceBrowserNotAliveWithNoWindows(true);
     helper.ReleaseService();
     g_browser_process->set_background_mode_manager_for_test(
-        scoped_ptr<BackgroundModeManager>(new FakeBackgroundModeManager));
+        std::unique_ptr<BackgroundModeManager>(new FakeBackgroundModeManager));
   }
 
   void StoreDataWithPage(const std::string& filename) {
@@ -317,8 +318,10 @@ class BetterSessionRestoreTest : public InProcessBrowserTest {
                                          bool close_all_windows) {
     Profile* profile = browser->profile();
 
+    ScopedKeepAlive test_keep_alive(KeepAliveOrigin::PANEL_VIEW,
+                                    KeepAliveRestartOption::DISABLED);
+
     // Close the browser.
-    chrome::IncrementKeepAliveCount();
     if (close_all_windows)
       CloseAllBrowsers();
     else
@@ -332,9 +335,8 @@ class BetterSessionRestoreTest : public InProcessBrowserTest {
 
     // Create a new window, which should trigger session restore.
     ui_test_utils::BrowserAddedObserver window_observer;
-    chrome::NewEmptyWindow(profile, chrome::HOST_DESKTOP_TYPE_NATIVE);
+    chrome::NewEmptyWindow(profile);
     Browser* new_browser = window_observer.WaitForSingleNewBrowser();
-    chrome::DecrementKeepAliveCount();
 
     return new_browser;
   }
@@ -486,10 +488,8 @@ IN_PROC_BROWSER_TEST_F(ContinueWhereILeftOffTest,
   // Set the startup preference to "continue where I left off" and visit a page
   // which stores a session cookie.
   StoreDataWithPage("session_cookies.html");
-  Browser* popup = new Browser(Browser::CreateParams(
-      Browser::TYPE_POPUP,
-      browser()->profile(),
-      chrome::HOST_DESKTOP_TYPE_NATIVE));
+  Browser* popup = new Browser(
+      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile()));
   popup->window()->Show();
 
   Browser* new_browser = QuitBrowserAndRestore(browser(), false);
@@ -595,14 +595,10 @@ class RestartTest : public BetterSessionRestoreTest {
  protected:
   void Restart() {
     // Simulate restarting the browser, but let the test exit peacefully.
-    for (chrome::BrowserIterator it; !it.done(); it.Next())
-      content::BrowserContext::SaveSessionState(it->profile());
+    for (auto* browser : *BrowserList::GetInstance())
+      content::BrowserContext::SaveSessionState(browser->profile());
     PrefService* pref_service = g_browser_process->local_state();
     pref_service->SetBoolean(prefs::kWasRestarted, true);
-#if defined(OS_WIN)
-    if (pref_service->HasPrefPath(prefs::kRelaunchMode))
-      pref_service->ClearPref(prefs::kRelaunchMode);
-#endif
   }
 
  private:
@@ -771,10 +767,8 @@ IN_PROC_BROWSER_TEST_F(NoSessionRestoreTest, SessionCookiesBrowserClose) {
 IN_PROC_BROWSER_TEST_F(NoSessionRestoreTest,
                        SessionCookiesBrowserCloseWithPopupOpen) {
   StoreDataWithPage("session_cookies.html");
-  Browser* popup = new Browser(Browser::CreateParams(
-      Browser::TYPE_POPUP,
-      browser()->profile(),
-      chrome::HOST_DESKTOP_TYPE_NATIVE));
+  Browser* popup = new Browser(
+      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile()));
   popup->window()->Show();
   Browser* new_browser = QuitBrowserAndRestore(browser(), false);
   NavigateAndCheckStoredData(new_browser, "session_cookies.html");
@@ -785,10 +779,8 @@ IN_PROC_BROWSER_TEST_F(NoSessionRestoreTest,
 IN_PROC_BROWSER_TEST_F(NoSessionRestoreTest,
                        SessionCookiesBrowserClosePopupLast) {
   StoreDataWithPage("session_cookies.html");
-  Browser* popup = new Browser(Browser::CreateParams(
-      Browser::TYPE_POPUP,
-      browser()->profile(),
-      chrome::HOST_DESKTOP_TYPE_NATIVE));
+  Browser* popup = new Browser(
+      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile()));
   popup->window()->Show();
   CloseBrowserSynchronously(browser());
   Browser* new_browser = QuitBrowserAndRestore(popup, false);

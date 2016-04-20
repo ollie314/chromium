@@ -42,7 +42,7 @@ const CGFloat kPadding = 10;
   base::scoped_nsobject<UITextField> _continuousMemoryWarningField;
 
   // A place to store the artifical memory bloat.
-  scoped_ptr<uint8_t> _bloat;
+  std::unique_ptr<uint8_t> _bloat;
 
   // Distance the view was pushed up to accomodate the keyboard.
   CGFloat _keyboardOffset;
@@ -591,12 +591,17 @@ const CGFloat kPadding = 10;
 
 // Shows an alert with the given |errorMessage|.
 - (void)alert:(NSString*)errorMessage {
-  UIAlertView* alert = [[UIAlertView alloc] initWithTitle:@"Error"
-                                                  message:errorMessage
-                                                 delegate:self
-                                        cancelButtonTitle:@"OK"
-                                        otherButtonTitles:nil, nil];
-  [alert show];
+  UIAlertController* alert =
+      [UIAlertController alertControllerWithTitle:@"Error"
+                                          message:errorMessage
+                                   preferredStyle:UIAlertControllerStyleAlert];
+  [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                            style:UIAlertActionStyleDefault
+                                          handler:nil]];
+  [[[[UIApplication sharedApplication] keyWindow] rootViewController]
+      presentViewController:alert
+                   animated:YES
+                 completion:nil];
 }
 
 @end

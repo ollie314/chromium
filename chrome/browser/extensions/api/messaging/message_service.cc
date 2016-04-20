@@ -15,7 +15,6 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/messaging/extension_message_port.h"
@@ -28,6 +27,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "components/guest_view/common/guest_view_constants.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -127,16 +127,16 @@ const char kProhibitedByPoliciesError[] =
 #endif
 
 struct MessageService::MessageChannel {
-  scoped_ptr<MessagePort> opener;
-  scoped_ptr<MessagePort> receiver;
+  std::unique_ptr<MessagePort> opener;
+  std::unique_ptr<MessagePort> receiver;
 };
 
 struct MessageService::OpenChannelParams {
   int source_process_id;
   int source_routing_id;
-  scoped_ptr<base::DictionaryValue> source_tab;
+  std::unique_ptr<base::DictionaryValue> source_tab;
   int source_frame_id;
-  scoped_ptr<MessagePort> receiver;
+  std::unique_ptr<MessagePort> receiver;
   int receiver_port_id;
   std::string source_extension_id;
   std::string target_extension_id;
@@ -149,7 +149,7 @@ struct MessageService::OpenChannelParams {
   // Takes ownership of receiver.
   OpenChannelParams(int source_process_id,
                     int source_routing_id,
-                    scoped_ptr<base::DictionaryValue> source_tab,
+                    std::unique_ptr<base::DictionaryValue> source_tab,
                     int source_frame_id,
                     MessagePort* receiver,
                     int receiver_port_id,
@@ -324,13 +324,15 @@ void MessageService::OpenChannelToExtension(
   bool include_guest_process_info = false;
 
   // Include info about the opener's tab (if it was a tab).
-  scoped_ptr<base::DictionaryValue> source_tab;
+  std::unique_ptr<base::DictionaryValue> source_tab;
   int source_frame_id = -1;
   if (source_contents && ExtensionTabUtil::GetTabId(source_contents) >= 0) {
     // Only the tab id is useful to platform apps for internal use. The
     // unnecessary bits will be stripped out in
     // MessagingBindings::DispatchOnConnect().
-    source_tab.reset(ExtensionTabUtil::CreateTabValue(source_contents));
+    source_tab.reset(ExtensionTabUtil::CreateTabObject(source_contents)
+                         ->ToValue()
+                         .release());
 
     content::RenderFrameHost* rfh =
         content::RenderFrameHost::FromID(source_process_id, source_routing_id);
@@ -347,7 +349,7 @@ void MessageService::OpenChannelToExtension(
     }
   }
 
-  scoped_ptr<OpenChannelParams> params(new OpenChannelParams(
+  std::unique_ptr<OpenChannelParams> params(new OpenChannelParams(
       source_process_id, source_routing_id, std::move(source_tab),
       source_frame_id, nullptr, receiver_port_id, source_extension_id,
       target_extension_id, source_url, channel_name, include_tls_channel_id,
@@ -442,24 +444,22 @@ void MessageService::OpenChannelToNativeApp(
     return;
   }
 
-  scoped_ptr<MessageChannel> channel(new MessageChannel());
+  std::unique_ptr<MessageChannel> channel(new MessageChannel());
   channel->opener.reset(
       new ExtensionMessagePort(weak_factory_.GetWeakPtr(),
                                GET_OPPOSITE_PORT_ID(receiver_port_id),
                                source_extension_id, source, false));
   if (!channel->opener->IsValidPort())
     return;
+  channel->opener->OpenPort(source_process_id, source_routing_id);
 
   // Get handle of the native view and pass it to the native messaging host.
   gfx::NativeView native_view = source ? source->GetNativeView() : nullptr;
 
   std::string error = kReceivingEndDoesntExistError;
-  scoped_ptr<NativeMessageHost> native_host = NativeMessageHost::Create(
-      native_view,
-      source_extension_id,
-      native_app_name,
-      policy_permission == ALLOW_ALL,
-      &error);
+  std::unique_ptr<NativeMessageHost> native_host = NativeMessageHost::Create(
+      native_view, source_extension_id, native_app_name,
+      policy_permission == ALLOW_ALL, &error);
 
   // Abandon the channel.
   if (!native_host.get()) {
@@ -500,7 +500,7 @@ void MessageService::OpenChannelToTab(int source_process_id,
       Profile::FromBrowserContext(source->GetProcess()->GetBrowserContext());
 
   WebContents* contents = NULL;
-  scoped_ptr<MessagePort> receiver;
+  std::unique_ptr<MessagePort> receiver;
   if (!ExtensionTabUtil::GetTabById(tab_id, profile, true, NULL, NULL,
                                     &contents, NULL) ||
       contents->GetController().NeedsReload()) {
@@ -535,11 +535,11 @@ void MessageService::OpenChannelToTab(int source_process_id,
     DCHECK(extension);
   }
 
-  scoped_ptr<OpenChannelParams> params(new OpenChannelParams(
-      source_process_id,
-      source_routing_id,
-      scoped_ptr<base::DictionaryValue>(),  // Source tab doesn't make sense
-                                            // for opening to tabs.
+  std::unique_ptr<OpenChannelParams> params(new OpenChannelParams(
+      source_process_id, source_routing_id,
+      std::unique_ptr<base::DictionaryValue>(),  // Source tab doesn't make
+                                                 // sense
+                                                 // for opening to tabs.
       -1,  // If there is no tab, then there is no frame either.
       receiver.release(), receiver_port_id, extension_id, extension_id,
       GURL(),  // Source URL doesn't make sense for opening to tabs.
@@ -551,7 +551,7 @@ void MessageService::OpenChannelToTab(int source_process_id,
 }
 
 void MessageService::OpenChannelImpl(BrowserContext* browser_context,
-                                     scoped_ptr<OpenChannelParams> params,
+                                     std::unique_ptr<OpenChannelParams> params,
                                      const Extension* target_extension,
                                      bool did_enqueue) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -569,12 +569,13 @@ void MessageService::OpenChannelImpl(BrowserContext* browser_context,
     return;
   }
 
-  scoped_ptr<MessagePort> opener(
+  std::unique_ptr<MessagePort> opener(
       new ExtensionMessagePort(weak_factory_.GetWeakPtr(),
                                GET_OPPOSITE_PORT_ID(params->receiver_port_id),
                                params->source_extension_id, source, false));
   if (!opener->IsValidPort())
     return;
+  opener->OpenPort(params->source_process_id, params->source_routing_id);
 
   params->receiver->RemoveCommonFrames(*opener);
   if (!params->receiver->IsValidPort()) {
@@ -817,7 +818,7 @@ void MessageService::DispatchMessage(int source_port_id,
 bool MessageService::MaybeAddPendingLazyBackgroundPageOpenChannelTask(
     BrowserContext* context,
     const Extension* extension,
-    scoped_ptr<OpenChannelParams>* params,
+    std::unique_ptr<OpenChannelParams>* params,
     const PendingMessagesQueue& pending_messages) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -849,8 +850,9 @@ bool MessageService::MaybeAddPendingLazyBackgroundPageOpenChannelTask(
   return true;
 }
 
-void MessageService::OnOpenChannelAllowed(scoped_ptr<OpenChannelParams> params,
-                                          bool allowed) {
+void MessageService::OnOpenChannelAllowed(
+    std::unique_ptr<OpenChannelParams> params,
+    bool allowed) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   int channel_id = GET_CHANNEL_ID(params->receiver_port_id);
@@ -930,7 +932,7 @@ void MessageService::OnOpenChannelAllowed(scoped_ptr<OpenChannelParams> params,
   }
 }
 
-void MessageService::GotChannelID(scoped_ptr<OpenChannelParams> params,
+void MessageService::GotChannelID(std::unique_ptr<OpenChannelParams> params,
                                   const std::string& tls_channel_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -974,7 +976,7 @@ void MessageService::GotChannelID(scoped_ptr<OpenChannelParams> params,
 }
 
 void MessageService::PendingLazyBackgroundPageOpenChannel(
-    scoped_ptr<OpenChannelParams> params,
+    std::unique_ptr<OpenChannelParams> params,
     int source_process_id,
     ExtensionHost* host) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);

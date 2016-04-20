@@ -79,6 +79,8 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   void GetSSLInfo(SSLInfo* ssl_info) override;
   void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) override;
   bool GetRemoteEndpoint(IPEndPoint* endpoint) override;
+  Error GetSignedEKMForTokenBinding(crypto::ECPrivateKey* key,
+                                    std::vector<uint8_t>* out) override;
   void Drain(HttpNetworkSession* session) override;
   void PopulateNetErrorDetails(NetErrorDetails* details) override;
   void SetPriority(RequestPriority priority) override;
@@ -87,7 +89,7 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   void OnRequestHeadersSent() override;
   SpdyResponseHeadersStatus OnResponseHeadersUpdated(
       const SpdyHeaderBlock& response_headers) override;
-  void OnDataReceived(scoped_ptr<SpdyBuffer> buffer) override;
+  void OnDataReceived(std::unique_ptr<SpdyBuffer> buffer) override;
   void OnDataSent() override;
   void OnTrailers(const SpdyHeaderBlock& trailers) override;
   void OnClose(int status) override;
@@ -145,7 +147,7 @@ class NET_EXPORT_PRIVATE SpdyHttpStream : public SpdyStream::Delegate,
   // It is not owned by this stream object, or point to |push_response_info_|.
   HttpResponseInfo* response_info_;
 
-  scoped_ptr<HttpResponseInfo> push_response_info_;
+  std::unique_ptr<HttpResponseInfo> push_response_info_;
 
   // We don't use SpdyStream's |response_header_status_| as we
   // sometimes call back into our delegate before it is updated.

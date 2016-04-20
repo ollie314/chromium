@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_CONTENT_SETTINGS_CONTENT_SETTING_IMAGE_MODEL_H_
 
 #include "base/macros.h"
+#include "base/memory/scoped_vector.h"
 #include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
@@ -108,8 +109,8 @@ class ContentSettingSimpleImageModel : public ContentSettingImageModel {
   void SetAnimationHasRun(content::WebContents* web_contents) override;
 
   // Factory method. Used only for testing.
-  static scoped_ptr<ContentSettingImageModel> CreateForContentTypeForTesting(
-      ContentSettingsType content_type);
+  static std::unique_ptr<ContentSettingImageModel>
+  CreateForContentTypeForTesting(ContentSettingsType content_type);
 
  protected:
   ContentSettingsType content_type() { return content_type_; }

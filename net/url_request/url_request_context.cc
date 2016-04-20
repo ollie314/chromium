@@ -7,6 +7,7 @@
 #include "base/compiler_specific.h"
 #include "base/debug/alias.h"
 #include "base/debug/stack_trace.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/host_resolver.h"
@@ -25,6 +26,7 @@ URLRequestContext::URLRequestContext()
       proxy_service_(nullptr),
       network_delegate_(nullptr),
       http_user_agent_settings_(nullptr),
+      cookie_store_(nullptr),
       transport_security_state_(nullptr),
       cert_transparency_verifier_(nullptr),
       http_transaction_factory_(nullptr),
@@ -33,8 +35,8 @@ URLRequestContext::URLRequestContext()
       backoff_manager_(nullptr),
       sdch_manager_(nullptr),
       network_quality_estimator_(nullptr),
-      url_requests_(new std::set<const URLRequest*>) {
-}
+      url_requests_(new std::set<const URLRequest*>),
+      has_known_mismatched_cookie_store_(false) {}
 
 URLRequestContext::~URLRequestContext() {
   AssertNoURLRequests();
@@ -51,7 +53,7 @@ void URLRequestContext::CopyFrom(const URLRequestContext* other) {
   set_ssl_config_service(other->ssl_config_service_.get());
   set_network_delegate(other->network_delegate_);
   set_http_server_properties(other->http_server_properties_);
-  set_cookie_store(other->cookie_store_.get());
+  set_cookie_store(other->cookie_store_);
   set_transport_security_state(other->transport_security_state_);
   set_cert_transparency_verifier(other->cert_transparency_verifier_);
   set_http_transaction_factory(other->http_transaction_factory_);
@@ -74,11 +76,11 @@ const HttpNetworkSession::Params* URLRequestContext::GetNetworkSessionParams(
   return &network_session->params();
 }
 
-scoped_ptr<URLRequest> URLRequestContext::CreateRequest(
+std::unique_ptr<URLRequest> URLRequestContext::CreateRequest(
     const GURL& url,
     RequestPriority priority,
     URLRequest::Delegate* delegate) const {
-  return make_scoped_ptr(
+  return base::WrapUnique(
       new URLRequest(url, priority, delegate, this, network_delegate_));
 }
 

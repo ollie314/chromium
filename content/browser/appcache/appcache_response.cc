@@ -41,7 +41,7 @@ class WrappedPickleIOBuffer : public net::WrappedIOBuffer {
  private:
   ~WrappedPickleIOBuffer() override {}
 
-  scoped_ptr<const base::Pickle> pickle_;
+  std::unique_ptr<const base::Pickle> pickle_;
 };
 
 }  // anon namespace
@@ -78,13 +78,24 @@ HttpResponseInfoIOBuffer::HttpResponseInfoIOBuffer(net::HttpResponseInfo* info)
 
 HttpResponseInfoIOBuffer::~HttpResponseInfoIOBuffer() {}
 
+// AppCacheDiskCacheInterface ----------------------------------------
+
+AppCacheDiskCacheInterface::AppCacheDiskCacheInterface()
+    : weak_factory_(this) {}
+
+base::WeakPtr<AppCacheDiskCacheInterface>
+AppCacheDiskCacheInterface::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
+}
+
+AppCacheDiskCacheInterface::~AppCacheDiskCacheInterface() {}
+
 // AppCacheResponseIO ----------------------------------------------
 
-AppCacheResponseIO::AppCacheResponseIO(int64_t response_id,
-                                       int64_t group_id,
-                                       AppCacheDiskCacheInterface* disk_cache)
+AppCacheResponseIO::AppCacheResponseIO(
+    int64_t response_id,
+    const base::WeakPtr<AppCacheDiskCacheInterface>& disk_cache)
     : response_id_(response_id),
-      group_id_(group_id),
       disk_cache_(disk_cache),
       entry_(NULL),
       buffer_len_(0),
@@ -176,9 +187,8 @@ void AppCacheResponseIO::OpenEntryCallback(
 
 AppCacheResponseReader::AppCacheResponseReader(
     int64_t response_id,
-    int64_t group_id,
-    AppCacheDiskCacheInterface* disk_cache)
-    : AppCacheResponseIO(response_id, group_id, disk_cache),
+    const base::WeakPtr<AppCacheDiskCacheInterface>& disk_cache)
+    : AppCacheResponseIO(response_id, disk_cache),
       range_offset_(0),
       range_length_(std::numeric_limits<int32_t>::max()),
       read_position_(0),
@@ -255,7 +265,7 @@ void AppCacheResponseReader::OnIOComplete(int result) {
     } else if (info_buffer_.get()) {
       // Deserialize the http info structure, ensuring we got headers.
       base::Pickle pickle(buffer_->data(), result);
-      scoped_ptr<net::HttpResponseInfo> info(new net::HttpResponseInfo);
+      std::unique_ptr<net::HttpResponseInfo> info(new net::HttpResponseInfo);
       bool response_truncated = false;
       if (!info->InitFromPickle(pickle, &response_truncated) ||
           !info->headers.get()) {
@@ -301,9 +311,8 @@ void AppCacheResponseReader::OnOpenEntryComplete() {
 
 AppCacheResponseWriter::AppCacheResponseWriter(
     int64_t response_id,
-    int64_t group_id,
-    AppCacheDiskCacheInterface* disk_cache)
-    : AppCacheResponseIO(response_id, group_id, disk_cache),
+    const base::WeakPtr<AppCacheDiskCacheInterface>& disk_cache)
+    : AppCacheResponseIO(response_id, disk_cache),
       info_size_(0),
       write_position_(0),
       write_amount_(0),
@@ -404,7 +413,10 @@ void AppCacheResponseWriter::OnCreateEntryComplete(
     AppCacheDiskCacheInterface::Entry** entry, int rv) {
   DCHECK(info_buffer_.get() || buffer_.get());
 
-  if (creation_phase_ == INITIAL_ATTEMPT) {
+  if (!disk_cache_) {
+    ScheduleIOCompletionCallback(net::ERR_FAILED);
+    return;
+  } else if (creation_phase_ == INITIAL_ATTEMPT) {
     if (rv != net::OK) {
       // We may try to overwrite existing entries.
       creation_phase_ = DOOM_EXISTING;
@@ -443,9 +455,8 @@ void AppCacheResponseWriter::OnCreateEntryComplete(
 
 AppCacheResponseMetadataWriter::AppCacheResponseMetadataWriter(
     int64_t response_id,
-    int64_t group_id,
-    AppCacheDiskCacheInterface* disk_cache)
-    : AppCacheResponseIO(response_id, group_id, disk_cache),
+    const base::WeakPtr<AppCacheDiskCacheInterface>& disk_cache)
+    : AppCacheResponseIO(response_id, disk_cache),
       write_amount_(0),
       weak_factory_(this) {}
 

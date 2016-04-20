@@ -66,7 +66,7 @@ TEST_F(EqualsTest, Array) {
   NamedRegionPtr n2(n1.Clone());
   EXPECT_TRUE(n1.Equals(n2));
 
-  n2->rects.reset();
+  n2->rects = nullptr;
   EXPECT_FALSE(n1.Equals(n2));
   n2->rects.resize(0);
   EXPECT_FALSE(n1.Equals(n2));
@@ -123,13 +123,13 @@ TEST_F(EqualsTest, InterfacePtr) {
   EXPECT_TRUE(InterfaceValueTraits::Equals(inf1, inf2));
 
   auto inf1_request = GetProxy(&inf1);
-  MOJO_ALLOW_UNUSED_LOCAL(inf1_request);
+  ALLOW_UNUSED_LOCAL(inf1_request);
 
   EXPECT_TRUE(InterfaceValueTraits::Equals(inf1, inf1));
   EXPECT_FALSE(InterfaceValueTraits::Equals(inf1, inf2));
 
   auto inf2_request = GetProxy(&inf2);
-  MOJO_ALLOW_UNUSED_LOCAL(inf2_request);
+  ALLOW_UNUSED_LOCAL(inf2_request);
 
   EXPECT_FALSE(InterfaceValueTraits::Equals(inf1, inf2));
 }

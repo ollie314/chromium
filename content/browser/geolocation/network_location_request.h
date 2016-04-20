@@ -5,9 +5,12 @@
 #ifndef CONTENT_BROWSER_GEOLOCATION_NETWORK_LOCATION_REQUEST_H_
 #define CONTENT_BROWSER_GEOLOCATION_NETWORK_LOCATION_REQUEST_H_
 
+#include <memory>
+
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/strings/string16.h"
 #include "content/browser/geolocation/wifi_data_provider.h"
 #include "content/common/content_export.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -47,7 +50,7 @@ class NetworkLocationRequest : private net::URLFetcherDelegate {
   // started. In all cases, any currently pending request will be canceled.
   bool MakeRequest(const base::string16& access_token,
                    const WifiData& wifi_data,
-                   const base::Time& timestamp);
+                   const base::Time& wifi_timestamp);
 
   bool is_request_pending() const { return url_fetcher_ != NULL; }
   const GURL& url() const { return url_; }
@@ -59,12 +62,12 @@ class NetworkLocationRequest : private net::URLFetcherDelegate {
   scoped_refptr<net::URLRequestContextGetter> url_context_;
   LocationResponseCallback location_response_callback_;
   const GURL url_;
-  scoped_ptr<net::URLFetcher> url_fetcher_;
+  std::unique_ptr<net::URLFetcher> url_fetcher_;
 
   // Keep a copy of the data sent in the request, so we can refer back to it
   // when the response arrives.
   WifiData wifi_data_;
-  base::Time wifi_data_timestamp_;
+  base::Time wifi_timestamp_;
 
   // The start time for the request.
   base::TimeTicks request_start_time_;

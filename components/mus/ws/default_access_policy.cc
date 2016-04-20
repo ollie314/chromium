@@ -8,14 +8,17 @@
 #include "components/mus/ws/server_window.h"
 
 namespace mus {
-
 namespace ws {
 
-DefaultAccessPolicy::DefaultAccessPolicy(ConnectionSpecificId connection_id,
-                                         AccessPolicyDelegate* delegate)
-    : connection_id_(connection_id), delegate_(delegate) {}
+DefaultAccessPolicy::DefaultAccessPolicy() {}
 
 DefaultAccessPolicy::~DefaultAccessPolicy() {}
+
+void DefaultAccessPolicy::Init(ConnectionSpecificId connection_id,
+                               AccessPolicyDelegate* delegate) {
+  connection_id_ = connection_id;
+  delegate_ = delegate;
+}
 
 bool DefaultAccessPolicy::CanRemoveWindowFromParent(
     const ServerWindow* window) const {
@@ -31,7 +34,7 @@ bool DefaultAccessPolicy::CanAddWindow(const ServerWindow* parent,
   return WasCreatedByThisConnection(child) &&
          (delegate_->HasRootForAccessPolicy(parent) ||
           (WasCreatedByThisConnection(parent) &&
-           !delegate_->IsWindowRootOfAnotherConnectionForAccessPolicy(parent)));
+           !delegate_->IsWindowRootOfAnotherTreeForAccessPolicy(parent)));
 }
 
 bool DefaultAccessPolicy::CanAddTransientWindow(
@@ -51,6 +54,11 @@ bool DefaultAccessPolicy::CanRemoveTransientWindowFromParent(
           WasCreatedByThisConnection(window->transient_parent()));
 }
 
+bool DefaultAccessPolicy::CanSetModal(const ServerWindow* window) const {
+  return delegate_->HasRootForAccessPolicy(window) ||
+         WasCreatedByThisConnection(window);
+}
+
 bool DefaultAccessPolicy::CanReorderWindow(
     const ServerWindow* window,
     const ServerWindow* relative_window,
@@ -65,26 +73,18 @@ bool DefaultAccessPolicy::CanDeleteWindow(const ServerWindow* window) const {
 
 bool DefaultAccessPolicy::CanGetWindowTree(const ServerWindow* window) const {
   return WasCreatedByThisConnection(window) ||
-         delegate_->HasRootForAccessPolicy(window) ||
-         IsDescendantOfEmbedRoot(window);
+         delegate_->HasRootForAccessPolicy(window);
 }
 
 bool DefaultAccessPolicy::CanDescendIntoWindowForWindowTree(
     const ServerWindow* window) const {
   return (WasCreatedByThisConnection(window) &&
-          !delegate_->IsWindowRootOfAnotherConnectionForAccessPolicy(window)) ||
-         delegate_->HasRootForAccessPolicy(window) ||
-         delegate_->IsDescendantOfEmbedRoot(window);
+          !delegate_->IsWindowRootOfAnotherTreeForAccessPolicy(window)) ||
+         delegate_->HasRootForAccessPolicy(window);
 }
 
-bool DefaultAccessPolicy::CanEmbed(const ServerWindow* window,
-                                   uint32_t policy_bitmask) const {
-  if (policy_bitmask != mojom::WindowTree::ACCESS_POLICY_DEFAULT)
-    return false;
-  return WasCreatedByThisConnection(window) ||
-         (delegate_->IsWindowKnownForAccessPolicy(window) &&
-          IsDescendantOfEmbedRoot(window) &&
-          !delegate_->HasRootForAccessPolicy(window));
+bool DefaultAccessPolicy::CanEmbed(const ServerWindow* window) const {
+  return WasCreatedByThisConnection(window);
 }
 
 bool DefaultAccessPolicy::CanChangeWindowVisibility(
@@ -93,16 +93,22 @@ bool DefaultAccessPolicy::CanChangeWindowVisibility(
          delegate_->HasRootForAccessPolicy(window);
 }
 
+bool DefaultAccessPolicy::CanChangeWindowOpacity(
+    const ServerWindow* window) const {
+  return WasCreatedByThisConnection(window) ||
+         delegate_->HasRootForAccessPolicy(window);
+}
+
 bool DefaultAccessPolicy::CanSetWindowSurface(
     const ServerWindow* window,
     mojom::SurfaceType surface_type) const {
-  if (surface_type == mojom::SURFACE_TYPE_UNDERLAY)
+  if (surface_type == mojom::SurfaceType::UNDERLAY)
     return WasCreatedByThisConnection(window);
 
   // Once a window embeds another app, the embedder app is no longer able to
   // call SetWindowSurfaceId() - this ability is transferred to the embedded
   // app.
-  if (delegate_->IsWindowRootOfAnotherConnectionForAccessPolicy(window))
+  if (delegate_->IsWindowRootOfAnotherTreeForAccessPolicy(window))
     return false;
   return WasCreatedByThisConnection(window) ||
          delegate_->HasRootForAccessPolicy(window);
@@ -123,8 +129,13 @@ bool DefaultAccessPolicy::CanSetWindowTextInputState(
          delegate_->HasRootForAccessPolicy(window);
 }
 
-bool DefaultAccessPolicy::CanSetFocus(const ServerWindow* window) const {
+bool DefaultAccessPolicy::CanSetCapture(const ServerWindow* window) const {
   return WasCreatedByThisConnection(window) ||
+         delegate_->HasRootForAccessPolicy(window);
+}
+
+bool DefaultAccessPolicy::CanSetFocus(const ServerWindow* window) const {
+  return !window || WasCreatedByThisConnection(window) ||
          delegate_->HasRootForAccessPolicy(window);
 }
 
@@ -143,21 +154,16 @@ bool DefaultAccessPolicy::ShouldNotifyOnHierarchyChange(
     const ServerWindow* window,
     const ServerWindow** new_parent,
     const ServerWindow** old_parent) const {
-  if (!WasCreatedByThisConnection(window) && !IsDescendantOfEmbedRoot(window) &&
-      (!*new_parent || !IsDescendantOfEmbedRoot(*new_parent)) &&
-      (!*old_parent || !IsDescendantOfEmbedRoot(*old_parent))) {
+  if (!WasCreatedByThisConnection(window))
     return false;
-  }
 
   if (*new_parent && !WasCreatedByThisConnection(*new_parent) &&
-      !delegate_->HasRootForAccessPolicy((*new_parent)) &&
-      !delegate_->IsDescendantOfEmbedRoot(*new_parent)) {
+      !delegate_->HasRootForAccessPolicy((*new_parent))) {
     *new_parent = nullptr;
   }
 
   if (*old_parent && !WasCreatedByThisConnection(*old_parent) &&
-      !delegate_->HasRootForAccessPolicy((*old_parent)) &&
-      !delegate_->IsDescendantOfEmbedRoot(*new_parent)) {
+      !delegate_->HasRootForAccessPolicy((*old_parent))) {
     *old_parent = nullptr;
   }
   return true;
@@ -171,7 +177,7 @@ const ServerWindow* DefaultAccessPolicy::GetWindowForFocusChange(
   return nullptr;
 }
 
-bool DefaultAccessPolicy::CanSetWindowManagerInternal() const {
+bool DefaultAccessPolicy::CanSetWindowManager() const {
   return false;
 }
 
@@ -180,11 +186,13 @@ bool DefaultAccessPolicy::WasCreatedByThisConnection(
   return window->id().connection_id == connection_id_;
 }
 
-bool DefaultAccessPolicy::IsDescendantOfEmbedRoot(
-    const ServerWindow* window) const {
-  return delegate_->IsDescendantOfEmbedRoot(window);
+bool DefaultAccessPolicy::IsValidIdForNewWindow(
+    const ClientWindowId& id) const {
+  // Clients using DefaultAccessPolicy only see windows they have created (for
+  // the embed point they choose the id), so it's ok for clients to use whatever
+  // id they want.
+  return true;
 }
 
 }  // namespace ws
-
 }  // namespace mus

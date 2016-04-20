@@ -7,12 +7,12 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/supports_user_data.h"
 #include "net/base/net_export.h"
 #include "net/url_request/url_request.h"
@@ -38,10 +38,10 @@ typedef std::vector<std::string> ResponseCookies;
 
 // To use this class, create an instance with the desired URL and a pointer to
 // the object to be notified when the URL has been loaded:
-//   scoped_ptr<URLFetcher> fetcher =
-//   URLFetcher::Create("http://www.google.com",
-//                                                     URLFetcher::GET,
-//                                                     this);
+//   std::unique_ptr<URLFetcher> fetcher =
+//       URLFetcher::Create(GURL("http://www.google.com"),
+//                          URLFetcher::GET,
+//                          this);
 //
 // You must also set a request context getter:
 //
@@ -49,7 +49,7 @@ typedef std::vector<std::string> ResponseCookies;
 //
 // Then, optionally set properties on this object, like the request context or
 // extra headers:
-//   fetcher->set_extra_request_headers("X-Foo: bar");
+//   fetcher->AddExtraRequestHeader("X-Foo: bar");
 //
 // Finally, start the request:
 //   fetcher->Start();
@@ -57,14 +57,13 @@ typedef std::vector<std::string> ResponseCookies;
 // You may cancel the request by destroying the URLFetcher:
 //   fetcher.reset();
 //
-// The object you supply as a delegate must inherit from
-// URLFetcherDelegate; when the fetch is completed,
-// OnURLFetchComplete() will be called with a pointer to the URLFetcher.  From
-// that point until the original URLFetcher instance is destroyed, you may use
-// accessor methods to see the result of the fetch. You should copy these
-// objects if you need them to live longer than the URLFetcher instance. If the
-// URLFetcher instance is destroyed before the callback happens, the fetch will
-// be canceled and no callback will occur.
+// The object you supply as a delegate must inherit from URLFetcherDelegate.
+// When the fetch is completed, OnURLFetchComplete() will be called with a
+// pointer to the URLFetcher. From that point until the original URLFetcher
+// instance is destroyed, you may use accessor methods to see the result of the
+// fetch. You should copy these objects if you need them to live longer than
+// the URLFetcher instance. If the URLFetcher instance is destroyed before the
+// callback happens, the fetch will be canceled and no callback will occur.
 //
 // You may create the URLFetcher instance on any thread; OnURLFetchComplete()
 // will be called back on the same thread you use to create the instance.
@@ -96,7 +95,7 @@ class NET_EXPORT URLFetcher {
 
   // Used by SetUploadStreamFactory. The callback should assign a fresh upload
   // data stream every time it's called.
-  typedef base::Callback<scoped_ptr<UploadDataStream>()>
+  typedef base::Callback<std::unique_ptr<UploadDataStream>()>
       CreateUploadStreamCallback;
 
   virtual ~URLFetcher();
@@ -104,17 +103,19 @@ class NET_EXPORT URLFetcher {
   // |url| is the URL to send the request to.
   // |request_type| is the type of request to make.
   // |d| the object that will receive the callback on fetch completion.
-  static scoped_ptr<URLFetcher> Create(const GURL& url,
-                                       URLFetcher::RequestType request_type,
-                                       URLFetcherDelegate* d);
+  static std::unique_ptr<URLFetcher> Create(
+      const GURL& url,
+      URLFetcher::RequestType request_type,
+      URLFetcherDelegate* d);
 
   // Like above, but if there's a URLFetcherFactory registered with the
   // implementation it will be used. |id| may be used during testing to identify
   // who is creating the URLFetcher.
-  static scoped_ptr<URLFetcher> Create(int id,
-                                       const GURL& url,
-                                       URLFetcher::RequestType request_type,
-                                       URLFetcherDelegate* d);
+  static std::unique_ptr<URLFetcher> Create(
+      int id,
+      const GURL& url,
+      URLFetcher::RequestType request_type,
+      URLFetcherDelegate* d);
 
   // Cancels all existing URLFetchers.  Will notify the URLFetcherDelegates.
   // Note that any new URLFetchers created while this is running will not be
@@ -269,7 +270,7 @@ class NET_EXPORT URLFetcher {
   // By default, the response is saved in a string. Call this method to use the
   // specified writer to save the response. Must be called before Start().
   virtual void SaveResponseWithWriter(
-      scoped_ptr<URLFetcherResponseWriter> response_writer) = 0;
+      std::unique_ptr<URLFetcherResponseWriter> response_writer) = 0;
 
   // Retrieve the response headers from the request.  Must only be called after
   // the OnURLFetchComplete callback has run.

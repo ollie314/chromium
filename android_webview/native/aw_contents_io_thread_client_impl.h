@@ -5,14 +5,12 @@
 #ifndef ANDROID_WEBVIEW_NATIVE_AW_CONTENTS_IO_THREAD_CLIENT_IMPL_H_
 #define ANDROID_WEBVIEW_NATIVE_AW_CONTENTS_IO_THREAD_CLIENT_IMPL_H_
 
-#include "android_webview/browser/aw_contents_io_thread_client.h"
-
 #include <stdint.h>
 
+#include "android_webview/browser/aw_contents_io_thread_client.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 
 class GURL;
 
@@ -39,6 +37,12 @@ class AwContentsIoThreadClientImpl : public AwContentsIoThreadClient {
   // This should be called at most once per |web_contents|.
   static void Associate(content::WebContents* web_contents,
                         const base::android::JavaRef<jobject>& jclient);
+
+  // Sets the |jclient| java instance to which service worker related
+  // callbacks should be delegated.
+  static void SetServiceWorkerIoThreadClient(
+      const base::android::JavaRef<jobject>& jclient,
+      const base::android::JavaRef<jobject>& browser_context);
 
   // Either |pending_associate| is true or |jclient| holds a non-null
   // Java object.

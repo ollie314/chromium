@@ -8,7 +8,6 @@
 #include <stdint.h>
 
 #include "base/files/file_util.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -19,7 +18,6 @@
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/notifications/profile_notification.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -194,7 +192,7 @@ DownloadItemNotification::DownloadItemNotification(
 
   notification_->set_progress(0);
   notification_->set_never_timeout(false);
-  notification_->set_adjust_icon(false);
+  notification_->set_draw_icon_background(false);
 
   Update();
 }
@@ -414,7 +412,8 @@ void DownloadItemNotification::UpdateNotificationData(
   UpdateNotificationIcon();
 
   std::vector<message_center::ButtonInfo> notification_actions;
-  scoped_ptr<std::vector<DownloadCommands::Command>> actions(GetExtraActions());
+  std::unique_ptr<std::vector<DownloadCommands::Command>> actions(
+      GetExtraActions());
 
   button_actions_.reset(new std::vector<DownloadCommands::Command>);
   for (auto it = actions->begin(); it != actions->end(); it++) {
@@ -629,9 +628,9 @@ void DownloadItemNotification::OnDecodeImageFailed() {
   UpdateNotificationData(UPDATE);
 }
 
-scoped_ptr<std::vector<DownloadCommands::Command>>
+std::unique_ptr<std::vector<DownloadCommands::Command>>
 DownloadItemNotification::GetExtraActions() const {
-  scoped_ptr<std::vector<DownloadCommands::Command>> actions(
+  std::unique_ptr<std::vector<DownloadCommands::Command>> actions(
       new std::vector<DownloadCommands::Command>());
 
   if (item_->IsDangerous()) {
@@ -845,10 +844,8 @@ base::string16 DownloadItemNotification::GetStatusString() const {
     return GetWarningStatusString();
 
   // The hostname. (E.g.:"example.com" or "127.0.0.1")
-  base::string16 host_name =
-      url_formatter::FormatUrlForSecurityDisplayOmitScheme(
-          item_->GetURL(),
-          profile()->GetPrefs()->GetString(prefs::kAcceptLanguages));
+  base::string16 host_name = url_formatter::FormatUrlForSecurityDisplay(
+      item_->GetURL(), url_formatter::SchemeDisplay::OMIT_HTTP_AND_HTTPS);
 
   DownloadItemModel model(item_);
   base::string16 sub_status_text;
@@ -916,8 +913,7 @@ base::string16 DownloadItemNotification::GetStatusString() const {
 }
 
 Browser* DownloadItemNotification::GetBrowser() const {
-  chrome::ScopedTabbedBrowserDisplayer browser_displayer(
-      profile(), chrome::GetActiveDesktop());
+  chrome::ScopedTabbedBrowserDisplayer browser_displayer(profile());
   DCHECK(browser_displayer.browser());
   return browser_displayer.browser();
 }

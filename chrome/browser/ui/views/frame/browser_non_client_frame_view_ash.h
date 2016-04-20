@@ -5,13 +5,13 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_NON_CLIENT_FRAME_VIEW_ASH_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_NON_CLIENT_FRAME_VIEW_ASH_H_
 
+#include <memory>
+
 #include "ash/shell_observer.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "chrome/browser/ui/views/tab_icon_view_model.h"
-#include "ui/views/controls/button/button.h"
 
 class TabIconView;
 class WebAppLeftHeaderView;
@@ -30,11 +30,8 @@ class ToggleImageButton;
 
 class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
                                      public ash::ShellObserver,
-                                     public TabIconViewModel,
-                                     public views::ButtonListener {
+                                     public TabIconViewModel {
  public:
-  static const char kViewClassName[];
-
   BrowserNonClientFrameViewAsh(BrowserFrame* frame, BrowserView* browser_view);
   ~BrowserNonClientFrameViewAsh() override;
 
@@ -75,12 +72,9 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
   bool ShouldTabIconViewAnimate() const override;
   gfx::ImageSkia GetFaviconForTabIconView() override;
 
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
  protected:
   // BrowserNonClientFrameView:
-  void UpdateNewAvatarButtonImpl() override;
+  void UpdateAvatar() override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest, WindowHeader);
@@ -92,6 +86,7 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
                            ToggleMaximizeModeRelayout);
   FRIEND_TEST_ALL_PREFIXES(WebAppLeftHeaderViewTest, BackButton);
   FRIEND_TEST_ALL_PREFIXES(WebAppLeftHeaderViewTest, LocationIcon);
+  friend class BrowserHeaderPainterAsh;
 
   // views::NonClientFrameView:
   bool DoesIntersectRect(const views::View* target,
@@ -121,23 +116,12 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
 
   // Layout the avatar button.
   void LayoutAvatar();
-#if defined(FRAME_AVATAR_BUTTON)
-  void LayoutNewStyleAvatar();
-#endif
 
   // Returns true if there is anything to paint. Some fullscreen windows do not
   // need their frames painted.
   bool ShouldPaint() const;
 
-  // Paints the header background when the frame is in immersive fullscreen and
-  // tab light bar is visible.
-  void PaintImmersiveLightbarStyleHeader(gfx::Canvas* canvas);
-
   void PaintToolbarBackground(gfx::Canvas* canvas);
-
-  // Draws the line under the header for windows without a toolbar and not using
-  // the packaged app header style.
-  void PaintContentEdge(gfx::Canvas* canvas);
 
   // View which contains the window controls.
   ash::FrameCaptionButtonContainerView* caption_button_container_;
@@ -150,10 +134,10 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
   TabIconView* window_icon_;
 
   // Helper class for painting the header.
-  scoped_ptr<ash::HeaderPainter> header_painter_;
+  std::unique_ptr<ash::HeaderPainter> header_painter_;
 
   // Updates the hittest bounds overrides based on the window show type.
-  scoped_ptr<ash::FrameBorderHitTestController>
+  std::unique_ptr<ash::FrameBorderHitTestController>
       frame_border_hit_test_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserNonClientFrameViewAsh);

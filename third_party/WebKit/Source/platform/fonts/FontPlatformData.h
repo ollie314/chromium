@@ -32,6 +32,7 @@
 #define FontPlatformData_h
 
 #include "SkPaint.h"
+#include "SkTypeface.h"
 #include "platform/PlatformExport.h"
 #include "platform/SharedBuffer.h"
 #include "platform/fonts/FontDescription.h"
@@ -124,11 +125,11 @@ public:
     bool fontContainsCharacter(UChar32 character);
 
     PassRefPtr<OpenTypeVerticalData> verticalData() const;
-    PassRefPtr<SharedBuffer> openTypeTable(uint32_t table) const;
+    PassRefPtr<SharedBuffer> openTypeTable(SkFontTableTag) const;
 
 #if !OS(MACOSX)
     // The returned styles are all actual styles without FontRenderStyle::NoPreference.
-    const FontRenderStyle& fontRenderStyle() const { return m_style; }
+    const FontRenderStyle& getFontRenderStyle() const { return m_style; }
 #endif
     void setupPaint(SkPaint*, float deviceScaleFactor = 1, const Font* = 0) const;
 

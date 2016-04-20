@@ -26,7 +26,6 @@
 #include "ppapi/shared_impl/scoped_pp_var.h"
 #include "ppapi/shared_impl/var.h"
 #include "ppapi/shared_impl/var_tracker.h"
-#include "third_party/WebKit/public/web/WebBindings.h"
 #include "third_party/WebKit/public/web/WebDOMMessageEvent.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
@@ -40,7 +39,6 @@ using ppapi::ArrayBufferVar;
 using ppapi::PpapiGlobals;
 using ppapi::ScopedPPVar;
 using ppapi::StringVar;
-using blink::WebBindings;
 using blink::WebElement;
 using blink::WebDOMEvent;
 using blink::WebDOMMessageEvent;
@@ -374,7 +372,7 @@ void MessageChannel::PostMessageToJavaScriptImpl(
   //     TODO(dmichael):  Add origin if we change to a more iframe-like origin
   //                      policy (see crbug.com/81537)
   WebDOMMessageEvent msg_event(message_data);
-  container->element().dispatchEvent(msg_event);
+  container->enqueueMessageEvent(msg_event);
 }
 
 PluginObject* MessageChannel::GetPluginObject(v8::Isolate* isolate) {

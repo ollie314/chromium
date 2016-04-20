@@ -11,10 +11,10 @@
 #include <nss.h>
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
-#include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
@@ -51,7 +51,7 @@ class SSLClientSocketNSS : public SSLClientSocket {
   // authentication is requested, the host_and_port field of SSLCertRequestInfo
   // will be populated with |host_and_port|.  |ssl_config| specifies
   // the SSL settings.
-  SSLClientSocketNSS(scoped_ptr<ClientSocketHandle> transport_socket,
+  SSLClientSocketNSS(std::unique_ptr<ClientSocketHandle> transport_socket,
                      const HostPortPair& host_and_port,
                      const SSLConfig& ssl_config,
                      const SSLClientSocketContext& context);
@@ -67,7 +67,6 @@ class SSLClientSocketNSS : public SSLClientSocket {
                            const base::StringPiece& context,
                            unsigned char* out,
                            unsigned int outlen) override;
-  int GetTLSUniqueChannelBinding(std::string* out) override;
 
   // StreamSocket implementation.
   int Connect(const CompletionCallback& callback) override;
@@ -80,7 +79,6 @@ class SSLClientSocketNSS : public SSLClientSocket {
   void SetSubresourceSpeculation() override;
   void SetOmniboxSpeculation() override;
   bool WasEverUsed() const override;
-  bool UsingTCPFastOpen() const override;
   bool GetSSLInfo(SSLInfo* ssl_info) override;
   void GetConnectionAttempts(ConnectionAttempts* out) const override;
   void ClearConnectionAttempts() override {}
@@ -99,6 +97,9 @@ class SSLClientSocketNSS : public SSLClientSocket {
 
   // SSLClientSocket implementation.
   ChannelIDService* GetChannelIDService() const override;
+  Error GetSignedEKMForTokenBinding(crypto::ECPrivateKey* key,
+                                    std::vector<uint8_t>* out) override;
+  crypto::ECPrivateKey* GetChannelIDKey() const override;
   SSLFailureState GetSSLFailureState() const override;
 
  private:
@@ -144,7 +145,7 @@ class SSLClientSocketNSS : public SSLClientSocket {
   // vetor representing a particular verification state, this method associates
   // each of the SCTs with the corresponding SCTVerifyStatus as it adds it to
   // the |ssl_info|.signed_certificate_timestamps list.
-  void AddSCTInfoToSSLInfo(SSLInfo* ssl_info) const;
+  void AddCTInfoToSSLInfo(SSLInfo* ssl_info) const;
 
   // Move last protocol to first place: SSLConfig::next_protos has protocols in
   // decreasing order of preference with NPN fallback protocol at the end, but
@@ -152,7 +153,7 @@ class SSLClientSocketNSS : public SSLClientSocket {
   // uses the first one as a fallback for NPN.
   static void ReorderNextProtos(NextProtoVector* next_protos);
 
-  scoped_ptr<ClientSocketHandle> transport_;
+  std::unique_ptr<ClientSocketHandle> transport_;
   HostPortPair host_and_port_;
   SSLConfig ssl_config_;
 
@@ -163,7 +164,7 @@ class SSLClientSocketNSS : public SSLClientSocket {
   CertVerifyResult server_cert_verify_result_;
 
   CertVerifier* const cert_verifier_;
-  scoped_ptr<CertVerifier::Request> cert_verifier_request_;
+  std::unique_ptr<CertVerifier::Request> cert_verifier_request_;
 
   // Certificate Transparency: Verifier and result holder.
   ct::CTVerifyResult ct_verify_result_;

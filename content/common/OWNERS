@@ -3,10 +3,8 @@
 jln@chromium.org
 
 # For security review of sandboxes
-per-file sandbox_win.cc=set noparent
-per-file sandbox_win.cc=jschuh@chromium.org
-per-file sandbox_win.cc=cpu@chromium.org
-per-file sandbox_win.cc=wfh@chromium.org
+per-file sandbox_win.*=set noparent
+per-file sandbox_win.*=file://sandbox/win/OWNERS
 
 # Mac Sandbox.
 per-file sandbox_init_mac.*=rsesek@chromium.org
@@ -72,8 +70,17 @@ per-file *font_config_ipc_linux*=wfh@chromium.org
 # Changes to Mojo interfaces require a security review to avoid
 # introducing new sandbox escapes.
 per-file *.mojom=set noparent
+per-file *.mojom=dcheng@chromium.org
+per-file *.mojom=inferno@chromium.org
+per-file *.mojom=jln@chromium.org
+per-file *.mojom=jschuh@chromium.org
+per-file *.mojom=kenrb@chromium.org
+per-file *.mojom=mkwst@chromium.org
+per-file *.mojom=nasko@chromium.org
 per-file *.mojom=palmer@chromium.org
 per-file *.mojom=tsepez@chromium.org
+per-file *.mojom=wfh@chromium.org
+
 
 # Accessibility
 per-file accessibility_node_data.*=dmazzoni@chromium.org

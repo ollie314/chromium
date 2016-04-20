@@ -199,7 +199,7 @@ void NativeThemeGtk2::PaintMenuItemBackground(
     SkCanvas* canvas,
     State state,
     const gfx::Rect& rect,
-    const MenuListExtraParams& menu_list) const {
+    const MenuItemExtraParams& menu_item) const {
   SkColor color;
   SkPaint paint;
   switch (state) {
@@ -216,6 +216,11 @@ void NativeThemeGtk2::PaintMenuItemBackground(
     default:
       NOTREACHED() << "Invalid state " << state;
       break;
+  }
+  if (menu_item.corner_radius > 0) {
+    const SkScalar radius = SkIntToScalar(menu_item.corner_radius);
+    canvas->drawRoundRect(gfx::RectToSkRect(rect), radius, radius, paint);
+    return;
   }
   canvas->drawRect(gfx::RectToSkRect(rect), paint);
 }
@@ -320,10 +325,8 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
       // return GetTextColor(GetButton(), NORMAL);
     case kColorId_CallToActionColor:
       return GetSystemColor(kColorId_LinkEnabled);
-    // TODO(estade): set proper values for these.
-    case kColorId_MdTextButtonEnabledColor:
-    case kColorId_MdTextButtonDisabledColor:
-      return gfx::kPlaceholderColor;
+    case kColorId_TextOnCallToActionColor:
+      return GetTextColor(GetLabel(), SELECTED);
 
     // Textfield
     case kColorId_TextfieldDefaultColor:

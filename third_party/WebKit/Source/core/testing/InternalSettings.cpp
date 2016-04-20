@@ -55,8 +55,7 @@
 namespace blink {
 
 InternalSettings::Backup::Backup(Settings* settings)
-    : m_originalAuthorShadowDOMForAnyElementEnabled(RuntimeEnabledFeatures::authorShadowDOMForAnyElementEnabled())
-    , m_originalCSP(RuntimeEnabledFeatures::experimentalContentSecurityPolicyFeaturesEnabled())
+    : m_originalCSP(RuntimeEnabledFeatures::experimentalContentSecurityPolicyFeaturesEnabled())
     , m_originalCSSStickyPositionEnabled(RuntimeEnabledFeatures::cssStickyPositionEnabled())
     , m_originalOverlayScrollbarsEnabled(RuntimeEnabledFeatures::overlayScrollbarsEnabled())
     , m_originalEditingBehavior(settings->editingBehaviorType())
@@ -80,7 +79,6 @@ InternalSettings::Backup::Backup(Settings* settings)
 
 void InternalSettings::Backup::restoreTo(Settings* settings)
 {
-    RuntimeEnabledFeatures::setAuthorShadowDOMForAnyElementEnabled(m_originalAuthorShadowDOMForAnyElementEnabled);
     RuntimeEnabledFeatures::setExperimentalContentSecurityPolicyFeaturesEnabled(m_originalCSP);
     RuntimeEnabledFeatures::setCSSStickyPositionEnabled(m_originalCSSStickyPositionEnabled);
     RuntimeEnabledFeatures::setOverlayScrollbarsEnabled(m_originalOverlayScrollbarsEnabled);
@@ -102,39 +100,12 @@ void InternalSettings::Backup::restoreTo(Settings* settings)
     RuntimeEnabledFeatures::setCompositorWorkerEnabled(m_originalCompositorWorkerEnabled);
 }
 
-#if ENABLE(OILPAN)
-InternalSettings* InternalSettings::from(Page& page)
-{
-    if (!HeapSupplement<Page>::from(page, supplementName()))
-        HeapSupplement<Page>::provideTo(page, supplementName(), new InternalSettings(page));
-    return static_cast<InternalSettings*>(HeapSupplement<Page>::from(page, supplementName()));
-}
-#else
-// We can't use RefCountedSupplement because that would try to make InternalSettings RefCounted
-// and InternalSettings is already RefCounted via its base class, InternalSettingsGenerated.
-// Instead, we manually make InternalSettings supplement Page.
-class InternalSettingsWrapper : public Supplement<Page> {
-public:
-    explicit InternalSettingsWrapper(Page& page)
-        : m_internalSettings(InternalSettings::create(page)) { }
-    virtual ~InternalSettingsWrapper() { m_internalSettings->hostDestroyed(); }
-#if ENABLE(ASSERT)
-    bool isRefCountedWrapper() const override { return true; }
-#endif
-    InternalSettings* internalSettings() const { return m_internalSettings.get(); }
-
-private:
-    RefPtr<InternalSettings> m_internalSettings;
-};
-
 InternalSettings* InternalSettings::from(Page& page)
 {
     if (!Supplement<Page>::from(page, supplementName()))
-        Supplement<Page>::provideTo(page, supplementName(), adoptPtr(new InternalSettingsWrapper(page)));
-    return static_cast<InternalSettingsWrapper*>(Supplement<Page>::from(page, supplementName()))->internalSettings();
+        Supplement<Page>::provideTo(page, supplementName(), new InternalSettings(page));
+    return static_cast<InternalSettings*>(Supplement<Page>::from(page, supplementName()));
 }
-#endif
-
 const char* InternalSettings::supplementName()
 {
     return "InternalSettings";
@@ -179,11 +150,6 @@ void InternalSettings::setMockGestureTapHighlightsEnabled(bool enabled, Exceptio
     settings()->setMockGestureTapHighlightsEnabled(enabled);
 }
 
-void InternalSettings::setAuthorShadowDOMForAnyElementEnabled(bool isEnabled)
-{
-    RuntimeEnabledFeatures::setAuthorShadowDOMForAnyElementEnabled(isEnabled);
-}
-
 void InternalSettings::setCSSStickyPositionEnabled(bool enabled)
 {
     RuntimeEnabledFeatures::setCSSStickyPositionEnabled(enabled);
@@ -214,6 +180,19 @@ void InternalSettings::setViewportMetaEnabled(bool enabled, ExceptionState& exce
 {
     InternalSettingsGuardForSettings();
     settings()->setViewportMetaEnabled(enabled);
+}
+
+void InternalSettings::setViewportStyle(const String& style, ExceptionState& exceptionState)
+{
+    InternalSettingsGuardForSettings();
+    if (equalIgnoringCase(style, "default"))
+        settings()->setViewportStyle(WebViewportStyle::Default);
+    else if (equalIgnoringCase(style, "mobile"))
+        settings()->setViewportStyle(WebViewportStyle::Mobile);
+    else if (equalIgnoringCase(style, "television"))
+        settings()->setViewportStyle(WebViewportStyle::Television);
+    else
+        exceptionState.throwDOMException(SyntaxError, "The viewport style type provided ('" + style + "') is invalid.");
 }
 
 void InternalSettings::setStandardFontFamily(const AtomicString& family, const String& script, ExceptionState& exceptionState)
@@ -363,9 +342,7 @@ DEFINE_TRACE(InternalSettings)
 {
     visitor->trace(m_page);
     InternalSettingsGenerated::trace(visitor);
-#if ENABLE(OILPAN)
-    HeapSupplement<Page>::trace(visitor);
-#endif
+    Supplement<Page>::trace(visitor);
 }
 
 void InternalSettings::setAvailablePointerTypes(const String& pointers, ExceptionState& exceptionState)
@@ -517,4 +494,4 @@ void InternalSettings::setCompositorWorkerEnabled(bool enabled, ExceptionState& 
     RuntimeEnabledFeatures::setCompositorWorkerEnabled(enabled);
 }
 
-}
+} // namespace blink

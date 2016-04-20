@@ -18,6 +18,8 @@
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/accessibility/ax_view_state.h"
+#include "ui/base/default_style.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/geometry/insets.h"
@@ -25,17 +27,23 @@
 #include "ui/native_theme/native_theme.h"
 
 namespace views {
+namespace {
+
+const gfx::FontList& GetDefaultFontList() {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  return rb.GetFontListWithDelta(ui::kLabelFontSizeDelta);
+}
+
+}  // namespace
 
 // static
 const char Label::kViewClassName[] = "Label";
 const int Label::kFocusBorderPadding = 1;
 
-Label::Label() {
-  Init(base::string16(), gfx::FontList());
+Label::Label() : Label(base::string16()) {
 }
 
-Label::Label(const base::string16& text) {
-  Init(text, gfx::FontList());
+Label::Label(const base::string16& text) : Label(text, GetDefaultFontList()) {
 }
 
 Label::Label(const base::string16& text, const gfx::FontList& font_list) {
@@ -327,12 +335,12 @@ void Label::OnEnabledChanged() {
   RecalculateColors();
 }
 
-scoped_ptr<gfx::RenderText> Label::CreateRenderText(
+std::unique_ptr<gfx::RenderText> Label::CreateRenderText(
     const base::string16& text,
     gfx::HorizontalAlignment alignment,
     gfx::DirectionalityMode directionality,
     gfx::ElideBehavior elide_behavior) {
-  scoped_ptr<gfx::RenderText> render_text(
+  std::unique_ptr<gfx::RenderText> render_text(
       render_text_->CreateInstanceOfSameType());
   render_text->SetHorizontalAlignment(alignment);
   render_text->SetDirectionalityMode(directionality);
@@ -431,6 +439,7 @@ void Label::MaybeBuildRenderTextLines() {
     rect.Inset(kFocusBorderPadding, kFocusBorderPadding);
   if (rect.IsEmpty())
     return;
+  rect.Inset(-gfx::ShadowValue::GetMargin(shadows()));
 
   gfx::HorizontalAlignment alignment = horizontal_alignment();
   gfx::DirectionalityMode directionality = render_text_->directionality_mode();
@@ -449,7 +458,7 @@ void Label::MaybeBuildRenderTextLines() {
   gfx::ElideBehavior elide_behavior =
       multi_line() ? gfx::NO_ELIDE : elide_behavior_;
   if (!multi_line() || render_text_->MultilineSupported()) {
-    scoped_ptr<gfx::RenderText> render_text =
+    std::unique_ptr<gfx::RenderText> render_text =
         CreateRenderText(text(), alignment, directionality, elide_behavior);
     render_text->SetDisplayRect(rect);
     render_text->SetMultiline(multi_line());
@@ -462,7 +471,7 @@ void Label::MaybeBuildRenderTextLines() {
 
     const int bottom = GetContentsBounds().bottom();
     for (size_t i = 0; i < lines.size() && rect.y() <= bottom; ++i) {
-      scoped_ptr<gfx::RenderText> line =
+      std::unique_ptr<gfx::RenderText> line =
           CreateRenderText(lines[i], alignment, directionality, elide_behavior);
       line->SetDisplayRect(rect);
       lines_.push_back(std::move(line));
@@ -526,7 +535,8 @@ gfx::Size Label::GetTextSize() const {
   } else {
     // Get the natural text size, unelided and only wrapped on newlines.
     std::vector<base::string16> lines = GetLinesForWidth(width());
-    scoped_ptr<gfx::RenderText> render_text(gfx::RenderText::CreateInstance());
+    std::unique_ptr<gfx::RenderText> render_text(
+        gfx::RenderText::CreateInstance());
     render_text->SetFontList(font_list());
     for (size_t i = 0; i < lines.size(); ++i) {
       render_text->SetText(lines[i]);

@@ -7,11 +7,12 @@
 
 #include <stddef.h>
 
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/containers/hash_tables.h"
+#include "base/hash.h"
 #include "base/macros.h"
 #include "cc/base/cc_export.h"
 #include "cc/base/list_container.h"
@@ -56,18 +57,18 @@ class CC_EXPORT RenderPass {
  public:
   ~RenderPass();
 
-  static scoped_ptr<RenderPass> Create();
-  static scoped_ptr<RenderPass> Create(size_t num_layers);
-  static scoped_ptr<RenderPass> Create(size_t shared_quad_state_list_size,
-                                       size_t quad_list_size);
+  static std::unique_ptr<RenderPass> Create();
+  static std::unique_ptr<RenderPass> Create(size_t num_layers);
+  static std::unique_ptr<RenderPass> Create(size_t shared_quad_state_list_size,
+                                            size_t quad_list_size);
 
   // A shallow copy of the render pass, which does not include its quads or copy
   // requests.
-  scoped_ptr<RenderPass> Copy(RenderPassId new_id) const;
+  std::unique_ptr<RenderPass> Copy(RenderPassId new_id) const;
 
   // A deep copy of the render passes in the list including the quads.
-  static void CopyAll(const std::vector<scoped_ptr<RenderPass>>& in,
-                      std::vector<scoped_ptr<RenderPass>>* out);
+  static void CopyAll(const std::vector<std::unique_ptr<RenderPass>>& in,
+                      std::vector<std::unique_ptr<RenderPass>>* out);
 
   void SetNew(RenderPassId id,
               const gfx::Rect& output_rect,
@@ -114,7 +115,7 @@ class CC_EXPORT RenderPass {
   // contents as a bitmap, and give a copy of the bitmap to each callback in
   // this list. This property should not be serialized between compositors, as
   // it only makes sense in the root compositor.
-  std::vector<scoped_ptr<CopyOutputRequest>> copy_requests;
+  std::vector<std::unique_ptr<CopyOutputRequest>> copy_requests;
 
   QuadList quad_list;
   SharedQuadStateList shared_quad_state_list;
@@ -133,20 +134,10 @@ class CC_EXPORT RenderPass {
   DISALLOW_COPY_AND_ASSIGN(RenderPass);
 };
 
-}  // namespace cc
+using RenderPassList = std::vector<std::unique_ptr<RenderPass>>;
+using RenderPassIdHashMap =
+    std::unordered_map<RenderPassId, RenderPass*, RenderPassIdHash>;
 
-namespace BASE_HASH_NAMESPACE {
-template <>
-struct hash<cc::RenderPassId> {
-  size_t operator()(cc::RenderPassId key) const {
-    return base::HashPair(key.layer_id, static_cast<int>(key.index));
-  }
-};
-}  // namespace BASE_HASH_NAMESPACE
-
-namespace cc {
-typedef std::vector<scoped_ptr<RenderPass>> RenderPassList;
-typedef base::hash_map<RenderPassId, RenderPass*> RenderPassIdHashMap;
 }  // namespace cc
 
 #endif  // CC_QUADS_RENDER_PASS_H_

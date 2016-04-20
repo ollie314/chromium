@@ -3,11 +3,13 @@
 # found in the LICENSE file.
 
 import("//build/config/chrome_build.gni")
+import("//build/config/chromecast_build.gni")
 import("//build/config/ui.gni")
 
 declare_args() {
   # Use the PCI lib to collect GPU information on Linux.
-  use_libpci = !is_chromecast
+  use_libpci = is_linux && (!is_chromecast || is_cast_desktop_build) &&
+               (use_x11 || use_ozone)
 }
 
 group("config") {
@@ -23,10 +25,9 @@ group("config") {
 }
 
 source_set("config_sources") {
-  visibility = [
-    "//components/mus/gles2:*",
-    "//gpu/*",
-  ]
+  # External code should depend on this via //gpu/config above rather than
+  # depending on this directly or the component build will break.
+  visibility = [ "//gpu/*" ]
 
   sources = [
     "dx_diag_node.cc",
@@ -40,6 +41,8 @@ source_set("config_sources") {
     "gpu_driver_bug_list.h",
     "gpu_driver_bug_list_json.cc",
     "gpu_driver_bug_workaround_type.h",
+    "gpu_driver_bug_workarounds.cc",
+    "gpu_driver_bug_workarounds.h",
     "gpu_dx_diagnostics_win.cc",
     "gpu_feature_type.h",
     "gpu_info.cc",
@@ -95,8 +98,6 @@ source_set("config_sources") {
   }
   if (use_libpci) {
     defines = [ "USE_LIBPCI=1" ]
-  }
-  if (is_linux && use_libpci && (use_x11 || use_ozone)) {
     deps += [ "//build/linux:libpci" ]
   }
   if (is_linux && use_x11) {

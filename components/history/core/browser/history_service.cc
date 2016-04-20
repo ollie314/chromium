@@ -46,7 +46,6 @@
 #include "components/history/core/browser/keyword_search_term.h"
 #include "components/history/core/browser/visit_database.h"
 #include "components/history/core/browser/visit_delegate.h"
-#include "components/history/core/browser/visit_filter.h"
 #include "components/history/core/browser/web_history_service.h"
 #include "components/history/core/common/thumbnail_score.h"
 #include "sync/api/sync_error_factory.h"
@@ -369,15 +368,16 @@ void HistoryService::TopHosts(size_t num_hosts,
       callback);
 }
 
-void HistoryService::GetCountsForOrigins(
+void HistoryService::GetCountsAndLastVisitForOrigins(
     const std::set<GURL>& origins,
-    const GetCountsForOriginsCallback& callback) const {
+    const GetCountsAndLastVisitForOriginsCallback& callback) const {
   DCHECK(thread_) << "History service being called after cleanup";
   DCHECK(thread_checker_.CalledOnValidThread());
-  PostTaskAndReplyWithResult(thread_->task_runner().get(), FROM_HERE,
-                             base::Bind(&HistoryBackend::GetCountsForOrigins,
-                                        history_backend_.get(), origins),
-                             callback);
+  PostTaskAndReplyWithResult(
+      thread_->task_runner().get(), FROM_HERE,
+      base::Bind(&HistoryBackend::GetCountsAndLastVisitForOrigins,
+                 history_backend_.get(), origins),
+      callback);
 }
 
 void HistoryService::HostRankIfAvailable(
@@ -828,22 +828,6 @@ base::CancelableTaskTracker::TaskId HistoryService::QueryMostVisitedURLs(
       base::Bind(callback, base::Owned(result)));
 }
 
-base::CancelableTaskTracker::TaskId HistoryService::QueryFilteredURLs(
-    int result_count,
-    const VisitFilter& filter,
-    bool extended_info,
-    const QueryFilteredURLsCallback& callback,
-    base::CancelableTaskTracker* tracker) {
-  DCHECK(thread_) << "History service being called after cleanup";
-  DCHECK(thread_checker_.CalledOnValidThread());
-  FilteredURLList* result = new FilteredURLList();
-  return tracker->PostTaskAndReply(
-      thread_->task_runner().get(), FROM_HERE,
-      base::Bind(&HistoryBackend::QueryFilteredURLs, history_backend_.get(),
-                 result_count, filter, extended_info, base::Unretained(result)),
-      base::Bind(callback, base::Owned(result)));
-}
-
 void HistoryService::Cleanup() {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!thread_) {
@@ -904,7 +888,6 @@ void HistoryService::Cleanup() {
 
 bool HistoryService::Init(
     bool no_db,
-    const std::string& languages,
     const HistoryDatabaseParams& history_database_params) {
   TRACE_EVENT0("browser,startup", "HistoryService::Init")
   SCOPED_UMA_HISTOGRAM_TIMER("History.HistoryServiceInitTime");
@@ -928,7 +911,7 @@ bool HistoryService::Init(
 
   ScheduleTask(PRIORITY_UI,
                base::Bind(&HistoryBackend::Init, history_backend_.get(),
-                          languages, no_db, history_database_params));
+                          no_db, history_database_params));
 
   if (visit_delegate_ && !visit_delegate_->Init(this))
     return false;

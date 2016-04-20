@@ -127,9 +127,10 @@ void RestoreFromProtobuf(
 
 #endif  // USE_PLATFORM_STATE_STORE
 
-scoped_ptr<base::DictionaryValue> Load(Profile* profile) {
+std::unique_ptr<base::DictionaryValue> Load(Profile* profile) {
 #if defined(USE_PLATFORM_STATE_STORE)
-  scoped_ptr<base::DictionaryValue> value_dict(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> value_dict(
+      new base::DictionaryValue());
   std::string data;
   PlatformStateStoreLoadResult result = ReadStoreData(profile, &data);
   if (result == PlatformStateStoreLoadResult::SUCCESS)
@@ -154,9 +155,9 @@ scoped_ptr<base::DictionaryValue> Load(Profile* profile) {
   UMA_HISTOGRAM_ENUMERATION(
       "SBIRS.PSSLoadResult", static_cast<uint32_t>(result),
       static_cast<uint32_t>(PlatformStateStoreLoadResult::NUM_RESULTS));
-  return value_dict.Pass();
+  return value_dict;
 #else
-  return scoped_ptr<base::DictionaryValue>();
+  return nullptr;
 #endif
 }
 

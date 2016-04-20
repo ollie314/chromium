@@ -12,7 +12,6 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "jni/CookiesFetcher_jni.h"
-#include "net/cookies/cookie_monster.h"
 #include "net/cookies/cookie_store.h"
 #include "net/url_request/url_request_context.h"
 
@@ -45,9 +44,10 @@ void CookiesFetcher::PersistCookies(JNIEnv* env,
   jobject_.Reset(env, obj);
 
   // The rest must be done from the IO thread.
-  content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
+  content::BrowserThread::PostTask(
+      content::BrowserThread::IO, FROM_HERE,
       base::Bind(&CookiesFetcher::PersistCookiesInternal,
-      base::Unretained(this), getter));
+                 base::Unretained(this), base::RetainedRef(getter)));
 }
 
 void CookiesFetcher::PersistCookiesInternal(
@@ -63,9 +63,7 @@ void CookiesFetcher::PersistCookiesInternal(
     return;
   }
 
-  net::CookieMonster* monster = store->GetCookieMonster();
-
-  monster->GetAllCookiesAsync(base::Bind(
+  store->GetAllCookiesAsync(base::Bind(
       &CookiesFetcher::OnCookiesFetchFinished, base::Unretained(this)));
 }
 
@@ -88,7 +86,7 @@ void CookiesFetcher::OnCookiesFetchFinished(const net::CookieList& cookies) {
         base::android::ConvertUTF8ToJavaString(env, i->Path()).obj(),
         i->CreationDate().ToInternalValue(), i->ExpiryDate().ToInternalValue(),
         i->LastAccessDate().ToInternalValue(), i->IsSecure(), i->IsHttpOnly(),
-        i->IsFirstPartyOnly(), i->Priority());
+        static_cast<int>(i->SameSite()), i->Priority());
     env->SetObjectArrayElement(joa.obj(), index++, java_cookie.obj());
   }
 
@@ -98,23 +96,49 @@ void CookiesFetcher::OnCookiesFetchFinished(const net::CookieList& cookies) {
   jobject_.Reset();
 }
 
-void CookiesFetcher::RestoreCookies(JNIEnv* env,
-                                    const JavaParamRef<jobject>& obj,
-                                    const JavaParamRef<jstring>& url,
-                                    const JavaParamRef<jstring>& name,
-                                    const JavaParamRef<jstring>& value,
-                                    const JavaParamRef<jstring>& domain,
-                                    const JavaParamRef<jstring>& path,
-                                    int64_t creation,
-                                    int64_t expiration,
-                                    int64_t last_access,
-                                    bool secure,
-                                    bool httponly,
-                                    bool firstpartyonly,
-                                    int priority) {
+static void RestoreToCookieJarInternal(net::URLRequestContextGetter* getter,
+                                       const net::CanonicalCookie& cookie) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+
+  net::CookieStore* store = getter->GetURLRequestContext()->cookie_store();
+
+  // Nullable sometimes according to docs.
+  if (!store) {
+    return;
+  }
+
+  base::Callback<void(bool success)> cb;
+
+  // TODO(estark): Remove kEnableExperimentalWebPlatformFeatures check
+  // when we decide whether to ship cookie
+  // prefixes. https://crbug.com/541511
+  bool experimental_features_enabled =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableExperimentalWebPlatformFeatures);
+  store->SetCookieWithDetailsAsync(
+      cookie.Source(), cookie.Name(), cookie.Value(), cookie.Domain(),
+      cookie.Path(), base::Time(), cookie.ExpiryDate(), cookie.LastAccessDate(),
+      cookie.IsSecure(), cookie.IsHttpOnly(), cookie.SameSite(),
+      experimental_features_enabled, cookie.Priority(), cb);
+}
+
+static void RestoreCookies(JNIEnv* env,
+                           const JavaParamRef<jclass>& jcaller,
+                           const JavaParamRef<jstring>& url,
+                           const JavaParamRef<jstring>& name,
+                           const JavaParamRef<jstring>& value,
+                           const JavaParamRef<jstring>& domain,
+                           const JavaParamRef<jstring>& path,
+                           jlong creation,
+                           jlong expiration,
+                           jlong last_access,
+                           jboolean secure,
+                           jboolean httponly,
+                           jboolean same_site,
+                           jint priority) {
   Profile* profile = ProfileManager::GetPrimaryUserProfile();
   if (!profile->HasOffTheRecordProfile()) {
-      return; // Don't create it. There is nothing to do.
+    return;  // Don't create it. There is nothing to do.
   }
   profile = profile->GetOffTheRecordProfile();
 
@@ -130,45 +154,15 @@ void CookiesFetcher::RestoreCookies(JNIEnv* env,
       base::Time::FromInternalValue(creation),
       base::Time::FromInternalValue(expiration),
       base::Time::FromInternalValue(last_access), secure, httponly,
-      firstpartyonly, static_cast<net::CookiePriority>(priority));
+      same_site ? net::CookieSameSite::LAX_MODE
+                : net::CookieSameSite::NO_RESTRICTION,
+      static_cast<net::CookiePriority>(priority));
 
   // The rest must be done from the IO thread.
   content::BrowserThread::PostTask(
-      content::BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&CookiesFetcher::RestoreToCookieJarInternal,
-                 base::Unretained(this),
-                 getter,
+      content::BrowserThread::IO, FROM_HERE,
+      base::Bind(&RestoreToCookieJarInternal, base::RetainedRef(getter),
                  cookie));
-}
-
-void CookiesFetcher::RestoreToCookieJarInternal(
-    net::URLRequestContextGetter* getter,
-    const net::CanonicalCookie& cookie) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-
-  net::CookieStore* store = getter->GetURLRequestContext()->cookie_store();
-
-  // Nullable sometimes according to docs.
-  if (!store) {
-      return;
-  }
-
-  net::CookieMonster* monster = store->GetCookieMonster();
-  base::Callback<void(bool success)> cb;
-
-  // TODO(estark): Remove kEnableExperimentalWebPlatformFeatures check
-  // when we decide whether to ship cookie
-  // prefixes. https://crbug.com/541511
-  bool experimental_features_enabled =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExperimentalWebPlatformFeatures);
-  monster->SetCookieWithDetailsAsync(
-      cookie.Source(), cookie.Name(), cookie.Value(), cookie.Domain(),
-      cookie.Path(), cookie.ExpiryDate(), cookie.IsSecure(),
-      cookie.IsHttpOnly(), cookie.IsFirstPartyOnly(),
-      experimental_features_enabled, experimental_features_enabled,
-      cookie.Priority(), cb);
 }
 
 // JNI functions

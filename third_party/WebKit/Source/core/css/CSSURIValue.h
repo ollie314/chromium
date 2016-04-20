@@ -6,16 +6,14 @@
 #define CSSURIValue_h
 
 #include "core/css/CSSValue.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
 class CSSURIValue : public CSSValue {
 public:
-    static PassRefPtrWillBeRawPtr<CSSURIValue> create(const String& str)
+    static CSSURIValue* create(const String& str)
     {
-        return adoptRefWillBeNoop(new CSSURIValue(str));
+        return new CSSURIValue(str);
     }
 
     String value() const { return m_string; }

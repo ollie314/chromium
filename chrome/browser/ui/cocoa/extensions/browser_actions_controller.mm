@@ -17,13 +17,12 @@
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_action_button.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_container_view.h"
-#import "chrome/browser/ui/cocoa/extensions/extension_message_bubble_bridge.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
 #import "chrome/browser/ui/cocoa/extensions/toolbar_actions_bar_bubble_mac.h"
 #import "chrome/browser/ui/cocoa/image_button_cell.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
-#include "chrome/browser/ui/extensions/extension_toolbar_icon_surfacing_bubble_delegate.h"
+#include "chrome/browser/ui/extensions/extension_message_bubble_bridge.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
@@ -31,6 +30,8 @@
 #include "grit/theme_resources.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
 #include "ui/base/cocoa/appkit_utils.h"
+#include "ui/base/cocoa/cocoa_base_utils.h"
+#include "ui/base/material_design/material_design_controller.h"
 
 NSString* const kBrowserActionVisibilityChangedNotification =
     @"BrowserActionVisibilityChangedNotification";
@@ -106,9 +107,6 @@ const CGFloat kBrowserActionBubbleYOffset = 3.0;
 // toolbar know that the drag has finished.
 - (void)containerDragFinished:(NSNotification*)notification;
 
-// Shows the toolbar info bubble, if it should be displayed.
-- (void)containerMouseEntered:(NSNotification*)notification;
-
 // Notifies the controlling ToolbarActionsBar that any running animation has
 // ended.
 - (void)containerAnimationEnded:(NSNotification*)notification;
@@ -165,11 +163,9 @@ const CGFloat kBrowserActionBubbleYOffset = 3.0;
 // Returns the associated ToolbarController.
 - (ToolbarController*)toolbarController;
 
-// Creates a message bubble anchored to the given |anchorAction|, or the app
-// menu if no |anchorAction| is null.
-- (ToolbarActionsBarBubbleMac*)createMessageBubble:
-    (scoped_ptr<ToolbarActionsBarBubbleDelegate>)delegate
-    anchorToSelf:(BOOL)anchorToSelf;
+// Creates a message bubble with the given |delegate|.
+- (void)createMessageBubble:
+    (std::unique_ptr<ToolbarActionsBarBubbleDelegate>)delegate;
 
 // Called when the window for the active bubble is closing, and sets the active
 // bubble to nil.
@@ -178,6 +174,18 @@ const CGFloat kBrowserActionBubbleYOffset = 3.0;
 // Sets the current focused view. Should only be used for the overflow
 // container.
 - (void)setFocusedViewIndex:(NSInteger)index;
+
+@end
+
+// A subclass of MenuButton that draws the chevron button in MD style.
+@interface ChevronMenuButton : MenuButton
+@end
+
+@implementation ChevronMenuButton
+
+- (gfx::VectorIconId)vectorIconId {
+  return gfx::VectorIconId::OVERFLOW_CHEVRON;
+}
 
 @end
 
@@ -206,9 +214,8 @@ class ToolbarActionsBarBridge : public ToolbarActionsBarDelegate {
   bool IsAnimating() const override;
   void StopAnimating() override;
   int GetChevronWidth() const override;
-  void ShowExtensionMessageBubble(
-      scoped_ptr<extensions::ExtensionMessageBubbleController> controller,
-      ToolbarActionViewController* anchor_action) override;
+  void ShowToolbarActionBubble(
+      std::unique_ptr<ToolbarActionsBarBubbleDelegate> bubble) override;
 
   // The owning BrowserActionsController; weak.
   BrowserActionsController* controller_;
@@ -280,23 +287,9 @@ int ToolbarActionsBarBridge::GetChevronWidth() const {
   return kChevronWidth;
 }
 
-void ToolbarActionsBarBridge::ShowExtensionMessageBubble(
-    scoped_ptr<extensions::ExtensionMessageBubbleController> bubble_controller,
-    ToolbarActionViewController* anchor_action) {
-  // This goop is a by-product of needing to wire together abstract classes,
-  // C++/Cocoa bridges, and ExtensionMessageBubbleController's somewhat strange
-  // Show() interface. It's ugly, but it's pretty confined, so it's probably
-  // okay (but if we ever need to expand, it might need to be reconsidered).
-  extensions::ExtensionMessageBubbleController* weak_controller =
-      bubble_controller.get();
-  scoped_ptr<ExtensionMessageBubbleBridge> bridge(
-      new ExtensionMessageBubbleBridge(std::move(bubble_controller),
-                                       anchor_action != nullptr));
-  ToolbarActionsBarBubbleMac* bubble =
-      [controller_ createMessageBubble:std::move(bridge)
-                          anchorToSelf:anchor_action != nil];
-  weak_controller->OnShown();
-  [bubble showWindow:nil];
+void ToolbarActionsBarBridge::ShowToolbarActionBubble(
+    std::unique_ptr<ToolbarActionsBarBubbleDelegate> bubble) {
+  [controller_ createMessageBubble:std::move(bubble)];
 }
 
 }  // namespace
@@ -379,15 +372,6 @@ void ToolbarActionsBarBridge::ShowExtensionMessageBubble(
     [self showChevronIfNecessaryInFrame:[containerView_ frame]];
     [self updateGrippyCursors];
     [container setIsOverflow:isOverflow_];
-    if (ExtensionToolbarIconSurfacingBubbleDelegate::ShouldShowForProfile(
-            browser_->profile())) {
-      [containerView_ setTrackingEnabled:YES];
-      [[NSNotificationCenter defaultCenter]
-          addObserver:self
-             selector:@selector(containerMouseEntered:)
-                 name:kBrowserActionsContainerMouseEntered
-               object:containerView_];
-    }
 
     focusedViewIndex_ = -1;
   }
@@ -561,7 +545,7 @@ void ToolbarActionsBarBridge::ShowExtensionMessageBubble(
   if (![self updateContainerVisibility])
     return;  // Container is hidden; no need to update.
 
-  scoped_ptr<ui::NinePartImageIds> highlight;
+  std::unique_ptr<ui::NinePartImageIds> highlight;
   if (toolbarActionsBar_->is_highlighting()) {
     if (toolbarActionsBar_->highlight_type() ==
         ToolbarActionsModel::HIGHLIGHT_INFO)
@@ -623,11 +607,18 @@ void ToolbarActionsBarBridge::ShowExtensionMessageBubble(
 }
 
 - (void)removeViewForAction:(ToolbarActionViewController*)action {
-  BrowserActionButton* button = [self buttonForId:action->GetId()];
+  // We're about to remove the button view from the container as well as from
+  // |buttons_|, so make sure we retain a reference.
+  base::scoped_nsobject<BrowserActionButton> button =
+      [[self buttonForId:action->GetId()] retain];
 
+  // Note: We remove the button from the view and the buttons list first because
+  // destroying it (or calling -onRemoved) can cause redraws, and we don't want
+  // to include it when the view is gone.
   [button removeFromSuperview];
-  [button onRemoved];
   [buttons_ removeObject:button];
+
+  [button onRemoved];
 
   [containerView_ setMaxDesiredWidth:toolbarActionsBar_->GetMaximumWidth()];
 }
@@ -644,9 +635,10 @@ void ToolbarActionsBarBridge::ShowExtensionMessageBubble(
   // Cocoa goes a little crazy if we try and change animations while adjusting
   // child frames (i.e., the buttons). If the toolbar is already animating,
   // just jump to the new frame. (This typically only happens if someone is
-  // "spamming" a button to add/remove an action.)
+  // "spamming" a button to add/remove an action.) If the window isn't visible
+  // (for example it's in the process of being created), don't bother animating.
   BOOL animate = !toolbarActionsBar_->suppress_animation() &&
-      ![containerView_ isAnimating];
+      ![containerView_ isAnimating] && [[containerView_ window] isVisible];
   [self updateContainerVisibility];
   [containerView_ resizeToWidth:width
                         animate:animate];
@@ -806,22 +798,6 @@ void ToolbarActionsBarBridge::ShowExtensionMessageBubble(
   }
 }
 
-- (void)containerMouseEntered:(NSNotification*)notification {
-  if (!activeBubble_ &&  // only show one bubble at a time
-      toolbarActionsBar_->show_icon_surfacing_bubble()) {
-    scoped_ptr<ToolbarActionsBarBubbleDelegate> delegate(
-        new ExtensionToolbarIconSurfacingBubbleDelegate(browser_->profile()));
-    ToolbarActionsBarBubbleMac* bubble =
-        [self createMessageBubble:std::move(delegate) anchorToSelf:YES];
-    [bubble showWindow:nil];
-  }
-  [containerView_ setTrackingEnabled:NO];
-  [[NSNotificationCenter defaultCenter]
-      removeObserver:self
-                name:kBrowserActionsContainerMouseEntered
-              object:containerView_];
-}
-
 - (void)actionButtonDragging:(NSNotification*)notification {
   suppressChevron_ = YES;
   if (![self chevronIsHidden])
@@ -958,18 +934,24 @@ void ToolbarActionsBarBridge::ShowExtensionMessageBubble(
     return;
 
   if (!chevronMenuButton_.get()) {
-    chevronMenuButton_.reset([[MenuButton alloc] init]);
+    bool isModeMaterial = ui::MaterialDesignController::IsModeMaterial();
+    if (isModeMaterial) {
+      chevronMenuButton_.reset([[ChevronMenuButton alloc] init]);
+    } else {
+      chevronMenuButton_.reset([[MenuButton alloc] init]);
+    }
     [chevronMenuButton_ setOpenMenuOnClick:YES];
     [chevronMenuButton_ setBordered:NO];
     [chevronMenuButton_ setShowsBorderOnlyWhileMouseInside:YES];
 
-    [[chevronMenuButton_ cell] setImageID:IDR_BROWSER_ACTIONS_OVERFLOW
-                           forButtonState:image_button_cell::kDefaultState];
-    [[chevronMenuButton_ cell] setImageID:IDR_BROWSER_ACTIONS_OVERFLOW_H
-                           forButtonState:image_button_cell::kHoverState];
-    [[chevronMenuButton_ cell] setImageID:IDR_BROWSER_ACTIONS_OVERFLOW_P
-                           forButtonState:image_button_cell::kPressedState];
-
+    if (!isModeMaterial) {
+      [[chevronMenuButton_ cell] setImageID:IDR_BROWSER_ACTIONS_OVERFLOW
+                             forButtonState:image_button_cell::kDefaultState];
+      [[chevronMenuButton_ cell] setImageID:IDR_BROWSER_ACTIONS_OVERFLOW_H
+                             forButtonState:image_button_cell::kHoverState];
+      [[chevronMenuButton_ cell] setImageID:IDR_BROWSER_ACTIONS_OVERFLOW_P
+                             forButtonState:image_button_cell::kPressedState];
+    }
     overflowMenu_.reset([[NSMenu alloc] initWithTitle:@""]);
     [overflowMenu_ setAutoenablesItems:NO];
     [overflowMenu_ setDelegate:self];
@@ -1020,30 +1002,44 @@ void ToolbarActionsBarBridge::ShowExtensionMessageBubble(
              browser_->window()->GetNativeWindow()] toolbarController];
 }
 
-- (ToolbarActionsBarBubbleMac*)createMessageBubble:
-    (scoped_ptr<ToolbarActionsBarBubbleDelegate>)delegate
-    anchorToSelf:(BOOL)anchorToSelf {
+- (void)createMessageBubble:
+    (std::unique_ptr<ToolbarActionsBarBubbleDelegate>)delegate {
+  NSView* anchorView = nil;
+  BOOL anchoredToAction = NO;
+  if (!delegate->GetAnchorActionId().empty()) {
+    BrowserActionButton* button =
+        [self buttonForId:delegate->GetAnchorActionId()];
+    if (button && [button superview]) {
+      anchorView = button;
+      anchoredToAction = YES;
+    } else {
+      anchorView = [[self toolbarController] appMenuButton];
+    }
+  } else {
+    anchorView = containerView_;
+  }
+
   DCHECK_GE([buttons_ count], 0u);
-  NSView* anchorView =
-      anchorToSelf ? containerView_ : [[self toolbarController] appMenuButton];
   NSPoint anchor = [self popupPointForView:anchorView
                                 withBounds:[anchorView bounds]];
 
-  anchor = [[containerView_ window] convertBaseToScreen:anchor];
+  anchor = ui::ConvertPointFromWindowToScreen([containerView_ window], anchor);
   activeBubble_ = [[ToolbarActionsBarBubbleMac alloc]
       initWithParentWindow:[containerView_ window]
                anchorPoint:anchor
+          anchoredToAction:anchoredToAction
                   delegate:std::move(delegate)];
   [[NSNotificationCenter defaultCenter]
       addObserver:self
          selector:@selector(bubbleWindowClosing:)
              name:NSWindowWillCloseNotification
            object:[activeBubble_ window]];
-  return activeBubble_;
+  [activeBubble_ showWindow:nil];
 }
 
 - (void)bubbleWindowClosing:(NSNotification*)notification {
   activeBubble_ = nil;
+  toolbarActionsBar_->OnBubbleClosed();
 }
 
 - (void)setFocusedViewIndex:(NSInteger)index {

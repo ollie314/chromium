@@ -93,12 +93,23 @@ def GetAllDepsConfigsInOrder(deps_config_paths):
   return build_utils.GetSortedTransitiveDependencies(deps_config_paths, GetDeps)
 
 
+def ResolveGroups(configs):
+  while True:
+    groups = DepsOfType('group', configs)
+    if not groups:
+      return configs
+    for config in groups:
+      index = configs.index(config)
+      expanded_configs = [GetDepConfig(p) for p in config['deps_configs']]
+      configs[index:index + 1] = expanded_configs
+
+
 class Deps(object):
   def __init__(self, direct_deps_config_paths):
     self.all_deps_config_paths = GetAllDepsConfigsInOrder(
         direct_deps_config_paths)
-    self.direct_deps_configs = [
-        GetDepConfig(p) for p in direct_deps_config_paths]
+    self.direct_deps_configs = ResolveGroups(
+        [GetDepConfig(p) for p in direct_deps_config_paths])
     self.all_deps_configs = [
         GetDepConfig(p) for p in self.all_deps_config_paths]
     self.direct_deps_config_paths = direct_deps_config_paths
@@ -166,6 +177,10 @@ def _FilterUnwantedDepsPaths(dep_paths, target_type):
   return ret
 
 
+def _AsInterfaceJar(jar_path):
+  return jar_path[:-3] + 'interface.jar'
+
+
 def main(argv):
   parser = optparse.OptionParser()
   build_utils.AddDepfileOption(parser)
@@ -216,6 +231,11 @@ def main(argv):
 
   # apk options
   parser.add_option('--apk-path', help='Path to the target\'s apk output.')
+  parser.add_option('--incremental-apk-path',
+                    help="Path to the target's incremental apk output.")
+  parser.add_option('--incremental-install-script-path',
+                    help="Path to the target's generated incremental install "
+                    "script.")
 
   parser.add_option('--tested-apk-config',
       help='Path to the build config of the tested apk (for an instrumentation '
@@ -239,7 +259,8 @@ def main(argv):
       'android_resources': ['build_config', 'resources_zip'],
       'android_apk': ['build_config', 'jar_path', 'dex_path', 'resources_zip'],
       'deps_dex': ['build_config', 'dex_path'],
-      'resource_rewriter': ['build_config']
+      'resource_rewriter': ['build_config'],
+      'group': ['build_config'],
   }
   required_options = required_options_map.get(options.type)
   if not required_options:
@@ -274,6 +295,7 @@ def main(argv):
                                                       options.type)
 
   deps = Deps(direct_deps_config_paths)
+  all_inputs = deps.AllConfigPaths() + build_utils.GetPythonDependencies()
 
   # Remove other locale resources if there is alternative_locale_resource in
   # direct deps.
@@ -343,6 +365,9 @@ def main(argv):
       deps_info['dex_path'] = options.dex_path
     if options.type == 'android_apk':
       deps_info['apk_path'] = options.apk_path
+      deps_info['incremental_apk_path'] = options.incremental_apk_path
+      deps_info['incremental_install_script_path'] = (
+          options.incremental_install_script_path)
 
     # Classpath values filled in below (after applying tested_apk_config).
     config['javac'] = {}
@@ -415,7 +440,6 @@ def main(argv):
     config['proguard'] = {}
     proguard_config = config['proguard']
     proguard_config['input_paths'] = [options.jar_path] + java_full_classpath
-    proguard_config['tested_apk_info'] = ''
 
   # An instrumentation test apk should exclude the dex files that are in the apk
   # under test.
@@ -436,9 +460,6 @@ def main(argv):
     if tested_apk_config['proguard_enabled']:
       assert proguard_enabled, ('proguard must be enabled for instrumentation'
           ' apks if it\'s enabled for the tested apk')
-      proguard_config['tested_apk_info'] = tested_apk_config['proguard_info']
-
-    deps_info['tested_apk_path'] = tested_apk_config['apk_path']
 
   # Dependencies for the final dex file of an apk or a 'deps_dex'.
   if options.type in ['android_apk', 'deps_dex']:
@@ -448,15 +469,19 @@ def main(argv):
 
   if options.type in ('java_binary', 'java_library', 'android_apk'):
     config['javac']['classpath'] = javac_classpath
+    config['javac']['interface_classpath'] = [
+        _AsInterfaceJar(p) for p in javac_classpath]
     config['java'] = {
       'full_classpath': java_full_classpath
     }
 
   if options.type == 'android_apk':
+    dependency_jars = [c['jar_path'] for c in all_library_deps]
+    all_interface_jars = [
+        _AsInterfaceJar(p) for p in dependency_jars + [options.jar_path]]
     config['dist_jar'] = {
-      'dependency_jars': [
-        c['jar_path'] for c in all_library_deps
-      ]
+      'dependency_jars': dependency_jars,
+      'all_interface_jars': all_interface_jars,
     }
     manifest = AndroidManifest(options.android_manifest)
     deps_info['package_name'] = manifest.GetPackageName()
@@ -495,6 +520,7 @@ def main(argv):
             prev_config['native']['java_libraries_list'])
         library_paths.extend(prev_config['native']['libraries'])
 
+    all_inputs.extend(library_paths)
     config['native'] = {
       'libraries': library_paths,
       'java_libraries_list': java_libraries_list_holder[0],
@@ -505,9 +531,7 @@ def main(argv):
   build_utils.WriteJson(config, options.build_config, only_if_changed=True)
 
   if options.depfile:
-    build_utils.WriteDepfile(
-        options.depfile,
-        deps.AllConfigPaths() + build_utils.GetPythonDependencies())
+    build_utils.WriteDepfile(options.depfile, all_inputs)
 
 
 if __name__ == '__main__':

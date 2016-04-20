@@ -5,7 +5,6 @@
 #include "cc/layers/ui_resource_layer.h"
 
 #include "base/thread_task_runner_handle.h"
-#include "cc/layers/layer_settings.h"
 #include "cc/resources/resource_provider.h"
 #include "cc/resources/scoped_ui_resource.h"
 #include "cc/test/fake_layer_tree_host.h"
@@ -30,9 +29,8 @@ namespace {
 
 class TestUIResourceLayer : public UIResourceLayer {
  public:
-  static scoped_refptr<TestUIResourceLayer> Create(
-      const LayerSettings& settings) {
-    return make_scoped_refptr(new TestUIResourceLayer(settings));
+  static scoped_refptr<TestUIResourceLayer> Create() {
+    return make_scoped_refptr(new TestUIResourceLayer());
   }
 
   UIResourceId GetUIResourceId() {
@@ -42,10 +40,7 @@ class TestUIResourceLayer : public UIResourceLayer {
   }
 
  protected:
-  explicit TestUIResourceLayer(const LayerSettings& settings)
-      : UIResourceLayer(settings) {
-    SetIsDrawable(true);
-  }
+  TestUIResourceLayer() : UIResourceLayer() { SetIsDrawable(true); }
   ~TestUIResourceLayer() override {}
 };
 
@@ -67,13 +62,11 @@ class UIResourceLayerTest : public testing::Test {
 
   FakeLayerTreeHostClient fake_client_;
   TestTaskGraphRunner task_graph_runner_;
-  scoped_ptr<FakeLayerTreeHost> layer_tree_host_;
-  LayerSettings layer_settings_;
+  std::unique_ptr<FakeLayerTreeHost> layer_tree_host_;
 };
 
 TEST_F(UIResourceLayerTest, SetBitmap) {
-  scoped_refptr<UIResourceLayer> test_layer =
-      TestUIResourceLayer::Create(layer_settings_);
+  scoped_refptr<UIResourceLayer> test_layer = TestUIResourceLayer::Create();
   ASSERT_TRUE(test_layer.get());
   test_layer->SetBounds(gfx::Size(100, 100));
 
@@ -97,8 +90,7 @@ TEST_F(UIResourceLayerTest, SetBitmap) {
 }
 
 TEST_F(UIResourceLayerTest, SetUIResourceId) {
-  scoped_refptr<TestUIResourceLayer> test_layer =
-      TestUIResourceLayer::Create(layer_settings_);
+  scoped_refptr<TestUIResourceLayer> test_layer = TestUIResourceLayer::Create();
   ASSERT_TRUE(test_layer.get());
   test_layer->SetBounds(gfx::Size(100, 100));
 
@@ -112,7 +104,7 @@ TEST_F(UIResourceLayerTest, SetUIResourceId) {
   EXPECT_FALSE(test_layer->DrawsContent());
 
   bool is_opaque = false;
-  scoped_ptr<ScopedUIResource> resource = ScopedUIResource::Create(
+  std::unique_ptr<ScopedUIResource> resource = ScopedUIResource::Create(
       layer_tree_host_.get(), UIResourceBitmap(gfx::Size(10, 10), is_opaque));
   test_layer->SetUIResourceId(resource->id());
   test_layer->Update();
@@ -121,7 +113,7 @@ TEST_F(UIResourceLayerTest, SetUIResourceId) {
 
   // ID is preserved even when you set ID first and attach it to the tree.
   layer_tree_host_->SetRootLayer(nullptr);
-  scoped_ptr<ScopedUIResource> shared_resource = ScopedUIResource::Create(
+  std::unique_ptr<ScopedUIResource> shared_resource = ScopedUIResource::Create(
       layer_tree_host_.get(), UIResourceBitmap(gfx::Size(5, 5), is_opaque));
   test_layer->SetUIResourceId(shared_resource->id());
   layer_tree_host_->SetRootLayer(test_layer);
@@ -130,8 +122,7 @@ TEST_F(UIResourceLayerTest, SetUIResourceId) {
 }
 
 TEST_F(UIResourceLayerTest, BitmapClearedOnSetUIResourceId) {
-  scoped_refptr<UIResourceLayer> test_layer =
-      TestUIResourceLayer::Create(layer_settings_);
+  scoped_refptr<UIResourceLayer> test_layer = TestUIResourceLayer::Create();
   ASSERT_TRUE(test_layer.get());
   test_layer->SetBounds(gfx::Size(100, 100));
 

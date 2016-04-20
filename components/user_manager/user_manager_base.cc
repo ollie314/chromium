@@ -17,14 +17,14 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner.h"
 #include "base/values.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/remove_user_delegate.h"
@@ -152,8 +152,6 @@ void UserManagerBase::UserLoggedIn(const AccountId& account_id,
 
   if (IsGuestAccountId(account_id)) {
     GuestUserLoggedIn();
-  } else if (IsKioskApp(account_id)) {
-    KioskAppLoggedIn(account_id);
   } else if (IsDemoApp(account_id)) {
     DemoAccountLoggedIn();
   } else {
@@ -161,10 +159,13 @@ void UserManagerBase::UserLoggedIn(const AccountId& account_id,
 
     if (user && user->GetType() == USER_TYPE_PUBLIC_ACCOUNT) {
       PublicAccountUserLoggedIn(user);
+    } else if (user && user->GetType() == USER_TYPE_KIOSK_APP) {
+      KioskAppLoggedIn(user);
     } else if ((user && user->GetType() == USER_TYPE_SUPERVISED) ||
                (!user && IsSupervisedAccountId(account_id))) {
       SupervisedUserLoggedIn(account_id);
-    } else if (browser_restart && IsPublicAccountMarkedForRemoval(account_id)) {
+    } else if (browser_restart &&
+               IsDeviceLocalAccountMarkedForRemoval(account_id)) {
       PublicAccountUserLoggedIn(User::CreatePublicAccountUser(account_id));
     } else if (account_id != GetOwnerAccountId() && !user &&
                (AreEphemeralUsersEnabled() || browser_restart)) {
@@ -256,10 +257,7 @@ void UserManagerBase::SessionStarted() {
   session_manager::SessionManager::Get()->SetSessionState(
       session_manager::SESSION_STATE_ACTIVE);
 
-  if (IsCurrentUserNew()) {
-    // Make sure that the new user's data is persisted to Local State.
-    GetLocalState()->CommitPendingWrite();
-  }
+  GetLocalState()->CommitPendingWrite();
 }
 
 void UserManagerBase::RemoveUser(const AccountId& account_id,
@@ -368,11 +366,14 @@ void UserManagerBase::SaveUserOAuthStatus(
   if (IsUserNonCryptohomeDataEphemeral(account_id))
     return;
 
-  DictionaryPrefUpdate oauth_status_update(GetLocalState(),
-                                           kUserOAuthTokenStatus);
-  oauth_status_update->SetWithoutPathExpansion(
-      account_id.GetUserEmail(),
-      new base::FundamentalValue(static_cast<int>(oauth_token_status)));
+  {
+    DictionaryPrefUpdate oauth_status_update(GetLocalState(),
+                                             kUserOAuthTokenStatus);
+    oauth_status_update->SetWithoutPathExpansion(
+        account_id.GetUserEmail(),
+        new base::FundamentalValue(static_cast<int>(oauth_token_status)));
+  }
+  GetLocalState()->CommitPendingWrite();
 }
 
 void UserManagerBase::SaveForceOnlineSignin(const AccountId& account_id,
@@ -384,10 +385,13 @@ void UserManagerBase::SaveForceOnlineSignin(const AccountId& account_id,
   if (IsUserNonCryptohomeDataEphemeral(account_id))
     return;
 
-  DictionaryPrefUpdate force_online_update(GetLocalState(),
-                                           kUserForceOnlineSignin);
-  force_online_update->SetBooleanWithoutPathExpansion(account_id.GetUserEmail(),
-                                                      force_online_signin);
+  {
+    DictionaryPrefUpdate force_online_update(GetLocalState(),
+                                             kUserForceOnlineSignin);
+    force_online_update->SetBooleanWithoutPathExpansion(
+        account_id.GetUserEmail(), force_online_signin);
+  }
+  GetLocalState()->CommitPendingWrite();
 }
 
 void UserManagerBase::SaveUserDisplayName(const AccountId& account_id,
@@ -592,9 +596,9 @@ bool UserManagerBase::IsUserNonCryptohomeDataEphemeral(
     return true;
 
   // Data belonging to the owner, anyone found on the user list and obsolete
-  // public accounts whose data has not been removed yet is not ephemeral.
+  // device local accounts whose data has not been removed yet is not ephemeral.
   if (account_id == GetOwnerAccountId() || UserExistsInList(account_id) ||
-      IsPublicAccountMarkedForRemoval(account_id)) {
+      IsDeviceLocalAccountMarkedForRemoval(account_id)) {
     return false;
   }
 
@@ -723,15 +727,13 @@ void UserManagerBase::EnsureUsersLoaded() {
       local_state->GetDictionary(kUserType);
 
   // Load public sessions first.
-  std::set<AccountId> public_sessions_set;
-  LoadPublicAccounts(&public_sessions_set);
+  std::set<AccountId> device_local_accounts_set;
+  LoadDeviceLocalAccounts(&device_local_accounts_set);
 
   // Load regular users and supervised users.
   std::vector<AccountId> regular_users;
   std::set<AccountId> regular_users_set;
-  ParseUserList(*prefs_regular_users,
-                public_sessions_set,
-                &regular_users,
+  ParseUserList(*prefs_regular_users, device_local_accounts_set, &regular_users,
                 &regular_users_set);
   for (std::vector<AccountId>::const_iterator it = regular_users.begin();
        it != regular_users.end(); ++it) {

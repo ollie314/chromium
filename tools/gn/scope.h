@@ -6,13 +6,13 @@
 #define TOOLS_GN_SCOPE_H_
 
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>
 
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "tools/gn/err.h"
 #include "tools/gn/pattern.h"
@@ -40,7 +40,8 @@ class Template;
 // variables. So you should use a non-const containing scope whenever possible.
 class Scope {
  public:
-  typedef base::hash_map<base::StringPiece, Value> KeyValueMap;
+  typedef base::hash_map<base::StringPiece, Value, base::StringPieceHash>
+      KeyValueMap;
   // Holds an owning list of Items.
   typedef ScopedVector<Item> ItemVector;
 
@@ -65,12 +66,8 @@ class Scope {
 
   // Options for configuring scope merges.
   struct MergeOptions {
-    // Defaults to all false, which are the things least likely to cause errors.
-    MergeOptions()
-        : clobber_existing(false),
-          skip_private_vars(false),
-          mark_dest_used(false) {
-    }
+    MergeOptions();
+    ~MergeOptions();
 
     // When set, all existing avlues in the destination scope will be
     // overwritten.
@@ -92,6 +89,9 @@ class Scope {
     // import, for example, or files that don't need a variable from the .gni
     // file will throw an error.
     bool mark_dest_used;
+
+    // When set, those variables are not merged.
+    std::set<std::string> excluded_values;
   };
 
   // Creates an empty toplevel scope.
@@ -227,7 +227,7 @@ class Scope {
   // be included. The resulting closure will reference the const containing
   // scope as its containing scope (since we assume the const scope won't
   // change, we don't have to copy its values).
-  scoped_ptr<Scope> MakeClosure() const;
+  std::unique_ptr<Scope> MakeClosure() const;
 
   // Makes an empty scope with the given name. Returns NULL if the name is
   // already set.
@@ -239,8 +239,7 @@ class Scope {
 
   // Filter to apply when the sources variable is assigned. May return NULL.
   const PatternList* GetSourcesAssignmentFilter() const;
-  void set_sources_assignment_filter(
-      scoped_ptr<PatternList> f) {
+  void set_sources_assignment_filter(std::unique_ptr<PatternList> f) {
     sources_assignment_filter_ = std::move(f);
   }
 
@@ -330,18 +329,18 @@ class Scope {
   // for more.
   unsigned mode_flags_;
 
-  typedef base::hash_map<base::StringPiece, Record> RecordMap;
+  typedef base::hash_map<base::StringPiece, Record, base::StringPieceHash>
+      RecordMap;
   RecordMap values_;
 
-  // Owning pointers. Note that this can't use string pieces since the names
-  // are constructed from Values which might be deallocated before this goes
-  // out of scope.
-  typedef base::hash_map<std::string, Scope*> NamedScopeMap;
+  // Note that this can't use string pieces since the names are constructed from
+  // Values which might be deallocated before this goes out of scope.
+  typedef base::hash_map<std::string, std::unique_ptr<Scope>> NamedScopeMap;
   NamedScopeMap target_defaults_;
 
   // Null indicates not set and that we should fallback to the containing
   // scope's filter.
-  scoped_ptr<PatternList> sources_assignment_filter_;
+  std::unique_ptr<PatternList> sources_assignment_filter_;
 
   // Owning pointers, must be deleted.
   typedef std::map<std::string, scoped_refptr<const Template> > TemplateMap;

@@ -55,6 +55,9 @@ extern const char kEasyUnlockAppId[];
 // The extension id of the Enterprise Web Store component application.
 extern const char kEnterpriseWebStoreAppId[];
 
+// The extension id of the feedback component extension.
+extern const char kFeedbackExtensionId[];
+
 // The extension id of GMail application.
 extern const char kGmailAppId[];
 
@@ -250,6 +253,11 @@ extern const char kMediaFileSystemPathPart[];
 extern const uint8_t kWebstoreSignaturesPublicKey[];
 extern const int kWebstoreSignaturesPublicKeySize;
 
+#if defined(OS_CHROMEOS)
+// Returns true if |extension_id| is one of the IME extensions that will create
+// IME menu.
+bool IsImeMenuExtensionId(const std::string& extension_id);
+#endif
 }  // namespace extension_misc
 
 #endif  // CHROME_COMMON_EXTENSIONS_EXTENSION_CONSTANTS_H_

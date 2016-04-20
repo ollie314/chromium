@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/webui/inspect_ui.h"
 
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "chrome/browser/devtools/devtools_target_impl.h"
 #include "chrome/browser/devtools/devtools_targets_ui.h"
@@ -16,6 +15,7 @@
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -490,7 +490,7 @@ const base::Value* InspectUI::GetPrefValue(const char* name) {
 }
 
 void InspectUI::AddTargetUIHandler(
-    scoped_ptr<DevToolsTargetsUIHandler> handler) {
+    std::unique_ptr<DevToolsTargetsUIHandler> handler) {
   DevToolsTargetsUIHandler* handler_ptr = handler.release();
   target_handlers_[handler_ptr->source_id()] = handler_ptr;
 }

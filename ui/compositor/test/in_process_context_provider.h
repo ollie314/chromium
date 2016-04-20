@@ -7,10 +7,10 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "cc/output/context_provider.h"
@@ -24,12 +24,17 @@ class GpuMemoryBufferManager;
 class ImageFactory;
 }
 
+namespace skia_bindings {
+class GrContextForGLES2Interface;
+}
+
 namespace ui {
 
 class InProcessContextProvider : public cc::ContextProvider {
  public:
   static scoped_refptr<InProcessContextProvider> Create(
       const gpu::gles2::ContextCreationAttribHelper& attribs,
+      InProcessContextProvider* shared_context,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       gpu::ImageFactory* image_factory,
       gfx::AcceleratedWidget window,
@@ -38,7 +43,8 @@ class InProcessContextProvider : public cc::ContextProvider {
   // Uses default attributes for creating an offscreen context.
   static scoped_refptr<InProcessContextProvider> CreateOffscreen(
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-      gpu::ImageFactory* image_factory);
+      gpu::ImageFactory* image_factory,
+      InProcessContextProvider* shared_context);
 
   // cc::ContextProvider:
   bool BindToCurrentThread() override;
@@ -57,28 +63,26 @@ class InProcessContextProvider : public cc::ContextProvider {
  private:
   InProcessContextProvider(
       const gpu::gles2::ContextCreationAttribHelper& attribs,
+      InProcessContextProvider* shared_context,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       gpu::ImageFactory* image_factory,
       gfx::AcceleratedWidget window,
       const std::string& debug_name);
   ~InProcessContextProvider() override;
 
-  void OnLostContext();
-
   base::ThreadChecker main_thread_checker_;
   base::ThreadChecker context_thread_checker_;
 
-  scoped_ptr<gpu::GLInProcessContext> context_;
-  skia::RefPtr<class GrContext> gr_context_;
+  std::unique_ptr<gpu::GLInProcessContext> context_;
+  std::unique_ptr<skia_bindings::GrContextForGLES2Interface> gr_context_;
 
   gpu::gles2::ContextCreationAttribHelper attribs_;
+  InProcessContextProvider* shared_context_;
   gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
   gpu::ImageFactory* image_factory_;
   gfx::AcceleratedWidget window_;
   std::string debug_name_;
   cc::ContextProvider::Capabilities capabilities_;
-
-  LostContextCallback lost_context_callback_;
 
   base::Lock context_lock_;
 

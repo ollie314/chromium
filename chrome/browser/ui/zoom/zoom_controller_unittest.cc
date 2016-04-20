@@ -3,11 +3,11 @@
 // found in the LICENSE file.
 
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/prefs/pref_service.h"
 #include "components/ui/zoom/test/zoom_test_utils.h"
 #include "components/ui/zoom/zoom_controller.h"
 #include "components/ui/zoom/zoom_observer.h"
@@ -41,7 +41,7 @@ class ZoomControllerTest : public ChromeRenderViewHostTestHarness {
   }
 
  protected:
-  scoped_ptr<ZoomController> zoom_controller_;
+  std::unique_ptr<ZoomController> zoom_controller_;
 };
 
 TEST_F(ZoomControllerTest, DidNavigateMainFrame) {

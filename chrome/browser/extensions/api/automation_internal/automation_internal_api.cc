@@ -27,7 +27,6 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_plugin_guest_manager.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -148,11 +147,9 @@ bool CanRequestAutomation(const Extension* extension,
     return true;
 
   int tab_id = ExtensionTabUtil::GetTabId(contents);
-  content::RenderProcessHost* process = contents->GetRenderProcessHost();
-  int process_id = process ? process->GetID() : -1;
   std::string unused_error;
-  return extension->permissions_data()->CanAccessPage(
-      extension, url, tab_id, process_id, &unused_error);
+  return extension->permissions_data()->CanAccessPage(extension, url, tab_id,
+                                                      &unused_error);
 }
 
 // Helper class that implements an action adapter for a |RenderFrameHost|.
@@ -248,7 +245,7 @@ AutomationInternalEnableTabFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(automation_info);
 
   using api::automation_internal::EnableTab::Params;
-  scoped_ptr<Params> params(Params::Create(*args_));
+  std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   content::WebContents* contents = NULL;
   if (params->args.tab_id.get()) {
@@ -298,7 +295,7 @@ ExtensionFunction::ResponseAction AutomationInternalEnableFrameFunction::Run() {
   // TODO(dtseng): Limited to desktop tree for now pending out of proc iframes.
   using api::automation_internal::EnableFrame::Params;
 
-  scoped_ptr<Params> params(Params::Create(*args_));
+  std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   content::RenderFrameHost* rfh =
@@ -320,7 +317,7 @@ AutomationInternalPerformActionFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(automation_info && automation_info->interact);
 
   using api::automation_internal::PerformAction::Params;
-  scoped_ptr<Params> params(Params::Create(*args_));
+  std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   if (params->args.tree_id == kDesktopTreeID) {
@@ -392,7 +389,7 @@ AutomationInternalEnableDesktopFunction::Run() {
     return RespondNow(Error("desktop permission must be requested"));
 
   using api::automation_internal::EnableDesktop::Params;
-  scoped_ptr<Params> params(Params::Create(*args_));
+  std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   // This gets removed when the extension process dies.
@@ -417,7 +414,7 @@ AutomationInternalQuerySelectorFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(automation_info);
 
   using api::automation_internal::QuerySelector::Params;
-  scoped_ptr<Params> params(Params::Create(*args_));
+  std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   if (params->args.tree_id == kDesktopTreeID) {

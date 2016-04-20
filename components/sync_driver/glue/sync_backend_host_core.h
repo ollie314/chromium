@@ -80,6 +80,7 @@ struct DoInitializeOptions {
 // SyncBackendHost::Core::DoConfigureSyncer.
 struct DoConfigureSyncerTypes {
   DoConfigureSyncerTypes();
+  DoConfigureSyncerTypes(const DoConfigureSyncerTypes& other);
   ~DoConfigureSyncerTypes();
   syncer::ModelTypeSet to_download;
   syncer::ModelTypeSet to_purge;
@@ -254,6 +255,9 @@ class SyncBackendHostCore
   void DoClearServerData(
       const syncer::SyncManager::ClearServerDataCallback& frontend_callback);
 
+  // Notify the syncer that the cookie jar has changed.
+  void DoOnCookieJarChanged(bool account_mismatch);
+
  private:
   friend class base::RefCountedThreadSafe<SyncBackendHostCore>;
   friend class SyncBackendHostForProfileSyncTest;
@@ -308,7 +312,7 @@ class SyncBackendHostCore
   syncer::CancelationSignal release_request_context_signal_;
   syncer::CancelationSignal stop_syncing_signal_;
 
-  // Matches the value of SyncPref's HasSyncSetupCompleted() flag at init time.
+  // Matches the value of SyncPref's IsFirstSetupComplete() flag at init time.
   // Should not be used for anything except for UMAs and logging.
   const bool has_sync_setup_completed_;
 

@@ -135,7 +135,7 @@ class ChevronMenuButton::MenuController : public views::MenuDelegate {
   views::MenuItemView* menu_;
 
   // Resposible for running the menu.
-  scoped_ptr<views::MenuRunner> menu_runner_;
+  std::unique_ptr<views::MenuRunner> menu_runner_;
 
   // The index into the ToolbarActionView vector, indicating where to start
   // picking browser actions to draw.
@@ -230,7 +230,7 @@ bool ChevronMenuButton::MenuController::ShowContextMenu(
   if (!view_controller->extension()->ShowConfigureContextMenus())
     return false;
 
-  scoped_ptr<extensions::ExtensionContextMenuModel> context_menu_contents(
+  std::unique_ptr<extensions::ExtensionContextMenuModel> context_menu_contents(
       new extensions::ExtensionContextMenuModel(
           view_controller->extension(), view_controller->browser(),
           extensions::ExtensionContextMenuModel::OVERFLOWED, view_controller));
@@ -361,7 +361,7 @@ size_t ChevronMenuButton::MenuController::IndexForId(int id) const {
 
 ChevronMenuButton::ChevronMenuButton(
     BrowserActionsContainer* browser_actions_container)
-    : views::MenuButton(NULL, base::string16(), this, false),
+    : views::MenuButton(base::string16(), this, false),
       browser_actions_container_(browser_actions_container),
       weak_factory_(this) {
   // Set the border explicitly, because otherwise the native theme manager takes
@@ -377,10 +377,10 @@ void ChevronMenuButton::CloseMenu() {
     menu_controller_->CloseMenu();
 }
 
-scoped_ptr<views::LabelButtonBorder> ChevronMenuButton::CreateDefaultBorder()
-    const {
+std::unique_ptr<views::LabelButtonBorder>
+ChevronMenuButton::CreateDefaultBorder() const {
   // The chevron resource was designed to not have any insets.
-  scoped_ptr<views::LabelButtonBorder> border =
+  std::unique_ptr<views::LabelButtonBorder> border =
       views::MenuButton::CreateDefaultBorder();
   border->set_insets(gfx::Insets());
   return border;
@@ -424,8 +424,9 @@ int ChevronMenuButton::OnPerformDrop(const ui::DropTargetEvent& event) {
   return ui::DragDropTypes::DRAG_MOVE;
 }
 
-void ChevronMenuButton::OnMenuButtonClicked(views::View* source,
-                                            const gfx::Point& point) {
+void ChevronMenuButton::OnMenuButtonClicked(views::MenuButton* source,
+                                            const gfx::Point& point,
+                                            const ui::Event* event) {
   DCHECK_EQ(this, source);
   // The menu could already be open if a user dragged an item over it but
   // ultimately dropped elsewhere (as in that case the menu will close on a

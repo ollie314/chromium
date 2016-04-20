@@ -7,17 +7,14 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
-#include "net/http/bidirectional_stream_job.h"
+#include "base/memory/ref_counted.h"
+#include "net/http/bidirectional_stream_impl.h"
 #include "net/http/http_stream_factory.h"
 #include "net/log/net_log.h"
-#include "net/net_features.h"
-
-#if !BUILDFLAG(ENABLE_BIDIRECTIONAL_STREAM)
-#error Only include this if ENABLE_BIDIRECTIONAL_STREAM is defined
-#endif
 
 class GURL;
 
@@ -37,7 +34,7 @@ struct SSLConfig;
 // ReadData or SendData should be in flight until the operation completes.
 // The BidirectionalStream must be torn down before the HttpNetworkSession.
 class NET_EXPORT BidirectionalStream
-    : public NON_EXPORTED_BASE(BidirectionalStreamJob::Delegate),
+    : public NON_EXPORTED_BASE(BidirectionalStreamImpl::Delegate),
       public NON_EXPORTED_BASE(HttpStreamRequest::Delegate) {
  public:
   // Delegate interface to get notified of success of failure. Callbacks will be
@@ -96,18 +93,20 @@ class NET_EXPORT BidirectionalStream
   // the request, and must be non-NULL. |session| is the http network session
   // with which this request will be made. |delegate| must be non-NULL.
   // |session| and |delegate| must outlive |this|.
-  BidirectionalStream(scoped_ptr<BidirectionalStreamRequestInfo> request_info,
-                      HttpNetworkSession* session,
-                      Delegate* delegate);
+  BidirectionalStream(
+      std::unique_ptr<BidirectionalStreamRequestInfo> request_info,
+      HttpNetworkSession* session,
+      Delegate* delegate);
 
   // Constructor that accepts a Timer, which can be used in tests to control
   // the buffering of received data.
-  BidirectionalStream(scoped_ptr<BidirectionalStreamRequestInfo> request_info,
-                      HttpNetworkSession* session,
-                      Delegate* delegate,
-                      scoped_ptr<base::Timer> timer);
+  BidirectionalStream(
+      std::unique_ptr<BidirectionalStreamRequestInfo> request_info,
+      HttpNetworkSession* session,
+      Delegate* delegate,
+      std::unique_ptr<base::Timer> timer);
 
-  // Cancels |stream_request_| or |stream_job_| if applicable.
+  // Cancels |stream_request_| or |stream_impl_| if applicable.
   // |this| should not be destroyed during Delegate::OnHeadersSent or
   // Delegate::OnDataSent.
   ~BidirectionalStream() override;
@@ -126,7 +125,7 @@ class NET_EXPORT BidirectionalStream
   // flag.
   void SendData(IOBuffer* data, int length, bool end_stream);
 
-  // If |stream_request_| is non-NULL, cancel it. If |stream_job_| is
+  // If |stream_request_| is non-NULL, cancel it. If |stream_impl_| is
   // established, cancel it. No delegate method will be called after Cancel().
   // Any pending operations may or may not succeed.
   void Cancel();
@@ -151,7 +150,7 @@ class NET_EXPORT BidirectionalStream
   // remote end point.
 
  private:
-  // BidirectionalStreamJob::Delegate implementation:
+  // BidirectionalStreamImpl::Delegate implementation:
   void OnHeadersSent() override;
   void OnHeadersReceived(const SpdyHeaderBlock& response_headers) override;
   void OnDataRead(int bytes_read) override;
@@ -163,9 +162,10 @@ class NET_EXPORT BidirectionalStream
   void OnStreamReady(const SSLConfig& used_ssl_config,
                      const ProxyInfo& used_proxy_info,
                      HttpStream* stream) override;
-  void OnBidirectionalStreamJobReady(const SSLConfig& used_ssl_config,
-                                     const ProxyInfo& used_proxy_info,
-                                     BidirectionalStreamJob* stream) override;
+  void OnBidirectionalStreamImplReady(
+      const SSLConfig& used_ssl_config,
+      const ProxyInfo& used_proxy_info,
+      BidirectionalStreamImpl* stream_impl) override;
   void OnWebSocketHandshakeStreamReady(
       const SSLConfig& used_ssl_config,
       const ProxyInfo& used_proxy_info,
@@ -189,20 +189,29 @@ class NET_EXPORT BidirectionalStream
   void OnQuicBroken() override;
 
   // BidirectionalStreamRequestInfo used when requesting the stream.
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info_;
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info_;
   const BoundNetLog net_log_;
+
+  HttpNetworkSession* session_;
 
   Delegate* const delegate_;
 
   // Timer used to buffer data received in short time-spans and send a single
   // read completion notification.
-  scoped_ptr<base::Timer> timer_;
-  // HttpStreamRequest used to request a BidirectionalStreamJob. This is NULL if
-  // the request has been canceled or completed.
-  scoped_ptr<HttpStreamRequest> stream_request_;
-  // The underlying BidirectioanlStreamJob used for this stream. It is non-NULL,
-  // if the |stream_request_| successfully finishes.
-  scoped_ptr<BidirectionalStreamJob> stream_job_;
+  std::unique_ptr<base::Timer> timer_;
+  // HttpStreamRequest used to request a BidirectionalStreamImpl. This is NULL
+  // if the request has been canceled or completed.
+  std::unique_ptr<HttpStreamRequest> stream_request_;
+  // The underlying BidirectioanlStreamImpl used for this stream. It is
+  // non-NULL, if the |stream_request_| successfully finishes.
+  std::unique_ptr<BidirectionalStreamImpl> stream_impl_;
+
+  // Buffer used for reading.
+  scoped_refptr<IOBuffer> read_buffer_;
+  // Buffer used for writing.
+  scoped_refptr<IOBuffer> write_buffer_;
+  // Length of |write_buffer_|.
+  size_t write_buffer_len_;
 
   DISALLOW_COPY_AND_ASSIGN(BidirectionalStream);
 };

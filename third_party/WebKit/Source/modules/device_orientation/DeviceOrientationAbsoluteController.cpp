@@ -17,9 +17,6 @@ DeviceOrientationAbsoluteController::DeviceOrientationAbsoluteController(Documen
 
 DeviceOrientationAbsoluteController::~DeviceOrientationAbsoluteController()
 {
-#if !ENABLE(OILPAN)
-    stopUpdating();
-#endif
 }
 
 const char* DeviceOrientationAbsoluteController::supplementName()
@@ -29,10 +26,10 @@ const char* DeviceOrientationAbsoluteController::supplementName()
 
 DeviceOrientationAbsoluteController& DeviceOrientationAbsoluteController::from(Document& document)
 {
-    DeviceOrientationAbsoluteController* controller = static_cast<DeviceOrientationAbsoluteController*>(WillBeHeapSupplement<Document>::from(document, DeviceOrientationAbsoluteController::supplementName()));
+    DeviceOrientationAbsoluteController* controller = static_cast<DeviceOrientationAbsoluteController*>(Supplement<Document>::from(document, DeviceOrientationAbsoluteController::supplementName()));
     if (!controller) {
         controller = new DeviceOrientationAbsoluteController(document);
-        WillBeHeapSupplement<Document>::provideTo(document, DeviceOrientationAbsoluteController::supplementName(), adoptPtrWillBeNoop(controller));
+        Supplement<Document>::provideTo(document, DeviceOrientationAbsoluteController::supplementName(), controller);
     }
     return *controller;
 }
@@ -47,7 +44,7 @@ void DeviceOrientationAbsoluteController::didAddEventListener(LocalDOMWindow* wi
         if (document().isSecureContext(errorMessage)) {
             UseCounter::count(document().frame(), UseCounter::DeviceOrientationAbsoluteSecureOrigin);
         } else {
-            UseCounter::countDeprecation(document().frame(), UseCounter::DeviceOrientationAbsoluteInsecureOrigin);
+            Deprecation::countDeprecation(document().frame(), UseCounter::DeviceOrientationAbsoluteInsecureOrigin);
             // TODO: add rappor logging of insecure origins as in DeviceOrientationController.
             if (document().frame()->settings()->strictPowerfulFeatureRestrictions())
                 return;

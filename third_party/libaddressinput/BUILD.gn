@@ -181,6 +181,8 @@ if (!is_android || use_aura) {
       ":util",
       "//base",
       "//base:i18n",
+      "//components/prefs",
+      "//net",
       "//third_party/icu",
       "//third_party/re2",
     ]
@@ -200,6 +202,12 @@ if (!is_android || use_aura) {
       "chromium/trie_unittest.cc",
     ]
 
+    if (is_ios) {
+      # TODO(rouslan): This tests uses ASSERT_DEATH which is not supported on
+      # iOS. Re-enable once http://crbug.com/595645 is fixed.
+      sources -= [ "src/cpp/test/address_data_test.cc" ]
+    }
+
     configs -= [ "//build/config/compiler:chromium_code" ]
     configs += [ "//build/config/compiler:no_chromium_code" ]
 
@@ -210,8 +218,8 @@ if (!is_android || use_aura) {
     deps = [
       ":libaddressinput",
       ":strings",
-      "//base:prefs",
       "//base/test:run_all_unittests",
+      "//components/prefs",
       "//net:test_support",
       "//testing/gtest",
     ]

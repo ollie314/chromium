@@ -9,14 +9,26 @@
 
 #include "mojo/public/cpp/bindings/lib/interface_id.h"
 #include "mojo/public/cpp/bindings/lib/template_util.h"
-#include "mojo/public/cpp/bindings/struct_ptr.h"
 #include "mojo/public/cpp/system/core.h"
 
+namespace WTF {
+class String;
+}
 namespace mojo {
+class String;
+
+template <typename T>
+class StructPtr;
+
+template <typename T>
+class InlinedStructPtr;
+
 namespace internal {
 
 template <typename T>
 class Array_Data;
+
+using String_Data = Array_Data<char>;
 
 #pragma pack(push, 1)
 
@@ -33,29 +45,11 @@ struct ArrayHeader {
 static_assert(sizeof(ArrayHeader) == 8, "Bad_sizeof(ArrayHeader)");
 
 template <typename T>
-union StructPointer {
+union Pointer {
   uint64_t offset;
   T* ptr;
 };
-static_assert(sizeof(StructPointer<char>) == 8, "Bad_sizeof(StructPointer)");
-
-template <typename T>
-union ArrayPointer {
-  uint64_t offset;
-  Array_Data<T>* ptr;
-};
-static_assert(sizeof(ArrayPointer<char>) == 8, "Bad_sizeof(ArrayPointer)");
-
-using StringPointer = ArrayPointer<char>;
-static_assert(sizeof(StringPointer) == 8, "Bad_sizeof(StringPointer)");
-
-
-template <typename T>
-union UnionPointer {
-  uint64_t offset;
-  T* ptr;
-};
-static_assert(sizeof(UnionPointer<char>) == 8, "Bad_sizeof(UnionPointer)");
+static_assert(sizeof(Pointer<char>) == 8, "Bad_sizeof(Pointer)");
 
 struct Interface_Data {
   MessagePipeHandle handle;
@@ -94,38 +88,62 @@ struct IsHandle {
 
 template <typename T>
 struct IsUnionDataType {
+ private:
   template <typename U>
   static YesType Test(const typename U::MojomUnionDataType*);
 
   template <typename U>
   static NoType Test(...);
 
+  EnsureTypeIsComplete<T> check_t_;
+
+ public:
   static const bool value =
       sizeof(Test<T>(0)) == sizeof(YesType) && !IsConst<T>::value;
 };
 
-template <typename T, bool move_only = IsMoveOnlyType<T>::value>
-struct WrapperTraits;
+template <typename MojomType, bool move_only = IsMoveOnlyType<MojomType>::value>
+struct GetDataTypeAsArrayElement;
 
 template <typename T>
-struct WrapperTraits<T, false> {
-  typedef T DataType;
+struct GetDataTypeAsArrayElement<T, false> {
+  using Data =
+      typename std::conditional<std::is_enum<T>::value, int32_t, T>::type;
 };
 template <typename H>
-struct WrapperTraits<ScopedHandleBase<H>, true> {
-  typedef H DataType;
+struct GetDataTypeAsArrayElement<ScopedHandleBase<H>, true> {
+  using Data = H;
 };
 template <typename S>
-struct WrapperTraits<StructPtr<S>, true> {
-  typedef typename S::Data_* DataType;
+struct GetDataTypeAsArrayElement<StructPtr<S>, true> {
+  using Data =
+      typename std::conditional<IsUnionDataType<typename S::Data_>::value,
+                                typename S::Data_,
+                                typename S::Data_*>::type;
 };
 template <typename S>
-struct WrapperTraits<InlinedStructPtr<S>, true> {
-  typedef typename S::Data_* DataType;
+struct GetDataTypeAsArrayElement<InlinedStructPtr<S>, true> {
+  using Data =
+      typename std::conditional<IsUnionDataType<typename S::Data_>::value,
+                                typename S::Data_,
+                                typename S::Data_*>::type;
 };
 template <typename S>
-struct WrapperTraits<S, true> {
-  typedef typename S::Data_* DataType;
+struct GetDataTypeAsArrayElement<S, true> {
+  using Data =
+      typename std::conditional<IsUnionDataType<typename S::Data_>::value,
+                                typename S::Data_,
+                                typename S::Data_*>::type;
+};
+
+template <>
+struct GetDataTypeAsArrayElement<String, false> {
+  using Data = String_Data*;
+};
+
+template <>
+struct GetDataTypeAsArrayElement<WTF::String, false> {
+  using Data = String_Data*;
 };
 
 }  // namespace internal

@@ -2,17 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ui/events/ozone/layout/xkb/xkb_keyboard_layout_engine.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/dom_key.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
 #include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
-#include "ui/events/ozone/layout/xkb/xkb_keyboard_layout_engine.h"
 
 namespace ui {
 
@@ -45,6 +47,7 @@ class VkTestXkbKeyboardLayoutEngine : public XkbKeyboardLayoutEngine {
   struct KeysymEntry {
     DomCode dom_code;
     xkb_keysym_t keysym;
+    base::char16 character;
   };
 
   struct RuleNames {
@@ -128,7 +131,7 @@ class VkTestXkbKeyboardLayoutEngine : public XkbKeyboardLayoutEngine {
           return false;
         }
         *xkb_keysym = keysym_entry_->keysym;
-        *character = 0;
+        *character = keysym_entry_->character;
         return true;
     }
     return false;
@@ -148,8 +151,8 @@ class XkbLayoutEngineVkTest : public testing::Test {
   ~XkbLayoutEngineVkTest() override {}
 
   void SetUp() override {
-    KeyboardLayoutEngineManager::SetKeyboardLayoutEngine(
-        make_scoped_ptr(new VkTestXkbKeyboardLayoutEngine(keycode_converter_)));
+    KeyboardLayoutEngineManager::SetKeyboardLayoutEngine(base::WrapUnique(
+        new VkTestXkbKeyboardLayoutEngine(keycode_converter_)));
     layout_engine_ = static_cast<VkTestXkbKeyboardLayoutEngine*>(
         KeyboardLayoutEngineManager::GetKeyboardLayoutEngine());
   }
@@ -815,6 +818,9 @@ TEST_F(XkbLayoutEngineVkTest, KeyboardCodeForNonPrintable) {
     {{DomCode::ENTER, XKB_KEY_Return}, VKEY_RETURN},
     {{DomCode::NUMPAD_ENTER, XKB_KEY_KP_Enter}, VKEY_RETURN},
     {{DomCode::SLEEP, XKB_KEY_XF86Sleep}, VKEY_SLEEP},
+    // Verify that number pad digits produce located VKEY codes.
+    {{DomCode::NUMPAD0, XKB_KEY_KP_0, '0'}, VKEY_NUMPAD0},
+    {{DomCode::NUMPAD9, XKB_KEY_KP_9, '9'}, VKEY_NUMPAD9},
   };
   for (const auto& e : kVkeyTestCase) {
     SCOPED_TRACE(static_cast<int>(e.test.dom_code));

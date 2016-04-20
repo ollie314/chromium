@@ -4,12 +4,13 @@
 
 #include "chrome/browser/safe_browsing/client_side_detection_host.h"
 
+#include <memory>
+#include <tuple>
 #include <utility>
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
@@ -98,13 +99,13 @@ ACTION(QuitUIMessageLoop) {
 }
 
 ACTION_P(InvokeDoneCallback, verdict) {
-  scoped_ptr<ClientPhishingRequest> request(::std::tr1::get<1>(args));
+  std::unique_ptr<ClientPhishingRequest> request(::std::tr1::get<1>(args));
   request->CopyFrom(*verdict);
   ::std::tr1::get<2>(args).Run(true, std::move(request));
 }
 
 ACTION_P(InvokeMalwareCallback, verdict) {
-  scoped_ptr<ClientMalwareRequest> request(::std::tr1::get<1>(args));
+  std::unique_ptr<ClientMalwareRequest> request(::std::tr1::get<1>(args));
   request->CopyFrom(*verdict);
   ::std::tr1::get<2>(args).Run(true, std::move(request));
 }
@@ -329,9 +330,9 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
         SafeBrowsingMsg_StartPhishingDetection::ID);
     if (url) {
       ASSERT_TRUE(msg);
-      base::Tuple<GURL> actual_url;
+      std::tuple<GURL> actual_url;
       SafeBrowsingMsg_StartPhishingDetection::Read(msg, &actual_url);
-      EXPECT_EQ(*url, base::get<0>(actual_url));
+      EXPECT_EQ(*url, std::get<0>(actual_url));
       EXPECT_EQ(main_rfh()->GetRoutingID(), msg->routing_id());
       process()->sink().ClearMessages();
     } else {
@@ -437,8 +438,8 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
   }
 
  protected:
-  scoped_ptr<ClientSideDetectionHost> csd_host_;
-  scoped_ptr<StrictMock<MockClientSideDetectionService> > csd_service_;
+  std::unique_ptr<ClientSideDetectionHost> csd_host_;
+  std::unique_ptr<StrictMock<MockClientSideDetectionService>> csd_service_;
   scoped_refptr<StrictMock<MockSafeBrowsingUIManager> > ui_manager_;
   scoped_refptr<StrictMock<MockSafeBrowsingDatabaseManager> > database_manager_;
   MockTestingProfile* mock_profile_;  // We don't own this object
@@ -559,6 +560,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneShowInterstitial) {
   EXPECT_EQ(phishing_url, resource.original_url);
   EXPECT_FALSE(resource.is_subresource);
   EXPECT_EQ(SB_THREAT_TYPE_CLIENT_SIDE_PHISHING_URL, resource.threat_type);
+  EXPECT_EQ(ThreatSource::CLIENT_SIDE_DETECTION, resource.threat_source);
   EXPECT_EQ(web_contents()->GetRenderProcessHost()->GetID(),
             resource.render_process_host_id);
   EXPECT_EQ(web_contents()->GetMainFrame()->GetRoutingID(),
@@ -647,6 +649,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneMultiplePings) {
   EXPECT_EQ(other_phishing_url, resource.original_url);
   EXPECT_FALSE(resource.is_subresource);
   EXPECT_EQ(SB_THREAT_TYPE_CLIENT_SIDE_PHISHING_URL, resource.threat_type);
+  EXPECT_EQ(ThreatSource::CLIENT_SIDE_DETECTION, resource.threat_source);
   EXPECT_EQ(web_contents()->GetRenderProcessHost()->GetID(),
             resource.render_process_host_id);
   EXPECT_EQ(web_contents()->GetMainFrame()->GetRoutingID(),
@@ -862,6 +865,7 @@ TEST_F(ClientSideDetectionHostTest,
   EXPECT_EQ(malware_landing_url, resource.original_url);
   EXPECT_TRUE(resource.is_subresource);
   EXPECT_EQ(SB_THREAT_TYPE_CLIENT_SIDE_MALWARE_URL, resource.threat_type);
+  EXPECT_EQ(ThreatSource::CLIENT_SIDE_DETECTION, resource.threat_source);
   EXPECT_EQ(web_contents()->GetRenderProcessHost()->GetID(),
             resource.render_process_host_id);
   EXPECT_EQ(web_contents()->GetMainFrame()->GetRoutingID(),

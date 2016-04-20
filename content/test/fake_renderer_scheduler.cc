@@ -14,22 +14,20 @@ FakeRendererScheduler::FakeRendererScheduler() {
 FakeRendererScheduler::~FakeRendererScheduler() {
 }
 
-scoped_ptr<blink::WebThread> FakeRendererScheduler::CreateMainThread() {
+std::unique_ptr<blink::WebThread> FakeRendererScheduler::CreateMainThread() {
   return nullptr;
 }
 
-scoped_refptr<base::SingleThreadTaskRunner>
-FakeRendererScheduler::DefaultTaskRunner() {
+scoped_refptr<scheduler::TaskQueue> FakeRendererScheduler::DefaultTaskRunner() {
   return nullptr;
 }
 
-scoped_refptr<base::SingleThreadTaskRunner>
+scoped_refptr<scheduler::TaskQueue>
 FakeRendererScheduler::CompositorTaskRunner() {
   return nullptr;
 }
 
-scoped_refptr<base::SingleThreadTaskRunner>
-FakeRendererScheduler::LoadingTaskRunner() {
+scoped_refptr<scheduler::TaskQueue> FakeRendererScheduler::LoadingTaskRunner() {
   return nullptr;
 }
 
@@ -52,7 +50,7 @@ scoped_refptr<scheduler::TaskQueue> FakeRendererScheduler::NewTimerTaskRunner(
   return nullptr;
 }
 
-scoped_ptr<scheduler::RenderWidgetSchedulingState>
+std::unique_ptr<scheduler::RenderWidgetSchedulingState>
 FakeRendererScheduler::NewRenderWidgetSchedulingState() {
   return nullptr;
 }
@@ -125,12 +123,7 @@ void FakeRendererScheduler::ResumeTimerQueue() {
 void FakeRendererScheduler::SetTimerQueueSuspensionWhenBackgroundedEnabled(
     bool enabled) {}
 
-double FakeRendererScheduler::CurrentTimeSeconds() const {
-  return 0.0;
-}
-
-double FakeRendererScheduler::MonotonicallyIncreasingTimeSeconds() const {
-  return 0.0;
-}
+void FakeRendererScheduler::SetTopLevelBlameContext(
+    base::trace_event::BlameContext* blame_context) {}
 
 }  // namespace content

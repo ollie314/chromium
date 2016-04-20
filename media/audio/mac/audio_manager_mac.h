@@ -26,7 +26,10 @@ class AUHALStream;
 // the AudioManager class.
 class MEDIA_EXPORT AudioManagerMac : public AudioManagerBase {
  public:
-  AudioManagerMac(AudioLogFactory* audio_log_factory);
+  AudioManagerMac(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
+      AudioLogFactory* audio_log_factory);
 
   // Implementation of AudioManager.
   bool HasAudioOutputDevices() override;
@@ -56,12 +59,6 @@ class MEDIA_EXPORT AudioManagerMac : public AudioManagerBase {
   void ReleaseOutputStream(AudioOutputStream* stream) override;
   void ReleaseInputStream(AudioInputStream* stream) override;
 
-  static bool GetDefaultInputDevice(AudioDeviceID* device);
-  static bool GetDefaultOutputDevice(AudioDeviceID* device);
-  static bool GetDefaultDevice(AudioDeviceID* device, bool input);
-
-  static bool GetDefaultOutputChannels(int* channels);
-
   static bool GetDeviceChannels(AudioDeviceID device,
                                 AudioObjectPropertyScope scope,
                                 int* channels);
@@ -69,7 +66,7 @@ class MEDIA_EXPORT AudioManagerMac : public AudioManagerBase {
   static int HardwareSampleRateForDevice(AudioDeviceID device_id);
   static int HardwareSampleRate();
 
-  // OSX has issues with starting streams as the sytem goes into suspend and
+  // OSX has issues with starting streams as the system goes into suspend and
   // immediately after it wakes up from resume.  See http://crbug.com/160920.
   // As a workaround we delay Start() when it occurs after suspend and for a
   // small amount of time after resume.
@@ -77,21 +74,33 @@ class MEDIA_EXPORT AudioManagerMac : public AudioManagerBase {
   // Streams should consult ShouldDeferStreamStart() and if true check the value
   // again after |kStartDelayInSecsForPowerEvents| has elapsed. If false, the
   // stream may be started immediately.
-  enum { kStartDelayInSecsForPowerEvents = 2 };
-  bool ShouldDeferStreamStart();
+  // TOOD(henrika): track UMA statistics related to defer start to come up with
+  // a suitable delay value.
+  enum { kStartDelayInSecsForPowerEvents = 5 };
+  bool ShouldDeferStreamStart() const;
 
-  // Changes the buffer size for |device_id| if there are no active input or
-  // output streams on the device or |desired_buffer_size| is lower than the
-  // current device buffer size.
-  //
-  // Returns false if an error occurred. There is no indication if the buffer
-  // size was changed or not.
-  // |element| is 0 for output streams and 1 for input streams.
+  // True if the device is on battery power.
+  bool IsOnBatteryPower() const;
+
+  // Number of times the device has resumed from power suspension.
+  size_t GetNumberOfResumeNotifications() const;
+
+  // True if the device is suspending.
+  bool IsSuspending() const;
+
+  // Changes the I/O buffer size for |device_id| if |desired_buffer_size| is
+  // lower than the current device buffer size. The buffer size can also be
+  // modified under other conditions. See comments in the corresponding cc-file
+  // for more details.
+  // |size_was_changed| is set to true if the device's buffer size was changed
+  // and |io_buffer_frame_size| contains the new buffer size.
+  // Returns false if an error occurred.
   bool MaybeChangeBufferSize(AudioDeviceID device_id,
                              AudioUnit audio_unit,
                              AudioUnitElement element,
                              size_t desired_buffer_size,
-                             bool* size_was_changed);
+                             bool* size_was_changed,
+                             size_t* io_buffer_frame_size);
 
   // Number of constructed output and input streams.
   size_t output_streams() const { return output_streams_.size(); }
@@ -109,7 +118,6 @@ class MEDIA_EXPORT AudioManagerMac : public AudioManagerBase {
 
  private:
   void InitializeOnAudioThread();
-  void ShutdownOnAudioThread();
 
   int ChooseBufferSize(bool is_input, int sample_rate);
 
@@ -130,8 +138,11 @@ class MEDIA_EXPORT AudioManagerMac : public AudioManagerBase {
   class AudioPowerObserver;
   scoped_ptr<AudioPowerObserver> power_observer_;
 
-  // Tracks all constructed input and output streams so they can be stopped at
-  // shutdown.  See ShutdownOnAudioThread() for more details.
+  // Tracks all constructed input and output streams.
+  // TODO(alokp): We used to track these streams to close before destruction.
+  // We no longer close the streams, so we may be able to get rid of these
+  // member variables. They are currently used by MaybeChangeBufferSize().
+  // Investigate if we can remove these.
   std::list<AudioInputStream*> basic_input_streams_;
   std::list<AUAudioInputStream*> low_latency_input_streams_;
   std::list<AUHALStream*> output_streams_;

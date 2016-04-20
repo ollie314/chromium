@@ -8,12 +8,12 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
-#include "base/memory/scoped_ptr.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "url/gurl.h"
@@ -70,6 +70,7 @@ class PasswordGenerationAgent : public content::RenderFrameObserver {
     AccountCreationFormData(
         linked_ptr<PasswordForm> form,
         std::vector<blink::WebInputElement> password_elements);
+    AccountCreationFormData(const AccountCreationFormData& other);
     ~AccountCreationFormData();
   };
 
@@ -102,6 +103,16 @@ class PasswordGenerationAgent : public content::RenderFrameObserver {
   // Hides a password generation popup if one exists.
   void HidePopup();
 
+  // Sets |generation_element_| to the focused password field and shows a
+  // generation popup at this field.
+  void OnUserTriggeredGeneratePassword();
+
+  // Creates a password form to presave a generated password. It copies behavior
+  // of CreatePasswordFormFromWebForm/FromUnownedInputElements, but takes
+  // |password_value| from |generation_element_| and empties |username_value|.
+  // If a form creating is failed, returns an empty unique_ptr.
+  std::unique_ptr<PasswordForm> CreatePasswordFormToPresave();
+
   // Stores forms that are candidates for account creation.
   AccountCreationFormDataList possible_account_creation_forms_;
 
@@ -116,14 +127,22 @@ class PasswordGenerationAgent : public content::RenderFrameObserver {
   std::vector<autofill::PasswordFormGenerationData> generation_enabled_forms_;
 
   // Data for form which generation is allowed on.
-  scoped_ptr<AccountCreationFormData> generation_form_data_;
+  std::unique_ptr<AccountCreationFormData> generation_form_data_;
 
   // Element where we want to trigger password generation UI.
   blink::WebInputElement generation_element_;
 
+  // Password element that had focus last. Since Javascript could change focused
+  // element after the user triggered a generation request, it is better to save
+  // the last focused password element.
+  blink::WebInputElement last_focused_password_element_;
+
   // If the password field at |generation_element_| contains a generated
   // password.
   bool password_is_generated_;
+
+  // True if password generation was manually triggered.
+  bool is_manually_triggered_;
 
   // True if a password was generated and the user edited it. Used for UMA
   // stats.

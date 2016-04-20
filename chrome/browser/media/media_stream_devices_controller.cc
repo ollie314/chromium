@@ -9,8 +9,8 @@
 
 #include "base/auto_reset.h"
 #include "base/callback_helpers.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -29,6 +29,8 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/scoped_user_pref_update.h"
+#include "components/url_formatter/elide_url.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/permission_type.h"
 #include "content/public/browser/render_frame_host.h"
@@ -91,8 +93,8 @@ void RecordPermissionAction(const content::MediaStreamRequest& request,
 class MediaPermissionRequestLogger : content::WebContentsObserver {
   // Map of <render process id, render frame id> ->
   // MediaPermissionRequestLogger.
-  using RequestMap =
-      std::map<std::pair<int, int>, scoped_ptr<MediaPermissionRequestLogger>>;
+  using RequestMap = std::map<std::pair<int, int>,
+                              std::unique_ptr<MediaPermissionRequestLogger>>;
 
  public:
   static void LogRequest(content::WebContents* contents,
@@ -105,7 +107,7 @@ class MediaPermissionRequestLogger : content::WebContentsObserver {
       UMA_HISTOGRAM_BOOLEAN("Pepper.SecureOrigin.MediaStreamRequest",
                             is_secure);
       GetRequestMap()[key] =
-          make_scoped_ptr(new MediaPermissionRequestLogger(contents, key));
+          base::WrapUnique(new MediaPermissionRequestLogger(contents, key));
     }
   }
 
@@ -202,7 +204,7 @@ MediaStreamDevicesController::~MediaStreamDevicesController() {
         request_, base::Bind(PermissionUmaUtil::PermissionIgnored));
     callback_.Run(content::MediaStreamDevices(),
                   content::MEDIA_DEVICE_FAILED_DUE_TO_SHUTDOWN,
-                  scoped_ptr<content::MediaStreamUI>());
+                  std::unique_ptr<content::MediaStreamUI>());
   }
 }
 
@@ -231,10 +233,6 @@ bool MediaStreamDevicesController::IsAskingForVideo() const {
   return old_video_setting_ == CONTENT_SETTING_ASK;
 }
 
-const std::string& MediaStreamDevicesController::GetSecurityOriginSpec() const {
-  return request_.security_origin.spec();
-}
-
 void MediaStreamDevicesController::ForcePermissionDeniedTemporarily() {
   base::AutoReset<bool> persist_permissions(
       &persist_permission_changes_, false);
@@ -259,7 +257,9 @@ base::string16 MediaStreamDevicesController::GetMessageText() const {
   else if (!IsAskingForVideo())
     message_id = IDS_MEDIA_CAPTURE_AUDIO_ONLY;
   return l10n_util::GetStringFUTF16(
-      message_id, base::UTF8ToUTF16(GetSecurityOriginSpec()));
+      message_id,
+      url_formatter::FormatUrlForSecurityDisplay(
+          GetOrigin(), url_formatter::SchemeDisplay::OMIT_CRYPTOGRAPHIC));
 }
 
 base::string16 MediaStreamDevicesController::GetMessageTextFragment() const {
@@ -271,11 +271,7 @@ base::string16 MediaStreamDevicesController::GetMessageTextFragment() const {
   return l10n_util::GetStringUTF16(message_id);
 }
 
-bool MediaStreamDevicesController::HasUserGesture() const {
-  return request_.user_gesture;
-}
-
-GURL MediaStreamDevicesController::GetRequestingHostname() const {
+GURL MediaStreamDevicesController::GetOrigin() const {
   return request_.security_origin;
 }
 
@@ -449,7 +445,7 @@ void MediaStreamDevicesController::RunCallback(
     request_result = content::MEDIA_DEVICE_NO_HARDWARE;
   }
 
-  scoped_ptr<content::MediaStreamUI> ui;
+  std::unique_ptr<content::MediaStreamUI> ui;
   if (!devices.empty()) {
     ui = MediaCaptureDevicesDispatcher::GetInstance()
              ->GetMediaStreamCaptureIndicator()
@@ -462,8 +458,6 @@ void MediaStreamDevicesController::StorePermission(
     ContentSetting new_audio_setting,
     ContentSetting new_video_setting) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  ContentSettingsPattern primary_pattern =
-      ContentSettingsPattern::FromURLNoWildcard(request_.security_origin);
 
   bool is_pepper_request =
       request_.request_type == content::MEDIA_OPEN_DEVICE_PEPPER_ONLY;
@@ -471,19 +465,20 @@ void MediaStreamDevicesController::StorePermission(
   if (IsAskingForAudio() && new_audio_setting != CONTENT_SETTING_ASK) {
     if (ShouldPersistContentSetting(new_audio_setting, request_.security_origin,
                                     is_pepper_request)) {
-      HostContentSettingsMapFactory::GetForProfile(profile_)->SetContentSetting(
-          primary_pattern, ContentSettingsPattern::Wildcard(),
-          CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string(),
-          new_audio_setting);
+      HostContentSettingsMapFactory::GetForProfile(profile_)
+          ->SetContentSettingDefaultScope(request_.security_origin, GURL(),
+                                          CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
+                                          std::string(), new_audio_setting);
     }
   }
   if (IsAskingForVideo() && new_video_setting != CONTENT_SETTING_ASK) {
     if (ShouldPersistContentSetting(new_video_setting, request_.security_origin,
                                     is_pepper_request)) {
-      HostContentSettingsMapFactory::GetForProfile(profile_)->SetContentSetting(
-          primary_pattern, ContentSettingsPattern::Wildcard(),
-          CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, std::string(),
-          new_video_setting);
+      HostContentSettingsMapFactory::GetForProfile(profile_)
+          ->SetContentSettingDefaultScope(
+              request_.security_origin, GURL(),
+              CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, std::string(),
+              new_video_setting);
     }
   }
 }

@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <map>
+#include <unordered_map>
 #include <utility>
 
 #include "base/trace_event/trace_event.h"
@@ -42,9 +43,68 @@ class CompareTaskNamespacePriority {
  private:
   uint16_t category_;
 };
+
+// Helper class for iterating over all dependents of a task.
+class DependentIterator {
+ public:
+  DependentIterator(TaskGraph* graph, const Task* task)
+      : graph_(graph),
+        task_(task),
+        current_index_(static_cast<size_t>(-1)),
+        current_node_(NULL) {
+    ++(*this);
+  }
+
+  TaskGraph::Node& operator->() const {
+    DCHECK_LT(current_index_, graph_->edges.size());
+    DCHECK_EQ(graph_->edges[current_index_].task, task_);
+    DCHECK(current_node_);
+    return *current_node_;
+  }
+
+  TaskGraph::Node& operator*() const {
+    DCHECK_LT(current_index_, graph_->edges.size());
+    DCHECK_EQ(graph_->edges[current_index_].task, task_);
+    DCHECK(current_node_);
+    return *current_node_;
+  }
+
+  // Note: Performance can be improved by keeping edges sorted.
+  DependentIterator& operator++() {
+    // Find next dependency edge for |task_|.
+    do {
+      ++current_index_;
+      if (current_index_ == graph_->edges.size())
+        return *this;
+    } while (graph_->edges[current_index_].task != task_);
+
+    // Now find the node for the dependent of this edge.
+    TaskGraph::Node::Vector::iterator it = std::find_if(
+        graph_->nodes.begin(), graph_->nodes.end(),
+        [this](const TaskGraph::Node& node) {
+          return node.task == graph_->edges[current_index_].dependent;
+        });
+    DCHECK(it != graph_->nodes.end());
+    current_node_ = &(*it);
+
+    return *this;
+  }
+
+  operator bool() const { return current_index_ < graph_->edges.size(); }
+
+ private:
+  TaskGraph* graph_;
+  const Task* task_;
+  size_t current_index_;
+  TaskGraph::Node* current_node_;
+};
+
 }  // namespace
 
 TaskGraphWorkQueue::TaskNamespace::TaskNamespace() {}
+
+TaskGraphWorkQueue::TaskNamespace::TaskNamespace(const TaskNamespace& other) =
+    default;
 
 TaskGraphWorkQueue::TaskNamespace::~TaskNamespace() {}
 
@@ -96,9 +156,11 @@ void TaskGraphWorkQueue::ScheduleTasks(NamespaceToken token, TaskGraph* graph) {
       continue;
 
     // Skip if already running.
-    if (std::find(task_namespace.running_tasks.begin(),
-                  task_namespace.running_tasks.end(),
-                  node.task) != task_namespace.running_tasks.end())
+    if (std::any_of(task_namespace.running_tasks.begin(),
+                    task_namespace.running_tasks.end(),
+                    [&node](const CategorizedTask& task) {
+                      return task.second == node.task;
+                    }))
       continue;
 
     task_namespace.ready_to_run_tasks[node.category].push_back(PrioritizedTask(
@@ -126,9 +188,11 @@ void TaskGraphWorkQueue::ScheduleTasks(NamespaceToken token, TaskGraph* graph) {
       continue;
 
     // Skip if already running.
-    if (std::find(task_namespace.running_tasks.begin(),
-                  task_namespace.running_tasks.end(),
-                  node.task) != task_namespace.running_tasks.end())
+    if (std::any_of(task_namespace.running_tasks.begin(),
+                    task_namespace.running_tasks.end(),
+                    [&node](const CategorizedTask& task) {
+                      return task.second == node.task;
+                    }))
       continue;
 
     DCHECK(std::find(task_namespace.completed_tasks.begin(),
@@ -194,7 +258,8 @@ TaskGraphWorkQueue::PrioritizedTask TaskGraphWorkQueue::GetNextTaskToRun(
   }
 
   // Add task to |running_tasks|.
-  task_namespace->running_tasks.push_back(task.task);
+  task_namespace->running_tasks.push_back(
+      std::make_pair(task.category, task.task));
 
   return task;
 }
@@ -204,8 +269,11 @@ void TaskGraphWorkQueue::CompleteTask(const PrioritizedTask& completed_task) {
   scoped_refptr<Task> task(completed_task.task);
 
   // Remove task from |running_tasks|.
-  auto it = std::find(task_namespace->running_tasks.begin(),
-                      task_namespace->running_tasks.end(), task);
+  auto it = std::find_if(task_namespace->running_tasks.begin(),
+                         task_namespace->running_tasks.end(),
+                         [&completed_task](const CategorizedTask& task) {
+                           return task.second == completed_task.task;
+                         });
   DCHECK(it != task_namespace->running_tasks.end());
   std::swap(*it, task_namespace->running_tasks.back());
   task_namespace->running_tasks.pop_back();
@@ -283,7 +351,7 @@ void TaskGraphWorkQueue::CollectCompletedTasks(NamespaceToken token,
 
 bool TaskGraphWorkQueue::DependencyMismatch(const TaskGraph* graph) {
   // Value storage will be 0-initialized.
-  base::hash_map<const Task*, size_t> dependents;
+  std::unordered_map<const Task*, size_t> dependents;
   for (const TaskGraph::Edge& edge : graph->edges)
     dependents[edge.dependent]++;
 

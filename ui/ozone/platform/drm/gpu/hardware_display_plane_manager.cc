@@ -36,6 +36,9 @@ HardwareDisplayPlaneList::PageFlipInfo::PageFlipInfo(uint32_t crtc_id,
     : crtc_id(crtc_id), framebuffer(framebuffer), crtc(crtc) {
 }
 
+HardwareDisplayPlaneList::PageFlipInfo::PageFlipInfo(
+    const PageFlipInfo& other) = default;
+
 HardwareDisplayPlaneList::PageFlipInfo::~PageFlipInfo() {
 }
 
@@ -97,7 +100,7 @@ bool HardwareDisplayPlaneManager::Initialize(DrmDevice* drm) {
 
     uint32_t formats_size = drm_plane->count_formats;
     plane_ids.insert(drm_plane->plane_id);
-    scoped_ptr<HardwareDisplayPlane> plane(
+    std::unique_ptr<HardwareDisplayPlane> plane(
         CreatePlane(drm_plane->plane_id, drm_plane->possible_crtcs));
 
     std::vector<uint32_t> supported_formats(formats_size);
@@ -120,7 +123,7 @@ bool HardwareDisplayPlaneManager::Initialize(DrmDevice* drm) {
   if (!has_universal_planes) {
     for (int i = 0; i < resources->count_crtcs; ++i) {
       if (plane_ids.find(resources->crtcs[i] - 1) == plane_ids.end()) {
-        scoped_ptr<HardwareDisplayPlane> dummy_plane(
+        std::unique_ptr<HardwareDisplayPlane> dummy_plane(
             CreatePlane(resources->crtcs[i] - 1, (1 << i)));
         if (dummy_plane->Initialize(drm, std::vector<uint32_t>(), true,
                                     false)) {
@@ -131,8 +134,8 @@ bool HardwareDisplayPlaneManager::Initialize(DrmDevice* drm) {
   }
 
   std::sort(planes_.begin(), planes_.end(),
-            [](const scoped_ptr<HardwareDisplayPlane>& l,
-               const scoped_ptr<HardwareDisplayPlane>& r) {
+            [](const std::unique_ptr<HardwareDisplayPlane>& l,
+               const std::unique_ptr<HardwareDisplayPlane>& r) {
               return l->plane_id() < r->plane_id();
             });
 
@@ -140,10 +143,10 @@ bool HardwareDisplayPlaneManager::Initialize(DrmDevice* drm) {
   return true;
 }
 
-scoped_ptr<HardwareDisplayPlane> HardwareDisplayPlaneManager::CreatePlane(
+std::unique_ptr<HardwareDisplayPlane> HardwareDisplayPlaneManager::CreatePlane(
     uint32_t plane_id,
     uint32_t possible_crtcs) {
-  return scoped_ptr<HardwareDisplayPlane>(
+  return std::unique_ptr<HardwareDisplayPlane>(
       new HardwareDisplayPlane(plane_id, possible_crtcs));
 }
 
@@ -231,7 +234,6 @@ bool HardwareDisplayPlaneManager::AssignOverlayPlanes(
   size_t plane_idx = 0;
   HardwareDisplayPlane* primary_plane = nullptr;
   gfx::Rect primary_display_bounds;
-  gfx::Rect primary_src_rect;
   uint32_t primary_format;
   for (const auto& plane : overlay_list) {
     HardwareDisplayPlane* hw_plane =
@@ -269,15 +271,13 @@ bool HardwareDisplayPlaneManager::AssignOverlayPlanes(
       // TODO(kalyank): Check if we can move this optimization to
       // DrmOverlayCandidatesHost.
       if (!needs_blending && primary_format == fourcc_format &&
-          primary_display_bounds == plane.display_bounds &&
-          fixed_point_rect == primary_src_rect) {
+          primary_display_bounds == plane.display_bounds) {
         ResetCurrentPlaneList(plane_list);
         hw_plane = primary_plane;
       }
     } else {
       primary_plane = hw_plane;
       primary_display_bounds = plane.display_bounds;
-      primary_src_rect = fixed_point_rect;
       primary_format = fourcc_format;
     }
 

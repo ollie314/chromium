@@ -4,9 +4,10 @@
 
 #include "chrome/browser/profiles/profile_destroyer.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
@@ -122,12 +123,13 @@ ProfileDestroyer::~ProfileDestroyer() {
   if (profile_)
     DestroyProfileWhenAppropriate(profile_);
 
+#ifdef NDEBUG
   // Don't wait for pending registrations, if any, these hosts are buggy.
   // Note: this can happen, but if so, it's better to crash here than wait
   // for the host to dereference a deleted Profile. http://crbug.com/248625
   CHECK_EQ(0U, num_hosts_) << "Some render process hosts were not "
                            << "destroyed early enough!";
-
+#endif  // NDEBUG
   DCHECK(pending_destroyers_ != NULL);
   DestroyerSet::iterator iter = pending_destroyers_->find(this);
   DCHECK(iter != pending_destroyers_->end());

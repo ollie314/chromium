@@ -4,13 +4,11 @@
 
 #include "net/base/network_interfaces_win.h"
 
-#pragma comment(lib, "iphlpapi.lib")
-
 #include <algorithm>
+#include <memory>
 
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
@@ -21,7 +19,6 @@
 #include "net/base/escape.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -49,28 +46,28 @@ NetworkChangeNotifier::ConnectionType GetNetworkInterfaceType(DWORD ifType) {
 
 // Returns scoped_ptr to WLAN_CONNECTION_ATTRIBUTES. The scoped_ptr may hold a
 // NULL pointer if WLAN_CONNECTION_ATTRIBUTES is unavailable.
-scoped_ptr<WLAN_CONNECTION_ATTRIBUTES, internal::WlanApiDeleter>
+std::unique_ptr<WLAN_CONNECTION_ATTRIBUTES, internal::WlanApiDeleter>
 GetConnectionAttributes() {
   const internal::WlanApi& wlanapi = internal::WlanApi::GetInstance();
-  scoped_ptr<WLAN_CONNECTION_ATTRIBUTES, internal::WlanApiDeleter>
+  std::unique_ptr<WLAN_CONNECTION_ATTRIBUTES, internal::WlanApiDeleter>
       wlan_connection_attributes;
   if (!wlanapi.initialized)
-    return wlan_connection_attributes.Pass();
+    return wlan_connection_attributes;
 
   internal::WlanHandle client;
   DWORD cur_version = 0;
   const DWORD kMaxClientVersion = 2;
   DWORD result = wlanapi.OpenHandle(kMaxClientVersion, &cur_version, &client);
   if (result != ERROR_SUCCESS)
-    return wlan_connection_attributes.Pass();
+    return wlan_connection_attributes;
 
   WLAN_INTERFACE_INFO_LIST* interface_list_ptr = NULL;
   result =
       wlanapi.enum_interfaces_func(client.Get(), NULL, &interface_list_ptr);
   if (result != ERROR_SUCCESS)
-    return wlan_connection_attributes.Pass();
-  scoped_ptr<WLAN_INTERFACE_INFO_LIST, internal::WlanApiDeleter> interface_list(
-      interface_list_ptr);
+    return wlan_connection_attributes;
+  std::unique_ptr<WLAN_INTERFACE_INFO_LIST, internal::WlanApiDeleter>
+      interface_list(interface_list_ptr);
 
   // Assume at most one connected wifi interface.
   WLAN_INTERFACE_INFO* info = NULL;
@@ -83,7 +80,7 @@ GetConnectionAttributes() {
   }
 
   if (info == NULL)
-    return wlan_connection_attributes.Pass();
+    return wlan_connection_attributes;
 
   WLAN_CONNECTION_ATTRIBUTES* conn_info_ptr = nullptr;
   DWORD conn_info_size = 0;
@@ -97,7 +94,7 @@ GetConnectionAttributes() {
     DCHECK(conn_info_ptr);
   else
     wlan_connection_attributes.reset();
-  return wlan_connection_attributes.Pass();
+  return wlan_connection_attributes;
 }
 
 }  // namespace
@@ -180,11 +177,12 @@ bool GetNetworkListImpl(NetworkInterfaceList* networks,
               int prefix_family = prefix->Address.lpSockaddr->sa_family;
               IPEndPoint network_endpoint;
               if (prefix_family == family &&
-                  network_endpoint.FromSockAddr(prefix->Address.lpSockaddr,
+                  network_endpoint.FromSockAddr(
+                      prefix->Address.lpSockaddr,
                       prefix->Address.iSockaddrLength) &&
-                  IPNumberMatchesPrefix(endpoint.address(),
-                                        network_endpoint.address(),
-                                        prefix->PrefixLength)) {
+                  IPAddressMatchesPrefix(endpoint.address(),
+                                         network_endpoint.address(),
+                                         prefix->PrefixLength)) {
                 prefix_length =
                     std::max<size_t>(prefix_length, prefix->PrefixLength);
               }
@@ -239,7 +237,7 @@ bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
     // There are 0 networks.
     return true;
   }
-  scoped_ptr<char[]> buf(new char[len]);
+  std::unique_ptr<char[]> buf(new char[len]);
   IP_ADAPTER_ADDRESSES* adapters =
       reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.get());
   result = GetAdaptersAddresses(AF_UNSPEC, flags, NULL, adapters, &len);
@@ -299,7 +297,7 @@ class WifiOptionSetter : public ScopedWifiOptions {
                                           &interface_list_ptr);
     if (result != ERROR_SUCCESS)
       return;
-    scoped_ptr<WLAN_INTERFACE_INFO_LIST, internal::WlanApiDeleter>
+    std::unique_ptr<WLAN_INTERFACE_INFO_LIST, internal::WlanApiDeleter>
         interface_list(interface_list_ptr);
 
     for (unsigned i = 0; i < interface_list->dwNumberOfItems; ++i) {
@@ -329,8 +327,8 @@ class WifiOptionSetter : public ScopedWifiOptions {
   internal::WlanHandle client_;
 };
 
-scoped_ptr<ScopedWifiOptions> SetWifiOptions(int options) {
-  return scoped_ptr<ScopedWifiOptions>(new WifiOptionSetter(options));
+std::unique_ptr<ScopedWifiOptions> SetWifiOptions(int options) {
+  return std::unique_ptr<ScopedWifiOptions>(new WifiOptionSetter(options));
 }
 
 std::string GetWifiSSID() {

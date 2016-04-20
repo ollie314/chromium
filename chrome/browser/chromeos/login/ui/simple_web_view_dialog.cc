@@ -19,16 +19,17 @@
 #include "chrome/browser/ui/autofill/chrome_autofill_client.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model_delegate.h"
-#include "chrome/browser/ui/toolbar/toolbar_model_impl.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/toolbar/reload_button.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/security_state/security_state_model.h"
+#include "components/toolbar/toolbar_model_impl.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_constants.h"
 #include "grit/components_strings.h"
 #include "ipc/ipc_message.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -135,7 +136,7 @@ SimpleWebViewDialog::SimpleWebViewDialog(Profile* profile)
   command_updater_->UpdateCommandEnabled(IDC_FORWARD, true);
   command_updater_->UpdateCommandEnabled(IDC_STOP, true);
   command_updater_->UpdateCommandEnabled(IDC_RELOAD, true);
-  command_updater_->UpdateCommandEnabled(IDC_RELOAD_IGNORING_CACHE, true);
+  command_updater_->UpdateCommandEnabled(IDC_RELOAD_BYPASSING_CACHE, true);
   command_updater_->UpdateCommandEnabled(IDC_RELOAD_CLEARING_CACHE, true);
 }
 
@@ -166,7 +167,8 @@ void SimpleWebViewDialog::Init() {
   if (web_view_->GetWebContents())
     ChromeSecurityStateModelClient::CreateForWebContents(
         web_view_->GetWebContents());
-  toolbar_model_.reset(new ToolbarModelImpl(this));
+  toolbar_model_.reset(
+      new ToolbarModelImpl(this, content::kMaxURLDisplayChars));
 
   set_background(views::Background::CreateSolidBackground(kDialogColor));
 
@@ -294,11 +296,6 @@ const ToolbarModel* SimpleWebViewDialog::GetToolbarModel() const {
   return toolbar_model_.get();
 }
 
-views::Widget* SimpleWebViewDialog::CreateViewsBubble(
-    views::BubbleDelegateView* bubble_delegate) {
-  return views::BubbleDelegateView::CreateBubble(bubble_delegate);
-}
-
 ContentSettingBubbleModelDelegate*
 SimpleWebViewDialog::GetContentSettingBubbleModelDelegate() {
   return bubble_model_delegate_.get();
@@ -346,11 +343,11 @@ void SimpleWebViewDialog::ExecuteCommandWithDisposition(
       web_contents->Stop();
       break;
     case IDC_RELOAD:
-      // Always reload ignoring cache.
-    case IDC_RELOAD_IGNORING_CACHE:
+    // Always reload bypassing cache.
+    case IDC_RELOAD_BYPASSING_CACHE:
     case IDC_RELOAD_CLEARING_CACHE:
       location_bar_->Revert();
-      web_contents->GetController().ReloadIgnoringCache(true);
+      web_contents->GetController().ReloadBypassingCache(true);
       break;
     default:
       NOTREACHED();

@@ -14,11 +14,10 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
-#include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "components/safe_browsing_db/hit_report.h"
+#include "components/safe_browsing_db/util.h"
 #include "content/public/browser/browser_thread.h"
 #include "url/gurl.h"
 
@@ -50,6 +49,7 @@ class SafeBrowsingUIManager
   // interacting with the blocking page.
   struct UnsafeResource {
     UnsafeResource();
+    UnsafeResource(const UnsafeResource& other);
     ~UnsafeResource();
 
     // Returns true if this UnsafeResource is a main frame load that was blocked
@@ -77,7 +77,7 @@ class SafeBrowsingUIManager
     bool is_subresource;
     bool is_subframe;
     SBThreatType threat_type;
-    std::string threat_metadata;
+    ThreatMetadata threat_metadata;
     UrlCheckCallback callback;  // This is called back on |callback_thread|.
     scoped_refptr<base::SingleThreadTaskRunner> callback_thread;
     int render_process_host_id;

@@ -30,8 +30,6 @@
 #include "core/svg/SVGMatrixTearOff.h"
 #include "platform/graphics/Pattern.h"
 #include "wtf/Forward.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
@@ -48,7 +46,7 @@ public:
         return new CanvasPattern(image, repeat, originClean);
     }
 
-    Pattern* pattern() const { return m_pattern.get(); }
+    Pattern* getPattern() const { return m_pattern.get(); }
 
     bool originClean() const { return m_originClean; }
 

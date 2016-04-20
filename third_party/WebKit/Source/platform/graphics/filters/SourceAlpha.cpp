@@ -29,13 +29,13 @@
 
 namespace blink {
 
-PassRefPtrWillBeRawPtr<SourceAlpha> SourceAlpha::create(FilterEffect* sourceEffect)
+SourceAlpha* SourceAlpha::create(FilterEffect* sourceEffect)
 {
-    return adoptRefWillBeNoop(new SourceAlpha(sourceEffect));
+    return new SourceAlpha(sourceEffect);
 }
 
 SourceAlpha::SourceAlpha(FilterEffect* sourceEffect)
-    : FilterEffect(sourceEffect->filter())
+    : FilterEffect(sourceEffect->getFilter())
 {
     setOperatingColorSpace(sourceEffect->operatingColorSpace());
     inputEffects().append(sourceEffect);
@@ -46,17 +46,17 @@ FloatRect SourceAlpha::determineAbsolutePaintRect(const FloatRect& requestedRect
     return inputEffect(0)->determineAbsolutePaintRect(requestedRect);
 }
 
-PassRefPtr<SkImageFilter> SourceAlpha::createImageFilter(SkiaImageFilterBuilder& builder)
+sk_sp<SkImageFilter> SourceAlpha::createImageFilter()
 {
-    RefPtr<SkImageFilter> sourceGraphic(builder.build(inputEffect(0), operatingColorSpace()));
+    sk_sp<SkImageFilter> sourceGraphic(SkiaImageFilterBuilder::build(inputEffect(0), operatingColorSpace()));
     SkScalar matrix[20] = {
         0, 0, 0, 0, 0,
         0, 0, 0, 0, 0,
         0, 0, 0, 0, 0,
         0, 0, 0, SK_Scalar1, 0
     };
-    RefPtr<SkColorFilter> colorFilter(adoptRef(SkColorMatrixFilter::Create(matrix)));
-    return adoptRef(SkColorFilterImageFilter::Create(colorFilter.get(), sourceGraphic.get()));
+    sk_sp<SkColorFilter> colorFilter = SkColorFilter::MakeMatrixFilterRowMajor255(matrix);
+    return SkColorFilterImageFilter::Make(std::move(colorFilter), std::move(sourceGraphic));
 }
 
 TextStream& SourceAlpha::externalRepresentation(TextStream& ts, int indent) const

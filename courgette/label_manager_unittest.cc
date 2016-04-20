@@ -16,35 +16,23 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
+#include "courgette/image_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace courgette {
 
 namespace {
 
-// Test version of RvaVisitor: Just wrap std::vector<RVA>.
-class TestRvaVisitor : public LabelManagerImpl::RvaVisitor {
+class TestLabelManager : public LabelManager {
  public:
-  explicit TestRvaVisitor(std::vector<RVA>::const_iterator rva_begin,
-                          std::vector<RVA>::const_iterator rva_end)
-      : rva_it_(rva_begin), rva_end_(rva_end) {}
-
-  ~TestRvaVisitor() override {}
-
-  size_t Remaining() const override { return std::distance(rva_it_, rva_end_); }
-
-  RVA Get() const override { return *rva_it_; }
-
-  void Next() override { ++rva_it_; }
-
- private:
-  std::vector<RVA>::const_iterator rva_it_;
-  std::vector<RVA>::const_iterator rva_end_;
+  void SetLabels(const LabelVector& labels) {
+    labels_ = labels;
+  };
 };
 
 void CheckLabelManagerContent(LabelManager* label_manager,
                               const std::map<RVA, int32_t>& expected) {
-  EXPECT_EQ(expected.size(), label_manager->Size());
+  EXPECT_EQ(expected.size(), label_manager->Labels().size());
   for (const auto& rva_and_count : expected) {
     Label* label = label_manager->Find(rva_and_count.first);
     EXPECT_TRUE(label != nullptr);
@@ -78,19 +66,16 @@ LabelVector CreateLabelVectorWithIndexes(const std::string& encoded_index) {
   labels.reserve(n);
   std::set<char> used_ch;
   for (size_t i = 0; i < n; ++i) {
-    Label label(i);
-    label.count_ = 1;
+    int index = Label::kNoIndex;
     char ch = encoded_index[i];
     if (ch != '.') {
       // Sanity check for test case.
       if (ch < 'A' || ch > 'Z' || used_ch.find(ch) != used_ch.end())
         NOTREACHED() << "Malformed test case: " << encoded_index;
       used_ch.insert(ch);
-      label.index_ = ch - 'A';
-    } else {
-      label.index_ = Label::kNoIndex;
+      index = ch - 'A';
     }
-    labels.push_back(label);
+    labels.push_back(Label(i, index, 1));
   }
   return labels;
 }
@@ -114,6 +99,28 @@ std::string EncodeLabelIndexes(const LabelVector& labels) {
 
 }  // namespace
 
+TEST(LabelManagerTest, GetLabelIndexBound) {
+  LabelVector labels0;
+  EXPECT_EQ(0, LabelManager::GetLabelIndexBound(labels0));
+
+  LabelVector labels1_uninit = CreateLabelVectorBasic(1);
+  ASSERT_EQ(1U, labels1_uninit.size());
+  EXPECT_EQ(0, LabelManager::GetLabelIndexBound(labels1_uninit));
+
+  LabelVector labels1_init = CreateLabelVectorBasic(1);
+  ASSERT_EQ(1U, labels1_init.size());
+  labels1_init[0].index_ = 99;
+  EXPECT_EQ(100, LabelManager::GetLabelIndexBound(labels1_init));
+
+  LabelVector labels6_mixed = CreateLabelVectorBasic(6);
+  ASSERT_EQ(6U, labels6_mixed.size());
+  labels6_mixed[1].index_ = 5;
+  labels6_mixed[2].index_ = 2;
+  labels6_mixed[4].index_ = 15;
+  labels6_mixed[5].index_ = 7;
+  EXPECT_EQ(16, LabelManager::GetLabelIndexBound(labels6_mixed));
+}
+
 TEST(LabelManagerTest, Basic) {
   static const RVA kTestTargetsRaw[] = {
     0x04000010,
@@ -129,10 +136,10 @@ TEST(LabelManagerTest, Basic) {
   };
   std::vector<RVA> test_targets(std::begin(kTestTargetsRaw),
                                 std::end(kTestTargetsRaw));
-  TestRvaVisitor visitor(test_targets.begin(), test_targets.end());
+  TrivialRvaVisitor visitor(test_targets);
 
   // Preallocate targets, then populate.
-  LabelManagerImpl label_manager;
+  TestLabelManager label_manager;
   label_manager.Read(&visitor);
 
   static const std::pair<RVA, int32_t> kExpected1Raw[] = {
@@ -165,10 +172,10 @@ TEST(LabelManagerTest, Single) {
   for (int dup = 1; dup < 8; ++dup) {
     // Test data: |dup| copies of kRva.
     std::vector<RVA> test_targets(dup, kRva);
-    TestRvaVisitor visitor(test_targets.begin(), test_targets.end());
-    LabelManagerImpl label_manager;
+    TrivialRvaVisitor visitor(test_targets);
+    TestLabelManager label_manager;
     label_manager.Read(&visitor);
-    EXPECT_EQ(1U, label_manager.Size());  // Deduped to 1 Label.
+    EXPECT_EQ(1U, label_manager.Labels().size());  // Deduped to 1 Label.
 
     Label* label = label_manager.Find(kRva);
     EXPECT_NE(nullptr, label);
@@ -184,16 +191,16 @@ TEST(LabelManagerTest, Single) {
 
 TEST(LabelManagerTest, Empty) {
   std::vector<RVA> empty_test_targets;
-  TestRvaVisitor visitor(empty_test_targets.begin(), empty_test_targets.end());
-  LabelManagerImpl label_manager;
+  TrivialRvaVisitor visitor(empty_test_targets);
+  TestLabelManager label_manager;
   label_manager.Read(&visitor);
-  EXPECT_EQ(0U, label_manager.Size());
+  EXPECT_EQ(0U, label_manager.Labels().size());
   for (RVA rva = 0U; rva < 16U; ++rva)
     EXPECT_EQ(nullptr, label_manager.Find(rva));
 }
 
 TEST(LabelManagerTest, EmptyAssign) {
-  LabelManagerImpl label_manager_empty;
+  TestLabelManager label_manager_empty;
   label_manager_empty.DefaultAssignIndexes();
   label_manager_empty.UnassignIndexes();
   label_manager_empty.AssignRemainingIndexes();
@@ -201,7 +208,7 @@ TEST(LabelManagerTest, EmptyAssign) {
 
 TEST(LabelManagerTest, TrivialAssign) {
   for (size_t size = 0; size < 20; ++size) {
-    LabelManagerImpl label_manager;
+    TestLabelManager label_manager;
     label_manager.SetLabels(CreateLabelVectorBasic(size));
 
     // Sanity check.
@@ -227,7 +234,7 @@ TEST(LabelManagerTest, TrivialAssign) {
 
 // Tests SimpleIndexAssigner fill strategies independently.
 TEST(LabelManagerTest, SimpleIndexAssigner) {
-  using SimpleIndexAssigner = LabelManagerImpl::SimpleIndexAssigner;
+  using SimpleIndexAssigner = LabelManager::SimpleIndexAssigner;
   // See CreateLabelVectorWithIndexes() explanation on how we encode LabelVector
   // |index_| values as a string.
   const struct TestCase {
@@ -344,7 +351,7 @@ TEST(LabelManagerTest, AssignRemainingIndexes) {
     {"..FE..GD..", "ABFECHGDIJ"}, // Forward: "AB"; backward: "IJ"; in: "CH".
   };
   for (const auto& test_case : kTestCases) {
-    LabelManagerImpl label_manager;
+    TestLabelManager label_manager;
     label_manager.SetLabels(CreateLabelVectorWithIndexes(test_case.input));
 
     label_manager.AssignRemainingIndexes();

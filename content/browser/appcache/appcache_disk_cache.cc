@@ -39,7 +39,7 @@ class AppCacheDiskCache::CreateBackendCallbackShim
       appcache_diskcache_->OnCreateBackendComplete(rv);
   }
 
-  scoped_ptr<disk_cache::Backend> backend_ptr_;  // Accessed directly.
+  std::unique_ptr<disk_cache::Backend> backend_ptr_;  // Accessed directly.
 
  private:
   friend class base::RefCounted<CreateBackendCallbackShim>;
@@ -335,6 +335,8 @@ AppCacheDiskCache::PendingCall::PendingCall(
     Entry** entry,
     const net::CompletionCallback& callback)
     : call_type(call_type), key(key), entry(entry), callback(callback) {}
+
+AppCacheDiskCache::PendingCall::PendingCall(const PendingCall& other) = default;
 
 AppCacheDiskCache::PendingCall::~PendingCall() {}
 

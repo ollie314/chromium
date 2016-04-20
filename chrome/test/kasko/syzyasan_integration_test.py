@@ -18,7 +18,7 @@ Typical usage (assuming in root 'src' directory):
 - generate project files with the following GYP variables:
     syzyasan=1 win_z7=0 chromium_win_pch=0
 - build the release Chrome binaries:
-    ninja -C out\Release chrome.exe
+    ninja -C out\Release chrome.exe chromedriver.exe
 - run the test:
     python chrome/test/kasko/syzyasan_integration_test.py
 """
@@ -136,8 +136,8 @@ class _ScopedInstrumentedChrome(object):
       result = subprocess.call(cmd)
     else:
       # Otherwise run the command with all output suppressed.
-      proc = subprocess.call(cmd, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE)
+      proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
       stdout, stderr = proc.communicate()
       result = proc.returncode
       if result != 0:
@@ -145,7 +145,7 @@ class _ScopedInstrumentedChrome(object):
         sys.stderr.write(stderr)
 
     if result != 0:
-      raise Exception('Failed to instrument: %s' % chrome_dll)
+      raise Exception('Failed to instrument: %s' % self.chrome_dll_)
 
     return
 
@@ -214,59 +214,66 @@ def Main():
 
   # Generate a temporary directory for use in the tests.
   with kasko.util.ScopedTempDir() as temp_dir:
-    # Prevent the temporary directory from self cleaning if requested.
-    if options.keep_temp_dirs:
-      temp_dir_path = temp_dir.release()
-    else:
-      temp_dir_path = temp_dir.path
-
-    # Use the specified user data directory if requested.
-    if options.user_data_dir:
-      user_data_dir = options.user_data_dir
-    else:
-      user_data_dir = os.path.join(temp_dir_path, 'user-data-dir')
-
-    kasko_dir = os.path.join(temp_dir_path, 'kasko')
-    os.makedirs(kasko_dir)
-
-    # Launch the test server.
-    server = kasko.crash_server.CrashServer()
-    with kasko.util.ScopedStartStop(server):
-      _LOGGER.info('Started server on port %d', server.port)
-
-      # Configure the environment so Chrome can find the test crash server.
-      os.environ['KASKO_CRASH_SERVER_URL'] = (
-          'http://127.0.0.1:%d/crash' % server.port)
-
-      # Configure the environment to disable feature randomization, which can
-      # result in Kasko being randomly disabled. Append to any existing options.
-      k = 'SYZYGY_ASAN_OPTIONS'
-      v = '--disable_feature_randomization'
-      if k in os.environ:
-        os.environ[k] += ' ' + v
+    try:
+      # Prevent the temporary directory from self cleaning if requested.
+      if options.keep_temp_dirs:
+        temp_dir_path = temp_dir.release()
       else:
-        os.environ[k] = v
+        temp_dir_path = temp_dir.path
 
-      # SyzyAsan instrument the Chrome installation.
-      chrome_dir = os.path.dirname(options.chrome)
-      with _ScopedInstrumentedChrome(chrome_dir, options.syzygy_dir,
-          temp_dir_path, instrumented_dir=options.instrumented_dir,
-          verbose=(options.log_level == logging.DEBUG),
-          skip_instrumentation=options.skip_instrumentation) as asan_chrome:
-        # Launch Chrome and navigate it to the test URL.
-        chrome = kasko.process.ChromeInstance(options.chromedriver,
-                                              options.chrome, user_data_dir)
-        with kasko.util.ScopedStartStop(chrome):
-          _LOGGER.info('Navigating to SyzyAsan debug URL')
-          chrome.navigate_to('chrome://crash/browser-use-after-free')
+      # Use the specified user data directory if requested.
+      if options.user_data_dir:
+        user_data_dir = options.user_data_dir
+      else:
+        user_data_dir = os.path.join(temp_dir_path, 'user-data-dir')
 
-          _LOGGER.info('Waiting for Kasko report')
-          if not server.wait_for_report(10):
-            raise Exception('No Kasko report received.')
+      kasko_dir = os.path.join(temp_dir_path, 'kasko')
+      os.makedirs(kasko_dir)
 
-    report = server.crash(0)
-    kasko.report.LogCrashKeys(report)
-    kasko.report.ValidateCrashReport(report, {'asan-error-type': 'SyzyAsan'})
+      # Launch the test server.
+      server = kasko.crash_server.CrashServer()
+      with kasko.util.ScopedStartStop(server):
+        _LOGGER.info('Started server on port %d', server.port)
+
+        # Configure the environment so Chrome can find the test crash server.
+        os.environ['KASKO_CRASH_SERVER_URL'] = (
+            'http://127.0.0.1:%d/crash' % server.port)
+
+        # Configure the environment to disable feature randomization, which can
+        # result in Kasko being randomly disabled. Append to any existing
+        # options.
+        k = 'SYZYGY_ASAN_OPTIONS'
+        v = '--disable_feature_randomization'
+        if k in os.environ:
+          os.environ[k] += ' ' + v
+        else:
+          os.environ[k] = v
+
+        # SyzyAsan instrument the Chrome installation.
+        chrome_dir = os.path.dirname(options.chrome)
+        with _ScopedInstrumentedChrome(chrome_dir, options.syzygy_dir,
+            temp_dir_path, instrumented_dir=options.instrumented_dir,
+            verbose=(options.log_level == logging.DEBUG),
+            skip_instrumentation=options.skip_instrumentation) as asan_chrome:
+          # Launch Chrome and navigate it to the test URL.
+          chrome = kasko.process.ChromeInstance(options.chromedriver,
+                                                options.chrome, user_data_dir)
+          with kasko.util.ScopedStartStop(chrome):
+            _LOGGER.info('Navigating to SyzyAsan debug URL')
+            chrome.navigate_to('chrome://crash/browser-use-after-free')
+
+            _LOGGER.info('Waiting for Kasko report')
+            if not server.wait_for_report(10):
+              raise Exception('No Kasko report received.')
+
+      report = server.crash(0)
+      kasko.report.LogCrashKeys(report)
+      kasko.report.ValidateCrashReport(report, {'asan-error-type': 'SyzyAsan'})
+
+      _LOGGER.info('Test passed successfully!')
+    except Exception as e:
+      _LOGGER.error(e)
+      return 1
 
     return 0
 

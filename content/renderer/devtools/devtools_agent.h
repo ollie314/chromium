@@ -5,10 +5,11 @@
 #ifndef CONTENT_RENDERER_DEVTOOLS_DEVTOOLS_AGENT_H_
 #define CONTENT_RENDERER_DEVTOOLS_DEVTOOLS_AGENT_H_
 
+#include <memory>
 #include <string>
 
+#include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
 #include "content/public/common/console_message_level.h"
 #include "content/public/renderer/render_frame_observer.h"
@@ -67,6 +68,8 @@ class CONTENT_EXPORT DevToolsAgent
   void willEnterDebugLoop() override;
   void didExitDebugLoop() override;
 
+  bool requestDevToolsForFrame(blink::WebLocalFrame* frame) override;
+
   void enableTracing(const blink::WebString& category_filter) override;
   void disableTracing() override;
 
@@ -79,6 +82,7 @@ class CONTENT_EXPORT DevToolsAgent
   void OnDetach();
   void OnDispatchOnInspectorBackend(int session_id, const std::string& message);
   void OnInspectElement(int x, int y);
+  void OnRequestNewWindowACK(bool success);
   void ContinueProgram();
   void OnSetupDevToolsClient(const std::string& compatibility_script);
 
@@ -87,7 +91,9 @@ class CONTENT_EXPORT DevToolsAgent
   bool paused_in_mouse_move_;
   bool paused_;
   RenderFrameImpl* frame_;
-  scoped_ptr<DevToolsCPUThrottler> cpu_throttler_;
+  base::Callback<void(int, int, const std::string&, const std::string&)>
+      send_protocol_message_callback_for_test_;
+  std::unique_ptr<DevToolsCPUThrottler> cpu_throttler_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsAgent);
 };

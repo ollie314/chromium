@@ -5,12 +5,12 @@
 #include "chrome/browser/plugins/plugin_info_message_filter.h"
 
 #include <stddef.h>
+
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -28,6 +28,7 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/browser/plugins_field_trial.h"
 #include "components/content_settings/core/common/content_settings.h"
+#include "components/prefs/pref_service.h"
 #include "components/rappor/rappor_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
@@ -54,19 +55,6 @@ using content::PluginService;
 using content::WebPluginInfo;
 
 namespace {
-
-#if defined(OS_WIN) || defined(OS_MACOSX)
-// These are the mime-types of plugins which are known to have PPAPI versions.
-const char* kPepperPluginMimeTypes[] = {
-    "application/pdf",
-    "application/x-google-chrome-pdf",
-    "application/x-nacl",
-    "application/x-pnacl",
-    "application/vnd.chromium.remoting-viewer",
-    "application/x-shockwave-flash",
-    "application/futuresplash",
-};
-#endif
 
 // For certain sandboxed Pepper plugins, use the JavaScript Content Settings.
 bool ShouldUseJavaScriptSettingForPlugin(const WebPluginInfo& plugin) {
@@ -128,16 +116,8 @@ void ReportMetrics(const std::string& mime_type,
   if (!rappor_service)
     return;
 
-  if (base::StartsWith(mime_type,
-                       content::kSilverlightPluginMimeTypePrefix,
-                       base::CompareCase::INSENSITIVE_ASCII)) {
-    rappor_service->RecordSample(
-        "Plugins.SilverlightOriginUrl", rappor::ETLD_PLUS_ONE_RAPPOR_TYPE,
-        net::registry_controlled_domains::GetDomainAndRegistry(
-            origin_url,
-            net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES));
-  } else if (mime_type == content::kFlashPluginSwfMimeType ||
-             mime_type == content::kFlashPluginSplMimeType) {
+  if (mime_type == content::kFlashPluginSwfMimeType ||
+      mime_type == content::kFlashPluginSplMimeType) {
     rappor_service->RecordSample(
         "Plugins.FlashOriginUrl", rappor::ETLD_PLUS_ONE_RAPPOR_TYPE,
         net::registry_controlled_domains::GetDomainAndRegistry(
@@ -273,7 +253,7 @@ void PluginInfoMessageFilter::PluginsLoaded(
     const std::vector<WebPluginInfo>& plugins) {
   ChromeViewHostMsg_GetPluginInfo_Output output;
   // This also fills in |actual_mime_type|.
-  scoped_ptr<PluginMetadata> plugin_metadata;
+  std::unique_ptr<PluginMetadata> plugin_metadata;
   if (context_.FindEnabledPlugin(params.render_frame_id, params.url,
                                  params.top_origin_url, params.mime_type,
                                  &output.status, &output.plugin,
@@ -343,16 +323,12 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
     const WebPluginInfo& plugin,
     const PluginMetadata* plugin_metadata,
     ChromeViewHostMsg_GetPluginInfo_Status* status) const {
-  if (plugin.type == WebPluginInfo::PLUGIN_TYPE_NPAPI) {
-    CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
-    // NPAPI plugins are not supported inside <webview> guests.
-#if defined(ENABLE_EXTENSIONS)
-    if (extensions::WebViewRendererState::GetInstance()->IsGuest(
-        render_process_id_)) {
-      *status = ChromeViewHostMsg_GetPluginInfo_Status::kNPAPINotSupported;
-      return;
-    }
-#endif
+  PluginMetadata::SecurityStatus plugin_status =
+      plugin_metadata->GetSecurityStatus(plugin);
+
+  if (plugin_status == PluginMetadata::SECURITY_STATUS_FULLY_TRUSTED) {
+    *status = ChromeViewHostMsg_GetPluginInfo_Status::kAllowed;
+    return;
   }
 
   ContentSetting plugin_setting = CONTENT_SETTING_DEFAULT;
@@ -372,8 +348,6 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
   DCHECK(plugin_setting != CONTENT_SETTING_DEFAULT);
   DCHECK(plugin_setting != CONTENT_SETTING_ASK);
 
-  PluginMetadata::SecurityStatus plugin_status =
-      plugin_metadata->GetSecurityStatus(plugin);
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   // Check if the plugin is outdated.
   if (plugin_status == PluginMetadata::SECURITY_STATUS_OUT_OF_DATE &&
@@ -386,28 +360,6 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
     return;
   }
 #endif
-  // Check if the plugin or its group is enabled by policy.
-  PluginPrefs::PolicyStatus plugin_policy =
-      plugin_prefs_->PolicyStatusForPlugin(plugin.name);
-  PluginPrefs::PolicyStatus group_policy =
-      plugin_prefs_->PolicyStatusForPlugin(plugin_metadata->name());
-
-  // Check if the plugin requires authorization.
-  if (plugin_status ==
-          PluginMetadata::SECURITY_STATUS_REQUIRES_AUTHORIZATION &&
-      plugin.type != WebPluginInfo::PLUGIN_TYPE_PEPPER_IN_PROCESS &&
-      plugin.type != WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS &&
-      plugin.type != WebPluginInfo::PLUGIN_TYPE_BROWSER_PLUGIN &&
-      !always_authorize_plugins_.GetValue() &&
-      plugin_setting != CONTENT_SETTING_BLOCK &&
-      uses_default_content_setting &&
-      plugin_policy != PluginPrefs::POLICY_ENABLED &&
-      group_policy != PluginPrefs::POLICY_ENABLED &&
-      !ChromePluginServiceFilter::GetInstance()->IsPluginRestricted(
-          plugin.path)) {
-    *status = ChromeViewHostMsg_GetPluginInfo_Status::kUnauthorized;
-    return;
-  }
 
   // Check if the plugin is crashing too much.
   if (PluginService::GetInstance()->IsPluginUnstable(plugin.path) &&
@@ -465,7 +417,7 @@ bool PluginInfoMessageFilter::Context::FindEnabledPlugin(
     ChromeViewHostMsg_GetPluginInfo_Status* status,
     WebPluginInfo* plugin,
     std::string* actual_mime_type,
-    scoped_ptr<PluginMetadata>* plugin_metadata) const {
+    std::unique_ptr<PluginMetadata>* plugin_metadata) const {
   *status = ChromeViewHostMsg_GetPluginInfo_Status::kAllowed;
 
   bool allow_wildcard = true;
@@ -475,19 +427,6 @@ bool PluginInfoMessageFilter::Context::FindEnabledPlugin(
       url, mime_type, allow_wildcard, &matching_plugins, &mime_types);
   if (matching_plugins.empty()) {
     *status = ChromeViewHostMsg_GetPluginInfo_Status::kNotFound;
-#if defined(OS_WIN) || defined(OS_MACOSX)
-    if (!PluginService::GetInstance()->NPAPIPluginsSupported()) {
-      // At this point it is not known for sure this is an NPAPI plugin as it
-      // could be a not-yet-installed Pepper plugin. To avoid notifying on
-      // these types, bail early based on a blacklist of pepper mime types.
-      for (auto pepper_mime_type : kPepperPluginMimeTypes)
-        if (pepper_mime_type == mime_type)
-          return false;
-
-      ChromePluginServiceFilter::GetInstance()->NPAPIPluginNotFound(
-          render_process_id_, render_frame_id, mime_type);
-    }
-#endif
     return false;
   }
 
@@ -529,7 +468,7 @@ void PluginInfoMessageFilter::Context::GetPluginContentSetting(
     ContentSetting* setting,
     bool* uses_default_content_setting,
     bool* is_managed) const {
-  scoped_ptr<base::Value> value;
+  std::unique_ptr<base::Value> value;
   content_settings::SettingInfo info;
   bool uses_plugin_specific_setting = false;
   if (ShouldUseJavaScriptSettingForPlugin(plugin)) {
@@ -541,21 +480,15 @@ void PluginInfoMessageFilter::Context::GetPluginContentSetting(
         &info);
   } else {
     content_settings::SettingInfo specific_info;
-    scoped_ptr<base::Value> specific_setting =
+    std::unique_ptr<base::Value> specific_setting =
         host_content_settings_map_->GetWebsiteSetting(
-            policy_url,
-            plugin_url,
-            CONTENT_SETTINGS_TYPE_PLUGINS,
-            resource,
+            policy_url, plugin_url, CONTENT_SETTINGS_TYPE_PLUGINS, resource,
             &specific_info);
     content_settings::SettingInfo general_info;
-    scoped_ptr<base::Value> general_setting =
+    std::unique_ptr<base::Value> general_setting =
         host_content_settings_map_->GetWebsiteSetting(
-            policy_url,
-            plugin_url,
-            CONTENT_SETTINGS_TYPE_PLUGINS,
-            std::string(),
-            &general_info);
+            policy_url, plugin_url, CONTENT_SETTINGS_TYPE_PLUGINS,
+            std::string(), &general_info);
 
     // If there is a plugin-specific setting, we use it, unless the general
     // setting was set by policy, in which case it takes precedence.

@@ -9,7 +9,7 @@
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/lifetime/keep_alive_registry.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/app_list/test/chrome_app_list_test_support.h"
 #include "chrome/browser/ui/browser.h"
@@ -27,14 +27,14 @@
 
 #if defined(OS_CHROMEOS)
 #include "ash/shell.h"
-#include "ash/test/app_list_controller_test_api.h"
+#include "chrome/browser/ui/ash/app_list/test/app_list_service_ash_test_api.h"
 #endif
 
 namespace {
 
 app_list::AppListView* GetAppListView(AppListService* service) {
 #if defined(OS_CHROMEOS)
-  return ash::test::AppListControllerTestApi(ash::Shell::GetInstance()).view();
+  return AppListServiceAshTestApi().GetAppListView();
 #else
   return static_cast<AppListServiceViews*>(service)->shower().app_list();
 #endif
@@ -68,7 +68,7 @@ typedef InProcessBrowserTest AppListServiceViewsBrowserTest;
 
 // Test closing the native app list window as if via a request from the OS.
 IN_PROC_BROWSER_TEST_F(AppListServiceViewsBrowserTest, NativeClose) {
-  AppListService* service = test::GetAppListService();
+  AppListService* service = AppListService::Get();
   EXPECT_FALSE(service->GetAppListWindow());
 
   // Since the profile is loaded, this will create a view immediately. This is
@@ -106,7 +106,7 @@ IN_PROC_BROWSER_TEST_F(AppListServiceViewsBrowserTest, NativeClose) {
 #define MAYBE_AcceleratorClose AcceleratorClose
 #endif
 IN_PROC_BROWSER_TEST_F(AppListServiceViewsBrowserTest, MAYBE_AcceleratorClose) {
-  AppListService* service = test::GetAppListService();
+  AppListService* service = AppListService::Get();
   service->ShowForProfile(browser()->profile());
   EXPECT_TRUE(service->GetAppListWindow());
 
@@ -119,13 +119,13 @@ IN_PROC_BROWSER_TEST_F(AppListServiceViewsBrowserTest, MAYBE_AcceleratorClose) {
   generator.PressKey(ui::VKEY_ESCAPE, 0);
 
 #if !defined(OS_CHROMEOS)
-  EXPECT_TRUE(chrome::WillKeepAlive());
+  EXPECT_TRUE(KeepAliveRegistry::GetInstance()->IsKeepingAlive());
 #endif
 
   base::RunLoop().RunUntilIdle();
 
 #if !defined(OS_CHROMEOS)
-  EXPECT_FALSE(chrome::WillKeepAlive());
+  EXPECT_FALSE(KeepAliveRegistry::GetInstance()->IsKeepingAlive());
 #endif
   EXPECT_FALSE(service->GetAppListWindow());
 }
@@ -150,7 +150,7 @@ class AppListControllerAppInfoDialogBrowserTest : public ExtensionBrowserTest {
     EXPECT_TRUE(extension_);
 
     // Open the app list.
-    service_ = test::GetAppListService();
+    service_ = AppListService::Get();
     EXPECT_FALSE(service_->GetAppListWindow());
     service_->ShowForProfile(browser()->profile());
     app_list_view_ = GetAppListView(service_);
@@ -229,7 +229,7 @@ IN_PROC_BROWSER_TEST_F(AppListServiceViewsExtensionBrowserTest,
   ASSERT_TRUE(extension);
 
   // Open the app list window for the app.
-  AppListService* service = test::GetAppListService();
+  AppListService* service = AppListService::Get();
   EXPECT_FALSE(service->GetAppListWindow());
 
   service->ShowForAppInstall(browser()->profile(), extension->id(), false);

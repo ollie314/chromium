@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <set>
 #include <string>
 
@@ -253,7 +254,7 @@ void CollectModuleVerificationData(
   using ModuleState = ClientIncidentReport_EnvironmentData_Process_ModuleState;
 
   for (size_t i = 0; i < num_modules_to_verify; ++i) {
-    scoped_ptr<ModuleState> module_state(new ModuleState());
+    std::unique_ptr<ModuleState> module_state(new ModuleState());
 
     int num_bytes_different = 0;
     bool scan_complete = VerifyModule(modules_to_verify[i],

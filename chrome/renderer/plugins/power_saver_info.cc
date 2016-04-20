@@ -73,6 +73,8 @@ std::string GetPluginInstancePosterAttribute(
 PowerSaverInfo::PowerSaverInfo()
     : power_saver_enabled(false), blocked_for_background_tab(false) {}
 
+PowerSaverInfo::PowerSaverInfo(const PowerSaverInfo& other) = default;
+
 PowerSaverInfo PowerSaverInfo::Get(content::RenderFrame* render_frame,
                                    bool power_saver_setting_on,
                                    const blink::WebPluginParams& params,
@@ -100,7 +102,7 @@ PowerSaverInfo PowerSaverInfo::Get(content::RenderFrame* render_frame,
     info.blocked_for_background_tab = render_frame->IsHidden();
 
     auto status = render_frame->GetPeripheralContentStatus(
-        render_frame->GetWebFrame()->top()->securityOrigin(),
+        render_frame->GetWebFrame()->top()->getSecurityOrigin(),
         url::Origin(params.url), gfx::Size());
 
     // Early-exit from the whole Power Saver system if the content is

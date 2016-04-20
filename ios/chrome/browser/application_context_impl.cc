@@ -11,9 +11,9 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
+#include "base/time/default_clock.h"
 #include "base/time/default_tick_clock.h"
 #include "base/tracked_objects.h"
 #include "components/component_updater/component_updater_service.h"
@@ -28,14 +28,16 @@
 #include "components/metrics_services_manager/metrics_services_manager.h"
 #include "components/net_log/chrome_net_log.h"
 #include "components/network_time/network_time_tracker.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/update_client/configurator.h"
 #include "components/update_client/update_query_params.h"
 #include "components/variations/service/variations_service.h"
-#include "components/web_resource/promo_resource_service.h"
 #include "components/web_resource/web_resource_pref_names.h"
+#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#include "ios/chrome/browser/browser_state/chrome_browser_state_manager_impl.h"
 #include "ios/chrome/browser/chrome_paths.h"
-#include "ios/chrome/browser/chrome_switches.h"
 #include "ios/chrome/browser/component_updater/ios_component_updater_configurator.h"
 #include "ios/chrome/browser/history/history_service_factory.h"
 #include "ios/chrome/browser/ios_chrome_io_thread.h"
@@ -44,23 +46,13 @@
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/chrome/browser/prefs/browser_prefs.h"
 #include "ios/chrome/browser/prefs/ios_chrome_pref_service_factory.h"
-#include "ios/chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "ios/chrome/browser/update_client/ios_chrome_update_query_params_delegate.h"
 #include "ios/chrome/browser/web_resource/web_resource_util.h"
 #include "ios/chrome/common/channel_info.h"
-#include "ios/public/provider/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/public/provider/chrome/browser/browser_state/chrome_browser_state_manager.h"
-#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/web/public/web_thread.h"
 #include "net/log/net_log_capture_mode.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/url_request/url_request_context_getter.h"
-
-namespace {
-// Dummy flag because iOS does not support disabling background networking.
-extern const char kDummyDisableBackgroundNetworking[] =
-    "dummy-disable-background-networking";
-}
 
 ApplicationContextImpl::ApplicationContextImpl(
     base::SequencedTaskRunner* local_state_task_runner,
@@ -98,6 +90,7 @@ void ApplicationContextImpl::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kMetricsReportingWifiOnly, true);
   registry->RegisterBooleanPref(prefs::kLastSessionUsedWKWebViewControlGroup,
                                 false);
+  registry->RegisterBooleanPref(prefs::kDroppedSafeBrowsingCookies, false);
 }
 
 void ApplicationContextImpl::PreCreateThreads() {
@@ -108,36 +101,19 @@ void ApplicationContextImpl::PreCreateThreads() {
 
 void ApplicationContextImpl::PreMainMessageLoopRun() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  const base::CommandLine& command_line =
-      *base::CommandLine::ForCurrentProcess();
-  if (!command_line.HasSwitch(switches::kDisableIOSWebResources)) {
-    DCHECK(!promo_resource_service_.get());
-    promo_resource_service_.reset(new web_resource::PromoResourceService(
-        GetLocalState(), ::GetChannel(), GetApplicationLocale(),
-        GetSystemURLRequestContext(), kDummyDisableBackgroundNetworking,
-        web_resource::GetIOSChromeParseJSONCallback()));
-    promo_resource_service_->StartAfterDelay();
-  }
 }
 
 void ApplicationContextImpl::StartTearDown() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  // We need to destroy the MetricsServicesManager, PromoResourceService and
-  // SafeBrowsing before the IO thread gets destroyed, since their destructors
-  // can call the URLFetcher destructor, which does a PostDelayedTask operation
-  // on the IO thread. (The IO thread will handle that URLFetcher operation
-  // before going away.)
-  if (safe_browsing_service_)
-    safe_browsing_service_->ShutDown();
+  // We need to destroy the MetricsServicesManager before the IO thread gets
+  // destroyed, since the destructor can call the URLFetcher destructor, which
+  // does a PostDelayedTask operation on the IO thread. (The IO thread will
+  // handle that URLFetcher operation before going away.)
 
   metrics_services_manager_.reset();
 
   // Need to clear browser states before the IO thread.
   chrome_browser_state_manager_.reset();
-
-  // PromoResourceService must be destroyed after the keyed services and before
-  // the IO thread.
-  promo_resource_service_.reset();
 
   // The GCMDriver must shut down while the IO thread is still alive.
   if (gcm_driver_)
@@ -236,11 +212,8 @@ const std::string& ApplicationContextImpl::GetApplicationLocale() {
 ios::ChromeBrowserStateManager*
 ApplicationContextImpl::GetChromeBrowserStateManager() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!chrome_browser_state_manager_) {
-    chrome_browser_state_manager_ =
-        ios::GetChromeBrowserProvider()->CreateChromeBrowserStateManager();
-    DCHECK(chrome_browser_state_manager_.get());
-  }
+  if (!chrome_browser_state_manager_)
+    chrome_browser_state_manager_.reset(new ChromeBrowserStateManagerImpl());
   return chrome_browser_state_manager_.get();
 }
 
@@ -249,7 +222,7 @@ ApplicationContextImpl::GetMetricsServicesManager() {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!metrics_services_manager_) {
     metrics_services_manager_.reset(
-        new metrics_services_manager::MetricsServicesManager(make_scoped_ptr(
+        new metrics_services_manager::MetricsServicesManager(base::WrapUnique(
             new IOSChromeMetricsServicesManagerClient(GetLocalState()))));
   }
   return metrics_services_manager_.get();
@@ -280,7 +253,8 @@ ApplicationContextImpl::GetNetworkTimeTracker() {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!network_time_tracker_) {
     network_time_tracker_.reset(new network_time::NetworkTimeTracker(
-        make_scoped_ptr(new base::DefaultTickClock), GetLocalState()));
+        base::WrapUnique(new base::DefaultClock),
+        base::WrapUnique(new base::DefaultTickClock), GetLocalState()));
   }
   return network_time_tracker_.get();
 }
@@ -302,7 +276,7 @@ gcm::GCMDriver* ApplicationContextImpl::GetGCMDriver() {
 web_resource::PromoResourceService*
 ApplicationContextImpl::GetPromoResourceService() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return promo_resource_service_.get();
+  return nullptr;
 }
 
 component_updater::ComponentUpdateService*
@@ -325,17 +299,6 @@ CRLSetFetcher* ApplicationContextImpl::GetCRLSetFetcher() {
     crl_set_fetcher_ = new CRLSetFetcher;
   }
   return crl_set_fetcher_.get();
-}
-
-safe_browsing::SafeBrowsingService*
-ApplicationContextImpl::GetSafeBrowsingService() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (!safe_browsing_service_) {
-    safe_browsing_service_ =
-        safe_browsing::SafeBrowsingService::CreateSafeBrowsingService();
-    safe_browsing_service_->Initialize();
-  }
-  return safe_browsing_service_.get();
 }
 
 void ApplicationContextImpl::SetApplicationLocale(const std::string& locale) {
@@ -386,7 +349,7 @@ void ApplicationContextImpl::CreateGCMDriver() {
           base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
 
   gcm_driver_ = gcm::CreateGCMDriverDesktop(
-      make_scoped_ptr(new gcm::GCMClientFactory), GetLocalState(), store_path,
+      base::WrapUnique(new gcm::GCMClientFactory), GetLocalState(), store_path,
       GetSystemURLRequestContext(), ::GetChannel(),
       web::WebThread::GetTaskRunnerForThread(web::WebThread::UI),
       web::WebThread::GetTaskRunnerForThread(web::WebThread::IO),

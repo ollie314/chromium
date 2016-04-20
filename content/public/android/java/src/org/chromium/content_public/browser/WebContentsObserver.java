@@ -4,6 +4,8 @@
 
 package org.chromium.content_public.browser;
 
+import org.chromium.content_public.common.MediaMetadata;
+
 import java.lang.ref.WeakReference;
 
 /**
@@ -28,6 +30,19 @@ public abstract class WebContentsObserver {
     public void renderViewReady() {}
 
     public void renderProcessGone(boolean wasOomProtected) {}
+
+    /**
+     * Called when the current navigation finishes.
+     *
+     * @param isMainFrame Whether the navigation is for the main frame.
+     * @param isErrorPage Whether the navigation shows an error page.
+     * @param hasCommitted Whether the navigation has committed. This returns true for either
+     *                     successful commits or error pages that replace the previous page
+     *                     (distinguished by |isErrorPage|), and false for errors that leave the
+     *                     user on the previous page.
+     */
+    public void didFinishNavigation(
+            boolean isMainFrame, boolean isErrorPage, boolean hasCommitted) {}
 
     /**
      * Called when the a page starts loading.
@@ -150,9 +165,11 @@ public abstract class WebContentsObserver {
     /**
      * Called when the media session state changed.
      * @param isControllable if the session can be resumed or suspended.
-     * @param isSuspended if the session currently suspended or not
+     * @param isSuspended if the session currently suspended or not.
+     * @param metadata of the media session.
      */
-    public void mediaSessionStateChanged(boolean isControllable, boolean isSuspended) {}
+    public void mediaSessionStateChanged(
+            boolean isControllable, boolean isSuspended, MediaMetadata metadata) {}
 
     /**
      * Stop observing the web contents and clean up associated references.

@@ -28,6 +28,10 @@ class WebContents;
 // tabs are enabled. Replaces the current controller.
 - (void)createTabStripController;
 
+// Sets the window's collection behavior to the appropriate
+// fullscreen behavior.
+- (void)updateFullscreenCollectionBehavior;
+
 // Saves the window's position in the local state preferences.
 - (void)saveWindowPositionIfNeeded;
 
@@ -44,7 +48,6 @@ class WebContents;
 
 // Shows the informational "how to exit fullscreen" bubble.
 - (void)showFullscreenExitBubbleIfNecessary;
-- (void)destroyFullscreenExitBubbleIfNecessary;
 
 // Lays out the tab strip and avatar button.
 - (void)applyTabStripLayout:(const chrome::TabStripLayout&)layout;
@@ -52,7 +55,6 @@ class WebContents;
 // Returns YES if the bookmark bar should be placed below the infobar, NO
 // otherwise.
 - (BOOL)placeBookmarkBarBelowInfoBar;
-
 
 // Lays out the tab content area in the given frame. If the height changes,
 // sends a message to the renderer to resize.
@@ -169,6 +171,10 @@ class WebContents;
 // out of AppKit Fullscreen.
 - (BOOL)shouldUseCustomAppKitFullscreenTransition:(BOOL)enterFullScreen;
 
+// Resets the variables that were set from using custom AppKit fullscreen
+// animation.
+- (void)resetCustomAppKitFullscreenVariables;
+
 - (content::WebContents*)webContents;
 - (PermissionBubbleManager*)permissionBubbleManager;
 
@@ -191,8 +197,8 @@ class WebContents;
 // it when we are entering fullscreen.
 - (void)adjustUIForEnteringFullscreen;
 
-// Returns YES if the fullscreen is for tab content.
-- (BOOL)isFullscreenForTabContent;
+// Returns YES if the fullscreen is for tab content or an extension.
+- (BOOL)isFullscreenForTabContentOrExtension;
 
 #endif
 

@@ -27,12 +27,10 @@
 #define ScriptRunner_h
 
 #include "core/CoreExport.h"
-#include "core/fetch/ResourcePtr.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Deque.h"
 #include "wtf/HashMap.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
@@ -41,17 +39,14 @@ class Document;
 class ScriptLoader;
 class WebTaskRunner;
 
-class CORE_EXPORT ScriptRunner final : public NoBaseWillBeGarbageCollectedFinalized<ScriptRunner> {
-    WTF_MAKE_NONCOPYABLE(ScriptRunner); USING_FAST_MALLOC_WILL_BE_REMOVED(ScriptRunner);
+class CORE_EXPORT ScriptRunner final : public GarbageCollectedFinalized<ScriptRunner> {
+    WTF_MAKE_NONCOPYABLE(ScriptRunner);
 public:
-    static PassOwnPtrWillBeRawPtr<ScriptRunner> create(Document* document)
+    static ScriptRunner* create(Document* document)
     {
-        return adoptPtrWillBeNoop(new ScriptRunner(document));
+        return new ScriptRunner(document);
     }
     ~ScriptRunner();
-#if !ENABLE(OILPAN)
-    void dispose();
-#endif
 
     enum ExecutionType { ASYNC_EXECUTION, IN_ORDER_EXECUTION };
     void queueScriptForExecution(ScriptLoader*, ExecutionType);
@@ -61,7 +56,7 @@ public:
     void notifyScriptReady(ScriptLoader*, ExecutionType);
     void notifyScriptLoadError(ScriptLoader*, ExecutionType);
 
-    static void movePendingAsyncScript(Document&, Document&, ScriptLoader*);
+    static void movePendingScript(Document&, Document&, ScriptLoader*);
 
     DECLARE_TRACE();
 
@@ -70,24 +65,24 @@ private:
 
     explicit ScriptRunner(Document*);
 
-    void addPendingAsyncScript(ScriptLoader*);
-
-    void movePendingAsyncScript(ScriptRunner*, ScriptLoader*);
+    void movePendingScript(ScriptRunner*, ScriptLoader*);
+    bool removePendingInOrderScript(ScriptLoader*);
+    void scheduleReadyInOrderScripts();
 
     void postTask(const WebTraceLocation&);
 
-    bool executeTaskFromQueue(WillBeHeapDeque<RawPtrWillBeMember<ScriptLoader>>*);
+    bool executeTaskFromQueue(HeapDeque<Member<ScriptLoader>>*);
 
     void executeTask();
 
-    RawPtrWillBeMember<Document> m_document;
+    Member<Document> m_document;
 
-    WillBeHeapDeque<RawPtrWillBeMember<ScriptLoader>> m_pendingInOrderScripts;
-    WillBeHeapHashSet<RawPtrWillBeMember<ScriptLoader>> m_pendingAsyncScripts;
+    HeapDeque<Member<ScriptLoader>> m_pendingInOrderScripts;
+    HeapHashSet<Member<ScriptLoader>> m_pendingAsyncScripts;
 
     // http://www.whatwg.org/specs/web-apps/current-work/#set-of-scripts-that-will-execute-as-soon-as-possible
-    WillBeHeapDeque<RawPtrWillBeMember<ScriptLoader>> m_asyncScriptsToExecuteSoon;
-    WillBeHeapDeque<RawPtrWillBeMember<ScriptLoader>> m_inOrderScriptsToExecuteSoon;
+    HeapDeque<Member<ScriptLoader>> m_asyncScriptsToExecuteSoon;
+    HeapDeque<Member<ScriptLoader>> m_inOrderScriptsToExecuteSoon;
 
     WebTaskRunner* m_taskRunner;
 
@@ -96,11 +91,6 @@ private:
     bool m_isSuspended;
 #ifndef NDEBUG
     bool m_hasEverBeenSuspended;
-#endif
-
-#if !ENABLE(OILPAN)
-    bool m_isDisposed;
-    WeakPtrFactory<ScriptRunner> m_weakPointerFactoryForTasks;
 #endif
 };
 

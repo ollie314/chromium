@@ -12,6 +12,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/files/scoped_file.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/process/process.h"
 #include "build/build_config.h"
 #include "ipc/ipc_channel_handle.h"
@@ -223,6 +224,7 @@ class IPC_EXPORT Channel : public Endpoint {
   // message from client to server we need to send the PID from the global
   // PID namespace.
   static void SetGlobalPid(int pid);
+  static int GetGlobalPid();
 #endif
 
 #if defined(OS_ANDROID)

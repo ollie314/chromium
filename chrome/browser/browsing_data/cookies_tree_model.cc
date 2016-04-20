@@ -175,6 +175,8 @@ LocalDataContainer* GetLocalDataContainerForNode(CookieTreeNode* node) {
 
 CookieTreeNode::DetailedInfo::DetailedInfo() : node_type(TYPE_NONE) {}
 
+CookieTreeNode::DetailedInfo::DetailedInfo(const DetailedInfo& other) = default;
+
 CookieTreeNode::DetailedInfo::~DetailedInfo() {}
 
 CookieTreeNode::DetailedInfo& CookieTreeNode::DetailedInfo::Init(
@@ -288,9 +290,8 @@ CookieTreeNode::DetailedInfo& CookieTreeNode::DetailedInfo::InitFlashLSO(
 // CookieTreeNode, public:
 
 void CookieTreeNode::DeleteStoredObjects() {
-  std::for_each(children().begin(),
-                children().end(),
-                std::mem_fun(&CookieTreeNode::DeleteStoredObjects));
+  for (auto* child : children())
+    child->DeleteStoredObjects();
 }
 
 CookiesTreeModel* CookieTreeNode::GetModel() const {
@@ -598,8 +599,7 @@ CookieTreeRootNode::CookieTreeRootNode(CookiesTreeModel* model)
 CookieTreeRootNode::~CookieTreeRootNode() {}
 
 CookieTreeHostNode* CookieTreeRootNode::GetOrCreateHostNode(const GURL& url) {
-  scoped_ptr<CookieTreeHostNode> host_node(
-      new CookieTreeHostNode(url));
+  std::unique_ptr<CookieTreeHostNode> host_node(new CookieTreeHostNode(url));
 
   // First see if there is an existing match.
   std::vector<CookieTreeNode*>::iterator host_node_iterator =
@@ -763,12 +763,8 @@ void CookieTreeHostNode::CreateContentException(
          setting == CONTENT_SETTING_BLOCK ||
          setting == CONTENT_SETTING_SESSION_ONLY);
   if (CanCreateContentException()) {
-    cookie_settings->ResetCookieSetting(
-        ContentSettingsPattern::FromURLNoWildcard(url_),
-        ContentSettingsPattern::Wildcard());
-    cookie_settings->SetCookieSetting(
-        ContentSettingsPattern::FromURL(url_),
-        ContentSettingsPattern::Wildcard(), setting);
+    cookie_settings->ResetCookieSetting(url_);
+    cookie_settings->SetCookieSetting(url_, setting);
   }
 }
 
@@ -992,12 +988,12 @@ CookiesTreeModel::~CookiesTreeModel() {
 // static
 int CookiesTreeModel::GetSendForMessageID(const net::CanonicalCookie& cookie) {
   if (cookie.IsSecure()) {
-    if (cookie.IsFirstPartyOnly())
-      return IDS_COOKIES_COOKIE_SENDFOR_SECURE_FIRSTPARTY;
+    if (cookie.SameSite() != net::CookieSameSite::NO_RESTRICTION)
+      return IDS_COOKIES_COOKIE_SENDFOR_SECURE_SAME_SITE;
     return IDS_COOKIES_COOKIE_SENDFOR_SECURE;
   }
-  if (cookie.IsFirstPartyOnly())
-    return IDS_COOKIES_COOKIE_SENDFOR_FIRSTPARTY;
+  if (cookie.SameSite() != net::CookieSameSite::NO_RESTRICTION)
+    return IDS_COOKIES_COOKIE_SENDFOR_SAME_SITE;
   return IDS_COOKIES_COOKIE_SENDFOR_ANY;
 }
 
@@ -1224,8 +1220,6 @@ void CookiesTreeModel::PopulateCookieInfoWithFilter(
   for (CookieList::iterator it = container->cookie_list_.begin();
        it != container->cookie_list_.end(); ++it) {
     GURL source = CanonicalizeCookieSource(*it);
-    if (!source.SchemeIsHTTPOrHTTPS())
-      continue;
     if (source.is_empty() || !group_by_cookie_source_) {
       std::string domain = it->Domain();
       if (domain.length() > 1 && domain[0] == '.')
@@ -1235,6 +1229,8 @@ void CookiesTreeModel::PopulateCookieInfoWithFilter(
       source = GURL(std::string(url::kHttpScheme) +
                     url::kStandardSchemeSeparator + domain + "/");
     }
+    if (!source.SchemeIsHTTPOrHTTPS())
+      continue;
 
     if (filter.empty() || (CookieTreeHostNode::TitleForUrl(source)
                                .find(filter) != base::string16::npos)) {

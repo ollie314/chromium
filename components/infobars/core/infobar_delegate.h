@@ -63,6 +63,8 @@ class InfoBarDelegate {
   // Unique identifier for every InfoBarDelegate subclass.
   // KEEP IN SYNC WITH THE InfoBarIdentifier ENUM IN histograms.xml.
   // NEW VALUES MUST BE APPENDED AND AVOID CHANGING ANY PRE-EXISTING VALUES.
+  // A Java counterpart will be generated for this enum.
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.infobar
   enum InfoBarIdentifier {
     INVALID = -1,
     TEST_INFOBAR = 0,
@@ -95,7 +97,7 @@ class InfoBarDelegate {
     PEPPER_BROKER_INFOBAR_DELEGATE = 27,
     PERMISSION_UPDATE_INFOBAR_DELEGATE = 28,
     DURABLE_STORAGE_PERMISSION_INFOBAR_DELEGATE_ANDROID = 29,
-    NPAPI_REMOVAL_INFOBAR_DELEGATE = 30,
+    // Removed: NPAPI_REMOVAL_INFOBAR_DELEGATE = 30,
     OUTDATED_PLUGIN_INFOBAR_DELEGATE = 31,
     PLUGIN_METRO_MODE_INFOBAR_DELEGATE = 32,
     RELOAD_PLUGIN_INFOBAR_DELEGATE = 33,
@@ -124,7 +126,11 @@ class InfoBarDelegate {
     SHOW_PASSKIT_INFOBAR_ERROR_DELEGATE = 56,
     READER_MODE_INFOBAR_DELEGATE = 57,
     SYNC_ERROR_INFOBAR_DELEGATE = 58,
-    UPGRADE_INFOBAR_DELEGATE = 59
+    UPGRADE_INFOBAR_DELEGATE = 59,
+    CHROME_WINDOW_ERROR = 60,
+    CONFIRM_DANGEROUS_DOWNLOAD = 61,
+    DESKTOP_SEARCH_REDIRECTION_INFOBAR_DELEGATE = 62,
+    UPDATE_PASSWORD_INFOBAR_DELEGATE = 63,
   };
 
   // Describes navigation events, used to decide whether infobars should be

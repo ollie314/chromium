@@ -16,6 +16,7 @@ namespace content {
 namespace {
 
 const int kRenderFrameId = 2;
+const char kEmptyMatchedDeviceId[] = "";
 
 class MockAudioDelegate : public media::AudioOutputIPCDelegate {
  public:
@@ -28,12 +29,13 @@ class MockAudioDelegate : public media::AudioOutputIPCDelegate {
     state_ = state;
   }
 
-  void OnDeviceAuthorized(
-      media::OutputDeviceStatus device_status,
-      const media::AudioParameters& output_params) override {
+  void OnDeviceAuthorized(media::OutputDeviceStatus device_status,
+                          const media::AudioParameters& output_params,
+                          const std::string& matched_device_id) override {
     device_authorized_received_ = true;
     device_status_ = device_status;
     output_params_ = output_params;
+    matched_device_id_ = matched_device_id;
   }
 
   void OnStreamCreated(base::SharedMemoryHandle handle,
@@ -80,6 +82,7 @@ class MockAudioDelegate : public media::AudioOutputIPCDelegate {
   bool device_authorized_received_;
   media::AudioParameters output_params_;
   media::OutputDeviceStatus device_status_;
+  std::string matched_device_id_;
 
   bool created_received_;
   base::SharedMemoryHandle handle_;
@@ -107,7 +110,7 @@ TEST(AudioMessageFilterTest, Basic) {
       new AudioMessageFilter(message_loop.task_runner()));
 
   MockAudioDelegate delegate;
-  const scoped_ptr<media::AudioOutputIPC> ipc =
+  const std::unique_ptr<media::AudioOutputIPC> ipc =
       filter->CreateAudioOutputIPC(kRenderFrameId);
   static const int kSessionId = 0;
   static const std::string kDeviceId;
@@ -121,7 +124,8 @@ TEST(AudioMessageFilterTest, Basic) {
   // AudioMsg_NotifyDeviceAuthorized
   EXPECT_FALSE(delegate.device_authorized_received());
   filter->OnMessageReceived(AudioMsg_NotifyDeviceAuthorized(
-      kStreamId, media::OUTPUT_DEVICE_STATUS_OK, MockOutputParams()));
+      kStreamId, media::OUTPUT_DEVICE_STATUS_OK, MockOutputParams(),
+      kEmptyMatchedDeviceId));
   EXPECT_TRUE(delegate.device_authorized_received());
   EXPECT_TRUE(delegate.output_params().Equals(MockOutputParams()));
   delegate.Reset();
@@ -159,9 +163,9 @@ TEST(AudioMessageFilterTest, Delegates) {
 
   MockAudioDelegate delegate1;
   MockAudioDelegate delegate2;
-  const scoped_ptr<media::AudioOutputIPC> ipc1 =
+  const std::unique_ptr<media::AudioOutputIPC> ipc1 =
       filter->CreateAudioOutputIPC(kRenderFrameId);
-  const scoped_ptr<media::AudioOutputIPC> ipc2 =
+  const std::unique_ptr<media::AudioOutputIPC> ipc2 =
       filter->CreateAudioOutputIPC(kRenderFrameId);
   ipc1->CreateStream(&delegate1, media::AudioParameters());
   ipc2->CreateStream(&delegate2, media::AudioParameters());

@@ -5,13 +5,13 @@
 #include "chrome/browser/metrics/chrome_stability_metrics_provider.h"
 
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
-#include "base/prefs/testing_pref_service.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/metrics/proto/system_profile.pb.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
+#include "components/prefs/testing_pref_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/notification_details.h"
@@ -39,7 +39,7 @@ class ChromeStabilityMetricsProviderTest : public testing::Test {
   TestingPrefServiceSimple* prefs() { return prefs_.get(); }
 
  private:
-  scoped_ptr<TestingPrefServiceSimple> prefs_;
+  std::unique_ptr<TestingPrefServiceSimple> prefs_;
   content::TestBrowserThreadBundle thread_bundle_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeStabilityMetricsProviderTest);
@@ -69,7 +69,7 @@ TEST_F(ChromeStabilityMetricsProviderTest, BrowserChildProcessObserver) {
 
 TEST_F(ChromeStabilityMetricsProviderTest, NotificationObserver) {
   ChromeStabilityMetricsProvider provider(prefs());
-  scoped_ptr<TestingProfileManager> profile_manager(
+  std::unique_ptr<TestingProfileManager> profile_manager(
       new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
   EXPECT_TRUE(profile_manager->SetUp());
 
@@ -77,7 +77,7 @@ TEST_F(ChromeStabilityMetricsProviderTest, NotificationObserver) {
   TestingProfile* profile(
       profile_manager->CreateTestingProfile("StabilityTestProfile"));
 
-  scoped_ptr<content::MockRenderProcessHostFactory> rph_factory(
+  std::unique_ptr<content::MockRenderProcessHostFactory> rph_factory(
       new content::MockRenderProcessHostFactory());
   scoped_refptr<content::SiteInstance> site_instance(
       content::SiteInstance::Create(profile));

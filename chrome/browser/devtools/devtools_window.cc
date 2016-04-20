@@ -10,7 +10,6 @@
 #include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/certificate_viewer.h"
@@ -21,11 +20,9 @@
 #include "chrome/browser/task_management/web_contents_tags.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -34,6 +31,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/ui/zoom/page_zoom.h"
 #include "components/ui/zoom/zoom_controller.h"
@@ -68,6 +66,9 @@ typedef std::vector<DevToolsWindow*> DevToolsWindows;
 base::LazyInstance<DevToolsWindows>::Leaky g_instances =
     LAZY_INSTANCE_INITIALIZER;
 
+base::LazyInstance<std::vector<base::Callback<void(DevToolsWindow*)>>>::Leaky
+    g_creation_callbacks = LAZY_INSTANCE_INITIALIZER;
+
 static const char kKeyUpEventName[] = "keyup";
 static const char kKeyDownEventName[] = "keydown";
 
@@ -76,11 +77,11 @@ bool FindInspectedBrowserAndTabIndex(
   if (!inspected_web_contents)
     return false;
 
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    int tab_index = it->tab_strip_model()->GetIndexOfWebContents(
-        inspected_web_contents);
+  for (auto* b : *BrowserList::GetInstance()) {
+    int tab_index =
+        b->tab_strip_model()->GetIndexOfWebContents(inspected_web_contents);
     if (tab_index != TabStripModel::kNoTab) {
-      *browser = *it;
+      *browser = b;
       *tab = tab_index;
       return true;
     }
@@ -220,7 +221,7 @@ class DevToolsEventForwarder {
 
 void DevToolsEventForwarder::SetWhitelistedShortcuts(
     const std::string& message) {
-  scoped_ptr<base::Value> parsed_message = base::JSONReader::Read(message);
+  std::unique_ptr<base::Value> parsed_message = base::JSONReader::Read(message);
   base::ListValue* shortcut_list;
   if (!parsed_message->GetAsList(&shortcut_list))
       return;
@@ -303,6 +304,23 @@ DevToolsWindow::ObserverWithAccessor::~ObserverWithAccessor() {
 // DevToolsWindow -------------------------------------------------------------
 
 const char DevToolsWindow::kDevToolsApp[] = "DevToolsApp";
+
+// static
+void DevToolsWindow::AddCreationCallbackForTest(
+    const CreationCallback& callback) {
+  g_creation_callbacks.Get().push_back(callback);
+}
+
+// static
+void DevToolsWindow::RemoveCreationCallbackForTest(
+    const CreationCallback& callback) {
+  for (size_t i = 0; i < g_creation_callbacks.Get().size(); ++i) {
+    if (g_creation_callbacks.Get().at(i).Equals(callback)) {
+      g_creation_callbacks.Get().erase(g_creation_callbacks.Get().begin() + i);
+      return;
+    }
+  }
+}
 
 DevToolsWindow::~DevToolsWindow() {
   life_stage_ = kClosing;
@@ -539,15 +557,6 @@ void DevToolsWindow::InspectElement(
     window->inspect_element_start_time_ = start_time;
 }
 
-// static
-content::DevToolsExternalAgentProxyDelegate*
-DevToolsWindow::CreateWebSocketAPIChannel(const std::string& path) {
-  if (path.find("/devtools/frontend_api") != 0)
-    return nullptr;
-
-  return DevToolsUIBindings::CreateWebSocketAPIChannel();
-}
-
 void DevToolsWindow::ScheduleShow(const DevToolsToggleAction& action) {
   if (life_stage_ == kLoadCompleted) {
     Show(action);
@@ -707,7 +716,8 @@ DevToolsWindow::DevToolsWindow(Profile* profile,
       // Passing "dockSide=undocked" parameter ensures proper UI.
       life_stage_(can_dock ? kNotLoaded : kIsDockedSet),
       action_on_load_(DevToolsToggleAction::NoOp()),
-      intercepted_page_beforeunload_(false) {
+      intercepted_page_beforeunload_(false),
+      ready_for_test_(false) {
   // Set up delegate, so we get fully-functional window immediately.
   // It will not appear in UI though until |life_stage_ == kLoadCompleted|.
   main_web_contents_->SetDelegate(this);
@@ -742,6 +752,11 @@ DevToolsWindow::DevToolsWindow(Profile* profile,
   // so that it shows up in the task manager.
   task_management::WebContentsTags::CreateForDevToolsContents(
       main_web_contents_);
+
+  std::vector<base::Callback<void(DevToolsWindow*)>> copy(
+      g_creation_callbacks.Get());
+  for (const auto& callback : copy)
+    callback.Run(this);
 }
 
 // static
@@ -773,7 +788,7 @@ DevToolsWindow* DevToolsWindow::Create(
                           shared_worker_frontend,
                           remote_frontend,
                           can_dock, settings));
-  scoped_ptr<WebContents> main_web_contents(
+  std::unique_ptr<WebContents> main_web_contents(
       WebContents::Create(WebContents::CreateParams(profile)));
   main_web_contents->GetController().LoadURL(
       DecorateFrontendURL(url), content::Referrer(),
@@ -1100,10 +1115,7 @@ void DevToolsWindow::OpenInNewTab(const std::string& url) {
       ui::PAGE_TRANSITION_LINK, false);
   WebContents* inspected_web_contents = GetInspectedWebContents();
   if (!inspected_web_contents || !inspected_web_contents->OpenURL(params)) {
-    chrome::HostDesktopType host_desktop_type =
-        browser_ ? browser_->host_desktop_type() : chrome::GetActiveDesktop();
-
-    chrome::ScopedTabbedBrowserDisplayer displayer(profile_, host_desktop_type);
+    chrome::ScopedTabbedBrowserDisplayer displayer(profile_);
     chrome::AddSelectedTabWithURL(displayer.browser(), GURL(url),
                                   ui::PAGE_TRANSITION_LINK);
   }
@@ -1163,6 +1175,14 @@ void DevToolsWindow::OnLoadCompleted() {
     LoadCompleted();
 }
 
+void DevToolsWindow::ReadyForTest() {
+  ready_for_test_ = true;
+  if (!ready_for_test_callback_.is_null()) {
+    ready_for_test_callback_.Run();
+    ready_for_test_callback_ = base::Closure();
+  }
+}
+
 void DevToolsWindow::CreateDevToolsBrowser() {
   PrefService* prefs = profile_->GetPrefs();
   if (!prefs->GetDictionary(prefs::kAppWindowPlacement)->HasKey(kDevToolsApp)) {
@@ -1178,10 +1198,7 @@ void DevToolsWindow::CreateDevToolsBrowser() {
     dev_tools_defaults->SetBoolean("always_on_top", false);
   }
 
-  browser_ = new Browser(Browser::CreateParams::CreateForDevTools(
-      profile_,
-      chrome::GetHostDesktopTypeForNativeView(
-          main_web_contents_->GetNativeView())));
+  browser_ = new Browser(Browser::CreateParams::CreateForDevTools(profile_));
   browser_->tab_strip_model()->AddWebContents(
       main_web_contents_, -1, ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
       TabStripModel::ADD_ACTIVE);
@@ -1279,13 +1296,13 @@ bool DevToolsWindow::ForwardKeyboardEvent(
   return event_forwarder_->ForwardEvent(event);
 }
 
-bool DevToolsWindow::ReloadInspectedWebContents(bool ignore_cache) {
+bool DevToolsWindow::ReloadInspectedWebContents(bool bypass_cache) {
   // Only route reload via front-end if the agent is attached.
   WebContents* wc = GetInspectedWebContents();
   if (!wc || wc->GetCrashedStatus() != base::TERMINATION_STATUS_STILL_RUNNING)
     return false;
-  base::FundamentalValue ignore_cache_value(ignore_cache);
+  base::FundamentalValue bypass_cache_value(bypass_cache);
   bindings_->CallClientFunction("DevToolsAPI.reloadInspectedPage",
-                                &ignore_cache_value, nullptr, nullptr);
+                                &bypass_cache_value, nullptr, nullptr);
   return true;
 }

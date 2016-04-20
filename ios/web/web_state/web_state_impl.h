@@ -9,12 +9,12 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/values.h"
 #include "ios/web/navigation/navigation_manager_delegate.h"
@@ -41,6 +41,7 @@ struct FaviconURL;
 struct LoadCommittedDetails;
 class NavigationManager;
 class WebInterstitialImpl;
+class WebStateDelegate;
 class WebStateFacadeDelegate;
 class WebStatePolicyDecider;
 class WebUIIOS;
@@ -62,9 +63,8 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   WebStateImpl(BrowserState* browser_state);
   ~WebStateImpl() override;
 
-  // Sets the CRWWebController that backs this object. Typically
-  // |web_controller| will also take ownership of this object. This will also
-  // create the WebContentsIOS facade.
+  // Gets/Sets the CRWWebController that backs this object.
+  CRWWebController* GetWebController();
   void SetWebController(CRWWebController* web_controller);
 
   // Gets or sets the delegate used to communicate with the web contents facade.
@@ -119,7 +119,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   // Called when the page requests a credential.
   void OnCredentialsRequested(int request_id,
                               const GURL& source_url,
-                              bool suppress_ui,
+                              bool unmediated,
                               const std::vector<std::string>& federations,
                               bool user_interaction);
 
@@ -208,12 +208,6 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   // Returns the tracker for this WebStateImpl.
   RequestTrackerImpl* GetRequestTracker();
 
-  // Gets and sets the mode controlling the HTTP cache behavior.
-  // TODO(rohitrao): As with the other RequestTracker-related methods, this
-  // should become an internal detail of this class.
-  net::RequestTracker::CacheMode GetCacheMode();
-  void SetCacheMode(net::RequestTracker::CacheMode mode);
-
   // Lazily creates (if necessary) and returns |request_group_id_|.
   // IMPORTANT: This should not be used for anything other than associating this
   // instance to network requests.
@@ -222,12 +216,18 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   NSString* GetRequestGroupID();
 
   // WebState:
+  WebStateDelegate* GetDelegate() override;
+  void SetDelegate(WebStateDelegate* delegate) override;
+  bool IsWebUsageEnabled() const override;
+  void SetWebUsageEnabled(bool enabled) override;
   UIView* GetView() override;
-  web::WebViewType GetWebViewType() const override;
   BrowserState* GetBrowserState() const override;
   void OpenURL(const WebState::OpenURLParams& params) override;
   NavigationManager* GetNavigationManager() override;
   CRWJSInjectionReceiver* GetJSInjectionReceiver() const override;
+  void ExecuteJavaScript(const base::string16& javascript) override;
+  void ExecuteJavaScript(const base::string16& javascript,
+                         const JavaScriptResultCallback& callback) override;
   const std::string& GetContentLanguageHeader() const override;
   const std::string& GetContentsMimeType() const override;
   bool ContentIsHTML() const override;
@@ -240,6 +240,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   void ShowTransientContentView(CRWContentView* content_view) override;
   bool IsShowingWebInterstitial() const override;
   WebInterstitial* GetWebInterstitial() const override;
+  int GetCertGroupId() const override;
   void AddScriptCommandCallback(const ScriptCommandCallback& callback,
                                 const std::string& command_prefix) override;
   void RemoveScriptCommandCallback(const std::string& command_prefix) override;
@@ -257,8 +258,12 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   // Called to dismiss the currently-displayed transient content view.
   void ClearTransientContentView();
 
+  // Notifies the delegate that the load progress was updated.
+  void SendChangeLoadProgress(double progress);
+
   // NavigationManagerDelegate:
   void NavigateToPendingEntry() override;
+  void LoadURLWithParams(const NavigationManager::WebLoadParams&) override;
   void OnNavigationItemsPruned(size_t pruned_item_count) override;
   void OnNavigationItemChanged() override;
   void OnNavigationItemCommitted(
@@ -284,6 +289,9 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   // Returns true if |web_controller_| has been set.
   bool Configured() const;
 
+  // Delegate, not owned by this object.
+  WebStateDelegate* delegate_;
+
   // Stores whether the web state is currently loading a page.
   bool is_loading_;
 
@@ -293,14 +301,14 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   // The delegate used to pass state to the web contents facade.
   WebStateFacadeDelegate* facade_delegate_;
 
-  // The CRWWebController that backs and owns this object.
-  CRWWebController* web_controller_;
+  // The CRWWebController that backs this object.
+  base::scoped_nsobject<CRWWebController> web_controller_;
 
   NavigationManagerImpl navigation_manager_;
 
   // |web::WebUIIOS| object for the current page if it is a WebUI page that
   // uses the web-based WebUI framework, or nullptr otherwise.
-  scoped_ptr<web::WebUIIOS> web_ui_;
+  std::unique_ptr<web::WebUIIOS> web_ui_;
 
   // A list of observers notified when page state changes. Weak references.
   base::ObserverList<WebStateObserver, true> observers_;
@@ -329,9 +337,6 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
 
   // Request tracker associted with this object.
   scoped_refptr<RequestTrackerImpl> request_tracker_;
-
-  // Mode controlling the HTTP cache behavior.
-  net::RequestTracker::CacheMode cache_mode_;
 
   // A number identifying this object. This number is injected into the user
   // agent to allow the network layer to know which web view requests originated

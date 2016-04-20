@@ -13,6 +13,7 @@
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
@@ -45,7 +46,6 @@
 #include "net/url_request/url_request_error_job.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_job_factory.h"
-
 #include "url/url_util.h"
 
 namespace content {
@@ -458,7 +458,7 @@ void GetMimeTypeOnUI(URLDataSourceImpl* source,
 namespace {
 
 bool IsValidNetworkErrorCode(int error_code) {
-  scoped_ptr<base::DictionaryValue> error_codes = net::GetNetConstants();
+  std::unique_ptr<base::DictionaryValue> error_codes = net::GetNetConstants();
   const base::DictionaryValue* net_error_codes_dict = nullptr;
 
   for (base::DictionaryValue::Iterator itr(*error_codes); !itr.IsAtEnd();
@@ -573,13 +573,13 @@ URLDataManagerBackend::~URLDataManagerBackend() {
 }
 
 // static
-scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
+std::unique_ptr<net::URLRequestJobFactory::ProtocolHandler>
 URLDataManagerBackend::CreateProtocolHandler(
     content::ResourceContext* resource_context,
     bool is_incognito,
     ChromeBlobStorageContext* blob_storage_context) {
   DCHECK(resource_context);
-  return make_scoped_ptr(new ChromeProtocolHandler(
+  return base::WrapUnique(new ChromeProtocolHandler(
       resource_context, is_incognito, blob_storage_context));
 }
 
@@ -674,15 +674,14 @@ bool URLDataManagerBackend::StartRequest(const net::URLRequest* request,
     // message loop before request for data. And correspondingly their
     // replies are put on the IO thread in the same order.
     target_message_loop->task_runner()->PostTask(
-        FROM_HERE,
-        base::Bind(&GetMimeTypeOnUI, scoped_refptr<URLDataSourceImpl>(source),
-                   path, job->AsWeakPtr()));
+        FROM_HERE, base::Bind(&GetMimeTypeOnUI, base::RetainedRef(source), path,
+                              job->AsWeakPtr()));
 
     // The DataSource wants StartDataRequest to be called on a specific thread,
     // usually the UI thread, for this path.
     target_message_loop->task_runner()->PostTask(
         FROM_HERE, base::Bind(&URLDataManagerBackend::CallStartRequest,
-                              make_scoped_refptr(source), path,
+                              base::RetainedRef(source), path,
                               render_process_id, render_frame_id, request_id));
   }
   return true;

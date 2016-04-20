@@ -9,8 +9,6 @@
 #include <string>
 
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/synchronization/cancellation_flag.h"
 #include "build/build_config.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
@@ -23,7 +21,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_iterator.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -33,6 +31,8 @@
 #include "components/content_settings/core/browser/website_settings_info.h"
 #include "components/content_settings/core/browser/website_settings_registry.h"
 #include "components/google/core/browser/google_url_tracker.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/search_engines/template_url_service.h"
@@ -88,7 +88,7 @@ ProfileResetter::~ProfileResetter() {
 
 void ProfileResetter::Reset(
     ProfileResetter::ResettableFlags resettable_flags,
-    scoped_ptr<BrandcodedDefaultSettings> master_settings,
+    std::unique_ptr<BrandcodedDefaultSettings> master_settings,
     const base::Closure& callback) {
   DCHECK(CalledOnValidThread());
   DCHECK(master_settings);
@@ -168,7 +168,7 @@ void ProfileResetter::ResetDefaultSearchEngine() {
     DCHECK(prefs);
     TemplateURLPrepopulateData::ClearPrepopulatedEnginesInPrefs(
         profile_->GetPrefs());
-    scoped_ptr<base::ListValue> search_engines(
+    std::unique_ptr<base::ListValue> search_engines(
         master_settings_->GetSearchProviderOverrides());
     if (search_engines) {
       // This Chrome distribution channel provides a custom search engine. We
@@ -279,7 +279,7 @@ void ProfileResetter::ResetStartupPages() {
   DCHECK(CalledOnValidThread());
   PrefService* prefs = profile_->GetPrefs();
   DCHECK(prefs);
-  scoped_ptr<base::ListValue> url_list(
+  std::unique_ptr<base::ListValue> url_list(
       master_settings_->GetUrlsToRestoreOnStartup());
   if (url_list)
     ListPrefUpdate(prefs, prefs::kURLsToRestoreOnStartup)->Swap(url_list.get());
@@ -295,9 +295,9 @@ void ProfileResetter::ResetStartupPages() {
 
 void ProfileResetter::ResetPinnedTabs() {
   // Unpin all the tabs.
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    if (it->is_type_tabbed() && it->profile() == profile_) {
-      TabStripModel* tab_model = it->tab_strip_model();
+  for (auto* browser : *BrowserList::GetInstance()) {
+    if (browser->is_type_tabbed() && browser->profile() == profile_) {
+      TabStripModel* tab_model = browser->tab_strip_model();
       // Here we assume that indexof(any mini tab) < indexof(any normal tab).
       // If we unpin the tab, it can be moved to the right. Thus traversing in
       // reverse direction is correct.

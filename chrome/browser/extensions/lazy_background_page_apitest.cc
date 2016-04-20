@@ -82,8 +82,8 @@ class LoadedIncognitoObserver : public ExtensionRegistryObserver {
   Profile* profile_;
   ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
       extension_registry_observer_;
-  scoped_ptr<LazyBackgroundObserver> original_complete_;
-  scoped_ptr<LazyBackgroundObserver> incognito_complete_;
+  std::unique_ptr<LazyBackgroundObserver> original_complete_;
+  std::unique_ptr<LazyBackgroundObserver> incognito_complete_;
 };
 
 }  // namespace
@@ -313,7 +313,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, WaitForRequest) {
 
 // Tests that the lazy background page stays alive while a NaCl module exists in
 // its DOM.
-#if !defined(DISABLE_NACL) && !defined(DISABLE_NACL_BROWSERTESTS)
+#if !defined(DISABLE_NACL)
 
 IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, NaClInBackgroundPage) {
   {

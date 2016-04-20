@@ -63,28 +63,29 @@ void CreateRenderPass(const RenderPassId& render_pass_id,
                       const gfx::Rect& rect,
                       const gfx::Transform& transform_to_root_target,
                       RenderPassList* render_pass_list) {
-  scoped_ptr<RenderPass> render_pass = RenderPass::Create();
+  std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
   render_pass->SetNew(render_pass_id, rect, rect, transform_to_root_target);
   render_pass_list->push_back(std::move(render_pass));
 }
 
-scoped_ptr<CompositorFrame> CreateCompositorFrameWithRenderPassList(
+std::unique_ptr<CompositorFrame> CreateCompositorFrameWithRenderPassList(
     RenderPassList* render_pass_list) {
-  scoped_ptr<DelegatedFrameData> root_delegated_frame_data(
+  std::unique_ptr<DelegatedFrameData> root_delegated_frame_data(
       new DelegatedFrameData);
   root_delegated_frame_data->render_pass_list.swap(*render_pass_list);
-  scoped_ptr<CompositorFrame> root_frame(new CompositorFrame);
+  std::unique_ptr<CompositorFrame> root_frame(new CompositorFrame);
   root_frame->delegated_frame_data = std::move(root_delegated_frame_data);
   return root_frame;
 }
 
-scoped_ptr<CompositorFrame> CreateCompositorFrame(const gfx::Rect& root_rect,
-                                                  RenderPass** render_pass) {
+std::unique_ptr<CompositorFrame> CreateCompositorFrame(
+    const gfx::Rect& root_rect,
+    RenderPass** render_pass) {
   RenderPassList render_pass_list;
   RenderPassId root_id(1, 1);
   CreateRenderPass(root_id, root_rect, gfx::Transform(), &render_pass_list);
 
-  scoped_ptr<CompositorFrame> root_frame =
+  std::unique_ptr<CompositorFrame> root_frame =
       CreateCompositorFrameWithRenderPassList(&render_pass_list);
 
   *render_pass =
@@ -93,27 +94,48 @@ scoped_ptr<CompositorFrame> CreateCompositorFrame(const gfx::Rect& root_rect,
 }
 
 TestSurfaceHittestDelegate::TestSurfaceHittestDelegate()
-    : target_overrides_(0) {}
+    : reject_target_overrides_(0), accept_target_overrides_(0) {}
 
 TestSurfaceHittestDelegate::~TestSurfaceHittestDelegate() {}
 
-void TestSurfaceHittestDelegate::AddInsetsForSurface(
+void TestSurfaceHittestDelegate::AddInsetsForRejectSurface(
     const SurfaceId& surface_id,
     const gfx::Insets& inset) {
-  insets_for_surface_.insert(std::make_pair(surface_id, inset));
+  insets_for_reject_.insert(std::make_pair(surface_id, inset));
+}
+
+void TestSurfaceHittestDelegate::AddInsetsForAcceptSurface(
+    const SurfaceId& surface_id,
+    const gfx::Insets& inset) {
+  insets_for_accept_.insert(std::make_pair(surface_id, inset));
 }
 
 bool TestSurfaceHittestDelegate::RejectHitTarget(
     const SurfaceDrawQuad* surface_quad,
     const gfx::Point& point_in_quad_space) {
-  if (!insets_for_surface_.count(surface_quad->surface_id))
+  if (!insets_for_reject_.count(surface_quad->surface_id))
     return false;
   gfx::Rect bounds(surface_quad->rect);
-  bounds.Inset(insets_for_surface_[surface_quad->surface_id]);
+  bounds.Inset(insets_for_reject_[surface_quad->surface_id]);
   // If the point provided falls outside the inset, then we skip this surface.
   if (!bounds.Contains(point_in_quad_space)) {
     if (surface_quad->rect.Contains(point_in_quad_space))
-      ++target_overrides_;
+      ++reject_target_overrides_;
+    return true;
+  }
+  return false;
+}
+
+bool TestSurfaceHittestDelegate::AcceptHitTarget(
+    const SurfaceDrawQuad* surface_quad,
+    const gfx::Point& point_in_quad_space) {
+  if (!insets_for_accept_.count(surface_quad->surface_id))
+    return false;
+  gfx::Rect bounds(surface_quad->rect);
+  bounds.Inset(insets_for_accept_[surface_quad->surface_id]);
+  // If the point provided falls outside the inset, then we accept this surface.
+  if (!bounds.Contains(point_in_quad_space)) {
+    ++accept_target_overrides_;
     return true;
   }
   return false;

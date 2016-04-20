@@ -12,7 +12,6 @@
 #include "base/i18n/time_formatting.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -23,6 +22,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_service.h"
 #include "components/upload_list/upload_list.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/web_contents.h"
@@ -152,7 +152,7 @@ void WebRtcLogsDOMHandler::UpdateUI() {
   for (std::vector<UploadList::UploadInfo>::iterator i = uploads.begin();
        i != uploads.end();
        ++i) {
-    scoped_ptr<base::DictionaryValue> upload(new base::DictionaryValue());
+    std::unique_ptr<base::DictionaryValue> upload(new base::DictionaryValue());
     upload->SetString("id", i->upload_id);
 
     base::string16 value_w;

@@ -33,29 +33,17 @@ namespace blink {
 
 using namespace HTMLNames;
 
-#if !ENABLE(OILPAN)
-void NamedNodeMap::ref()
-{
-    m_element->ref();
-}
-
-void NamedNodeMap::deref()
-{
-    m_element->deref();
-}
-#endif
-
-PassRefPtrWillBeRawPtr<Attr> NamedNodeMap::getNamedItem(const AtomicString& name) const
+Attr* NamedNodeMap::getNamedItem(const AtomicString& name) const
 {
     return m_element->getAttributeNode(name);
 }
 
-PassRefPtrWillBeRawPtr<Attr> NamedNodeMap::getNamedItemNS(const AtomicString& namespaceURI, const AtomicString& localName) const
+Attr* NamedNodeMap::getNamedItemNS(const AtomicString& namespaceURI, const AtomicString& localName) const
 {
     return m_element->getAttributeNodeNS(namespaceURI, localName);
 }
 
-PassRefPtrWillBeRawPtr<Attr> NamedNodeMap::removeNamedItem(const AtomicString& name, ExceptionState& exceptionState)
+Attr* NamedNodeMap::removeNamedItem(const AtomicString& name, ExceptionState& exceptionState)
 {
     size_t index = m_element->attributes().findIndex(name, m_element->shouldIgnoreAttributeCase());
     if (index == kNotFound) {
@@ -65,7 +53,7 @@ PassRefPtrWillBeRawPtr<Attr> NamedNodeMap::removeNamedItem(const AtomicString& n
     return m_element->detachAttribute(index);
 }
 
-PassRefPtrWillBeRawPtr<Attr> NamedNodeMap::removeNamedItemNS(const AtomicString& namespaceURI, const AtomicString& localName, ExceptionState& exceptionState)
+Attr* NamedNodeMap::removeNamedItemNS(const AtomicString& namespaceURI, const AtomicString& localName, ExceptionState& exceptionState)
 {
     size_t index = m_element->attributes().findIndex(QualifiedName(nullAtom, localName, namespaceURI));
     if (index == kNotFound) {
@@ -75,19 +63,19 @@ PassRefPtrWillBeRawPtr<Attr> NamedNodeMap::removeNamedItemNS(const AtomicString&
     return m_element->detachAttribute(index);
 }
 
-PassRefPtrWillBeRawPtr<Attr> NamedNodeMap::setNamedItem(Attr* attr, ExceptionState& exceptionState)
+Attr* NamedNodeMap::setNamedItem(Attr* attr, ExceptionState& exceptionState)
 {
-    ASSERT(attr);
+    DCHECK(attr);
     return m_element->setAttributeNode(attr, exceptionState);
 }
 
-PassRefPtrWillBeRawPtr<Attr> NamedNodeMap::setNamedItemNS(Attr* attr, ExceptionState& exceptionState)
+Attr* NamedNodeMap::setNamedItemNS(Attr* attr, ExceptionState& exceptionState)
 {
-    ASSERT(attr);
+    DCHECK(attr);
     return m_element->setAttributeNodeNS(attr, exceptionState);
 }
 
-PassRefPtrWillBeRawPtr<Attr> NamedNodeMap::item(unsigned index) const
+Attr* NamedNodeMap::item(unsigned index) const
 {
     AttributeCollection attributes = m_element->attributes();
     if (index >= attributes.size())

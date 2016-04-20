@@ -36,6 +36,8 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_CONTROL_DOWN, TAKE_SCREENSHOT },
   { true, ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
     TAKE_PARTIAL_SCREENSHOT },
+  { true, ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_ALT_DOWN | ui::EF_CONTROL_DOWN,
+    TAKE_ACTIVE_WINDOW_SCREENSHOT },
   { true, ui::VKEY_BRIGHTNESS_DOWN, ui::EF_NONE, BRIGHTNESS_DOWN },
   { true, ui::VKEY_BRIGHTNESS_DOWN, ui::EF_ALT_DOWN, KEYBOARD_BRIGHTNESS_DOWN },
   { true, ui::VKEY_BRIGHTNESS_UP, ui::EF_NONE, BRIGHTNESS_UP },
@@ -72,9 +74,6 @@ const AcceleratorData kAcceleratorData[] = {
   // spoken feedback is enabled.
   { true, ui::VKEY_Z, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
     TOGGLE_SPOKEN_FEEDBACK },
-  { true, ui::VKEY_CONTROL, ui::EF_CONTROL_DOWN, SILENCE_SPOKEN_FEEDBACK},
-  { true, ui::VKEY_LCONTROL, ui::EF_CONTROL_DOWN, SILENCE_SPOKEN_FEEDBACK},
-  { true, ui::VKEY_RCONTROL, ui::EF_CONTROL_DOWN, SILENCE_SPOKEN_FEEDBACK},
   { true, ui::VKEY_OEM_COMMA, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
     SWITCH_TO_PREVIOUS_USER },
   { true, ui::VKEY_OEM_PERIOD, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
@@ -351,6 +350,7 @@ const AcceleratorAction kActionsAllowedAtLoginOrLockScreen[] = {
   SCALE_UI_RESET,
   SHOW_SYSTEM_TRAY_BUBBLE,
   SWITCH_IME,  // Switch to another IME depending on the accelerator.
+  TAKE_ACTIVE_WINDOW_SCREENSHOT,
   TAKE_PARTIAL_SCREENSHOT,
   TAKE_SCREENSHOT,
 #if defined(OS_CHROMEOS)
@@ -406,6 +406,7 @@ const AcceleratorAction kActionsAllowedAtModalWindow[] = {
   SCALE_UI_RESET,
   SHOW_KEYBOARD_OVERLAY,
   SWITCH_IME,
+  TAKE_ACTIVE_WINDOW_SCREENSHOT,
   TAKE_PARTIAL_SCREENSHOT,
   TAKE_SCREENSHOT,
 #if defined(OS_CHROMEOS)
@@ -438,18 +439,20 @@ const AcceleratorAction kNonrepeatableActions[] = {
     // TODO(mazda): Add other actions which should not be repeated.
     CYCLE_BACKWARD_MRU,
     CYCLE_FORWARD_MRU,
-    TOGGLE_OVERVIEW,
     EXIT,
+    OPEN_FEEDBACK_PAGE,
     PRINT_UI_HIERARCHIES,  // Don't fill the logs if the key is held down.
     ROTATE_SCREEN,
     ROTATE_WINDOW,
     SCALE_UI_UP,
     SCALE_UI_DOWN,
     SCALE_UI_RESET,
+    TAKE_ACTIVE_WINDOW_SCREENSHOT,
     TAKE_PARTIAL_SCREENSHOT,
     TAKE_SCREENSHOT,
     TOGGLE_FULLSCREEN,
     TOGGLE_MAXIMIZED,
+    TOGGLE_OVERVIEW,
     WINDOW_MINIMIZE,
 #if defined(OS_CHROMEOS)
     DEBUG_TOGGLE_TOUCH_PAD,
@@ -528,6 +531,7 @@ const AcceleratorAction kActionsKeepingMenuOpen[] = {
     PREVIOUS_IME,
     PRINT_UI_HIERARCHIES,
     SWITCH_IME,
+    TAKE_ACTIVE_WINDOW_SCREENSHOT,
     TAKE_PARTIAL_SCREENSHOT,
     TAKE_SCREENSHOT,
 #if defined(OS_CHROMEOS)
@@ -538,7 +542,6 @@ const AcceleratorAction kActionsKeepingMenuOpen[] = {
     DISABLE_CAPS_LOCK,
     KEYBOARD_BRIGHTNESS_DOWN,
     KEYBOARD_BRIGHTNESS_UP,
-    SILENCE_SPOKEN_FEEDBACK,
     TOGGLE_CAPS_LOCK,
     TOGGLE_SPOKEN_FEEDBACK,
     TOGGLE_WIFI,

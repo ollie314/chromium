@@ -11,6 +11,8 @@
 #include "base/android/jni_string.h"
 #include "base/feature_list.h"
 #include "base/macros.h"
+#include "chrome/common/chrome_features.h"
+#include "components/offline_pages/offline_page_feature.h"
 #include "jni/ChromeFeatureList_jni.h"
 
 using base::android::ConvertJavaStringToUTF8;
@@ -24,18 +26,44 @@ namespace {
 // this array may either refer to features defined in this file (above) or in
 // other locations in the code base (e.g. chrome/, components/, etc).
 const base::Feature* kFeaturesExposedToJava[] = {
+    &kMediaStyleNotification,
     &kNTPOfflinePagesFeature,
+    &kNTPSnippetsFeature,
+    &kNTPToolbarFeature,
+    &kNTPFakeOmniboxTextFeature,
     &kPhysicalWebFeature,
+    &features::kSimplifiedFullscreenUI,
+    &offline_pages::kOfflinePagesBackgroundLoadingFeature,
 };
 
 }  // namespace
+
+const base::Feature kMediaStyleNotification {
+  "MediaStyleNotification", base::FEATURE_DISABLED_BY_DEFAULT
+};
 
 const base::Feature kNTPOfflinePagesFeature {
   "NTPOfflinePages", base::FEATURE_DISABLED_BY_DEFAULT
 };
 
+const base::Feature kNTPSnippetsFeature {
+  "NTPSnippets", base::FEATURE_DISABLED_BY_DEFAULT
+};
+
+const base::Feature kNTPToolbarFeature {
+  "NTPToolbar", base::FEATURE_ENABLED_BY_DEFAULT
+};
+
+const base::Feature kNTPFakeOmniboxTextFeature {
+  "NTPFakeOmniboxText", base::FEATURE_DISABLED_BY_DEFAULT
+};
+
 const base::Feature kPhysicalWebFeature {
   "PhysicalWeb", base::FEATURE_DISABLED_BY_DEFAULT
+};
+
+const base::Feature kSystemDownloadManager {
+  "SystemDownloadManager", base::FEATURE_ENABLED_BY_DEFAULT
 };
 
 static jboolean IsEnabled(JNIEnv* env,

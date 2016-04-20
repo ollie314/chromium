@@ -21,17 +21,15 @@ import org.chromium.chrome.browser.profiles.ProfileDownloader;
 import org.chromium.chrome.browser.signin.AccountManagementFragment;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.signin.SigninManager.SignInAllowedObserver;
-import org.chromium.sync.signin.AccountManagerHelper;
+import org.chromium.sync.AndroidSyncSettings;
 import org.chromium.sync.signin.ChromeSigninController;
-
-import java.util.List;
 
 /**
  * A preference that displays "Sign in to Chrome" when the user is not sign in, and displays
  * the user's name, email, and profile image when the user is signed in.
  */
 public class SignInPreference extends Preference implements SignInAllowedObserver,
-        ProfileDownloader.Observer {
+        ProfileDownloader.Observer, AndroidSyncSettings.AndroidSyncSettingsObserver {
 
     private boolean mViewEnabled;
 
@@ -52,6 +50,7 @@ public class SignInPreference extends Preference implements SignInAllowedObserve
         manager.addSignInAllowedObserver(this);
         ProfileDownloader.addObserver(this);
         FirstRunSignInProcessor.updateSigninManagerFirstRunCheckDone(getContext());
+        AndroidSyncSettings.registerObserver(getContext(), this);
     }
 
     /**
@@ -62,6 +61,7 @@ public class SignInPreference extends Preference implements SignInAllowedObserve
         SigninManager manager = SigninManager.get(getContext());
         manager.removeSignInAllowedObserver(this);
         ProfileDownloader.removeObserver(this);
+        AndroidSyncSettings.unregisterObserver(getContext(), this);
     }
 
     /**
@@ -78,13 +78,7 @@ public class SignInPreference extends Preference implements SignInAllowedObserve
             summary = getContext().getString(R.string.sign_in_to_chrome_summary);
             fragment = null;
         } else {
-            List<String> accounts = AccountManagerHelper.get(getContext()).getGoogleAccountNames();
-            if (accounts.size() == 1) {
-                summary = accounts.get(0);
-            } else {
-                summary = getContext().getString(
-                        R.string.number_of_signed_in_accounts, accounts.size());
-            }
+            summary = getSyncSummaryString(getContext(), account.name);
             fragment = AccountManagementFragment.class.getName();
             title = AccountManagementFragment.getCachedUserName(account.name);
             if (title == null) {
@@ -122,6 +116,16 @@ public class SignInPreference extends Preference implements SignInAllowedObserve
         }
     }
 
+    private static String getSyncSummaryString(Context context, String accountName) {
+        boolean syncEnabled = AndroidSyncSettings.isSyncEnabled(context);
+        if (syncEnabled) {
+            return String.format(
+                context.getString(R.string.account_management_sync_summary), accountName);
+        }
+
+        return context.getString(R.string.sync_is_disabled);
+    }
+
     @Override
     protected void onBindView(View view) {
         super.onBindView(view);
@@ -144,6 +148,12 @@ public class SignInPreference extends Preference implements SignInAllowedObserve
     public void onProfileDownloaded(String accountId, String fullName, String givenName,
             Bitmap bitmap) {
         AccountManagementFragment.updateUserNamePictureCache(accountId, fullName, bitmap);
+        update();
+    }
+
+    // AndroidSyncSettings.AndroidSyncSettingsObserver
+    @Override
+    public void androidSyncSettingsChanged() {
         update();
     }
 }

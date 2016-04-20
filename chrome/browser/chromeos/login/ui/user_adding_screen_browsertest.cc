@@ -5,20 +5,21 @@
 #include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker_tester.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/chromeos/login/users/multi_profile_user_controller.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/prefs/pref_service.h"
 #include "components/user_manager/user_manager.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -37,19 +38,31 @@ namespace chromeos {
 class UserAddingScreenTest : public LoginManagerTest,
                              public UserAddingScreen::Observer {
  public:
-  UserAddingScreenTest() : LoginManagerTest(false),
-                           user_adding_started_(0),
-                           user_adding_finished_(0) {
-  }
+  UserAddingScreenTest() : LoginManagerTest(false) {}
 
   void SetUpInProcessBrowserTestFixture() override {
     LoginManagerTest::SetUpInProcessBrowserTestFixture();
     UserAddingScreen::Get()->AddObserver(this);
   }
 
-  void OnUserAddingFinished() override { ++user_adding_finished_; }
+  void WaitUntilUserAddingFinishedOrCancelled() {
+    if (finished_)
+      return;
+    run_loop_.reset(new base::RunLoop());
+    run_loop_->Run();
+  }
 
-  void OnUserAddingStarted() override { ++user_adding_started_; }
+  void OnUserAddingFinished() override {
+    ++user_adding_finished_;
+    finished_ = true;
+    if (run_loop_)
+      run_loop_->Quit();
+  }
+
+  void OnUserAddingStarted() override {
+    ++user_adding_started_;
+    finished_ = false;
+  }
 
   void SetUserCanLock(user_manager::User* user, bool can_lock) {
     user->set_can_lock(can_lock);
@@ -57,7 +70,7 @@ class UserAddingScreenTest : public LoginManagerTest,
 
   void CheckScreenIsVisible() {
     views::View* web_view =
-        LoginDisplayHostImpl::default_host()->GetWebUILoginView()->child_at(0);
+        LoginDisplayHost::default_host()->GetWebUILoginView()->child_at(0);
     for (views::View* current_view = web_view;
          current_view;
          current_view = current_view->parent()) {
@@ -78,8 +91,11 @@ class UserAddingScreenTest : public LoginManagerTest,
   int user_adding_finished() { return user_adding_finished_; }
 
  private:
-  int user_adding_started_;
-  int user_adding_finished_;
+  int user_adding_started_ = 0;
+  int user_adding_finished_ = 0;
+  std::unique_ptr<base::RunLoop> run_loop_;
+  bool finished_ = false;  // True if OnUserAddingFinished() has been called
+                           // before WaitUntilUserAddingFinishedOrCancelled().
 
   DISALLOW_COPY_AND_ASSIGN(UserAddingScreenTest);
 };
@@ -113,13 +129,14 @@ IN_PROC_BROWSER_TEST_F(UserAddingScreenTest, CancelAdding) {
                 GetSessionState());
 
   UserAddingScreen::Get()->Cancel();
+  WaitUntilUserAddingFinishedOrCancelled();
   content::RunAllPendingInMessageLoop();
   EXPECT_EQ(1, user_adding_finished());
   EXPECT_EQ(ash::SessionStateDelegate::SESSION_STATE_ACTIVE,
             ash::Shell::GetInstance()->session_state_delegate()->
                 GetSessionState());
 
-  EXPECT_TRUE(LoginDisplayHostImpl::default_host() == NULL);
+  EXPECT_TRUE(LoginDisplayHost::default_host() == nullptr);
   EXPECT_EQ(1u, user_manager::UserManager::Get()->GetLoggedInUsers().size());
   EXPECT_EQ(kTestUsers[0],
             user_manager::UserManager::Get()->GetActiveUser()->email());
@@ -151,11 +168,13 @@ IN_PROC_BROWSER_TEST_F(UserAddingScreenTest, AddingSeveralUsers) {
               ash::Shell::GetInstance()->session_state_delegate()->
                   GetSessionState());
     AddUser(kTestUsers[i]);
+    WaitUntilUserAddingFinishedOrCancelled();
+    content::RunAllPendingInMessageLoop();
     EXPECT_EQ(i, user_adding_finished());
     EXPECT_EQ(ash::SessionStateDelegate::SESSION_STATE_ACTIVE,
               ash::Shell::GetInstance()->session_state_delegate()->
                   GetSessionState());
-    EXPECT_TRUE(LoginDisplayHostImpl::default_host() == NULL);
+    EXPECT_TRUE(LoginDisplayHost::default_host() == nullptr);
     ASSERT_EQ(unsigned(i + 1), user_manager->GetLoggedInUsers().size());
   }
 
@@ -176,9 +195,9 @@ IN_PROC_BROWSER_TEST_F(UserAddingScreenTest, AddingSeveralUsers) {
       ProfileHelper::Get()
           ->GetProfileByUserUnsafe(user_manager->GetLoggedInUsers()[2])
           ->GetPrefs();
-  ASSERT_TRUE(prefs1 != NULL);
-  ASSERT_TRUE(prefs2 != NULL);
-  ASSERT_TRUE(prefs3 != NULL);
+  ASSERT_TRUE(prefs1 != nullptr);
+  ASSERT_TRUE(prefs2 != nullptr);
+  ASSERT_TRUE(prefs3 != nullptr);
   prefs1->SetBoolean(prefs::kEnableAutoScreenLock, false);
   prefs2->SetBoolean(prefs::kEnableAutoScreenLock, false);
   prefs3->SetBoolean(prefs::kEnableAutoScreenLock, false);
@@ -250,6 +269,7 @@ IN_PROC_BROWSER_TEST_F(UserAddingScreenTest, ScreenVisibility) {
   content::RunAllPendingInMessageLoop();
   CheckScreenIsVisible();
   UserAddingScreen::Get()->Cancel();
+  WaitUntilUserAddingFinishedOrCancelled();
   content::RunAllPendingInMessageLoop();
 
   ScreenLocker::Show();
@@ -266,6 +286,7 @@ IN_PROC_BROWSER_TEST_F(UserAddingScreenTest, ScreenVisibility) {
   content::RunAllPendingInMessageLoop();
   CheckScreenIsVisible();
   UserAddingScreen::Get()->Cancel();
+  WaitUntilUserAddingFinishedOrCancelled();
   content::RunAllPendingInMessageLoop();
 }
 

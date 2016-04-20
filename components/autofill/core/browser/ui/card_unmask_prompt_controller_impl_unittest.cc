@@ -6,10 +6,10 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/testing_pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
 #include "components/autofill/core/browser/autofill_client.h"
@@ -17,6 +17,8 @@
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/ui/card_unmask_prompt_view.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/testing_pref_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace autofill {
@@ -97,12 +99,14 @@ class CardUnmaskPromptControllerImplTest : public testing::Test {
   void ShowPrompt() {
     controller_->ShowPrompt(test_unmask_prompt_view_.get(),
                             test::GetMaskedServerCard(),
+                            AutofillClient::UNMASK_FOR_AUTOFILL,
                             delegate_->GetWeakPtr());
   }
 
   void ShowPromptAmex() {
     controller_->ShowPrompt(test_unmask_prompt_view_.get(),
                             test::GetMaskedServerCardAmex(),
+                            AutofillClient::UNMASK_FOR_AUTOFILL,
                             delegate_->GetWeakPtr());
   }
 
@@ -124,10 +128,10 @@ class CardUnmaskPromptControllerImplTest : public testing::Test {
         prefs::kAutofillWalletImportStorageCheckboxState, value);
   }
 
-  scoped_ptr<TestCardUnmaskPromptView> test_unmask_prompt_view_;
-  scoped_ptr<TestingPrefServiceSimple> pref_service_;
-  scoped_ptr<TestCardUnmaskPromptController> controller_;
-  scoped_ptr<TestCardUnmaskDelegate> delegate_;
+  std::unique_ptr<TestCardUnmaskPromptView> test_unmask_prompt_view_;
+  std::unique_ptr<TestingPrefServiceSimple> pref_service_;
+  std::unique_ptr<TestCardUnmaskPromptController> controller_;
+  std::unique_ptr<TestCardUnmaskDelegate> delegate_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CardUnmaskPromptControllerImplTest);

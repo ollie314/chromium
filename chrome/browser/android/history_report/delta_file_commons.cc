@@ -52,6 +52,9 @@ DeltaFileEntryWithData::DeltaFileEntryWithData(DeltaFileEntry entry)
       data_set_(false),
       is_bookmark_(false) {}
 
+DeltaFileEntryWithData::DeltaFileEntryWithData(
+    const DeltaFileEntryWithData& other) = default;
+
 DeltaFileEntryWithData::~DeltaFileEntryWithData() {}
 
 int64_t DeltaFileEntryWithData::SeqNo() const {
@@ -110,7 +113,7 @@ std::string DeltaFileEntryWithData::Url() const {
 base::string16 DeltaFileEntryWithData::Title() const {
   if (!Valid()) return base::UTF8ToUTF16("");
   if (is_bookmark_ && !bookmark_title_.empty()) return bookmark_title_;
-  if (data_.title().empty()) return base::UTF8ToUTF16(data_.url().host());
+  if (data_.title().empty()) return base::UTF8ToUTF16(data_.url().host_piece());
   return data_.title();
 }
 

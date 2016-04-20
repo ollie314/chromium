@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_model.h"
@@ -88,7 +89,7 @@ class SearchBoxImageButton : public views::ImageButton {
     selected_ = selected;
     SchedulePaint();
     if (selected)
-      NotifyAccessibilityEvent(ui::AX_EVENT_FOCUS, true);
+      NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION, true);
   }
 
   bool OnKeyPressed(const ui::KeyEvent& event) override {
@@ -172,7 +173,7 @@ SearchBoxView::SearchBoxView(SearchBoxViewDelegate* delegate,
 
 #if !defined(OS_CHROMEOS)
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  menu_button_ = new views::MenuButton(NULL, base::string16(), this, false);
+  menu_button_ = new views::MenuButton(base::string16(), this, false);
   menu_button_->SetBorder(views::Border::NullBorder());
   menu_button_->SetImage(views::Button::STATE_NORMAL,
                          *rb.GetImageSkiaNamed(IDR_APP_LIST_TOOLS_NORMAL));
@@ -222,7 +223,7 @@ void SearchBoxView::InvalidateMenu() {
 }
 
 void SearchBoxView::SetShadow(const gfx::ShadowValue& shadow) {
-  SetBorder(make_scoped_ptr(new views::ShadowBorder(shadow)));
+  SetBorder(base::WrapUnique(new views::ShadowBorder(shadow)));
   Layout();
 }
 
@@ -404,7 +405,9 @@ void SearchBoxView::ButtonPressed(views::Button* sender,
     NOTREACHED();
 }
 
-void SearchBoxView::OnMenuButtonClicked(View* source, const gfx::Point& point) {
+void SearchBoxView::OnMenuButtonClicked(views::MenuButton* source,
+                                        const gfx::Point& point,
+                                        const ui::Event* event) {
   if (!menu_)
     menu_.reset(new AppListMenuViews(view_delegate_));
 

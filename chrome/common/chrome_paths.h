@@ -46,12 +46,8 @@ enum {
                                 // to set policies for chrome. This directory
                                 // contains subdirectories.
 #endif
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  DIR_USER_APPLICATIONS,        // ~/Applications
-  DIR_USER_LIBRARY,             // ~/Library
-#endif
 #if defined(OS_CHROMEOS) || (defined(OS_LINUX) && defined(CHROMIUM_BUILD)) || \
-    (defined(OS_MACOSX) && !defined(OS_IOS))
+    defined(OS_MACOSX)
   DIR_USER_EXTERNAL_EXTENSIONS,  // Directory for per-user external extensions
                                  // on Chrome Mac and Chromium Linux.
                                  // On Chrome OS, this path is used for OEM
@@ -88,10 +84,6 @@ enum {
                                     // Pepper Flash plugin, downloadable from
                                     // Adobe website. Querying this path might
                                     // succeed no matter the file exists or not.
-  FILE_FLASH_SYSTEM_PLUGIN,     // Full path to the system version of NPAPI
-                                // Flash plugin, downloadable from Adobe
-                                // website. Querying this path might succeed no
-                                // matter the file exists or not.
   FILE_NACL_PLUGIN,             // Full path to the internal NaCl plugin file.
   DIR_PNACL_BASE,               // Full path to the base dir for PNaCl.
   DIR_PNACL_COMPONENT,          // Full path to the latest PNaCl version
@@ -117,7 +109,7 @@ enum {
   DIR_SUPERVISED_USER_INSTALLED_WHITELISTS,  // Directory where sanitized
                                              // supervised user whitelists are
                                              // installed.
-#if defined(OS_LINUX) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_LINUX) || defined(OS_MACOSX)
   DIR_NATIVE_MESSAGING,         // System directory where native messaging host
                                 // manifest files are stored.
   DIR_USER_NATIVE_MESSAGING,    // Directory with Native Messaging Hosts

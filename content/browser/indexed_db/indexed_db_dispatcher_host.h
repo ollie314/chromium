@@ -15,10 +15,13 @@
 #include "base/id_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "content/browser/fileapi/chrome_blob_storage_context.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "storage/browser/blob/blob_data_handle.h"
+#include "storage/browser/quota/quota_manager.h"
+#include "storage/common/quota/quota_status_code.h"
 #include "url/gurl.h"
 
 struct IndexedDBDatabaseMetadata;
@@ -35,6 +38,10 @@ struct IndexedDBHostMsg_DatabaseSetIndexKeys_Params;
 struct IndexedDBHostMsg_FactoryDeleteDatabase_Params;
 struct IndexedDBHostMsg_FactoryGetDatabaseNames_Params;
 struct IndexedDBHostMsg_FactoryOpen_Params;
+
+namespace url {
+class Origin;
+}
 
 namespace content {
 class IndexedDBBlobInfo;
@@ -73,7 +80,7 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
   void FinishTransaction(int64_t host_transaction_id, bool committed);
 
   // A shortcut for accessing our context.
-  IndexedDBContextImpl* Context() { return indexed_db_context_.get(); }
+  IndexedDBContextImpl* context() const { return indexed_db_context_.get(); }
   storage::BlobStorageContext* blob_storage_context() const {
     return blob_storage_context_->context();
   }
@@ -83,10 +90,10 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
   int32_t Add(IndexedDBCursor* cursor);
   int32_t Add(IndexedDBConnection* connection,
               int32_t ipc_thread_id,
-              const GURL& origin_url);
+              const url::Origin& origin);
 
   void RegisterTransactionId(int64_t host_transaction_id,
-                             const GURL& origin_url);
+                             const url::Origin& origin);
 
   IndexedDBCursor* GetCursorFromId(int32_t ipc_cursor_id);
 
@@ -113,8 +120,8 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
       BlobDataHandleMap;
   typedef std::map<int64_t, int64_t> TransactionIDToDatabaseIDMap;
   typedef std::map<int64_t, uint64_t> TransactionIDToSizeMap;
-  typedef std::map<int64_t, GURL> TransactionIDToURLMap;
-  typedef std::map<int32_t, GURL> WebIDBObjectIDToURLMap;
+  typedef std::map<int64_t, url::Origin> TransactionIDToOriginMap;
+  typedef std::map<int32_t, url::Origin> WebIDBObjectIDToOriginMap;
 
   // IDMap for RefCounted types
   template <typename RefCountedType>
@@ -198,12 +205,22 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
 
     void OnAbort(int32_t ipc_database_id, int64_t transaction_id);
     void OnCommit(int32_t ipc_database_id, int64_t transaction_id);
+    void OnGotUsageAndQuotaForCommit(int32_t ipc_database_id,
+                                     int64_t transaction_id,
+                                     storage::QuotaStatusCode status,
+                                     int64_t usage,
+                                     int64_t quota);
+
     IndexedDBDispatcherHost* parent_;
     IDMap<IndexedDBConnection, IDMapOwnPointer> map_;
-    WebIDBObjectIDToURLMap database_url_map_;
+    WebIDBObjectIDToOriginMap database_origin_map_;
     TransactionIDToSizeMap transaction_size_map_;
-    TransactionIDToURLMap transaction_url_map_;
+    TransactionIDToOriginMap transaction_origin_map_;
     TransactionIDToDatabaseIDMap transaction_database_map_;
+
+    // Weak pointers are used when an asynchronous quota request is made, in
+    // case the dispatcher is torn down before the response returns.
+    base::WeakPtrFactory<DatabaseDispatcherHost> weak_factory_;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(DatabaseDispatcherHost);
@@ -280,8 +297,8 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
   BlobDataHandleMap blob_data_handle_map_;
 
   // Only access on IndexedDB thread.
-  scoped_ptr<DatabaseDispatcherHost> database_dispatcher_host_;
-  scoped_ptr<CursorDispatcherHost> cursor_dispatcher_host_;
+  std::unique_ptr<DatabaseDispatcherHost> database_dispatcher_host_;
+  std::unique_ptr<CursorDispatcherHost> cursor_dispatcher_host_;
 
   // Used to set file permissions for blob storage.
   int ipc_process_id_;

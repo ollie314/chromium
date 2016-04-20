@@ -28,7 +28,6 @@
 #include "net/base/address_list.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/x509_certificate.h"
@@ -175,7 +174,7 @@ bool CastSocketImpl::audio_only() const {
 scoped_ptr<net::TCPClientSocket> CastSocketImpl::CreateTcpSocket() {
   net::AddressList addresses(ip_endpoint_);
   return scoped_ptr<net::TCPClientSocket>(
-      new net::TCPClientSocket(addresses, net_log_, net_log_source_));
+      new net::TCPClientSocket(addresses, nullptr, net_log_, net_log_source_));
   // Options cannot be set on the TCPClientSocket yet, because the
   // underlying platform socket will not be created until Bind()
   // or Connect() is called.

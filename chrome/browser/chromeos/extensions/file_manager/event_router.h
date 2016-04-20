@@ -8,13 +8,13 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/files/file_path_watcher.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/extensions/file_manager/device_event_router.h"
 #include "chrome/browser/chromeos/extensions/file_manager/job_event_router.h"
@@ -26,9 +26,9 @@
 #include "chromeos/disks/disk_mount_manager.h"
 #include "chromeos/network/network_state_handler_observer.h"
 #include "chromeos/settings/timezone_settings.h"
-#include "components/drive/file_system_observer.h"
+#include "components/drive/chromeos/file_system_observer.h"
+#include "components/drive/chromeos/sync_client.h"
 #include "components/drive/service/drive_service_interface.h"
-#include "components/drive/sync_client.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "storage/browser/fileapi/file_system_operation.h"
 
@@ -215,11 +215,11 @@ class EventRouter : public KeyedService,
   base::Time last_copy_progress_event_;
 
   WatcherMap file_watchers_;
-  scoped_ptr<PrefChangeRegistrar> pref_change_registrar_;
+  std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
   Profile* profile_;
 
-  scoped_ptr<DeviceEventRouter> device_event_router_;
-  scoped_ptr<JobEventRouter> job_event_router_;
+  std::unique_ptr<DeviceEventRouter> device_event_router_;
+  std::unique_ptr<JobEventRouter> job_event_router_;
 
   DispatchDirectoryChangeEventImplCallback
       dispatch_directory_change_event_impl_;

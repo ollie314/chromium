@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/i18n/case_conversion.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
@@ -27,6 +26,7 @@
 #include "chrome/common/spellcheck_common.h"
 #include "chrome/common/spellcheck_result.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -165,11 +165,7 @@ void SpellingMenuObserver::InitMenu(const content::ContextMenuParams& params) {
   // suggestions".
   proxy_->AddMenuItem(IDC_SPELLCHECK_ADD_TO_DICTIONARY,
       l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_ADD_TO_DICTIONARY));
-
-  proxy_->AddCheckItem(
-      IDC_CONTENT_CONTEXT_SPELLING_TOGGLE,
-      l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_SPELLING_ASK_GOOGLE));
-
+  proxy_->AddSpellCheckServiceItem(integrate_spelling_service_.GetValue());
   proxy_->AddSeparator();
 }
 
@@ -290,7 +286,7 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
     if (!integrate_spelling_service_.GetValue()) {
       content::RenderViewHost* rvh = proxy_->GetRenderViewHost();
       gfx::Rect rect = rvh->GetWidget()->GetView()->GetViewBounds();
-      scoped_ptr<SpellingBubbleModel> model(
+      std::unique_ptr<SpellingBubbleModel> model(
           new SpellingBubbleModel(profile, proxy_->GetWebContents()));
       chrome::ShowConfirmBubble(
           proxy_->GetWebContents()->GetTopLevelNativeWindow(),

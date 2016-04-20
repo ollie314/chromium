@@ -6,6 +6,8 @@
 #define CONTENT_BROWSER_NOTIFICATIONS_NOTIFICATION_DATABASE_H_
 
 #include <stdint.h>
+
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -183,12 +185,12 @@ class CONTENT_EXPORT NotificationDatabase {
 
   int64_t next_notification_id_ = 0;
 
-  scoped_ptr<const leveldb::FilterPolicy> filter_policy_;
+  std::unique_ptr<const leveldb::FilterPolicy> filter_policy_;
 
   // The declaration order for these members matters, as |db_| depends on |env_|
   // and thus has to be destructed first.
-  scoped_ptr<leveldb::Env> env_;
-  scoped_ptr<leveldb::DB> db_;
+  std::unique_ptr<leveldb::Env> env_;
+  std::unique_ptr<leveldb::DB> db_;
 
   State state_ = STATE_UNINITIALIZED;
 

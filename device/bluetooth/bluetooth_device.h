@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -78,6 +79,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
 
   // The value returned if the RSSI or transmit power cannot be read.
   static const int kUnknownPower = 127;
+  // The value returned if the appearance is not present.
+  static const uint16_t kAppearanceNotPresent = 0xffc0;
 
   struct DEVICE_BLUETOOTH_EXPORT ConnectionInfo {
     int rssi;
@@ -223,6 +226,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // number in BCD format, where available.
   virtual uint16_t GetDeviceID() const = 0;
 
+  // Returns the appearance of the device.
+  virtual uint16_t GetAppearance() const = 0;
+
   // Returns the name of the device suitable for displaying, this may
   // be a synthesized string containing the address and localized type name
   // if the device has no obtained name.
@@ -232,6 +238,11 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // aware of, by decoding the bluetooth class information. The returned
   // values are unique, and do not overlap, so DEVICE_KEYBOARD is not also
   // DEVICE_PERIPHERAL.
+  //
+  // Returns the type of the device, limited to those we support or are aware
+  // of, by decoding the bluetooth class information for Classic devices or
+  // by decoding the device's appearance for LE devices. For example,
+  // Microsoft Universal Foldable Keyboard only advertises the appearance.
   DeviceType GetDeviceType() const;
 
   // Indicates whether the device is known to support pairing based on its
@@ -427,7 +438,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // returned BluetoothGattConnection will be automatically marked as inactive.
   // To monitor the state of the connection, observe the
   // BluetoothAdapter::Observer::DeviceChanged method.
-  typedef base::Callback<void(scoped_ptr<BluetoothGattConnection>)>
+  typedef base::Callback<void(std::unique_ptr<BluetoothGattConnection>)>
       GattConnectionCallback;
   virtual void CreateGattConnection(const GattConnectionCallback& callback,
                                     const ConnectErrorCallback& error_callback);
@@ -457,6 +468,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // empty string.
   static std::string CanonicalizeAddress(const std::string& address);
 
+  // Return associated BluetoothAdapter.
+  BluetoothAdapter* GetAdapter() { return adapter_; }
+
  protected:
   // BluetoothGattConnection is a friend to call Add/RemoveGattConnection.
   friend BluetoothGattConnection;
@@ -470,6 +484,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
                            BluetoothGattConnection_ErrorAfterConnection);
   FRIEND_TEST_ALL_PREFIXES(BluetoothTest,
                            BluetoothGattConnection_DisconnectGatt_Cleanup);
+  FRIEND_TEST_ALL_PREFIXES(BluetoothTest, GetDeviceName_NullName);
 
   BluetoothDevice(BluetoothAdapter* adapter);
 
@@ -524,7 +539,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
 
   // Mapping from the platform-specific GATT service identifiers to
   // BluetoothGattService objects.
-  typedef base::ScopedPtrHashMap<std::string, scoped_ptr<BluetoothGattService>>
+  typedef base::ScopedPtrHashMap<std::string,
+                                 std::unique_ptr<BluetoothGattService>>
       GattServiceMap;
   GattServiceMap gatt_services_;
   bool gatt_services_discovery_complete_;
@@ -532,7 +548,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // Mapping from service UUID represented as a std::string of a bluetooth
   // service to
   // the specific data. The data is stored as BinaryValue.
-  scoped_ptr<base::DictionaryValue> services_data_;
+  std::unique_ptr<base::DictionaryValue> services_data_;
 
  private:
   // Returns a localized string containing the device's bluetooth address and

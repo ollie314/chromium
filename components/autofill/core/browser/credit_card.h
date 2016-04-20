@@ -17,6 +17,9 @@
 
 namespace autofill {
 
+// A midline horizontal ellipsis (U+22EF).
+extern const base::char16 kMidlineEllipsis[];
+
 // A form group that stores credit card information.
 class CreditCard : public AutofillDataModel {
  public:
@@ -152,6 +155,10 @@ class CreditCard : public AutofillDataModel {
   // Determines if |this| is a local version of the server card |other|.
   bool IsLocalDuplicateOfServerCard(const CreditCard& other) const;
 
+  // Determines if |this| has the same number as |other|. If either is a masked
+  // server card, compares the last four digits only.
+  bool HasSameNumberAs(const CreditCard& other) const;
+
   // Equality operators compare GUIDs, origins, and the contents.
   // Usage metadata (use count, use date, modification date) are NOT compared.
   bool operator==(const CreditCard& credit_card) const;
@@ -163,10 +170,6 @@ class CreditCard : public AutofillDataModel {
 
   // Returns true if there are no values (field types) set.
   bool IsEmpty(const std::string& app_locale) const;
-
-  // Returns true if all field types have valid values set. Server masked cards
-  // will not be complete. MASKED_SERVER_CARDs will never be complete.
-  bool IsComplete() const;
 
   // Returns true if all field types have valid values set and the card is not
   // expired. MASKED_SERVER_CARDs will never be valid because the number is
@@ -189,6 +192,9 @@ class CreditCard : public AutofillDataModel {
                            const std::string& app_locale,
                            int* num);
 
+  // Returns whether the credit card is expired based on |current_time|.
+  bool IsExpired(const base::Time& current_time) const;
+
  private:
   // FormGroup:
   void GetSupportedTypes(ServerFieldTypeSet* supported_types) const override;
@@ -203,8 +209,9 @@ class CreditCard : public AutofillDataModel {
   base::string16 Expiration4DigitYearAsString() const;
   base::string16 Expiration2DigitYearAsString() const;
 
-  // Sets |expiration_month_| to the integer conversion of |text|.
-  void SetExpirationMonthFromString(const base::string16& text,
+  // Sets |expiration_month_| to the integer conversion of |text| and returns
+  // whether the operation was successful.
+  bool SetExpirationMonthFromString(const base::string16& text,
                                     const std::string& app_locale);
 
   // Sets |expiration_year_| to the integer conversion of |text|.

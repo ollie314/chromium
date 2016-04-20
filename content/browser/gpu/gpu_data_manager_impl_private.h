@@ -28,6 +28,11 @@ namespace base {
 class CommandLine;
 }
 
+namespace gpu {
+struct GpuPreferences;
+struct VideoMemoryUsageStats;
+}
+
 namespace content {
 
 class CONTENT_EXPORT GpuDataManagerImplPrivate {
@@ -49,7 +54,6 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   void RequestVideoMemoryUsageStatsUpdate() const;
   bool ShouldUseSwiftShader() const;
   void RegisterSwiftShaderPath(const base::FilePath& path);
-  bool ShouldUseWarp() const;
   void AddObserver(GpuDataManagerObserver* observer);
   void RemoveObserver(GpuDataManagerObserver* observer);
   void UnblockDomainFrom3DAPIs(const GURL& url);
@@ -67,13 +71,12 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   void UpdateGpuInfo(const gpu::GPUInfo& gpu_info);
 
   void UpdateVideoMemoryUsageStats(
-      const GPUVideoMemoryUsageStats& video_memory_usage_stats);
+      const gpu::VideoMemoryUsageStats& video_memory_usage_stats);
 
   void AppendRendererCommandLine(base::CommandLine* command_line) const;
 
-  void AppendGpuCommandLine(base::CommandLine* command_line) const;
-
-  void AppendPluginCommandLine(base::CommandLine* command_line) const;
+  void AppendGpuCommandLine(base::CommandLine* command_line,
+                            gpu::GpuPreferences* gpu_preferences) const;
 
   void UpdateRendererWebPrefs(WebPreferences* prefs) const;
 
@@ -116,9 +119,6 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
 
   size_t GetBlacklistedFeatureCount() const;
 
-  void SetDisplayCount(unsigned int display_count);
-  unsigned int GetDisplayCount() const;
-
   bool UpdateActiveGpu(uint32_t vendor_id, uint32_t device_id);
 
   void OnGpuProcessInitFailure();
@@ -138,8 +138,6 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
                            SwiftShaderRendering);
   FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
                            SwiftShaderRendering2);
-  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
-                           WarpEnabledOverridesSwiftShader);
   FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
                            GpuInfoUpdate);
   FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
@@ -197,6 +195,8 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
                       const std::string& gpu_driver_bug_list_json,
                       const gpu::GPUInfo& gpu_info);
 
+  void RunPostInitTasks();
+
   void UpdateGpuInfoHelper();
 
   void UpdateBlacklistedFeatures(const std::set<int>& features);
@@ -214,13 +214,6 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
 
   // Try to switch to SwiftShader rendering, if possible and necessary.
   void EnableSwiftShaderIfNecessary();
-
-  // Try to switch to WARP rendering if the GPU hardware is not supported or
-  // absent, and if we are trying to run in Windows Metro mode.
-  void EnableWarpIfNecessary();
-
-  // Use only for testing, forces |use_warp_| to true.
-  void ForceWarpModeForTesting();
 
   // Helper to extract the domain from a given URL.
   std::string GetDomainFromURL(const GURL& url) const;
@@ -243,16 +236,14 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
 
   gpu::GPUInfo gpu_info_;
 
-  scoped_ptr<gpu::GpuBlacklist> gpu_blacklist_;
-  scoped_ptr<gpu::GpuDriverBugList> gpu_driver_bug_list_;
+  std::unique_ptr<gpu::GpuBlacklist> gpu_blacklist_;
+  std::unique_ptr<gpu::GpuDriverBugList> gpu_driver_bug_list_;
 
   const scoped_refptr<GpuDataManagerObserverList> observer_list_;
 
   std::vector<LogMessage> log_messages_;
 
   bool use_swiftshader_;
-
-  bool use_warp_;
 
   base::FilePath swiftshader_path_;
 
@@ -264,23 +255,25 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   // they cause random failures.
   bool update_histograms_;
 
-  // Number of currently open windows, to be used in gpu memory allocation.
-  int window_count_;
-
   DomainBlockMap blocked_domains_;
   mutable std::list<base::Time> timestamps_of_gpu_resets_;
   bool domain_blocking_enabled_;
 
   GpuDataManagerImpl* owner_;
 
-  unsigned int display_count_;
-
   bool gpu_process_accessible_;
+
+  // True if Initialize() has been completed.
+  bool is_initialized_;
 
   // True if all future Initialize calls should be ignored.
   bool finalized_;
 
   std::string disabled_extensions_;
+
+  // If one tries to call a member before initialization then it is defered
+  // until Initialize() is completed.
+  std::vector<base::Closure> post_init_tasks_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuDataManagerImplPrivate);
 };

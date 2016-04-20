@@ -17,6 +17,7 @@
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_param_traits.h"
 #include "third_party/WebKit/public/platform/modules/indexeddb/WebIDBTypes.h"
+#include "url/origin.h"
 
 // Singly-included section for typedefs in multiply-included file.
 #ifndef CONTENT_COMMON_INDEXED_DB_INDEXED_DB_MESSAGES_H_
@@ -47,8 +48,8 @@ IPC_STRUCT_BEGIN(IndexedDBHostMsg_FactoryGetDatabaseNames_Params)
   // The response should have these ids.
   IPC_STRUCT_MEMBER(int32_t, ipc_thread_id)
   IPC_STRUCT_MEMBER(int32_t, ipc_callbacks_id)
-  // The string id of the origin doing the initiating.
-  IPC_STRUCT_MEMBER(std::string, database_identifier)
+  // The origin doing the initiating.
+  IPC_STRUCT_MEMBER(url::Origin, origin)
 IPC_STRUCT_END()
 
 // Used to open an indexed database.
@@ -59,8 +60,8 @@ IPC_STRUCT_BEGIN(IndexedDBHostMsg_FactoryOpen_Params)
   IPC_STRUCT_MEMBER(int32_t, ipc_callbacks_id)
   // Identifier for database callbacks
   IPC_STRUCT_MEMBER(int32_t, ipc_database_callbacks_id)
-  // The string id of the origin doing the initiating.
-  IPC_STRUCT_MEMBER(std::string, database_identifier)
+  // The origin doing the initiating.
+  IPC_STRUCT_MEMBER(url::Origin, origin)
   // The name of the database.
   IPC_STRUCT_MEMBER(base::string16, name)
   // The transaction id used if a database upgrade is needed.
@@ -74,8 +75,8 @@ IPC_STRUCT_BEGIN(IndexedDBHostMsg_FactoryDeleteDatabase_Params)
   // The response should have these ids.
   IPC_STRUCT_MEMBER(int32_t, ipc_thread_id)
   IPC_STRUCT_MEMBER(int32_t, ipc_callbacks_id)
-  // The string id of the origin doing the initiating.
-  IPC_STRUCT_MEMBER(std::string, database_identifier)
+  // The origin doing the initiating.
+  IPC_STRUCT_MEMBER(url::Origin, origin)
   // The name of the database.
   IPC_STRUCT_MEMBER(base::string16, name)
 IPC_STRUCT_END()
@@ -341,8 +342,7 @@ IPC_STRUCT_END()
 IPC_STRUCT_BEGIN(IndexedDBDatabaseMetadata)
   IPC_STRUCT_MEMBER(int64_t, id)
   IPC_STRUCT_MEMBER(base::string16, name)
-  IPC_STRUCT_MEMBER(base::string16, version)
-  IPC_STRUCT_MEMBER(int64_t, int_version)
+  IPC_STRUCT_MEMBER(int64_t, version)
   IPC_STRUCT_MEMBER(int64_t, max_object_store_id)
   IPC_STRUCT_MEMBER(std::vector<IndexedDBObjectStoreMetadata>, object_stores)
 IPC_STRUCT_END()
@@ -424,7 +424,7 @@ IPC_MESSAGE_CONTROL1(IndexedDBMsg_CallbacksUpgradeNeeded,
 IPC_MESSAGE_CONTROL2(IndexedDBMsg_DatabaseCallbacksForcedClose,
                      int32_t, /* ipc_thread_id */
                      int32_t) /* ipc_database_callbacks_id */
-IPC_MESSAGE_CONTROL4(IndexedDBMsg_DatabaseCallbacksIntVersionChange,
+IPC_MESSAGE_CONTROL4(IndexedDBMsg_DatabaseCallbacksVersionChange,
                      int32_t, /* ipc_thread_id */
                      int32_t, /* ipc_database_callbacks_id */
                      int64_t, /* old_version */

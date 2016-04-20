@@ -2,10 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "content/browser/service_worker/service_worker_process_manager.h"
+
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "content/browser/service_worker/service_worker_process_manager.h"
+#include "content/common/service_worker/embedded_worker_settings.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
@@ -24,7 +27,8 @@ void DidAllocateWorkerProcess(const base::Closure& quit_closure,
                               bool* is_new_process_out,
                               ServiceWorkerStatusCode status,
                               int process_id,
-                              bool is_new_process) {
+                              bool is_new_process,
+                              const EmbeddedWorkerSettings& settings) {
   *status_out = status;
   *process_id_out = process_id;
   *is_new_process_out = is_new_process;
@@ -50,13 +54,13 @@ class ServiceWorkerProcessManagerTest : public testing::Test {
     process_manager_.reset();
   }
 
-  scoped_ptr<MockRenderProcessHost> CreateRenderProcessHost() {
-    return make_scoped_ptr(new MockRenderProcessHost(browser_context_.get()));
+  std::unique_ptr<MockRenderProcessHost> CreateRenderProcessHost() {
+    return base::WrapUnique(new MockRenderProcessHost(browser_context_.get()));
   }
 
  protected:
-  scoped_ptr<TestBrowserContext> browser_context_;
-  scoped_ptr<ServiceWorkerProcessManager> process_manager_;
+  std::unique_ptr<TestBrowserContext> browser_context_;
+  std::unique_ptr<ServiceWorkerProcessManager> process_manager_;
   GURL pattern_;
   GURL script_url_;
 
@@ -86,9 +90,9 @@ TEST_F(ServiceWorkerProcessManagerTest, SortProcess) {
 }
 
 TEST_F(ServiceWorkerProcessManagerTest, FindAvailableProcess) {
-  scoped_ptr<MockRenderProcessHost> host1(CreateRenderProcessHost());
-  scoped_ptr<MockRenderProcessHost> host2(CreateRenderProcessHost());
-  scoped_ptr<MockRenderProcessHost> host3(CreateRenderProcessHost());
+  std::unique_ptr<MockRenderProcessHost> host1(CreateRenderProcessHost());
+  std::unique_ptr<MockRenderProcessHost> host2(CreateRenderProcessHost());
+  std::unique_ptr<MockRenderProcessHost> host3(CreateRenderProcessHost());
 
   // Process 1 has 2 refs, 2 has 3 refs and 3 has 1 ref.
   process_manager_->AddProcessReferenceToPattern(pattern_, host1->GetID());
@@ -126,8 +130,8 @@ TEST_F(ServiceWorkerProcessManagerTest,
   GURL scope2("http://example.com/scope2");
 
   // Set up mock renderer process hosts.
-  scoped_ptr<MockRenderProcessHost> host1(CreateRenderProcessHost());
-  scoped_ptr<MockRenderProcessHost> host2(CreateRenderProcessHost());
+  std::unique_ptr<MockRenderProcessHost> host1(CreateRenderProcessHost());
+  std::unique_ptr<MockRenderProcessHost> host2(CreateRenderProcessHost());
   process_manager_->AddProcessReferenceToPattern(scope1, host1->GetID());
   process_manager_->AddProcessReferenceToPattern(scope2, host2->GetID());
   ASSERT_EQ(0, host1->worker_ref_count());
@@ -143,6 +147,7 @@ TEST_F(ServiceWorkerProcessManagerTest,
   bool is_new_process = true;
   process_manager_->AllocateWorkerProcess(
       kEmbeddedWorkerId1, scope1, script_url_,
+      true /* can_use_existing_process */,
       base::Bind(&DidAllocateWorkerProcess, run_loop1.QuitClosure(), &status,
                  &process_id, &is_new_process));
   run_loop1.Run();
@@ -167,6 +172,7 @@ TEST_F(ServiceWorkerProcessManagerTest,
   is_new_process = true;
   process_manager_->AllocateWorkerProcess(
       kEmbeddedWorkerId2, scope1, script_url_,
+      true /* can_use_existing_process */,
       base::Bind(&DidAllocateWorkerProcess, run_loop2.QuitClosure(), &status,
                  &process_id, &is_new_process));
   run_loop2.Run();
@@ -182,7 +188,7 @@ TEST_F(ServiceWorkerProcessManagerTest,
   ASSERT_TRUE(found != instance_info.end());
   EXPECT_EQ(host1->GetID(), found->second.process_id);
 
-  // (3) Allocate a process to the other worker whose scope is different from
+  // (3) Allocate a process to a third worker whose scope is different from
   // other workers.
   base::RunLoop run_loop3;
   status = SERVICE_WORKER_ERROR_MAX_VALUE;
@@ -190,6 +196,7 @@ TEST_F(ServiceWorkerProcessManagerTest,
   is_new_process = true;
   process_manager_->AllocateWorkerProcess(
       kEmbeddedWorkerId3, scope2, script_url_,
+      true /* can_use_existing_process */,
       base::Bind(&DidAllocateWorkerProcess, run_loop3.QuitClosure(), &status,
                  &process_id, &is_new_process));
   run_loop3.Run();
@@ -234,7 +241,7 @@ TEST_F(ServiceWorkerProcessManagerTest, AllocateWorkerProcess_InShutdown) {
   int process_id = -10;
   bool is_new_process = true;
   process_manager_->AllocateWorkerProcess(
-      1, pattern_, script_url_,
+      1, pattern_, script_url_, true /* can_use_existing_process */,
       base::Bind(&DidAllocateWorkerProcess, run_loop.QuitClosure(), &status,
                  &process_id, &is_new_process));
   run_loop.Run();

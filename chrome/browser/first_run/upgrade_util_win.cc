@@ -13,13 +13,11 @@
 
 #include "base/base_paths.h"
 #include "base/command_line.h"
-#include "base/environment.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/process/launch.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
@@ -31,7 +29,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/upgrade_util_win.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -39,6 +36,7 @@
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
+#include "components/prefs/pref_service.h"
 #include "ui/base/ui_base_switches.h"
 
 #if defined(GOOGLE_CHROME_BUILD)
@@ -82,60 +80,7 @@ bool InvokeGoogleUpdateForRename() {
 
 namespace upgrade_util {
 
-const char kRelaunchModeMetro[] = "relaunch.mode.metro";
-const char kRelaunchModeDesktop[] = "relaunch.mode.desktop";
-const char kRelaunchModeDefault[] = "relaunch.mode.default";
-
-// TODO(shrikant): Have a map/array to quickly map enum to strings.
-std::string RelaunchModeEnumToString(const RelaunchMode relaunch_mode) {
-  if (relaunch_mode == RELAUNCH_MODE_METRO)
-    return kRelaunchModeMetro;
-
-  if (relaunch_mode == RELAUNCH_MODE_DESKTOP)
-    return kRelaunchModeDesktop;
-
-  // For the purpose of code flow, even in case of wrong value we will
-  // return default re-launch mode.
-  return kRelaunchModeDefault;
-}
-
-RelaunchMode RelaunchModeStringToEnum(const std::string& relaunch_mode) {
-  if (relaunch_mode == kRelaunchModeMetro)
-    return RELAUNCH_MODE_METRO;
-
-  if (relaunch_mode == kRelaunchModeDesktop)
-    return RELAUNCH_MODE_DESKTOP;
-
-  // On Windows 7 if the current browser is in Chrome OS mode, then restart
-  // into Chrome OS mode.
-  if ((base::win::GetVersion() == base::win::VERSION_WIN7) &&
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kViewerConnect) &&
-      !g_browser_process->local_state()->HasPrefPath(prefs::kRelaunchMode)) {
-    // TODO(ananta)
-    // On Windows 8, the delegate execute process looks up the previously
-    // launched mode from the registry and relaunches into that mode. We need
-    // something similar on Windows 7. For now, set the pref to ensure that
-    // we get relaunched into Chrome OS mode.
-    g_browser_process->local_state()->SetString(
-        prefs::kRelaunchMode, upgrade_util::kRelaunchModeMetro);
-    return RELAUNCH_MODE_METRO;
-  }
-
-  return RELAUNCH_MODE_DEFAULT;
-}
-
-bool RelaunchChromeHelper(const base::CommandLine& command_line,
-                          const RelaunchMode& relaunch_mode) {
-  scoped_ptr<base::Environment> env(base::Environment::Create());
-  std::string version_str;
-
-  // Get the version variable and remove it from the environment.
-  if (env->GetVar(chrome::kChromeVersionEnvVar, &version_str))
-    env->UnSetVar(chrome::kChromeVersionEnvVar);
-  else
-    version_str.clear();
-
+bool RelaunchChromeBrowser(const base::CommandLine& command_line) {
   base::FilePath chrome_exe;
   if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
     NOTREACHED();
@@ -148,17 +93,11 @@ bool RelaunchChromeHelper(const base::CommandLine& command_line,
   chrome_exe_command_line.SetProgram(
       chrome_exe.DirName().Append(installer::kChromeExe));
 
-  return base::LaunchProcess(chrome_exe_command_line, base::LaunchOptions())
-      .IsValid();
-}
-
-bool RelaunchChromeBrowser(const base::CommandLine& command_line) {
-  return RelaunchChromeHelper(command_line, RELAUNCH_MODE_DEFAULT);
-}
-
-bool RelaunchChromeWithMode(const base::CommandLine& command_line,
-                            const RelaunchMode& relaunch_mode) {
-  return RelaunchChromeHelper(command_line, relaunch_mode);
+  // Set the working directory to the exe's directory. This avoids a handle to
+  // the version directory being kept open in the relaunched child process.
+  base::LaunchOptions launch_options;
+  launch_options.current_directory = chrome_exe.DirName();
+  return base::LaunchProcess(chrome_exe_command_line, launch_options).IsValid();
 }
 
 bool IsUpdatePendingRestart() {
@@ -226,9 +165,6 @@ bool IsRunningOldChrome() {
 }
 
 bool DoUpgradeTasks(const base::CommandLine& command_line) {
-  // The DelegateExecute verb handler finalizes pending in-use updates for
-  // metro mode launches, as Chrome cannot be gracefully relaunched when
-  // running in this mode.
   if (!SwapNewChromeExeIfPresent() && !IsRunningOldChrome())
     return false;
   // At this point the chrome.exe has been swapped with the new one.

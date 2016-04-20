@@ -21,18 +21,6 @@ class InputMethodEngine;
 
 namespace extensions {
 
-class InputImeSetCompositionFunction : public SyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("input.ime.setComposition",
-                             INPUT_IME_SETCOMPOSITION)
-
- protected:
-  ~InputImeSetCompositionFunction() override {}
-
-  // ExtensionFunction:
-  bool RunSync() override;
-};
-
 class InputImeClearCompositionFunction : public SyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("input.ime.clearComposition",
@@ -40,17 +28,6 @@ class InputImeClearCompositionFunction : public SyncExtensionFunction {
 
  protected:
   ~InputImeClearCompositionFunction() override {}
-
-  // ExtensionFunction:
-  bool RunSync() override;
-};
-
-class InputImeCommitTextFunction : public SyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("input.ime.commitText", INPUT_IME_COMMITTEXT)
-
- protected:
-  ~InputImeCommitTextFunction() override {}
 
   // ExtensionFunction:
   bool RunSync() override;
@@ -126,18 +103,6 @@ class InputImeDeleteSurroundingTextFunction : public SyncExtensionFunction {
   bool RunSync() override;
 };
 
-class InputImeSendKeyEventsFunction : public AsyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("input.ime.sendKeyEvents",
-                             INPUT_IME_SENDKEYEVENTS)
-
- protected:
-  ~InputImeSendKeyEventsFunction() override {}
-
-  // ExtensionFunction:
-  bool RunAsync() override;
-};
-
 class InputImeHideInputViewFunction : public AsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("input.ime.hideInputView",
@@ -148,6 +113,24 @@ class InputImeHideInputViewFunction : public AsyncExtensionFunction {
 
   // ExtensionFunction:
   bool RunAsync() override;
+};
+
+class InputMethodPrivateNotifyImeMenuItemActivatedFunction
+    : public UIThreadExtensionFunction {
+ public:
+  InputMethodPrivateNotifyImeMenuItemActivatedFunction() {}
+
+ protected:
+  ~InputMethodPrivateNotifyImeMenuItemActivatedFunction() override {}
+
+  // UIThreadExtensionFunction:
+  ResponseAction Run() override;
+
+ private:
+  DECLARE_EXTENSION_FUNCTION("inputMethodPrivate.notifyImeMenuItemActivated",
+                             INPUTMETHODPRIVATE_NOTIFYIMEMENUITEMACTIVATED)
+  DISALLOW_COPY_AND_ASSIGN(
+      InputMethodPrivateNotifyImeMenuItemActivatedFunction);
 };
 
 class InputImeEventRouter : public InputImeEventRouterBase {
@@ -162,7 +145,8 @@ class InputImeEventRouter : public InputImeEventRouterBase {
 
   chromeos::InputMethodEngine* GetEngine(const std::string& extension_id,
                                          const std::string& component_id);
-  chromeos::InputMethodEngine* GetActiveEngine(const std::string& extension_id);
+  input_method::InputMethodEngineBase* GetActiveEngine(
+      const std::string& extension_id) override;
 
  private:
   // The engine map from extension_id to an engine.

@@ -5,12 +5,14 @@
 #include "chrome/browser/media/router/media_router_factory.h"
 
 #include "build/build_config.h"
+#include "chrome/browser/profiles/incognito_helpers.h"
+#include "chrome/browser/profiles/profile.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/media/android/router/media_router_android.h"
 #else
-#include "chrome/browser/media/router/media_router_mojo_impl.h"
+#include "chrome/browser/media/router/mojo/media_router_mojo_impl.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/process_manager_factory.h"
 #endif
@@ -36,6 +38,17 @@ MediaRouter* MediaRouterFactory::GetApiForBrowserContext(
       service_factory.Get().GetServiceForBrowserContext(context, true));
 }
 
+void MediaRouterFactory::BrowserContextShutdown(
+    content::BrowserContext* context) {
+  if (context->IsOffTheRecord()) {
+    MediaRouter* router =
+        static_cast<MediaRouter*>(GetServiceForBrowserContext(context, false));
+    if (router)
+      router->OnOffTheRecordProfileShutdown();
+  }
+  BrowserContextKeyedServiceFactory::BrowserContextShutdown(context);
+}
+
 MediaRouterFactory::MediaRouterFactory()
     : BrowserContextKeyedServiceFactory(
           "MediaRouter",
@@ -47,6 +60,11 @@ MediaRouterFactory::MediaRouterFactory()
 }
 
 MediaRouterFactory::~MediaRouterFactory() {
+}
+
+content::BrowserContext* MediaRouterFactory::GetBrowserContextToUse(
+    content::BrowserContext* context) const {
+  return chrome::GetBrowserContextRedirectedInIncognito(context);
 }
 
 KeyedService* MediaRouterFactory::BuildServiceInstanceFor(

@@ -9,7 +9,7 @@ import android.util.Pair;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.bookmark.BookmarksBridge;
+import org.chromium.chrome.browser.bookmarks.BookmarkBridge;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
 import org.chromium.components.bookmarks.BookmarkId;
@@ -37,7 +37,7 @@ public class BookmarksTest extends SyncTestBase {
     private static final String MODIFIED_TITLE = "Chromium2";
     private static final String FOLDER_TITLE = "Tech";
 
-    private BookmarksBridge mBookmarksBridge;
+    private BookmarkBridge mBookmarkBridge;
 
     // A container to store bookmark information for data verification.
     private static class Bookmark {
@@ -78,10 +78,10 @@ public class BookmarksTest extends SyncTestBase {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                mBookmarksBridge = new BookmarksBridge(Profile.getLastUsedProfile());
-                // The BookmarksBridge needs to know how to handle partner bookmarks.
+                mBookmarkBridge = new BookmarkBridge(Profile.getLastUsedProfile());
+                // The BookmarkBridge needs to know how to handle partner bookmarks.
                 // Without this call to fake that knowledge for testing, it crashes.
-                mBookmarksBridge.loadEmptyPartnerBookmarkShimForTesting();
+                mBookmarkBridge.loadEmptyPartnerBookmarkShimForTesting();
             }
         });
         setUpTestAccountAndSignInToSync();
@@ -120,7 +120,7 @@ public class BookmarksTest extends SyncTestBase {
         Bookmark bookmark = getClientBookmarks().get(0);
         modifyServerBookmark(bookmark.id, MODIFIED_TITLE, URL);
         SyncTestUtil.triggerSync();
-        pollForCriteria(new ClientBookmarksCriteria() {
+        pollInstrumentationThread(new ClientBookmarksCriteria() {
             @Override
             public boolean isSatisfied(List<Bookmark> bookmarks) {
                 Bookmark modifiedBookmark = bookmarks.get(0);
@@ -168,7 +168,7 @@ public class BookmarksTest extends SyncTestBase {
         // Move on server, sync, and verify the move locally.
         mFakeServerHelper.modifyBookmarkEntity(bookmark.id, TITLE, URL, folder.id);
         SyncTestUtil.triggerSync();
-        pollForCriteria(new ClientBookmarksCriteria() {
+        pollInstrumentationThread(new ClientBookmarksCriteria() {
             @Override
             public boolean isSatisfied(List<Bookmark> bookmarks) {
                 // The "s" is prepended because the server adds one to the parentId.
@@ -208,7 +208,7 @@ public class BookmarksTest extends SyncTestBase {
         modifyServerBookmarkFolder(folder.id, MODIFIED_TITLE);
         SyncTestUtil.triggerSync();
 
-        pollForCriteria(new ClientBookmarksCriteria() {
+        pollInstrumentationThread(new ClientBookmarksCriteria() {
             @Override
             public boolean isSatisfied(List<Bookmark> bookmarks) {
                 Bookmark modifiedFolder = bookmarks.get(0);
@@ -296,7 +296,7 @@ public class BookmarksTest extends SyncTestBase {
         // Move on client, sync, and verify the move on the server.
         moveClientBookmark(bookmarkId, folderId);
         SyncTestUtil.triggerSync();
-        pollForCriteria(new ServerBookmarksCriteria() {
+        pollInstrumentationThread(new ServerBookmarksCriteria() {
             @Override
             public boolean isSatisfied(List<Bookmark> bookmarks) {
                 Bookmark modifiedBookmark = bookmarks.get(bookmarks.get(0).isFolder() ? 1 : 0);
@@ -366,8 +366,8 @@ public class BookmarksTest extends SyncTestBase {
         BookmarkId id = ThreadUtils.runOnUiThreadBlockingNoException(new Callable<BookmarkId>() {
             @Override
             public BookmarkId call() throws Exception {
-                BookmarkId parentId = mBookmarksBridge.getMobileFolderId();
-                return mBookmarksBridge.addBookmark(parentId, 0, title, url);
+                BookmarkId parentId = mBookmarkBridge.getMobileFolderId();
+                return mBookmarkBridge.addBookmark(parentId, 0, title, url);
             }
         });
         assertNotNull("Failed to create bookmark.", id);
@@ -378,8 +378,8 @@ public class BookmarksTest extends SyncTestBase {
         BookmarkId id = ThreadUtils.runOnUiThreadBlockingNoException(new Callable<BookmarkId>() {
             @Override
             public BookmarkId call() throws Exception {
-                BookmarkId parentId = mBookmarksBridge.getMobileFolderId();
-                return mBookmarksBridge.addFolder(parentId, 0, title);
+                BookmarkId parentId = mBookmarkBridge.getMobileFolderId();
+                return mBookmarkBridge.addFolder(parentId, 0, title);
             }
         });
         assertNotNull("Failed to create bookmark folder.", id);
@@ -410,7 +410,7 @@ public class BookmarksTest extends SyncTestBase {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                mBookmarksBridge.deleteBookmark(id);
+                mBookmarkBridge.deleteBookmark(id);
             }
         });
     }
@@ -419,7 +419,7 @@ public class BookmarksTest extends SyncTestBase {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                mBookmarksBridge.setBookmarkTitle(id, title);
+                mBookmarkBridge.setBookmarkTitle(id, title);
             }
         });
     }
@@ -428,7 +428,7 @@ public class BookmarksTest extends SyncTestBase {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                mBookmarksBridge.moveBookmark(id, newParentId, 0 /* new index */);
+                mBookmarkBridge.moveBookmark(id, newParentId, 0 /* new index */);
             }
         });
     }
@@ -470,22 +470,18 @@ public class BookmarksTest extends SyncTestBase {
                             count, ModelType.BOOKMARKS, name));
     }
 
-    private void waitForClientBookmarkCount(final int n) throws InterruptedException {
-        pollForCriteria(new Criteria("There should be " + n + " local bookmarks.") {
+    private void waitForClientBookmarkCount(int n) throws InterruptedException {
+        pollInstrumentationThread(Criteria.equals(n, new Callable<Integer>() {
             @Override
-            public boolean isSatisfied() {
-                try {
-                    return SyncTestUtil.getLocalData(mContext, BOOKMARKS_TYPE_STRING).size() == n;
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
+            public Integer call() throws Exception {
+                return SyncTestUtil.getLocalData(mContext, BOOKMARKS_TYPE_STRING).size();
             }
-        });
+        }));
     }
 
     private void waitForServerBookmarkCountWithName(final int count, final String name)
             throws InterruptedException {
-        pollForCriteria(new Criteria(
+        pollInstrumentationThread(new Criteria(
                 "Expected " + count + " remote bookmarks with name " + name + ".") {
             @Override
             public boolean isSatisfied() {

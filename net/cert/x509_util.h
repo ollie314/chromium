@@ -7,10 +7,10 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "net/base/net_export.h"
 
@@ -30,6 +30,12 @@ enum DigestAlgorithm {
   DIGEST_SHA1,
   DIGEST_SHA256
 };
+
+// Generate a 'tls-server-end-point' channel binding based on the specified
+// certificate. Channel bindings are based on RFC 5929.
+NET_EXPORT_PRIVATE bool GetTLSServerEndPointChannelBinding(
+    const X509Certificate& certificate,
+    std::string* token);
 
 // Creates a public-private keypair and a self-signed certificate.
 // Subject, serial number and validity period are given as parameters.
@@ -53,7 +59,7 @@ NET_EXPORT bool CreateKeyAndSelfSignedCert(
     uint32_t serial_number,
     base::Time not_valid_before,
     base::Time not_valid_after,
-    scoped_ptr<crypto::RSAPrivateKey>* key,
+    std::unique_ptr<crypto::RSAPrivateKey>* key,
     std::string* der_cert);
 
 // Creates a self-signed certificate from a provided key, using the specified

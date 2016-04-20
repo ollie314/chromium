@@ -4,13 +4,14 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "apps/launcher.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -34,6 +35,7 @@
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/host_zoom_map.h"
@@ -57,7 +59,6 @@
 #include "url/gurl.h"
 
 #if defined(OS_CHROMEOS)
-#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -259,6 +260,7 @@ class PlatformAppWithFileBrowserTest: public PlatformAppBrowserTest {
   }
 };
 
+const char kChromiumURL[] = "http://chromium.org";
 #if !defined(OS_CHROMEOS)
 const char kTestFilePath[] = "platform_apps/launch_files/test.txt";
 #endif
@@ -270,7 +272,7 @@ const char kTestFilePath[] = "platform_apps/launch_files/test.txt";
 // ash, so we test that it works here.
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, CreateAndCloseAppWindow) {
   const Extension* extension = LoadAndLaunchPlatformApp("minimal", "Launched");
-  AppWindow* window = CreateAppWindow(extension);
+  AppWindow* window = CreateAppWindow(browser()->profile(), extension);
   CloseAppWindow(window);
 }
 
@@ -294,7 +296,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, EmptyContextMenu) {
   WebContents* web_contents = GetFirstAppWindowWebContents();
   ASSERT_TRUE(web_contents);
   content::ContextMenuParams params;
-  scoped_ptr<PlatformAppContextMenu> menu;
+  std::unique_ptr<PlatformAppContextMenu> menu;
   menu.reset(new PlatformAppContextMenu(web_contents->GetMainFrame(), params));
   menu->Init();
   ASSERT_TRUE(menu->HasCommandWithId(IDC_CONTENT_CONTEXT_INSPECTELEMENT));
@@ -313,7 +315,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenu) {
   WebContents* web_contents = GetFirstAppWindowWebContents();
   ASSERT_TRUE(web_contents);
   content::ContextMenuParams params;
-  scoped_ptr<PlatformAppContextMenu> menu;
+  std::unique_ptr<PlatformAppContextMenu> menu;
   menu.reset(new PlatformAppContextMenu(web_contents->GetMainFrame(), params));
   menu->Init();
   int first_extensions_command_id =
@@ -342,7 +344,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, InstalledAppWithContextMenu) {
   WebContents* web_contents = GetFirstAppWindowWebContents();
   ASSERT_TRUE(web_contents);
   content::ContextMenuParams params;
-  scoped_ptr<PlatformAppContextMenu> menu;
+  std::unique_ptr<PlatformAppContextMenu> menu;
   menu.reset(new PlatformAppContextMenu(web_contents->GetMainFrame(), params));
   menu->Init();
   int extensions_custom_id =
@@ -367,7 +369,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenuTextField) {
   ASSERT_TRUE(web_contents);
   content::ContextMenuParams params;
   params.is_editable = true;
-  scoped_ptr<PlatformAppContextMenu> menu;
+  std::unique_ptr<PlatformAppContextMenu> menu;
   menu.reset(new PlatformAppContextMenu(web_contents->GetMainFrame(), params));
   menu->Init();
   int extensions_custom_id =
@@ -392,7 +394,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenuSelection) {
   ASSERT_TRUE(web_contents);
   content::ContextMenuParams params;
   params.selection_text = base::ASCIIToUTF16("Hello World");
-  scoped_ptr<PlatformAppContextMenu> menu;
+  std::unique_ptr<PlatformAppContextMenu> menu;
   menu.reset(new PlatformAppContextMenu(web_contents->GetMainFrame(), params));
   menu->Init();
   int extensions_custom_id =
@@ -416,7 +418,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenuClicked) {
   ASSERT_TRUE(web_contents);
   content::ContextMenuParams params;
   params.page_url = GURL("http://foo.bar");
-  scoped_ptr<PlatformAppContextMenu> menu;
+  std::unique_ptr<PlatformAppContextMenu> menu;
   menu.reset(new PlatformAppContextMenu(web_contents->GetMainFrame(), params));
   menu->Init();
   int extensions_custom_id =
@@ -432,17 +434,34 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenuClicked) {
 }
 
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, DisallowNavigation) {
-  TabsAddedNotificationObserver observer(2);
+  TabsAddedNotificationObserver observer(1);
 
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/navigation")) << message_;
 
   observer.Wait();
-  ASSERT_EQ(2U, observer.tabs().size());
-  EXPECT_EQ(std::string(chrome::kExtensionInvalidRequestURL),
-            observer.tabs()[0]->GetURL().spec());
-  EXPECT_EQ("http://chromium.org/",
-            observer.tabs()[1]->GetURL().spec());
+  ASSERT_EQ(1U, observer.tabs().size());
+  EXPECT_EQ(GURL(kChromiumURL), observer.tabs()[0]->GetURL());
+}
+
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
+                       DisallowBackgroundPageNavigation) {
+  // The test will try to open in app urls and external urls via clicking links
+  // and window.open(). Only the external urls should succeed in opening tabs.
+  // TODO(lazyboy): non-external urls also succeed right now because of
+  // http://crbug.com/585570 not being fixed. Fix the test once the bug is
+  // fixed.
+  // const size_t kExpectedNumberOfTabs = 2u;
+  const size_t kExpectedNumberOfTabs = 6u;
+  TabsAddedNotificationObserver observer(kExpectedNumberOfTabs);
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/background_page_navigation")) <<
+      message_;
+  observer.Wait();
+  ASSERT_EQ(kExpectedNumberOfTabs, observer.tabs().size());
+  EXPECT_EQ(GURL(kChromiumURL),
+            observer.tabs()[kExpectedNumberOfTabs - 1]->GetURL());
+  EXPECT_EQ(GURL(kChromiumURL),
+            observer.tabs()[kExpectedNumberOfTabs - 2]->GetURL());
 }
 
 // Failing on some Win and Linux buildbots.  See crbug.com/354425.
@@ -760,7 +779,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
                        AppWindowAdjustBoundsToBeVisibleOnScreen) {
   const Extension* extension = LoadAndLaunchPlatformApp("minimal", "Launched");
 
-  AppWindow* window = CreateAppWindow(extension);
+  AppWindow* window = CreateAppWindow(browser()->profile(), extension);
 
   // The screen bounds didn't change, the cached bounds didn't need to adjust.
   gfx::Rect cached_bounds(80, 100, 400, 400);
@@ -1228,9 +1247,9 @@ IN_PROC_BROWSER_TEST_F(PlatformAppIncognitoBrowserTest, IncognitoComponentApp) {
   ASSERT_TRUE(registry != NULL);
   registry->AddObserver(this);
 
-  OpenApplication(AppLaunchParams(incognito_profile, file_manager, CURRENT_TAB,
-                                  chrome::HOST_DESKTOP_TYPE_NATIVE,
-                                  extensions::SOURCE_TEST));
+  OpenApplication(CreateAppLaunchParamsUserContainer(
+      incognito_profile, file_manager, NEW_FOREGROUND_TAB,
+      extensions::SOURCE_TEST));
 
   while (!ContainsKey(opener_app_ids_, file_manager->id())) {
     content::RunAllPendingInMessageLoop();
@@ -1250,7 +1269,7 @@ class RestartDeviceTest : public PlatformAppBrowserTest {
 
     power_manager_client_ = new chromeos::FakePowerManagerClient;
     chromeos::DBusThreadManager::GetSetterForTesting()->SetPowerManagerClient(
-        scoped_ptr<chromeos::PowerManagerClient>(power_manager_client_));
+        std::unique_ptr<chromeos::PowerManagerClient>(power_manager_client_));
   }
 
   void SetUpOnMainThread() override {
@@ -1285,7 +1304,7 @@ class RestartDeviceTest : public PlatformAppBrowserTest {
  private:
   chromeos::FakePowerManagerClient* power_manager_client_;
   chromeos::MockUserManager* mock_user_manager_;
-  scoped_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
+  std::unique_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
 
   DISALLOW_COPY_AND_ASSIGN(RestartDeviceTest);
 };

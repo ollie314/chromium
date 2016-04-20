@@ -28,7 +28,7 @@ class AndroidUsbSocket : public net::StreamSocket,
                    base::Closure delete_callback);
   ~AndroidUsbSocket() override;
 
-  void HandleIncoming(scoped_ptr<AdbMessage> message);
+  void HandleIncoming(std::unique_ptr<AdbMessage> message);
 
   void Terminated(bool closed_by_device);
 
@@ -51,7 +51,6 @@ class AndroidUsbSocket : public net::StreamSocket,
   void SetSubresourceSpeculation() override;
   void SetOmniboxSpeculation() override;
   bool WasEverUsed() const override;
-  bool UsingTCPFastOpen() const override;
   bool WasNpnNegotiated() const override;
   net::NextProto GetNegotiatedProtocol() const override;
   bool GetSSLInfo(net::SSLInfo* ssl_info) override;

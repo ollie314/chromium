@@ -23,6 +23,7 @@
 #include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerCache.h"
 #include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerRequest.h"
 #include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerResponse.h"
+#include "url/origin.h"
 
 using base::TimeTicks;
 
@@ -89,7 +90,10 @@ ServiceWorkerResponse ResponseFromWebResponse(
       web_response.responseType(), headers,
       base::UTF16ToASCII(base::StringPiece16(web_response.blobUUID())),
       web_response.blobSize(), web_response.streamURL(),
-      blink::WebServiceWorkerResponseErrorUnknown);
+      blink::WebServiceWorkerResponseErrorUnknown,
+      base::Time::FromInternalValue(web_response.responseTime()),
+      !web_response.cacheStorageCacheName().isNull(),
+      web_response.cacheStorageCacheName().utf8());
 }
 
 CacheStorageCacheQueryParams QueryParamsFromWebQueryParams(
@@ -292,14 +296,14 @@ void CacheStorageDispatcher::OnCacheStorageOpenSuccess(int thread_id,
                                                        int request_id,
                                                        int cache_id) {
   DCHECK_EQ(thread_id, CurrentWorkerId());
-  scoped_ptr<WebCache> web_cache(
+  std::unique_ptr<WebCache> web_cache(
       new WebCache(weak_factory_.GetWeakPtr(), cache_id));
   web_caches_.AddWithID(web_cache.get(), cache_id);
   UMA_HISTOGRAM_TIMES("ServiceWorkerCache.CacheStorage.Open",
                       TimeTicks::Now() - open_times_[request_id]);
   WebServiceWorkerCacheStorage::CacheStorageWithCacheCallbacks* callbacks =
       open_callbacks_.Lookup(request_id);
-  callbacks->onSuccess(blink::adoptWebPtr(web_cache.release()));
+  callbacks->onSuccess(std::move(web_cache));
   open_callbacks_.Remove(request_id);
   open_times_.erase(request_id);
 }
@@ -522,7 +526,7 @@ void CacheStorageDispatcher::OnCacheBatchError(
 
 void CacheStorageDispatcher::dispatchHas(
     WebServiceWorkerCacheStorage::CacheStorageCallbacks* callbacks,
-    const GURL& origin,
+    const url::Origin& origin,
     const blink::WebString& cacheName) {
   int request_id = has_callbacks_.Add(callbacks);
   has_times_[request_id] = base::TimeTicks::Now();
@@ -532,7 +536,7 @@ void CacheStorageDispatcher::dispatchHas(
 
 void CacheStorageDispatcher::dispatchOpen(
     WebServiceWorkerCacheStorage::CacheStorageWithCacheCallbacks* callbacks,
-    const GURL& origin,
+    const url::Origin& origin,
     const blink::WebString& cacheName) {
   int request_id = open_callbacks_.Add(callbacks);
   open_times_[request_id] = base::TimeTicks::Now();
@@ -542,7 +546,7 @@ void CacheStorageDispatcher::dispatchOpen(
 
 void CacheStorageDispatcher::dispatchDelete(
     WebServiceWorkerCacheStorage::CacheStorageCallbacks* callbacks,
-    const GURL& origin,
+    const url::Origin& origin,
     const blink::WebString& cacheName) {
   int request_id = delete_callbacks_.Add(callbacks);
   delete_times_[request_id] = base::TimeTicks::Now();
@@ -552,7 +556,7 @@ void CacheStorageDispatcher::dispatchDelete(
 
 void CacheStorageDispatcher::dispatchKeys(
     WebServiceWorkerCacheStorage::CacheStorageKeysCallbacks* callbacks,
-    const GURL& origin) {
+    const url::Origin& origin) {
   int request_id = keys_callbacks_.Add(callbacks);
   keys_times_[request_id] = base::TimeTicks::Now();
   Send(new CacheStorageHostMsg_CacheStorageKeys(CurrentWorkerId(), request_id,
@@ -561,7 +565,7 @@ void CacheStorageDispatcher::dispatchKeys(
 
 void CacheStorageDispatcher::dispatchMatch(
     WebServiceWorkerCacheStorage::CacheStorageMatchCallbacks* callbacks,
-    const GURL& origin,
+    const url::Origin& origin,
     const blink::WebServiceWorkerRequest& request,
     const blink::WebServiceWorkerCache::QueryParams& query_params) {
   int request_id = match_callbacks_.Add(callbacks);
@@ -646,6 +650,11 @@ void CacheStorageDispatcher::PopulateWebResponseFromResponse(
   web_response->setStatus(response.status_code);
   web_response->setStatusText(base::ASCIIToUTF16(response.status_text));
   web_response->setResponseType(response.response_type);
+  web_response->setResponseTime(response.response_time.ToInternalValue());
+  web_response->setCacheStorageCacheName(
+      response.is_in_cache_storage
+          ? blink::WebString::fromUTF8(response.cache_storage_cache_name)
+          : blink::WebString());
 
   for (const auto& i : response.headers) {
     web_response->setHeader(base::ASCIIToUTF16(i.first),

@@ -6,12 +6,11 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/values.h"
@@ -26,6 +25,7 @@
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/bookmarks/managed/managed_bookmark_service.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -83,7 +83,7 @@ class BookmarkContextMenuTest : public testing::Test {
 
  protected:
   content::TestBrowserThreadBundle thread_bundle_;
-  scoped_ptr<TestingProfile> profile_;
+  std::unique_ptr<TestingProfile> profile_;
   BookmarkModel* model_;
   TestingPageNavigator navigator_;
 
@@ -305,7 +305,7 @@ TEST_F(BookmarkContextMenuTest, CutCopyPasteNode) {
   const BookmarkNode* bb_node = model_->bookmark_bar_node();
   std::vector<const BookmarkNode*> nodes;
   nodes.push_back(bb_node->GetChild(0));
-  scoped_ptr<BookmarkContextMenu> controller(new BookmarkContextMenu(
+  std::unique_ptr<BookmarkContextMenu> controller(new BookmarkContextMenu(
       NULL, NULL, profile_.get(), NULL, nodes[0]->parent(), nodes, false));
   EXPECT_TRUE(controller->IsCommandEnabled(IDC_COPY));
   EXPECT_TRUE(controller->IsCommandEnabled(IDC_CUT));
@@ -338,7 +338,7 @@ TEST_F(BookmarkContextMenuTest, ShowManagedBookmarks) {
   const BookmarkNode* bb_node = model_->bookmark_bar_node();
   std::vector<const BookmarkNode*> nodes;
   nodes.push_back(bb_node->GetChild(0));
-  scoped_ptr<BookmarkContextMenu> controller(new BookmarkContextMenu(
+  std::unique_ptr<BookmarkContextMenu> controller(new BookmarkContextMenu(
       NULL, NULL, profile_.get(), NULL, nodes[0]->parent(), nodes, false));
 
   // Verify that there are no managed nodes yet.

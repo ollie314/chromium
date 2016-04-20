@@ -17,27 +17,22 @@ extern const char kHistogramCommit[];
 extern const char kHistogramFirstLayout[];
 extern const char kHistogramFirstTextPaint[];
 extern const char kHistogramDomContentLoaded[];
+extern const char kHistogramDomLoadingToDomContentLoaded[];
 extern const char kHistogramLoad[];
-extern const char kHistogramFirstPaint[];
-extern const char kHistogramFirstImagePaint[];
 extern const char kHistogramFirstContentfulPaint[];
+extern const char kHistogramDomLoadingToFirstContentfulPaint[];
+extern const char kHistogramParseDuration[];
+extern const char kHistogramParseBlockedOnScriptLoad[];
+
 extern const char kBackgroundHistogramCommit[];
 extern const char kBackgroundHistogramFirstLayout[];
 extern const char kBackgroundHistogramFirstTextPaint[];
 extern const char kBackgroundHistogramDomContentLoaded[];
 extern const char kBackgroundHistogramLoad[];
 extern const char kBackgroundHistogramFirstPaint[];
-extern const char kBackgroundHistogramFirstImagePaint[];
-extern const char kBackgroundHistogramFirstContentfulPaint[];
-
-extern const char kHistogramFirstContentfulPaintHigh[];
-extern const char kHistogramFirstContentfulPaintLow[];
-
-extern const char kHistogramFirstBackground[];
-extern const char kHistogramFirstForeground[];
 
 extern const char kHistogramBackgroundBeforePaint[];
-extern const char kHistogramBackgroundBeforeCommit[];
+extern const char kHistogramFailedProvisionalLoad[];
 
 extern const char kRapporMetricsNameCoarseTiming[];
 
@@ -55,12 +50,25 @@ class CorePageLoadMetricsObserver
   // page_load_metrics::PageLoadMetricsObserver:
   void OnComplete(const page_load_metrics::PageLoadTiming& timing,
                   const page_load_metrics::PageLoadExtraInfo& info) override;
+  void OnFailedProvisionalLoad(
+      content::NavigationHandle* navigation_handle) override;
 
  private:
+  // Information related to failed provisional loads.
+  // Populated in OnFailedProvisionalLoad and accessed in OnComplete.
+  struct FailedProvisionalLoadInfo {
+    base::TimeDelta interval;
+    net::Error error;
+
+    FailedProvisionalLoadInfo() : error(net::OK) {}
+  };
+
   void RecordTimingHistograms(const page_load_metrics::PageLoadTiming& timing,
                               const page_load_metrics::PageLoadExtraInfo& info);
   void RecordRappor(const page_load_metrics::PageLoadTiming& timing,
                     const page_load_metrics::PageLoadExtraInfo& info);
+
+  FailedProvisionalLoadInfo failed_provisional_load_info_;
 
   DISALLOW_COPY_AND_ASSIGN(CorePageLoadMetricsObserver);
 };

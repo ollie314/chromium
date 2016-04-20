@@ -10,7 +10,6 @@
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/base/test_completion_callback.h"
 #include "net/test/net_test_suite.h"
 #include "net/udp/udp_client_socket.h"
@@ -54,11 +53,10 @@ class UDPSocketPerfTest : public PlatformTest {
 void CreateUDPAddress(const std::string& ip_str,
                       uint16_t port,
                       IPEndPoint* address) {
-  IPAddressNumber ip_number;
-  bool rv = ParseIPLiteralToNumber(ip_str, &ip_number);
-  if (!rv)
+  IPAddress ip_address;
+  if (!ip_address.AssignFromIPLiteral(ip_str))
     return;
-  *address = IPEndPoint(ip_number, port);
+  *address = IPEndPoint(ip_address, port);
 }
 
 void UDPSocketPerfTest::WritePacketsToSocket(UDPClientSocket* socket,
@@ -90,7 +88,7 @@ void UDPSocketPerfTest::WriteBenchmark(bool use_nonblocking_io) {
   // Setup the server to listen.
   IPEndPoint bind_address;
   CreateUDPAddress("127.0.0.1", kPort, &bind_address);
-  scoped_ptr<UDPServerSocket> server(
+  std::unique_ptr<UDPServerSocket> server(
       new UDPServerSocket(nullptr, NetLog::Source()));
 #if defined(OS_WIN)
   if (use_nonblocking_io)
@@ -102,7 +100,7 @@ void UDPSocketPerfTest::WriteBenchmark(bool use_nonblocking_io) {
   // Setup the client.
   IPEndPoint server_address;
   CreateUDPAddress("127.0.0.1", kPort, &server_address);
-  scoped_ptr<UDPClientSocket> client(
+  std::unique_ptr<UDPClientSocket> client(
       new UDPClientSocket(DatagramSocket::DEFAULT_BIND, RandIntCallback(),
                           nullptr, NetLog::Source()));
 #if defined(OS_WIN)

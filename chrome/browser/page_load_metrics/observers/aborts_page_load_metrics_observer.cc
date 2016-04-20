@@ -8,10 +8,51 @@
 
 using page_load_metrics::UserAbortType;
 
+namespace internal {
+
+const char kHistogramAbortForwardBackBeforeCommit[] =
+    "PageLoad.AbortTiming.ForwardBackNavigation.BeforeCommit";
+const char kHistogramAbortReloadBeforeCommit[] =
+    "PageLoad.AbortTiming.Reload.BeforeCommit";
+const char kHistogramAbortNewNavigationBeforeCommit[] =
+    "PageLoad.AbortTiming.NewNavigation.BeforeCommit";
+const char kHistogramAbortStopBeforeCommit[] =
+    "PageLoad.AbortTiming.Stop.BeforeCommit";
+const char kHistogramAbortCloseBeforeCommit[] =
+    "PageLoad.AbortTiming.Close.BeforeCommit";
+const char kHistogramAbortOtherBeforeCommit[] =
+    "PageLoad.AbortTiming.Other.BeforeCommit";
+const char kHistogramAbortUnknownNavigationBeforeCommit[] =
+    "PageLoad.AbortTiming.UnknownNavigation.BeforeCommit";
+
+const char kHistogramAbortForwardBackBeforePaint[] =
+    "PageLoad.AbortTiming.ForwardBackNavigation.AfterCommit.BeforePaint";
+const char kHistogramAbortReloadBeforePaint[] =
+    "PageLoad.AbortTiming.Reload.AfterCommit.BeforePaint";
+const char kHistogramAbortNewNavigationBeforePaint[] =
+    "PageLoad.AbortTiming.NewNavigation.AfterCommit.BeforePaint";
+const char kHistogramAbortStopBeforePaint[] =
+    "PageLoad.AbortTiming.Stop.AfterCommit.BeforePaint";
+const char kHistogramAbortCloseBeforePaint[] =
+    "PageLoad.AbortTiming.Close.AfterCommit.BeforePaint";
+
+const char kHistogramAbortForwardBackDuringParse[] =
+    "PageLoad.AbortTiming.ForwardBackNavigation.DuringParse";
+const char kHistogramAbortReloadDuringParse[] =
+    "PageLoad.AbortTiming.Reload.DuringParse";
+const char kHistogramAbortNewNavigationDuringParse[] =
+    "PageLoad.AbortTiming.NewNavigation.DuringParse";
+const char kHistogramAbortStopDuringParse[] =
+    "PageLoad.AbortTiming.Stop.DuringParse";
+const char kHistogramAbortCloseDuringParse[] =
+    "PageLoad.AbortTiming.Close.DuringParse";
+
+}  // namespace internal
+
 namespace {
 
 void RecordAbortBeforeCommit(UserAbortType abort_type,
-                             const base::TimeDelta& time_to_abort) {
+                             base::TimeDelta time_to_abort) {
   switch (abort_type) {
     case UserAbortType::ABORT_RELOAD:
       PAGE_LOAD_HISTOGRAM(internal::kHistogramAbortReloadBeforeCommit,
@@ -37,6 +78,11 @@ void RecordAbortBeforeCommit(UserAbortType abort_type,
       PAGE_LOAD_HISTOGRAM(internal::kHistogramAbortOtherBeforeCommit,
                           time_to_abort);
       return;
+    case UserAbortType::ABORT_UNKNOWN_NAVIGATION:
+      PAGE_LOAD_HISTOGRAM(
+          internal::kHistogramAbortUnknownNavigationBeforeCommit,
+          time_to_abort);
+      return;
     case UserAbortType::ABORT_NONE:
     case UserAbortType::ABORT_LAST_ENTRY:
       NOTREACHED();
@@ -46,7 +92,7 @@ void RecordAbortBeforeCommit(UserAbortType abort_type,
 }
 
 void RecordAbortAfterCommitBeforePaint(UserAbortType abort_type,
-                                       const base::TimeDelta& time_to_abort) {
+                                       base::TimeDelta time_to_abort) {
   switch (abort_type) {
     case UserAbortType::ABORT_RELOAD:
       PAGE_LOAD_HISTOGRAM(internal::kHistogramAbortReloadBeforePaint,
@@ -68,8 +114,50 @@ void RecordAbortAfterCommitBeforePaint(UserAbortType abort_type,
       PAGE_LOAD_HISTOGRAM(internal::kHistogramAbortCloseBeforePaint,
                           time_to_abort);
       return;
+    case UserAbortType::ABORT_UNKNOWN_NAVIGATION:
+      NOTREACHED() << "Received UserAbortType::ABORT_UNKNOWN_NAVIGATION for "
+                      "committed load.";
+      return;
     case UserAbortType::ABORT_OTHER:
-      DLOG(FATAL) << "Received UserAbortType::ABORT_OTHER for committed load.";
+      NOTREACHED() << "Received UserAbortType::ABORT_OTHER for committed load.";
+      return;
+    case UserAbortType::ABORT_NONE:
+    case UserAbortType::ABORT_LAST_ENTRY:
+      NOTREACHED();
+      return;
+  }
+  NOTREACHED();
+}
+
+void RecordAbortDuringParse(UserAbortType abort_type,
+                            base::TimeDelta time_to_abort) {
+  switch (abort_type) {
+    case UserAbortType::ABORT_RELOAD:
+      PAGE_LOAD_HISTOGRAM(internal::kHistogramAbortReloadDuringParse,
+                          time_to_abort);
+      return;
+    case UserAbortType::ABORT_FORWARD_BACK:
+      PAGE_LOAD_HISTOGRAM(internal::kHistogramAbortForwardBackDuringParse,
+                          time_to_abort);
+      return;
+    case UserAbortType::ABORT_NEW_NAVIGATION:
+      PAGE_LOAD_HISTOGRAM(internal::kHistogramAbortNewNavigationDuringParse,
+                          time_to_abort);
+      return;
+    case UserAbortType::ABORT_STOP:
+      PAGE_LOAD_HISTOGRAM(internal::kHistogramAbortStopDuringParse,
+                          time_to_abort);
+      return;
+    case UserAbortType::ABORT_CLOSE:
+      PAGE_LOAD_HISTOGRAM(internal::kHistogramAbortCloseDuringParse,
+                          time_to_abort);
+      return;
+    case UserAbortType::ABORT_UNKNOWN_NAVIGATION:
+      NOTREACHED() << "Received UserAbortType::ABORT_UNKNOWN_NAVIGATION for "
+                      "committed load.";
+      return;
+    case UserAbortType::ABORT_OTHER:
+      NOTREACHED() << "Received UserAbortType::ABORT_OTHER for committed load.";
       return;
     case UserAbortType::ABORT_NONE:
     case UserAbortType::ABORT_LAST_ENTRY:
@@ -81,33 +169,6 @@ void RecordAbortAfterCommitBeforePaint(UserAbortType abort_type,
 
 }  // namespace
 
-namespace internal {
-
-const char kHistogramAbortForwardBackBeforeCommit[] =
-    "PageLoad.AbortTiming.ForwardBackNavigation.BeforeCommit";
-const char kHistogramAbortReloadBeforeCommit[] =
-    "PageLoad.AbortTiming.Reload.BeforeCommit";
-const char kHistogramAbortNewNavigationBeforeCommit[] =
-    "PageLoad.AbortTiming.NewNavigation.BeforeCommit";
-const char kHistogramAbortStopBeforeCommit[] =
-    "PageLoad.AbortTiming.Stop.BeforeCommit";
-const char kHistogramAbortCloseBeforeCommit[] =
-    "PageLoad.AbortTiming.Close.BeforeCommit";
-const char kHistogramAbortOtherBeforeCommit[] =
-    "PageLoad.AbortTiming.Other.BeforeCommit";
-const char kHistogramAbortForwardBackBeforePaint[] =
-    "PageLoad.AbortTiming.ForwardBackNavigation.AfterCommit.BeforePaint";
-const char kHistogramAbortReloadBeforePaint[] =
-    "PageLoad.AbortTiming.Reload.AfterCommit.BeforePaint";
-const char kHistogramAbortNewNavigationBeforePaint[] =
-    "PageLoad.AbortTiming.NewNavigation.AfterCommit.BeforePaint";
-const char kHistogramAbortStopBeforePaint[] =
-    "PageLoad.AbortTiming.Stop.AfterCommit.BeforePaint";
-const char kHistogramAbortCloseBeforePaint[] =
-    "PageLoad.AbortTiming.Close.AfterCommit.BeforePaint";
-
-}  // namespace internal
-
 AbortsPageLoadMetricsObserver::AbortsPageLoadMetricsObserver() {}
 
 void AbortsPageLoadMetricsObserver::OnComplete(
@@ -117,11 +178,11 @@ void AbortsPageLoadMetricsObserver::OnComplete(
   if (abort_type == UserAbortType::ABORT_NONE)
     return;
 
-  const base::TimeDelta& time_to_abort = extra_info.time_to_abort;
+  base::TimeDelta time_to_abort = extra_info.time_to_abort;
   DCHECK(!time_to_abort.is_zero());
 
   // Don't log abort times if the page was backgrounded before the abort event.
-  if (!EventOccurredInForeground(time_to_abort, extra_info))
+  if (!WasStartedInForegroundEventInForeground(time_to_abort, extra_info))
     return;
 
   if (extra_info.time_to_commit.is_zero()) {
@@ -137,6 +198,10 @@ void AbortsPageLoadMetricsObserver::OnComplete(
   if (timing.IsEmpty())
     return;
 
+  if (!timing.parse_start.is_zero() && time_to_abort >= timing.parse_start &&
+      (timing.parse_stop.is_zero() || timing.parse_stop >= time_to_abort)) {
+    RecordAbortDuringParse(abort_type, time_to_abort);
+  }
   if (timing.first_paint.is_zero() || timing.first_paint >= time_to_abort) {
     RecordAbortAfterCommitBeforePaint(abort_type, time_to_abort);
   }

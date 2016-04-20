@@ -102,23 +102,9 @@ BitmapImage::~BitmapImage()
     stopAnimation();
 }
 
-bool BitmapImage::isBitmapImage() const
-{
-    return true;
-}
-
 bool BitmapImage::currentFrameHasSingleSecurityOrigin() const
 {
     return true;
-}
-
-int BitmapImage::totalFrameBytes()
-{
-    const size_t numFrames = frameCount();
-    size_t totalBytes = 0;
-    for (size_t i = 0; i < numFrames; ++i)
-        totalBytes += m_source.frameBytesAtIndex(i);
-    return safeCast<int>(totalBytes);
 }
 
 void BitmapImage::destroyDecodedData(bool destroyAll)
@@ -130,7 +116,8 @@ void BitmapImage::destroyDecodedData(bool destroyAll)
         m_frames[i].clear(false);
     }
 
-    destroyMetadataAndNotify(m_source.clearCacheExceptFrame(destroyAll ? kNotFound : m_currentFrame));
+    m_source.clearCacheExceptFrame(destroyAll ? kNotFound : m_currentFrame);
+    notifyMemoryChanged();
 }
 
 void BitmapImage::destroyDecodedDataIfNecessary()
@@ -147,10 +134,19 @@ void BitmapImage::destroyDecodedDataIfNecessary()
     }
 }
 
-void BitmapImage::destroyMetadataAndNotify(size_t frameBytesCleared)
+void BitmapImage::notifyMemoryChanged()
 {
-    if (frameBytesCleared && imageObserver())
-        imageObserver()->decodedSizeChanged(this, -safeCast<int>(frameBytesCleared));
+    if (getImageObserver())
+        getImageObserver()->decodedSizeChangedTo(this, totalFrameBytes());
+}
+
+size_t BitmapImage::totalFrameBytes()
+{
+    const size_t numFrames = frameCount();
+    size_t totalBytes = 0;
+    for (size_t i = 0; i < numFrames; ++i)
+        totalBytes += m_source.frameBytesAtIndex(i);
+    return totalBytes;
 }
 
 void BitmapImage::cacheFrame(size_t index)
@@ -158,9 +154,6 @@ void BitmapImage::cacheFrame(size_t index)
     size_t numFrames = frameCount();
     if (m_frames.size() < numFrames)
         m_frames.grow(numFrames);
-
-    int deltaBytes = totalFrameBytes();
-
 
     // We are caching frame snapshots.  This is OK even for partially decoded frames,
     // as they are cleared by dataChanged() when new data arrives.
@@ -178,12 +171,7 @@ void BitmapImage::cacheFrame(size_t index)
     if (frameSize != m_size)
         m_hasUniformFrameSize = false;
 
-    // We need to check the total bytes before and after the decode call, not
-    // just the current frame size, because some multi-frame images may require
-    // decoding multiple frames to decode the current frame.
-    deltaBytes = totalFrameBytes() - deltaBytes;
-    if (deltaBytes && imageObserver())
-        imageObserver()->decodedSizeChanged(this, deltaBytes);
+    notifyMemoryChanged();
 }
 
 void BitmapImage::updateSize() const
@@ -234,16 +222,13 @@ bool BitmapImage::dataChanged(bool allDataReceived)
     // start of the frame data), and any or none of them might be the particular
     // frame affected by appending new data here. Thus we have to clear all the
     // incomplete frames to be safe.
-    size_t frameBytesCleared = 0;
     for (size_t i = 0; i < m_frames.size(); ++i) {
         // NOTE: Don't call frameIsCompleteAtIndex() here, that will try to
         // decode any uncached (i.e. never-decoded or
         // cleared-on-a-previous-pass) frames!
-        size_t frameBytes = m_frames[i].m_frameBytes;
         if (m_frames[i].m_haveMetadata && !m_frames[i].m_isComplete)
-            frameBytesCleared += (m_frames[i].clear(true) ? frameBytes : 0);
+            m_frames[i].clear(true);
     }
-    destroyMetadataAndNotify(frameBytesCleared);
 
     // Feed all the data we've seen so far to the image decoder.
     m_allDataReceived = allDataReceived;
@@ -309,7 +294,7 @@ void BitmapImage::draw(SkCanvas* canvas, const SkPaint& paint, const FloatRect& 
     if (currentFrameIsLazyDecoded())
         PlatformInstrumentation::didDrawLazyPixelRef(image->uniqueID());
 
-    if (ImageObserver* observer = imageObserver())
+    if (ImageObserver* observer = getImageObserver())
         observer->didDraw(this);
 
     startAnimation();
@@ -341,7 +326,8 @@ bool BitmapImage::isSizeAvailable()
 
     if (m_sizeAvailable && hasVisibleImageSize(size())) {
         BitmapImageMetrics::countDecodedImageType(m_source.filenameExtension());
-        BitmapImageMetrics::countImageOrientation(m_source.orientationAtIndex(0).orientation());
+        if (m_source.filenameExtension() == "jpg")
+            BitmapImageMetrics::countImageOrientation(m_source.orientationAtIndex(0).orientation());
     }
 
     return m_sizeAvailable;
@@ -461,7 +447,7 @@ int BitmapImage::repetitionCount(bool imageKnownToBeComplete)
 
 bool BitmapImage::shouldAnimate()
 {
-    bool animated = repetitionCount(false) != cAnimationNone && !m_animationFinished && imageObserver();
+    bool animated = repetitionCount(false) != cAnimationNone && !m_animationFinished && getImageObserver();
     if (animated && m_animationPolicy == ImageAnimationPolicyNoAnimation)
         animated = false;
     return animated;
@@ -617,7 +603,7 @@ bool BitmapImage::internalAdvanceAnimation(bool skippingFrames)
 
     // See if anyone is still paying attention to this animation.  If not, we don't
     // advance and will remain suspended at the current frame until the animation is resumed.
-    if (!skippingFrames && imageObserver()->shouldPauseAnimation(this))
+    if (!skippingFrames && getImageObserver()->shouldPauseAnimation(this))
         return false;
 
     ++m_currentFrame;
@@ -644,7 +630,7 @@ bool BitmapImage::internalAdvanceAnimation(bool skippingFrames)
     // We need to draw this frame if we advanced to it while not skipping, or if
     // while trying to skip frames we hit the last frame and thus had to stop.
     if (skippingFrames != advancedAnimation)
-        imageObserver()->animationAdvanced(this);
+        getImageObserver()->animationAdvanced(this);
     return advancedAnimation;
 }
 

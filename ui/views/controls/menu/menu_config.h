@@ -61,10 +61,6 @@ struct VIEWS_EXPORT MenuConfig {
   int check_width;
   int check_height;
 
-  // The horizontal space reserved for radio button. The actual width of the
-  // image may be different.
-  int radio_width;
-
   // The horizontal space reserved for submenu arrow. The actual width of the
   // image may be different.
   int arrow_width;
@@ -80,6 +76,9 @@ struct VIEWS_EXPORT MenuConfig {
 
   // Height of a ui::SPACING_SEPARATOR.
   int separator_spacing_height;
+
+  // Thickness of the drawn separator line in pixels.
+  int separator_thickness;
 
   // Are mnemonics shown?
   bool show_mnemonics;

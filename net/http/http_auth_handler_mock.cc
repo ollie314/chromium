@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/thread_task_runner_handle.h"
@@ -101,7 +102,8 @@ bool HttpAuthHandlerMock::AllowsExplicitCredentials() {
   return allows_explicit_credentials_;
 }
 
-bool HttpAuthHandlerMock::Init(HttpAuthChallengeTokenizer* challenge) {
+bool HttpAuthHandlerMock::Init(HttpAuthChallengeTokenizer* challenge,
+                               const SSLInfo& ssl_info) {
   auth_scheme_ = HttpAuth::AUTH_SCHEME_MOCK;
   score_ = 1;
   properties_ = connection_based_ ? IS_CONNECTION_BASED : 0;
@@ -161,24 +163,27 @@ HttpAuthHandlerMock::Factory::~Factory() {
 
 void HttpAuthHandlerMock::Factory::AddMockHandler(
     HttpAuthHandler* handler, HttpAuth::Target target) {
-  handlers_[target].push_back(make_scoped_ptr(handler));
+  handlers_[target].push_back(base::WrapUnique(handler));
 }
 
 int HttpAuthHandlerMock::Factory::CreateAuthHandler(
     HttpAuthChallengeTokenizer* challenge,
     HttpAuth::Target target,
+    const SSLInfo& ssl_info,
     const GURL& origin,
     CreateReason reason,
     int nonce_count,
     const BoundNetLog& net_log,
-    scoped_ptr<HttpAuthHandler>* handler) {
+    std::unique_ptr<HttpAuthHandler>* handler) {
   if (handlers_[target].empty())
     return ERR_UNEXPECTED;
-  scoped_ptr<HttpAuthHandler> tmp_handler = std::move(handlers_[target][0]);
-  std::vector<scoped_ptr<HttpAuthHandler>>& handlers = handlers_[target];
+  std::unique_ptr<HttpAuthHandler> tmp_handler =
+      std::move(handlers_[target][0]);
+  std::vector<std::unique_ptr<HttpAuthHandler>>& handlers = handlers_[target];
   handlers.erase(handlers.begin());
   if (do_init_from_challenge_ &&
-      !tmp_handler->InitFromChallenge(challenge, target, origin, net_log))
+      !tmp_handler->InitFromChallenge(challenge, target, ssl_info, origin,
+                                      net_log))
     return ERR_INVALID_RESPONSE;
   handler->swap(tmp_handler);
   return OK;

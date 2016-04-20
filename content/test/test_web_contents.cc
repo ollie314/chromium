@@ -34,9 +34,10 @@ TestWebContents::TestWebContents(BrowserContext* browser_context)
 }
 
 TestWebContents* TestWebContents::Create(BrowserContext* browser_context,
-                                         SiteInstance* instance) {
+                                         scoped_refptr<SiteInstance> instance) {
   TestWebContents* test_web_contents = new TestWebContents(browser_context);
-  test_web_contents->Init(WebContents::CreateParams(browser_context, instance));
+  test_web_contents->Init(
+      WebContents::CreateParams(browser_context, std::move(instance)));
   return test_web_contents;
 }
 
@@ -135,7 +136,7 @@ void TestWebContents::TestDidNavigateWithReferrer(
   params.security_info = std::string();
   params.gesture = NavigationGestureUser;
   params.was_within_same_page = false;
-  params.is_post = false;
+  params.method = "GET";
   params.page_state = PageState::CreateFromURL(url);
   params.contents_mime_type = std::string("text/html");
 
@@ -148,10 +149,7 @@ const std::string& TestWebContents::GetSaveFrameHeaders() {
 
 bool TestWebContents::CrossProcessNavigationPending() {
   if (IsBrowserSideNavigationEnabled()) {
-    return GetRenderManager()->speculative_render_frame_host_ &&
-           static_cast<TestRenderFrameHost*>(
-               GetRenderManager()->speculative_render_frame_host_.get())
-               ->pending_commit();
+    return GetRenderManager()->speculative_render_frame_host_ != nullptr;
   }
   return GetRenderManager()->pending_frame_host() != nullptr;
 }
@@ -189,7 +187,28 @@ void TestWebContents::NavigateAndCommit(const GURL& url) {
 }
 
 void TestWebContents::TestSetIsLoading(bool value) {
-  SetIsLoading(value, true, nullptr);
+  if (value) {
+    DidStartLoading(GetMainFrame()->frame_tree_node(), true);
+  } else {
+    for (FrameTreeNode* node : frame_tree_.Nodes()) {
+      RenderFrameHostImpl* current_frame_host =
+          node->render_manager()->current_frame_host();
+      DCHECK(current_frame_host);
+      current_frame_host->ResetLoadingState();
+
+      if (IsBrowserSideNavigationEnabled()) {
+        RenderFrameHostImpl* speculative_frame_host =
+            node->render_manager()->speculative_frame_host();
+        if (speculative_frame_host)
+          speculative_frame_host->ResetLoadingState();
+      } else {
+        RenderFrameHostImpl* pending_frame_host =
+            node->render_manager()->pending_frame_host();
+        if (pending_frame_host)
+          pending_frame_host->ResetLoadingState();
+      }
+    }
+  }
 }
 
 void TestWebContents::CommitPendingNavigation() {

@@ -5,24 +5,23 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_OPTIONS_BROWSER_OPTIONS_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_BROWSER_OPTIONS_HANDLER_H_
 
+#include <memory>
+#include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/pref_change_registrar.h"
-#include "base/prefs/pref_member.h"
 #include "base/scoped_observer.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_info_cache_observer.h"
-#include "chrome/browser/shell_integration.h"
-#include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
 #include "components/policy/core/common/policy_service.h"
+#include "components/prefs/pref_change_registrar.h"
+#include "components/prefs/pref_member.h"
 #include "components/search_engines/template_url_service_observer.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "components/signin/core/common/signin_pref_names.h"
@@ -36,7 +35,9 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/policy/consumer_management_service.h"
 #include "chrome/browser/chromeos/system/pointer_device_observer.h"
-#endif  // defined(OS_CHROMEOS)
+#else  // defined(OS_CHROMEOS)
+#include "chrome/browser/shell_integration.h"
+#endif  // !defined(OS_CHROMEOS)
 
 class AutocompleteController;
 class CloudPrintSetupHandler;
@@ -56,11 +57,10 @@ namespace options {
 // Chrome browser options page UI handler.
 class BrowserOptionsHandler
     : public OptionsPageUIHandler,
-      public ProfileInfoCacheObserver,
+      public ProfileAttributesStorage::Observer,
       public sync_driver::SyncServiceObserver,
       public SigninManagerBase::Observer,
       public ui::SelectFileDialog::Listener,
-      public ShellIntegration::DefaultWebClientObserver,
 #if defined(OS_CHROMEOS)
       public chromeos::system::PointerDeviceObserver::Observer,
       public policy::ConsumerManagementService::Observer,
@@ -91,11 +91,6 @@ class BrowserOptionsHandler
   void GoogleSignedOut(const std::string& account_id,
                        const std::string& username) override;
 
-  // ShellIntegration::DefaultWebClientObserver implementation.
-  void SetDefaultWebClientUIState(
-      ShellIntegration::DefaultWebClientUIState state) override;
-  bool IsInteractiveSetDefaultPermitted() override;
-
   // TemplateURLServiceObserver implementation.
   void OnTemplateURLServiceChanged() override;
 
@@ -117,13 +112,13 @@ class BrowserOptionsHandler
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
 
- // ProfileInfoCacheObserver implementation.
- void OnProfileAdded(const base::FilePath& profile_path) override;
- void OnProfileWasRemoved(const base::FilePath& profile_path,
-                          const base::string16& profile_name) override;
- void OnProfileNameChanged(const base::FilePath& profile_path,
-                           const base::string16& old_profile_name) override;
- void OnProfileAvatarChanged(const base::FilePath& profile_path) override;
+  // ProfileAttributesStorage::Observer implementation.
+  void OnProfileAdded(const base::FilePath& profile_path) override;
+  void OnProfileWasRemoved(const base::FilePath& profile_path,
+                           const base::string16& profile_name) override;
+  void OnProfileNameChanged(const base::FilePath& profile_path,
+                            const base::string16& old_profile_name) override;
+  void OnProfileAvatarChanged(const base::FilePath& profile_path) override;
 
 #if defined(ENABLE_PRINT_PREVIEW) && !defined(OS_CHROMEOS)
   void OnCloudPrintPrefsChanged();
@@ -159,14 +154,8 @@ class BrowserOptionsHandler
   // Will be called when the kSigninAllowed pref has changed.
   void OnSigninAllowedPrefChange();
 
-  // Makes this the default browser. Called from WebUI.
-  void BecomeDefaultBrowser(const base::ListValue* args);
-
   // Sets the search engine at the given index to be default. Called from WebUI.
   void SetDefaultSearchEngine(const base::ListValue* args);
-
-  // Returns the string ID for the given default browser state.
-  int StatusStringIdForState(ShellIntegration::DefaultWebClientState state);
 
   // Returns if the "make Chrome default browser" button should be shown.
   bool ShouldShowSetDefaultBrowser();
@@ -177,12 +166,21 @@ class BrowserOptionsHandler
   // Returns if access to advanced settings should be allowed.
   bool ShouldAllowAdvancedSettings();
 
+#if !defined(OS_CHROMEOS)
   // Gets the current default browser state, and asynchronously reports it to
   // the WebUI page.
   void UpdateDefaultBrowserState();
 
+  // Makes this the default browser. Called from WebUI.
+  void BecomeDefaultBrowser(const base::ListValue* args);
+
+  // Receives the default browser state when the worker is done.
+  void OnDefaultBrowserWorkerFinished(
+      shell_integration::DefaultWebClientState state);
+
   // Updates the UI with the given state for the default browser.
   void SetDefaultBrowserUIString(int status_string_id);
+#endif  // !defined(OS_CHROMEOS)
 
   // Loads the possible default search engine list and reports it to the WebUI.
   void AddTemplateUrlServiceObserver();
@@ -194,7 +192,7 @@ class BrowserOptionsHandler
   //     filePath: "/path/to/profile/data/on/disk",
   //     isCurrentProfile: false
   //   };
-  scoped_ptr<base::ListValue> GetProfilesInfoList();
+  std::unique_ptr<base::ListValue> GetProfilesInfoList();
 
   // Sends an array of Profile objects to javascript.
   void SendProfilesInfo();
@@ -226,6 +224,12 @@ class BrowserOptionsHandler
   // kSystemTimezonePolicy is set, and preventing the user from changing the
   // system time zone if kSystemTimezonePolicy is not set.
   void OnSystemTimezonePolicyChanged();
+
+  // Updates the UI, preventing the user from changing timezone or timezone
+  // detection settings if kSystemTimezoneAutomaticDetectionPolicy is set, and
+  // allowing the user to update these settings if
+  // kSystemTimezoneAutomaticDetectionPolicy is not set.
+  void OnSystemTimezoneAutomaticDetectionPolicyChanged();
 #endif
 
   // Callback for the "selectDownloadLocation" message. This will prompt the
@@ -339,9 +343,6 @@ class BrowserOptionsHandler
   // Setup the proxy settings section UI.
   void SetupProxySettingsSection();
 
-  // Setup the manage certificates section UI.
-  void SetupManageCertificatesSection();
-
   // Setup the UI specific to managing supervised users.
   void SetupManagingSupervisedUsers();
 
@@ -374,18 +375,21 @@ class BrowserOptionsHandler
 
   // Returns a newly created dictionary with a number of properties that
   // correspond to the status of sync.
-  scoped_ptr<base::DictionaryValue> GetSyncStateDictionary();
+  std::unique_ptr<base::DictionaryValue> GetSyncStateDictionary();
 
   // Checks whether on Chrome OS the current user is the device owner. Returns
   // true on other platforms.
   bool IsDeviceOwnerProfile();
 
-  scoped_refptr<ShellIntegration::DefaultBrowserWorker> default_browser_worker_;
+#if !defined(OS_CHROMEOS)
+  scoped_refptr<shell_integration::DefaultBrowserWorker>
+      default_browser_worker_;
+  BooleanPrefMember default_browser_policy_;
+#endif
 
   bool page_initialized_;
 
   StringPrefMember homepage_;
-  BooleanPrefMember default_browser_policy_;
 
   TemplateURLService* template_url_service_;  // Weak.
 
@@ -395,15 +399,17 @@ class BrowserOptionsHandler
 
   StringPrefMember auto_open_files_;
 
-  scoped_ptr<ChromeZoomLevelPrefs::DefaultZoomLevelSubscription>
+  std::unique_ptr<ChromeZoomLevelPrefs::DefaultZoomLevelSubscription>
       default_zoom_level_subscription_;
 
   PrefChangeRegistrar profile_pref_registrar_;
 #if defined(OS_CHROMEOS)
-  scoped_ptr<policy::PolicyChangeRegistrar> policy_registrar_;
+  std::unique_ptr<policy::PolicyChangeRegistrar> policy_registrar_;
 
   // Whether factory reset can be performed.
   bool enable_factory_reset_;
+
+  PrefChangeRegistrar local_state_pref_change_registrar_;
 #endif
 
   ScopedObserver<SigninManagerBase, SigninManagerBase::Observer>

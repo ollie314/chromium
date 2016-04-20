@@ -14,7 +14,6 @@
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
 #include "chrome/browser/notifications/message_center_settings_controller.h"
-#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
@@ -51,7 +50,7 @@ class MessageCenterSettingsControllerBaseTest : public testing::Test {
 
   void CreateController() {
     controller_.reset(new MessageCenterSettingsController(
-        testing_profile_manager_.profile_info_cache()));
+        *testing_profile_manager_.profile_attributes_storage()));
   }
 
   void ResetController() {
@@ -63,7 +62,7 @@ class MessageCenterSettingsControllerBaseTest : public testing::Test {
  private:
   content::TestBrowserThreadBundle thread_bundle_;
   TestingProfileManager testing_profile_manager_;
-  scoped_ptr<MessageCenterSettingsController> controller_;
+  std::unique_ptr<MessageCenterSettingsController> controller_;
 
   DISALLOW_COPY_AND_ASSIGN(MessageCenterSettingsControllerBaseTest);
 };
@@ -109,7 +108,7 @@ class MessageCenterSettingsControllerChromeOSTest
         user_manager::UserManager::Get());
   }
 
-  scoped_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
+  std::unique_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
 
   DISALLOW_COPY_AND_ASSIGN(MessageCenterSettingsControllerChromeOSTest);
 };
@@ -131,20 +130,15 @@ TEST_F(MessageCenterSettingsControllerTest, NotifierGroups) {
 
   EXPECT_EQ(controller()->GetNotifierGroupAt(0).name,
             base::UTF8ToUTF16("Profile-1"));
-  EXPECT_EQ(controller()->GetNotifierGroupAt(0).index, 0u);
-
   EXPECT_EQ(controller()->GetNotifierGroupAt(1).name,
             base::UTF8ToUTF16("Profile-2"));
-  EXPECT_EQ(controller()->GetNotifierGroupAt(1).index, 1u);
 
   EXPECT_EQ(controller()->GetActiveNotifierGroup().name,
             base::UTF8ToUTF16("Profile-1"));
-  EXPECT_EQ(controller()->GetActiveNotifierGroup().index, 0u);
 
   controller()->SwitchToNotifierGroup(1);
   EXPECT_EQ(controller()->GetActiveNotifierGroup().name,
             base::UTF8ToUTF16("Profile-2"));
-  EXPECT_EQ(controller()->GetActiveNotifierGroup().index, 1u);
 
   controller()->SwitchToNotifierGroup(0);
   EXPECT_EQ(controller()->GetActiveNotifierGroup().name,
@@ -160,22 +154,19 @@ TEST_F(MessageCenterSettingsControllerChromeOSTest, NotifierGroups) {
 
   EXPECT_EQ(controller()->GetNotifierGroupAt(0).name,
             base::UTF8ToUTF16("Profile-1"));
-  EXPECT_EQ(controller()->GetNotifierGroupAt(0).index, 0u);
 
   SwitchActiveUser("Profile-2");
   EXPECT_EQ(controller()->GetNotifierGroupCount(), 1u);
   EXPECT_EQ(controller()->GetNotifierGroupAt(0).name,
             base::UTF8ToUTF16("Profile-2"));
-  EXPECT_EQ(controller()->GetNotifierGroupAt(0).index, 1u);
 
   SwitchActiveUser("Profile-1");
   EXPECT_EQ(controller()->GetNotifierGroupCount(), 1u);
   EXPECT_EQ(controller()->GetNotifierGroupAt(0).name,
             base::UTF8ToUTF16("Profile-1"));
-  EXPECT_EQ(controller()->GetNotifierGroupAt(0).index, 0u);
 }
 // TODO(mukai): write a test case to reproduce the actual guest session scenario
-// in ChromeOS -- no profiles in the profile_info_cache.
+// in ChromeOS -- no profiles in |profile_attributes_storage_|.
 #endif  // !defined(OS_CHROMEOS)
 
 TEST_F(MessageCenterSettingsControllerTest, NotifierSortOrder) {
@@ -203,71 +194,84 @@ TEST_F(MessageCenterSettingsControllerTest, NotifierSortOrder) {
   // Baf is a hosted app which should not appear in the notifier list.
   const std::string kBafId = "dddddddddddddddddddddddddddddddd";
 
-  foo_app.SetManifest(std::move(
+  foo_app.SetManifest(
       extensions::DictionaryBuilder()
           .Set("name", "Foo")
           .Set("version", "1.0.0")
           .Set("manifest_version", 2)
-          .Set("app",
-               std::move(extensions::DictionaryBuilder().Set(
-                   "background",
-                   std::move(extensions::DictionaryBuilder().Set(
-                       "scripts", std::move(extensions::ListBuilder().Append(
-                                      "background.js")))))))
+          .Set("app", extensions::DictionaryBuilder()
+                          .Set("background",
+                               extensions::DictionaryBuilder()
+                                   .Set("scripts", extensions::ListBuilder()
+                                                       .Append("background.js")
+                                                       .Build())
+                                   .Build())
+                          .Build())
           .Set("permissions",
-               std::move(extensions::ListBuilder().Append("notifications")))));
+               extensions::ListBuilder().Append("notifications").Build())
+          .Build());
   foo_app.SetID(kFooId);
   extension_service->AddExtension(foo_app.Build().get());
 
   extensions::ExtensionBuilder bar_app;
-  bar_app.SetManifest(std::move(
+  bar_app.SetManifest(
       extensions::DictionaryBuilder()
           .Set("name", "Bar")
           .Set("version", "1.0.0")
           .Set("manifest_version", 2)
-          .Set("app",
-               std::move(extensions::DictionaryBuilder().Set(
-                   "background",
-                   std::move(extensions::DictionaryBuilder().Set(
-                       "scripts", std::move(extensions::ListBuilder().Append(
-                                      "background.js")))))))
+          .Set("app", extensions::DictionaryBuilder()
+                          .Set("background",
+                               extensions::DictionaryBuilder()
+                                   .Set("scripts", extensions::ListBuilder()
+                                                       .Append("background.js")
+                                                       .Build())
+                                   .Build())
+                          .Build())
           .Set("permissions",
-               std::move(extensions::ListBuilder().Append("notifications")))));
+               extensions::ListBuilder().Append("notifications").Build())
+          .Build());
   bar_app.SetID(kBarId);
   extension_service->AddExtension(bar_app.Build().get());
 
   extensions::ExtensionBuilder baz_app;
-  baz_app.SetManifest(std::move(
+  baz_app.SetManifest(
       extensions::DictionaryBuilder()
           .Set("name", "baz")
           .Set("version", "1.0.0")
           .Set("manifest_version", 2)
-          .Set("app",
-               std::move(extensions::DictionaryBuilder().Set(
-                   "background",
-                   std::move(extensions::DictionaryBuilder().Set(
-                       "scripts", std::move(extensions::ListBuilder().Append(
-                                      "background.js")))))))));
+          .Set("app", extensions::DictionaryBuilder()
+                          .Set("background",
+                               extensions::DictionaryBuilder()
+                                   .Set("scripts", extensions::ListBuilder()
+                                                       .Append("background.js")
+                                                       .Build())
+                                   .Build())
+                          .Build())
+          .Build());
   baz_app.SetID(kBazId);
   extension_service->AddExtension(baz_app.Build().get());
 
   extensions::ExtensionBuilder baf_app;
-  baf_app.SetManifest(std::move(
+  baf_app.SetManifest(
       extensions::DictionaryBuilder()
           .Set("name", "baf")
           .Set("version", "1.0.0")
           .Set("manifest_version", 2)
           .Set("app",
-               std::move(extensions::DictionaryBuilder().Set(
-                   "urls",
-                   std::move(extensions::ListBuilder().Append(
-                       "http://localhost/extensions/hosted_app/main.html")))))
-          .Set(
-              "launch",
-              std::move(extensions::DictionaryBuilder().Set(
-                  "urls",
-                  std::move(extensions::ListBuilder().Append(
-                      "http://localhost/extensions/hosted_app/main.html")))))));
+               extensions::DictionaryBuilder()
+                   .Set("urls", extensions::ListBuilder()
+                                    .Append("http://localhost/extensions/"
+                                            "hosted_app/main.html")
+                                    .Build())
+                   .Build())
+          .Set("launch",
+               extensions::DictionaryBuilder()
+                   .Set("urls", extensions::ListBuilder()
+                                    .Append("http://localhost/extensions/"
+                                            "hosted_app/main.html")
+                                    .Build())
+                   .Build())
+          .Build());
 
   baf_app.SetID(kBafId);
   extension_service->AddExtension(baf_app.Build().get());

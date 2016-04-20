@@ -4,9 +4,12 @@
 
 #include "media/formats/common/stream_parser_test_base.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
+#include "media/base/media_track.h"
+#include "media/base/media_tracks.h"
 #include "media/base/test_data_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -30,7 +33,7 @@ static std::string BufferQueueToString(
 }
 
 StreamParserTestBase::StreamParserTestBase(
-    scoped_ptr<StreamParser> stream_parser)
+    std::unique_ptr<StreamParser> stream_parser)
     : parser_(std::move(stream_parser)) {
   parser_->Init(
       base::Bind(&StreamParserTestBase::OnInitDone, base::Unretained(this)),
@@ -83,14 +86,13 @@ void StreamParserTestBase::OnInitDone(
 }
 
 bool StreamParserTestBase::OnNewConfig(
-    const AudioDecoderConfig& audio_config,
-    const VideoDecoderConfig& video_config,
+    std::unique_ptr<MediaTracks> tracks,
     const StreamParser::TextTrackConfigMap& text_config) {
-  DVLOG(1) << __FUNCTION__ << "(" << audio_config.IsValidConfig() << ", "
-           << video_config.IsValidConfig() << ")";
-  EXPECT_TRUE(audio_config.IsValidConfig());
-  EXPECT_FALSE(video_config.IsValidConfig());
-  last_audio_config_ = audio_config;
+  DVLOG(1) << __FUNCTION__ << " media tracks count=" << tracks->tracks().size();
+  EXPECT_EQ(tracks->tracks().size(), 1u);
+  EXPECT_TRUE(tracks->getFirstAudioConfig().IsValidConfig());
+  EXPECT_FALSE(tracks->getFirstVideoConfig().IsValidConfig());
+  last_audio_config_ = tracks->getFirstAudioConfig();
   return true;
 }
 

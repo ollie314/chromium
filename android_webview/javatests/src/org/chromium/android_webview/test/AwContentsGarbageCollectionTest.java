@@ -4,12 +4,13 @@
 
 package org.chromium.android_webview.test;
 
+import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
+
 import android.content.Context;
 import android.content.ContextWrapper;
+import android.os.ResultReceiver;
 import android.test.suitebuilder.annotation.LargeTest;
 import android.test.suitebuilder.annotation.SmallTest;
-
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.base.annotations.SuppressFBWarnings;
@@ -60,7 +61,7 @@ public class AwContentsGarbageCollectionTest extends AwTestBase {
     }
 
     private static class GcTestDependencyFactory extends TestDependencyFactory {
-        private StrongRefTestContext mContext;
+        private final StrongRefTestContext mContext;
 
         public GcTestDependencyFactory(StrongRefTestContext context) {
             mContext = context;
@@ -93,6 +94,43 @@ public class AwContentsGarbageCollectionTest extends AwTestBase {
         for (int i = 0; i < containerViews.length; i++) {
             containerViews[i] = createAwTestContainerViewOnMainSync(client);
             loadUrlAsync(containerViews[i].getAwContents(), "about:blank");
+        }
+
+        for (int i = 0; i < containerViews.length; i++) {
+            containerViews[i] = null;
+        }
+        containerViews = null;
+        removeAllViews();
+        gcAndCheckAllAwContentsDestroyed();
+    }
+
+    @DisableHardwareAccelerationForTest
+    @SuppressFBWarnings("UC_USELESS_OBJECT")
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testHoldKeyboardResultReceiver() throws Throwable {
+        gcAndCheckAllAwContentsDestroyed();
+
+        TestAwContentsClient client = new TestAwContentsClient();
+        AwTestContainerView containerViews[] = new AwTestContainerView[MAX_IDLE_INSTANCES + 1];
+        ResultReceiver resultReceivers[] = new ResultReceiver[MAX_IDLE_INSTANCES + 1];
+        for (int i = 0; i < containerViews.length; i++) {
+            final AwTestContainerView containerView = createAwTestContainerViewOnMainSync(client);
+            containerViews[i] = containerView;
+            loadUrlAsync(containerView.getAwContents(), "about:blank");
+            // When we call showSoftInput(), we pass a ResultReceiver object as a parameter.
+            // Android framework will hold the object reference until the matching
+            // ResultReceiver in InputMethodService (IME app) gets garbage-collected.
+            // WebView object wouldn't get gc'ed once OSK shows up because of this.
+            // It is difficult to show keyboard and wait until input method window shows up.
+            // Instead, we simply emulate Android's behavior by keeping strong references.
+            // See crbug.com/595613 for details.
+            resultReceivers[i] = runTestOnUiThreadAndGetResult(new Callable<ResultReceiver>() {
+                @Override
+                public ResultReceiver call() throws Exception {
+                    return containerView.getContentViewCore().getNewShowKeyboardReceiver();
+                }
+            });
         }
 
         for (int i = 0; i < containerViews.length; i++) {
@@ -216,7 +254,8 @@ public class AwContentsGarbageCollectionTest extends AwTestBase {
         final long timeoutBetweenGcMs = scaleTimeout(1000);
         for (int i = 0; i < 15; ++i) {
             try {
-                CriteriaHelper.pollForCriteria(criteria, timeoutBetweenGcMs, CHECK_INTERVAL);
+                CriteriaHelper.pollInstrumentationThread(
+                        criteria, timeoutBetweenGcMs, CHECK_INTERVAL);
                 break;
             } catch (AssertionError e) {
                 Runtime.getRuntime().gc();

@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -15,12 +16,12 @@
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "content/common/content_export.h"
 #include "content/common/service_worker/service_worker_status_code.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 namespace leveldb {
 class DB;
@@ -68,11 +69,13 @@ class CONTENT_EXPORT ServiceWorkerDatabase {
     bool has_fetch_handler;
     base::Time last_update_check;
     std::vector<GURL> foreign_fetch_scopes;
+    std::vector<url::Origin> foreign_fetch_origins;
 
     // Not populated until ServiceWorkerStorage::StoreRegistration is called.
     int64_t resources_total_size_bytes;
 
     RegistrationData();
+    RegistrationData(const RegistrationData& other);
     ~RegistrationData();
   };
 
@@ -344,8 +347,8 @@ class CONTENT_EXPORT ServiceWorkerDatabase {
       Status status);
 
   const base::FilePath path_;
-  scoped_ptr<leveldb::Env> env_;
-  scoped_ptr<leveldb::DB> db_;
+  std::unique_ptr<leveldb::Env> env_;
+  std::unique_ptr<leveldb::DB> db_;
 
   int64_t next_avail_registration_id_;
   int64_t next_avail_resource_id_;

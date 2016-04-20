@@ -8,11 +8,11 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/memory/scoped_ptr.h"
 #include "sync/api/attachments/attachment_id.h"
 #include "sync/base/sync_export.h"
 
@@ -26,6 +26,7 @@ namespace syncer {
 // It is cheap to copy Attachments. Feel free to store and return by value.
 class SYNC_EXPORT Attachment {
  public:
+  Attachment(const Attachment& other);
   ~Attachment();
 
   // Default copy and assignment are welcome.

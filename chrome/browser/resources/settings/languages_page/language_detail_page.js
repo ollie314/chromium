@@ -5,9 +5,6 @@
 /**
  * @fileoverview 'settings-language-detail-page' is a sub-page for editing
  * an individual language's settings.
- *
- * @group Chrome Settings Elements
- * @element settings-language-detail-page
  */
 Polymer({
   is: 'settings-language-detail-page',
@@ -33,11 +30,17 @@ Polymer({
      * @type {LanguageInfo|undefined}
      */
     detail: Object,
+
+    /** @private {!LanguageHelper} */
+    languageHelper_: Object,
   },
 
-  /** @private {!LanguageHelper} */
-  languageHelper_: LanguageHelperImpl.getInstance(),
+  /** @override */
+  created: function() {
+     this.languageHelper_ = LanguageHelperImpl.getInstance();
+  },
 
+  /** @override */
   ready: function() {
     // In a CrOS multi-user session, the primary user controls the UI language.
     if (this.isSecondaryUser_()) {

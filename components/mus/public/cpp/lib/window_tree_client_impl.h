@@ -14,6 +14,7 @@
 #include "base/observer_list.h"
 #include "components/mus/common/types.h"
 #include "components/mus/public/cpp/window.h"
+#include "components/mus/public/cpp/window_manager_delegate.h"
 #include "components/mus/public/cpp/window_tree_connection.h"
 #include "components/mus/public/interfaces/window_tree.mojom.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
@@ -35,12 +36,16 @@ enum class ChangeType;
 // Manages the connection with the Window Server service.
 class WindowTreeClientImpl : public WindowTreeConnection,
                              public mojom::WindowTreeClient,
-                             public mojom::WindowManagerInternal {
+                             public mojom::WindowManager,
+                             public WindowManagerClient {
  public:
   WindowTreeClientImpl(WindowTreeDelegate* delegate,
                        WindowManagerDelegate* window_manager_delegate,
                        mojo::InterfaceRequest<mojom::WindowTreeClient> request);
   ~WindowTreeClientImpl() override;
+
+  // Establishes the connection by way of the WindowTreeFactory.
+  void ConnectViaWindowTreeFactory(shell::Connector* connector);
 
   // Wait for OnEmbed(), returning when done.
   void WaitForEmbed();
@@ -61,6 +66,8 @@ class WindowTreeClientImpl : public WindowTreeConnection,
   void AddTransientWindow(Window* window, Id transient_window_id);
   void RemoveTransientWindowFromParent(Window* window);
 
+  void SetModal(Window* window);
+
   void Reorder(Window* window,
                Id relative_window_id,
                mojom::OrderDirection direction);
@@ -71,6 +78,8 @@ class WindowTreeClientImpl : public WindowTreeConnection,
   void SetBounds(Window* window,
                  const gfx::Rect& old_bounds,
                  const gfx::Rect& bounds);
+  void SetCapture(Window* window);
+  void ReleaseCapture(Window* window);
   void SetClientArea(Id window_id,
                      const gfx::Insets& client_area,
                      const std::vector<gfx::Rect>& additional_client_areas);
@@ -78,6 +87,7 @@ class WindowTreeClientImpl : public WindowTreeConnection,
   void SetCanFocus(Id window_id, bool can_focus);
   void SetPredefinedCursor(Id window_id, mus::mojom::Cursor cursor_id);
   void SetVisible(Window* window, bool visible);
+  void SetOpacity(Window* window, float opacity);
   void SetProperty(Window* window,
                    const std::string& name,
                    mojo::Array<uint8_t> data);
@@ -88,7 +98,6 @@ class WindowTreeClientImpl : public WindowTreeConnection,
 
   void Embed(Id window_id,
              mojom::WindowTreeClientPtr client,
-             uint32_t policy_bitmask,
              const mojom::WindowTree::EmbedCallback& callback);
 
   void RequestClose(Window* window);
@@ -98,6 +107,8 @@ class WindowTreeClientImpl : public WindowTreeConnection,
                      mojo::InterfaceRequest<mojom::Surface> surface,
                      mojom::SurfaceClientPtr client);
 
+  // Sets the input capture to |window| without notifying the server.
+  void LocalSetCapture(Window* window);
   // Sets focus to |window| without notifying the server.
   void LocalSetFocus(Window* window);
 
@@ -107,11 +118,14 @@ class WindowTreeClientImpl : public WindowTreeConnection,
 
   bool IsRoot(Window* window) const { return roots_.count(window) > 0; }
 
-  bool is_embed_root() const { return is_embed_root_; }
-
   // Called after the window's observers have been notified of destruction (as
   // the last step of ~Window).
   void OnWindowDestroyed(Window* window);
+
+  Window* GetWindowByServerId(Id id);
+
+  // WindowTreeConnection:
+  Window* GetCaptureWindow() override;
 
  private:
   friend class WindowTreeClientImplPrivate;
@@ -146,17 +160,16 @@ class WindowTreeClientImpl : public WindowTreeConnection,
                    ConnectionSpecificId connection_id,
                    mojom::WindowDataPtr root_data,
                    Id focused_window_id,
-                   uint32_t access_policy);
+                   bool drawn);
 
   // Overridden from WindowTreeConnection:
   void SetDeleteOnNoRoots(bool value) override;
   const std::set<Window*>& GetRoots() override;
-  Window* GetWindowById(Id id) override;
   Window* GetFocusedWindow() override;
+  void ClearFocus() override;
   Window* NewWindow(const Window::SharedProperties* properties) override;
   Window* NewTopLevelWindow(
       const Window::SharedProperties* properties) override;
-  bool IsEmbedRoot() override;
   ConnectionSpecificId GetConnectionId() override;
   void AddObserver(WindowTreeConnectionObserver* observer) override;
   void RemoveObserver(WindowTreeConnectionObserver* observer) override;
@@ -166,11 +179,13 @@ class WindowTreeClientImpl : public WindowTreeConnection,
                mojom::WindowDataPtr root,
                mojom::WindowTreePtr tree,
                Id focused_window_id,
-               uint32_t access_policy) override;
+               bool drawn) override;
   void OnEmbeddedAppDisconnected(Id window_id) override;
   void OnUnembed(Id window_id) override;
+  void OnLostCapture(Id window_id) override;
   void OnTopLevelCreated(uint32_t change_id,
-                         mojom::WindowDataPtr data) override;
+                         mojom::WindowDataPtr data,
+                         bool drawn) override;
   void OnWindowBoundsChanged(Id window_id,
                              mojo::RectPtr old_bounds,
                              mojo::RectPtr new_bounds) override;
@@ -188,15 +203,18 @@ class WindowTreeClientImpl : public WindowTreeConnection,
       mojom::ViewportMetricsPtr new_metrics) override;
   void OnWindowHierarchyChanged(
       Id window_id,
-      Id new_parent_id,
       Id old_parent_id,
+      Id new_parent_id,
       mojo::Array<mojom::WindowDataPtr> windows) override;
   void OnWindowReordered(Id window_id,
                          Id relative_window_id,
                          mojom::OrderDirection direction) override;
   void OnWindowDeleted(Id window_id) override;
   void OnWindowVisibilityChanged(Id window_id, bool visible) override;
-  void OnWindowDrawnStateChanged(Id window_id, bool drawn) override;
+  void OnWindowOpacityChanged(Id window_id,
+                              float old_opacity,
+                              float new_opacity) override;
+  void OnWindowParentDrawnStateChanged(Id window_id, bool drawn) override;
   void OnWindowSharedPropertyChanged(Id window_id,
                                      const mojo::String& name,
                                      mojo::Array<uint8_t> new_data) override;
@@ -208,11 +226,10 @@ class WindowTreeClientImpl : public WindowTreeConnection,
                                        mojom::Cursor cursor) override;
   void OnChangeCompleted(uint32_t change_id, bool success) override;
   void RequestClose(uint32_t window_id) override;
-  void GetWindowManagerInternal(
-      mojo::AssociatedInterfaceRequest<WindowManagerInternal> internal)
-      override;
+  void GetWindowManager(
+      mojo::AssociatedInterfaceRequest<WindowManager> internal) override;
 
-  // Overridden from WindowManagerInternal:
+  // Overridden from WindowManager:
   void WmSetBounds(uint32_t change_id,
                    Id window_id,
                    mojo::RectPtr transit_bounds) override;
@@ -223,6 +240,22 @@ class WindowTreeClientImpl : public WindowTreeConnection,
   void WmCreateTopLevelWindow(uint32_t change_id,
                               mojo::Map<mojo::String, mojo::Array<uint8_t>>
                                   transport_properties) override;
+  void OnAccelerator(uint32_t id, mus::mojom::EventPtr event) override;
+
+  // Overriden from WindowManagerClient:
+  void SetFrameDecorationValues(
+      mojom::FrameDecorationValuesPtr values) override;
+  void AddAccelerator(uint32_t id,
+                      mojom::EventMatcherPtr event_matcher,
+                      const base::Callback<void(bool)>& callback) override;
+  void RemoveAccelerator(uint32_t id) override;
+  void AddActivationParent(Window* window) override;
+  void RemoveActivationParent(Window* window) override;
+  void ActivateNextWindow() override;
+  void SetUnderlaySurfaceOffsetAndExtendedHitArea(
+      Window* window,
+      const gfx::Vector2d& offset,
+      const gfx::Insets& hit_area) override;
 
   // This is set once and only once when we get OnEmbed(). It gives the unique
   // id for this connection.
@@ -243,6 +276,8 @@ class WindowTreeClientImpl : public WindowTreeConnection,
 
   IdToWindowMap windows_;
 
+  Window* capture_window_;
+
   Window* focused_window_;
 
   mojo::Binding<WindowTreeClient> binding_;
@@ -251,20 +286,17 @@ class WindowTreeClientImpl : public WindowTreeConnection,
   // directly set this.
   mojom::WindowTree* tree_;
 
-  bool is_embed_root_;
-
   bool delete_on_no_roots_;
 
   bool in_destructor_;
 
   base::ObserverList<WindowTreeConnectionObserver> observers_;
 
-  scoped_ptr<mojo::AssociatedBinding<mojom::WindowManagerInternal>>
+  scoped_ptr<mojo::AssociatedBinding<mojom::WindowManager>>
       window_manager_internal_;
-  mojom::WindowManagerInternalClientAssociatedPtr
-      window_manager_internal_client_;
+  mojom::WindowManagerClientAssociatedPtr window_manager_internal_client_;
 
-  MOJO_DISALLOW_COPY_AND_ASSIGN(WindowTreeClientImpl);
+  DISALLOW_COPY_AND_ASSIGN(WindowTreeClientImpl);
 };
 
 }  // namespace mus

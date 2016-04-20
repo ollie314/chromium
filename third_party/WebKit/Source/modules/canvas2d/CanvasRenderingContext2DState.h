@@ -13,17 +13,18 @@
 
 namespace blink {
 
+class CanvasRenderingContext2D;
 class CanvasStyle;
 class CSSValue;
 class Element;
 
-class CanvasRenderingContext2DState final : public NoBaseWillBeGarbageCollectedFinalized<CanvasRenderingContext2DState>, public CSSFontSelectorClient {
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(CanvasRenderingContext2DState);
-    USING_FAST_MALLOC_WILL_BE_REMOVED(CanvasRenderingContext2DState);
+class CanvasRenderingContext2DState final : public GarbageCollectedFinalized<CanvasRenderingContext2DState>, public CSSFontSelectorClient {
+    WTF_MAKE_NONCOPYABLE(CanvasRenderingContext2DState);
+    USING_GARBAGE_COLLECTED_MIXIN(CanvasRenderingContext2DState);
 public:
-    static PassOwnPtrWillBeRawPtr<CanvasRenderingContext2DState> create()
+    static CanvasRenderingContext2DState* create()
     {
-        return adoptPtrWillBeNoop(new CanvasRenderingContext2DState);
+        return new CanvasRenderingContext2DState;
     }
 
     ~CanvasRenderingContext2DState() override;
@@ -41,11 +42,10 @@ public:
         ImagePaintType,
     };
 
-    static PassOwnPtrWillBeRawPtr<CanvasRenderingContext2DState> create(const CanvasRenderingContext2DState& other, ClipListCopyMode mode)
+    static CanvasRenderingContext2DState* create(const CanvasRenderingContext2DState& other, ClipListCopyMode mode)
     {
-        return adoptPtrWillBeNoop(new CanvasRenderingContext2DState(other, mode));
+        return new CanvasRenderingContext2DState(other, mode);
     }
-    CanvasRenderingContext2DState& operator=(const CanvasRenderingContext2DState&);
 
     // CSSFontSelectorClient implementation
     void fontsNeedUpdate(CSSFontSelector*) override;
@@ -74,6 +74,7 @@ public:
     bool hasClip() const { return m_hasClip; }
     bool hasComplexClip() const { return m_hasComplexClip; }
     void playbackClips(SkCanvas* canvas) const { m_clipList.playback(canvas); }
+    const SkPath& getCurrentClipPath() const { return m_clipList.getCurrentClipPath(); }
 
     void setFont(const Font&, CSSFontSelector*);
     const Font& font() const;
@@ -81,11 +82,14 @@ public:
     void setUnparsedFont(const String& font) { m_unparsedFont = font; }
     const String& unparsedFont() const { return m_unparsedFont; }
 
-    void setFilter(PassRefPtrWillBeRawPtr<CSSValue>);
+    void setFontForFilter(const Font& font) { m_fontForFilter = font; }
+
+    void setFilter(CSSValue*);
     void setUnparsedFilter(const String& filterString) { m_unparsedFilter = filterString; }
     const String& unparsedFilter() const { return m_unparsedFilter; }
-    SkImageFilter* getFilter(Element*, const Font&, IntSize canvasSize) const;
-    bool hasFilter() const { return m_filterValue; }
+    SkImageFilter* getFilter(Element*, IntSize canvasSize, CanvasRenderingContext2D*) const;
+    bool hasFilter(Element*, IntSize canvasSize, CanvasRenderingContext2D*) const;
+    void clearResolvedFilter() const;
 
     void setStrokeStyle(CanvasStyle*);
     CanvasStyle* strokeStyle() const { return m_strokeStyle.get(); }
@@ -102,22 +106,22 @@ public:
     };
 
     void setDirection(Direction direction) { m_direction = direction; }
-    Direction direction() const { return m_direction; }
+    Direction getDirection() const { return m_direction; }
 
     void setTextAlign(TextAlign align) { m_textAlign = align; }
-    TextAlign textAlign() const { return m_textAlign; }
+    TextAlign getTextAlign() const { return m_textAlign; }
 
     void setTextBaseline(TextBaseline baseline) { m_textBaseline = baseline; }
-    TextBaseline textBaseline() const { return m_textBaseline; }
+    TextBaseline getTextBaseline() const { return m_textBaseline; }
 
     void setLineWidth(double lineWidth) { m_strokePaint.setStrokeWidth(lineWidth); }
     double lineWidth() const { return m_strokePaint.getStrokeWidth(); }
 
     void setLineCap(LineCap lineCap) { m_strokePaint.setStrokeCap(static_cast<SkPaint::Cap>(lineCap)); }
-    LineCap lineCap() const { return static_cast<LineCap>(m_strokePaint.getStrokeCap()); }
+    LineCap getLineCap() const { return static_cast<LineCap>(m_strokePaint.getStrokeCap()); }
 
     void setLineJoin(LineJoin lineJoin) { m_strokePaint.setStrokeJoin(static_cast<SkPaint::Join>(lineJoin)); }
-    LineJoin lineJoin() const { return static_cast<LineJoin>(m_strokePaint.getStrokeJoin()); }
+    LineJoin getLineJoin() const { return static_cast<LineJoin>(m_strokePaint.getStrokeJoin()); }
 
     void setMiterLimit(double miterLimit) { m_strokePaint.setStrokeMiter(miterLimit); }
     double miterLimit() const { return m_strokePaint.getStrokeMiter(); }
@@ -162,7 +166,7 @@ public:
 
 private:
     CanvasRenderingContext2DState();
-    CanvasRenderingContext2DState(const CanvasRenderingContext2DState&, ClipListCopyMode = CopyClipList);
+    CanvasRenderingContext2DState(const CanvasRenderingContext2DState&, ClipListCopyMode);
 
     void updateLineDash() const;
     void updateStrokeStyle() const;
@@ -180,8 +184,8 @@ private:
 
     String m_unparsedStrokeColor;
     String m_unparsedFillColor;
-    PersistentWillBeMember<CanvasStyle> m_strokeStyle;
-    PersistentWillBeMember<CanvasStyle> m_fillStyle;
+    Member<CanvasStyle> m_strokeStyle;
+    Member<CanvasStyle> m_fillStyle;
 
     mutable SkPaint m_strokePaint;
     mutable SkPaint m_fillPaint;
@@ -193,8 +197,8 @@ private:
     mutable RefPtr<SkDrawLooper> m_emptyDrawLooper;
     mutable RefPtr<SkDrawLooper> m_shadowOnlyDrawLooper;
     mutable RefPtr<SkDrawLooper> m_shadowAndForegroundDrawLooper;
-    mutable RefPtr<SkImageFilter> m_shadowOnlyImageFilter;
-    mutable RefPtr<SkImageFilter> m_shadowAndForegroundImageFilter;
+    mutable sk_sp<SkImageFilter> m_shadowOnlyImageFilter;
+    mutable sk_sp<SkImageFilter> m_shadowAndForegroundImageFilter;
 
     double m_globalAlpha;
     AffineTransform m_transform;
@@ -203,10 +207,11 @@ private:
 
     String m_unparsedFont;
     Font m_font;
+    Font m_fontForFilter;
 
     String m_unparsedFilter;
-    RefPtrWillBeMember<CSSValue> m_filterValue;
-    mutable RefPtr<SkImageFilter> m_resolvedFilter;
+    Member<CSSValue> m_filterValue;
+    mutable sk_sp<SkImageFilter> m_resolvedFilter;
 
     // Text state.
     TextAlign m_textAlign;
@@ -227,6 +232,6 @@ private:
     ClipList m_clipList;
 };
 
-} // blink
+} // namespace blink
 
 #endif

@@ -20,6 +20,7 @@
 #include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/password_manager/core/browser/password_bubble_experiment.h"
 #include "components/password_manager/core/browser/password_manager_constants.h"
+#include "components/password_manager/core/browser/password_ui_utils.h"
 #include "components/password_manager/core/common/credential_manager_types.h"
 #include "jni/AccountChooserDialog_jni.h"
 #include "ui/android/window_android.h"
@@ -109,7 +110,7 @@ AccountChooserDialogAndroid::AccountChooserDialogAndroid(
     ScopedVector<autofill::PasswordForm> federated_credentials,
     const GURL& origin,
     const ManagePasswordsState::CredentialsCallback& callback)
-    : web_contents_(web_contents) {
+    : web_contents_(web_contents), origin_(origin) {
   passwords_data_.set_client(
       ChromePasswordManagerClient::FromWebContents(web_contents_));
   passwords_data_.OnRequestCredentials(
@@ -122,13 +123,14 @@ AccountChooserDialogAndroid::~AccountChooserDialogAndroid() {}
 void AccountChooserDialogAndroid::ShowDialog() {
   JNIEnv* env = AttachCurrentThread();
   bool is_smartlock_branding_enabled =
-      password_bubble_experiment::IsSmartLockBrandingEnabled(
+      password_bubble_experiment::IsSmartLockUser(
           ProfileSyncServiceFactory::GetForProfile(
               Profile::FromBrowserContext(web_contents_->GetBrowserContext())));
   base::string16 title;
   gfx::Range title_link_range = gfx::Range();
-  GetAccountChooserDialogTitleTextAndLinkRange(is_smartlock_branding_enabled,
-                                               &title, &title_link_range);
+  GetAccountChooserDialogTitleTextAndLinkRange(
+      is_smartlock_branding_enabled, local_credentials_forms().size() > 1,
+      &title, &title_link_range);
   gfx::NativeWindow native_window = web_contents_->GetTopLevelNativeWindow();
   size_t credential_array_size =
       local_credentials_forms().size() + federated_credentials_forms().size();
@@ -146,7 +148,10 @@ void AccountChooserDialogAndroid::ShowDialog() {
       env, native_window->GetJavaObject().obj(),
       reinterpret_cast<intptr_t>(this), java_credentials_array.obj(),
       base::android::ConvertUTF16ToJavaString(env, title).obj(),
-      title_link_range.start(), title_link_range.end()));
+      title_link_range.start(), title_link_range.end(),
+      base::android::ConvertUTF8ToJavaString(
+          env, password_manager::GetShownOrigin(origin_))
+          .obj()));
   base::android::ScopedJavaLocalRef<jobject> java_dialog(java_dialog_global);
   net::URLRequestContextGetter* request_context =
       Profile::FromBrowserContext(web_contents_->GetBrowserContext())
@@ -182,7 +187,7 @@ void AccountChooserDialogAndroid::OnLinkClicked(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   web_contents_->OpenURL(content::OpenURLParams(
-      GURL(password_manager::kPasswordManagerAccountDashboardURL),
+      GURL(password_manager::kPasswordManagerHelpCenterSmartLock),
       content::Referrer(), NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK,
       false /* is_renderer_initiated */));
 }
@@ -202,17 +207,16 @@ void AccountChooserDialogAndroid::ChooseCredential(
     password_manager::CredentialType type) {
   using namespace password_manager;
   if (type == CredentialType::CREDENTIAL_TYPE_EMPTY) {
-    passwords_data_.ChooseCredential(autofill::PasswordForm(), type);
+    passwords_data_.ChooseCredential(nullptr);
     return;
   }
-  DCHECK(type == CredentialType::CREDENTIAL_TYPE_PASSWORD ||
-         type == CredentialType::CREDENTIAL_TYPE_FEDERATED);
+  DCHECK_EQ(CredentialType::CREDENTIAL_TYPE_PASSWORD, type);
   const auto& credentials_forms =
       (type == CredentialType::CREDENTIAL_TYPE_PASSWORD)
           ? local_credentials_forms()
           : federated_credentials_forms();
   if (index < credentials_forms.size()) {
-    passwords_data_.ChooseCredential(*credentials_forms[index], type);
+    passwords_data_.ChooseCredential(credentials_forms[index]);
   }
 }
 

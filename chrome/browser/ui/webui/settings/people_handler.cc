@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/settings/people_handler.h"
 
+#include <string>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -12,14 +14,10 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_avatar_icon_util.h"
-#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/signin/chrome_signin_helper.h"
@@ -32,12 +30,13 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/user_manager.h"
-#include "chrome/browser/ui/webui/options/options_handlers_helper.h"
+#include "chrome/browser/ui/webui/profile_helper.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/core/browser/signin_metrics.h"
@@ -51,16 +50,11 @@
 #include "google_apis/gaia/gaia_constants.h"
 #include "grit/components_strings.h"
 #include "net/base/url_util.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/ui/webui/options/chromeos/user_image_source.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "components/signin/core/browser/signin_manager_base.h"
-#include "components/user_manager/user_manager.h"
 #else
 #include "components/signin/core/browser/signin_manager.h"
 #endif
@@ -93,7 +87,7 @@ SyncConfigInfo::SyncConfigInfo()
 SyncConfigInfo::~SyncConfigInfo() {}
 
 bool GetConfiguration(const std::string& json, SyncConfigInfo* config) {
-  scoped_ptr<base::Value> parsed_value = base::JSONReader::Read(json);
+  std::unique_ptr<base::Value> parsed_value = base::JSONReader::Read(json);
   base::DictionaryValue* result;
   if (!parsed_value || !parsed_value->GetAsDictionary(&result)) {
     DLOG(ERROR) << "GetConfiguration() not passed a Dictionary";
@@ -154,49 +148,6 @@ bool GetConfiguration(const std::string& json, SyncConfigInfo* config) {
   return true;
 }
 
-// Retrieves the
-void GetAccountNameAndIcon(const Profile& profile,
-                           std::string* name,
-                           std::string* icon_url) {
-  DCHECK(name);
-  DCHECK(icon_url);
-
-#if defined(OS_CHROMEOS)
-  *name = profile.GetProfileUserName();
-  if (name->empty()) {
-    const user_manager::User* user =
-        chromeos::ProfileHelper::Get()->GetUserByProfile(&profile);
-    if (user && (user->GetType() != user_manager::USER_TYPE_GUEST))
-      *name = user->email();
-  }
-  if (!name->empty())
-    *name = gaia::SanitizeEmail(gaia::CanonicalizeEmail(*name));
-
-  // Get image as data URL instead of using chrome://userimage source to avoid
-  // issues with caching.
-  const AccountId account_id(AccountId::FromUserEmail(*name));
-  scoped_refptr<base::RefCountedMemory> image =
-      chromeos::options::UserImageSource::GetUserImage(account_id);
-  *icon_url = webui::GetPngDataUrl(image->front(), image->size());
-#else   // !defined(OS_CHROMEOS)
-  ProfileInfoCache& cache =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
-  ProfileAttributesEntry* entry = nullptr;
-  if (cache.GetProfileAttributesWithPath(profile.GetPath(), &entry)) {
-    *name = base::UTF16ToUTF8(entry->GetName());
-
-    if (entry->IsUsingGAIAPicture() && entry->GetGAIAPicture()) {
-      gfx::Image icon =
-          profiles::GetAvatarIconForWebUI(entry->GetAvatarIcon(), true);
-      *icon_url = webui::GetBitmapDataUrl(icon.AsBitmap());
-    } else {
-      *icon_url =
-          profiles::GetDefaultAvatarIconUrl(entry->GetAvatarIconIndex());
-    }
-  }
-#endif  // defined(OS_CHROMEOS)
-}
-
 }  // namespace
 
 namespace settings {
@@ -216,14 +167,9 @@ PeopleHandler::PeopleHandler(Profile* profile)
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile_));
   if (sync_service)
     sync_service_observer_.Add(sync_service);
-
-  g_browser_process->profile_manager()->GetProfileInfoCache().AddObserver(this);
 }
 
 PeopleHandler::~PeopleHandler() {
-  g_browser_process->profile_manager()->
-      GetProfileInfoCache().RemoveObserver(this);
-
   // Early exit if running unit tests (no actual WebUI is attached).
   if (!web_ui())
     return;
@@ -243,7 +189,7 @@ void PeopleHandler::ConfigureSyncDone() {
 
   ProfileSyncService* service = GetSyncService();
   DCHECK(service);
-  if (!service->HasSyncSetupCompleted()) {
+  if (!service->IsFirstSetupComplete()) {
     // This is the first time configuring sync, so log it.
     base::FilePath profile_file_path = profile_->GetPath();
     ProfileMetrics::LogProfileSyncSignIn(profile_file_path);
@@ -251,7 +197,7 @@ void PeopleHandler::ConfigureSyncDone() {
     // We're done configuring, so notify ProfileSyncService that it is OK to
     // start syncing.
     service->SetSetupInProgress(false);
-    service->SetSyncSetupCompleted();
+    service->SetFirstSetupComplete();
   }
 }
 
@@ -263,9 +209,6 @@ bool PeopleHandler::IsActiveLogin() const {
 }
 
 void PeopleHandler::RegisterMessages() {
-  web_ui()->RegisterMessageCallback(
-      "getProfileInfo",
-      base::Bind(&PeopleHandler::HandleGetProfileInfo, base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "SyncSetupDidClosePage",
       base::Bind(&PeopleHandler::OnDidClosePage, base::Unretained(this)));
@@ -317,8 +260,8 @@ void PeopleHandler::DisplayGaiaLoginInNewTabOrWindow(
   bool force_new_tab = false;
   if (!browser) {
     // Settings is not displayed in a browser window. Open a new window.
-    browser = new Browser(Browser::CreateParams(Browser::TYPE_TABBED, profile_,
-                                                chrome::GetActiveDesktop()));
+    browser =
+        new Browser(Browser::CreateParams(Browser::TYPE_TABBED, profile_));
     force_new_tab = true;
   }
 
@@ -437,16 +380,6 @@ ProfileSyncService* PeopleHandler::GetSyncService() const {
   return profile_->IsSyncAllowed()
              ? ProfileSyncServiceFactory::GetForProfile(profile_)
              : nullptr;
-}
-
-void PeopleHandler::HandleGetProfileInfo(const base::ListValue* args) {
-  std::string name;
-  std::string icon_url;
-  GetAccountNameAndIcon(*profile_, &name, &icon_url);
-
-  web_ui()->CallJavascriptFunction("settings.SyncPrivateApi.receiveProfileInfo",
-                                   base::StringValue(name),
-                                   base::StringValue(icon_url));
 }
 
 void PeopleHandler::HandleConfigure(const base::ListValue* args) {
@@ -601,7 +534,7 @@ void PeopleHandler::HandleShowSetupUI(const base::ListValue* args) {
   // If a setup wizard is present on this page or another, bring it to focus.
   // Otherwise, display a new one on this page.
   if (!FocusExistingWizardIfPresent())
-    OpenSyncSetup(args);
+    OpenSyncSetup(false /* creating_supervised_user */);
 }
 
 #if defined(OS_CHROMEOS)
@@ -617,19 +550,26 @@ void PeopleHandler::HandleDoSignOutOnAuthError(const base::ListValue* args) {
 void PeopleHandler::HandleStartSignin(const base::ListValue* args) {
   // Should only be called if the user is not already signed in.
   DCHECK(!SigninManagerFactory::GetForProfile(profile_)->IsAuthenticated());
-  OpenSyncSetup(args);
+  bool creating_supervised_user = false;
+  args->GetBoolean(0, &creating_supervised_user);
+  OpenSyncSetup(creating_supervised_user);
 }
 
 void PeopleHandler::HandleStopSyncing(const base::ListValue* args) {
   if (GetSyncService())
     ProfileSyncService::SyncEvent(ProfileSyncService::STOP_FROM_OPTIONS);
-  SigninManagerFactory::GetForProfile(profile_)
-      ->SignOut(signin_metrics::USER_CLICKED_SIGNOUT_SETTINGS);
 
   bool delete_profile = false;
-  if (args->GetBoolean(0, &delete_profile) && delete_profile) {
+  args->GetBoolean(0, &delete_profile);
+  signin_metrics::SignoutDelete delete_metric =
+      delete_profile ? signin_metrics::SignoutDelete::DELETED
+                     : signin_metrics::SignoutDelete::KEEPING;
+  SigninManagerFactory::GetForProfile(profile_)
+      ->SignOut(signin_metrics::USER_CLICKED_SIGNOUT_SETTINGS, delete_metric);
+
+  if (delete_profile) {
     // Do as BrowserOptionsHandler::DeleteProfile().
-    options::helper::DeleteProfileAtPath(profile_->GetPath(), web_ui());
+    webui::DeleteProfileAtPath(profile_->GetPath(), web_ui());
   }
 }
 #endif
@@ -658,7 +598,7 @@ void PeopleHandler::CloseSyncSetup() {
   if (IsActiveLogin()) {
     // Don't log a cancel event if the sync setup dialog is being
     // automatically closed due to an auth error.
-    if (!sync_service || (!sync_service->HasSyncSetupCompleted() &&
+    if (!sync_service || (!sync_service->IsFirstSetupComplete() &&
                           sync_service->GetAuthError().state() ==
                               GoogleServiceAuthError::NONE)) {
       if (configuring_sync_) {
@@ -680,7 +620,8 @@ void PeopleHandler::CloseSyncSetup() {
           // TODO(rsimha): Revisit this for M30. See http://crbug.com/252049.
           if (sync_service->IsFirstSetupInProgress()) {
             SigninManagerFactory::GetForProfile(profile_)
-                ->SignOut(signin_metrics::ABORT_SIGNIN);
+                ->SignOut(signin_metrics::ABORT_SIGNIN,
+                          signin_metrics::SignoutDelete::IGNORE_METRIC);
           }
 #endif
         }
@@ -699,7 +640,7 @@ void PeopleHandler::CloseSyncSetup() {
   configuring_sync_ = false;
 }
 
-void PeopleHandler::OpenSyncSetup(const base::ListValue* args) {
+void PeopleHandler::OpenSyncSetup(bool creating_supervised_user) {
   if (!PrepareSyncSetup())
     return;
 
@@ -724,15 +665,10 @@ void PeopleHandler::OpenSyncSetup(const base::ListValue* args) {
     // setup including any visible overlays, and display the gaia auth page.
     // Control will be returned to the sync settings page once auth is complete.
     CloseUI();
-    if (args) {
-      std::string access_point = base::UTF16ToUTF8(ExtractStringValue(args));
-      if (access_point == "access-point-supervised-user") {
-        DisplayGaiaLogin(
-            signin_metrics::AccessPoint::ACCESS_POINT_SUPERVISED_USER);
-        return;
-      }
-    }
-    DisplayGaiaLogin(signin_metrics::AccessPoint::ACCESS_POINT_SETTINGS);
+    DisplayGaiaLogin(
+        creating_supervised_user ?
+            signin_metrics::AccessPoint::ACCESS_POINT_SUPERVISED_USER :
+            signin_metrics::AccessPoint::ACCESS_POINT_SETTINGS);
     return;
   }
 #endif
@@ -784,22 +720,11 @@ void PeopleHandler::OnStateChanged() {
   UpdateSyncState();
 }
 
-void PeopleHandler::OnProfileNameChanged(
-    const base::FilePath& /* profile_path */,
-    const base::string16& /* old_profile_name */) {
-  HandleGetProfileInfo(nullptr);
-}
-
-void PeopleHandler::OnProfileAvatarChanged(
-    const base::FilePath& /* profile_path */) {
-  HandleGetProfileInfo(nullptr);
-}
-
-scoped_ptr<base::DictionaryValue> PeopleHandler::GetSyncStateDictionary() {
+std::unique_ptr<base::DictionaryValue> PeopleHandler::GetSyncStateDictionary() {
   // The items which are to be written into |sync_status| are also described in
   // chrome/browser/resources/options/browser_options.js in @typedef
   // for SyncStatus. Please update it whenever you add or remove any keys here.
-  scoped_ptr<base::DictionaryValue> sync_status(new base::DictionaryValue);
+  std::unique_ptr<base::DictionaryValue> sync_status(new base::DictionaryValue);
   if (profile_->IsGuestSession()) {
     // Cannot display signin status when running in guest mode on chromeos
     // because there is no SigninManager.
@@ -825,7 +750,7 @@ scoped_ptr<base::DictionaryValue> PeopleHandler::GetSyncStateDictionary() {
   sync_status->SetBoolean("signinAllowed", signin->IsSigninAllowed());
   sync_status->SetBoolean("syncSystemEnabled", (service != nullptr));
   sync_status->SetBoolean("setupCompleted",
-                          service && service->HasSyncSetupCompleted());
+                          service && service->IsFirstSetupComplete());
   sync_status->SetBoolean(
       "setupInProgress",
       service && !service->IsManaged() && service->IsFirstSetupInProgress());

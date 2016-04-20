@@ -5,12 +5,12 @@
 #ifndef UI_ANDROID_WINDOW_ANDROID_COMPOSITOR_H_
 #define UI_ANDROID_WINDOW_ANDROID_COMPOSITOR_H_
 
+#include "base/memory/scoped_ptr.h"
 #include "cc/output/copy_output_request.h"
 #include "ui/android/ui_android_export.h"
 
 namespace cc {
 class Layer;
-class LayerSettings;
 }
 
 namespace ui {
@@ -20,14 +20,10 @@ class ResourceManager;
 // Android interface for compositor-related tasks.
 class UI_ANDROID_EXPORT WindowAndroidCompositor {
  public:
-  static const cc::LayerSettings& LayerSettings();
-  static void SetLayerSettings(const cc::LayerSettings& settings);
-
   virtual ~WindowAndroidCompositor() {}
 
-  virtual void AttachLayerForReadback(scoped_refptr<cc::Layer> layer) = 0;
   virtual void RequestCopyOfOutputOnRootLayer(
-      scoped_ptr<cc::CopyOutputRequest> request) = 0;
+      std::unique_ptr<cc::CopyOutputRequest> request) = 0;
   virtual void OnVSync(base::TimeTicks frame_time,
                        base::TimeDelta vsync_period) = 0;
   virtual void SetNeedsAnimate() = 0;

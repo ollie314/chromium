@@ -32,6 +32,7 @@
 #include "core/dom/DocumentFragment.h"
 #include "core/dom/Element.h"
 #include "core/dom/TreeScope.h"
+#include "core/dom/shadow/SlotAssignment.h"
 #include "wtf/DoublyLinkedList.h"
 
 namespace blink {
@@ -53,15 +54,15 @@ enum class ShadowRootType {
 
 class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope, public DoublyLinkedListNode<ShadowRoot> {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(ShadowRoot);
+    USING_GARBAGE_COLLECTED_MIXIN(ShadowRoot);
     friend class WTF::DoublyLinkedListNode<ShadowRoot>;
 public:
     // FIXME: Current implementation does not work well if a shadow root is dynamically created.
     // So multiple shadow subtrees in several elements are prohibited.
     // See https://github.com/w3c/webcomponents/issues/102 and http://crbug.com/234020
-    static PassRefPtrWillBeRawPtr<ShadowRoot> create(Document& document, ShadowRootType type)
+    static ShadowRoot* create(Document& document, ShadowRootType type)
     {
-        return adoptRefWillBeNoop(new ShadowRoot(document, type));
+        return new ShadowRoot(document, type);
     }
 
     void recalcStyle(StyleRecalcChange);
@@ -78,6 +79,8 @@ public:
     ShadowRoot* youngerShadowRoot() const { return prev(); }
 
     ShadowRoot* olderShadowRootForBindings() const;
+
+    String mode() const { return (type() == ShadowRootType::V0 || type() == ShadowRootType::Open) ? "open" : "closed"; };
 
     bool isOpenOrV0() const { return type() == ShadowRootType::V0 || type() == ShadowRootType::Open; }
 
@@ -106,17 +109,25 @@ public:
     unsigned numberOfStyles() const { return m_numberOfStyles; }
 
     HTMLShadowElement* shadowInsertionPointOfYoungerShadowRoot() const;
-    void setShadowInsertionPointOfYoungerShadowRoot(PassRefPtrWillBeRawPtr<HTMLShadowElement>);
+    void setShadowInsertionPointOfYoungerShadowRoot(HTMLShadowElement*);
 
     void didAddInsertionPoint(InsertionPoint*);
     void didRemoveInsertionPoint(InsertionPoint*);
-    const WillBeHeapVector<RefPtrWillBeMember<InsertionPoint>>& descendantInsertionPoints();
+    const HeapVector<Member<InsertionPoint>>& descendantInsertionPoints();
 
     ShadowRootType type() const { return static_cast<ShadowRootType>(m_type); }
 
     void didAddSlot();
     void didRemoveSlot();
-    const WillBeHeapVector<RefPtrWillBeMember<HTMLSlotElement>>& descendantSlots();
+    const HeapVector<Member<HTMLSlotElement>>& descendantSlots();
+
+    void distributeV1();
+
+    HTMLSlotElement* assignedSlotFor(const Node& node) const
+    {
+        DCHECK(m_slotAssignment);
+        return m_slotAssignment->assignedSlotFor(node);
+    }
 
     // Make protected methods from base class public here.
     using TreeScope::setDocument;
@@ -130,7 +141,7 @@ public:
     String innerHTML() const;
     void setInnerHTML(const String&, ExceptionState&);
 
-    PassRefPtrWillBeRawPtr<Node> cloneNode(bool, ExceptionState&);
+    Node* cloneNode(bool, ExceptionState&);
 
     StyleSheetList* styleSheets();
 
@@ -143,10 +154,6 @@ private:
     ShadowRoot(Document&, ShadowRootType);
     ~ShadowRoot() override;
 
-#if !ENABLE(OILPAN)
-    void dispose() override;
-#endif
-
     void childrenChanged(const ChildrenChange&) override;
 
     ShadowRootRareData* ensureShadowRootRareData();
@@ -156,7 +163,7 @@ private:
     void invalidateDescendantInsertionPoints();
 
     // ShadowRoots should never be cloned.
-    PassRefPtrWillBeRawPtr<Node> cloneNode(bool) override { return nullptr; }
+    Node* cloneNode(bool) override { return nullptr; }
 
     // FIXME: This shouldn't happen. https://bugs.webkit.org/show_bug.cgi?id=88834
     bool isOrphan() const { return !host(); }
@@ -164,9 +171,10 @@ private:
     void invalidateDescendantSlots();
     unsigned descendantSlotCount() const;
 
-    RawPtrWillBeMember<ShadowRoot> m_prev;
-    RawPtrWillBeMember<ShadowRoot> m_next;
-    OwnPtrWillBeMember<ShadowRootRareData> m_shadowRootRareData;
+    Member<ShadowRoot> m_prev;
+    Member<ShadowRoot> m_next;
+    Member<ShadowRootRareData> m_shadowRootRareData;
+    Member<SlotAssignment> m_slotAssignment;
     unsigned m_numberOfStyles : 26;
     unsigned m_type : 2;
     unsigned m_registeredWithParentShadowRoot : 1;
@@ -178,6 +186,14 @@ private:
 inline Element* ShadowRoot::activeElement() const
 {
     return adjustedFocusedElement();
+}
+
+inline ShadowRoot* Element::shadowRootIfV1() const
+{
+    ShadowRoot* root = this->shadowRoot();
+    if (root && root->isV1())
+        return root;
+    return nullptr;
 }
 
 DEFINE_NODE_TYPE_CASTS(ShadowRoot, isShadowRoot());

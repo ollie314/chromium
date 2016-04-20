@@ -11,6 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "build/build_config.h"
+#include "chrome/common/origin_trials/origin_trial_key_manager.h"
 #include "content/public/common/content_client.h"
 
 #if defined(ENABLE_PLUGINS)
@@ -60,6 +61,7 @@ class ChromeContentClient : public content::ContentClient {
   void AddPepperPlugins(
       std::vector<content::PepperPluginInfo>* plugins) override;
   void AddAdditionalSchemes(std::vector<url::SchemeWithType>* standard_schemes,
+                            std::vector<url::SchemeWithType>* referrer_schemes,
                             std::vector<std::string>* saveable_shemes) override;
   bool CanSendWhileSwappedOut(const IPC::Message* message) override;
   std::string GetProduct() const override;
@@ -73,7 +75,7 @@ class ChromeContentClient : public content::ContentClient {
   gfx::Image& GetNativeImageNamed(int resource_id) const override;
   std::string GetProcessTypeNameInEnglish(int type) override;
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MACOSX)
   bool GetSandboxProfileForSandboxType(
       int sandbox_type,
       int* sandbox_profile_resource_id) const override;
@@ -85,6 +87,10 @@ class ChromeContentClient : public content::ContentClient {
   void AddServiceWorkerSchemes(std::set<std::string>* schemes) override;
 
   bool IsSupplementarySiteIsolationModeEnabled() override;
+  base::StringPiece GetOriginTrialPublicKey() override;
+
+ private:
+  OriginTrialKeyManager origin_trial_key_manager_;
 };
 
 #endif  // CHROME_COMMON_CHROME_CONTENT_CLIENT_H_

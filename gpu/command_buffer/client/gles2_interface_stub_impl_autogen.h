@@ -341,6 +341,10 @@ void GLES2InterfaceStub::GetShaderSource(GLuint /* shader */,
 const GLubyte* GLES2InterfaceStub::GetString(GLenum /* name */) {
   return 0;
 }
+const GLubyte* GLES2InterfaceStub::GetStringi(GLenum /* name */,
+                                              GLuint /* index */) {
+  return 0;
+}
 void GLES2InterfaceStub::GetSynciv(GLsync /* sync */,
                                    GLenum /* pname */,
                                    GLsizei /* bufsize */,
@@ -992,10 +996,6 @@ void GLES2InterfaceStub::DiscardFramebufferEXT(
     const GLenum* /* attachments */) {}
 void GLES2InterfaceStub::LoseContextCHROMIUM(GLenum /* current */,
                                              GLenum /* other */) {}
-GLuint GLES2InterfaceStub::InsertSyncPointCHROMIUM() {
-  return 0;
-}
-void GLES2InterfaceStub::WaitSyncPointCHROMIUM(GLuint /* sync_point */) {}
 GLuint64 GLES2InterfaceStub::InsertFenceSyncCHROMIUM() {
   return 0;
 }
@@ -1033,10 +1033,14 @@ void GLES2InterfaceStub::ScheduleCALayerCHROMIUM(
     GLboolean /* is_clipped */,
     const GLfloat* /* clip_rect */,
     GLint /* sorting_context_id */,
-    const GLfloat* /* transform */) {}
+    const GLfloat* /* transform */,
+    GLuint /* filter */) {}
 void GLES2InterfaceStub::CommitOverlayPlanesCHROMIUM() {}
 void GLES2InterfaceStub::SwapInterval(GLint /* interval */) {}
 void GLES2InterfaceStub::FlushDriverCachesCHROMIUM() {}
+GLuint GLES2InterfaceStub::GetLastFlushIdCHROMIUM() {
+  return 0;
+}
 void GLES2InterfaceStub::MatrixLoadfCHROMIUM(GLenum /* matrixMode */,
                                              const GLfloat* /* m */) {}
 void GLES2InterfaceStub::MatrixLoadIdentityCHROMIUM(GLenum /* matrixMode */) {}
@@ -1165,4 +1169,8 @@ GLint GLES2InterfaceStub::GetFragDataIndexEXT(GLuint /* program */,
                                               const char* /* name */) {
   return 0;
 }
+void GLES2InterfaceStub::UniformMatrix4fvStreamTextureMatrixCHROMIUM(
+    GLint /* location */,
+    GLboolean /* transpose */,
+    const GLfloat* /* default_value */) {}
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_INTERFACE_STUB_IMPL_AUTOGEN_H_

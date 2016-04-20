@@ -288,14 +288,10 @@ void CardUnmaskPromptViews::DeleteDelegate() {
   delete this;
 }
 
-int CardUnmaskPromptViews::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
-}
-
 base::string16 CardUnmaskPromptViews::GetDialogButtonLabel(
     ui::DialogButton button) const {
   if (button == ui::DIALOG_BUTTON_OK)
-    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CARD_UNMASK_CONFIRM_BUTTON);
+    return controller_->GetOkButtonLabel();
 
   return DialogDelegateView::GetDialogButtonLabel(button);
 }

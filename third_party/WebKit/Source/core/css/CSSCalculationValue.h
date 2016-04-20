@@ -36,9 +36,7 @@
 #include "core/css/CSSValue.h"
 #include "core/css/parser/CSSParserTokenRange.h"
 #include "platform/CalculationValue.h"
-#include "wtf/PassOwnPtr.h"
-#include "wtf/RefCounted.h"
-#include "wtf/RefPtr.h"
+#include "wtf/Forward.h"
 
 namespace blink {
 
@@ -65,8 +63,7 @@ enum CalculationCategory {
     CalcOther
 };
 
-class CSSCalcExpressionNode : public RefCountedWillBeGarbageCollected<CSSCalcExpressionNode> {
-    DECLARE_EMPTY_VIRTUAL_DESTRUCTOR_WILL_BE_REMOVED(CSSCalcExpressionNode);
+class CSSCalcExpressionNode : public GarbageCollected<CSSCalcExpressionNode> {
 public:
     enum Type {
         CssCalcPrimitiveValue = 1,
@@ -76,11 +73,11 @@ public:
     virtual bool isZero() const = 0;
     virtual double doubleValue() const = 0;
     virtual double computeLengthPx(const CSSToLengthConversionData&) const = 0;
-    virtual void accumulateLengthArray(CSSLengthArray&, CSSLengthTypeArray&, double multiplier) const = 0;
+    virtual void accumulateLengthArray(CSSLengthArray&, double multiplier) const = 0;
     virtual void accumulatePixelsAndPercent(const CSSToLengthConversionData&, PixelsAndPercent&, float multiplier = 1) const = 0;
     virtual String customCSSText() const = 0;
     virtual bool equals(const CSSCalcExpressionNode& other) const { return m_category == other.m_category && m_isInteger == other.m_isInteger; }
-    virtual Type type() const = 0;
+    virtual Type getType() const = 0;
 
     CalculationCategory category() const { return m_category; }
     virtual CSSPrimitiveValue::UnitType typeWithCalcResolved() const = 0;
@@ -100,14 +97,14 @@ protected:
     bool m_isInteger;
 };
 
-class CORE_EXPORT CSSCalcValue : public RefCountedWillBeGarbageCollected<CSSCalcValue> {
+class CORE_EXPORT CSSCalcValue : public GarbageCollected<CSSCalcValue> {
 public:
-    static PassRefPtrWillBeRawPtr<CSSCalcValue> create(const CSSParserTokenRange&, ValueRange);
-    static PassRefPtrWillBeRawPtr<CSSCalcValue> create(PassRefPtrWillBeRawPtr<CSSCalcExpressionNode>, ValueRange = ValueRangeAll);
+    static CSSCalcValue* create(const CSSParserTokenRange&, ValueRange);
+    static CSSCalcValue* create(CSSCalcExpressionNode*, ValueRange = ValueRangeAll);
 
-    static PassRefPtrWillBeRawPtr<CSSCalcExpressionNode> createExpressionNode(PassRefPtrWillBeRawPtr<CSSPrimitiveValue>, bool isInteger = false);
-    static PassRefPtrWillBeRawPtr<CSSCalcExpressionNode> createExpressionNode(PassRefPtrWillBeRawPtr<CSSCalcExpressionNode>, PassRefPtrWillBeRawPtr<CSSCalcExpressionNode>, CalcOperator);
-    static PassRefPtrWillBeRawPtr<CSSCalcExpressionNode> createExpressionNode(double pixels, double percent);
+    static CSSCalcExpressionNode* createExpressionNode(CSSPrimitiveValue*, bool isInteger = false);
+    static CSSCalcExpressionNode* createExpressionNode(CSSCalcExpressionNode*, CSSCalcExpressionNode*, CalcOperator);
+    static CSSCalcExpressionNode* createExpressionNode(double pixels, double percent);
 
     PassRefPtr<CalculationValue> toCalcValue(const CSSToLengthConversionData& conversionData) const
     {
@@ -121,7 +118,7 @@ public:
     bool isNegative() const { return m_expression->doubleValue() < 0; }
     ValueRange permittedValueRange() { return m_nonNegative ? ValueRangeNonNegative : ValueRangeAll; }
     double computeLengthPx(const CSSToLengthConversionData&) const;
-    void accumulateLengthArray(CSSLengthArray& lengthArray, CSSLengthTypeArray& lengthTypeArray, double multiplier) const { m_expression->accumulateLengthArray(lengthArray, lengthTypeArray, multiplier); }
+    void accumulateLengthArray(CSSLengthArray& lengthArray, double multiplier) const { m_expression->accumulateLengthArray(lengthArray, multiplier); }
     CSSCalcExpressionNode* expressionNode() const { return m_expression.get(); }
 
     String customCSSText() const;
@@ -133,7 +130,7 @@ public:
     }
 
 private:
-    CSSCalcValue(PassRefPtrWillBeRawPtr<CSSCalcExpressionNode> expression, ValueRange range)
+    CSSCalcValue(CSSCalcExpressionNode* expression, ValueRange range)
         : m_expression(expression)
         , m_nonNegative(range == ValueRangeNonNegative)
     {
@@ -141,7 +138,7 @@ private:
 
     double clampToPermittedRange(double) const;
 
-    const RefPtrWillBeMember<CSSCalcExpressionNode> m_expression;
+    const Member<CSSCalcExpressionNode> m_expression;
     const bool m_nonNegative;
 };
 

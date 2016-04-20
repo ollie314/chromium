@@ -11,6 +11,7 @@ import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.StrictMode;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -25,6 +26,7 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.Log;
 import org.chromium.base.StreamUtil;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.TabState;
@@ -48,6 +50,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Displays a webapp in a nearly UI-less Chrome (InfoBars still appear).
@@ -169,8 +172,11 @@ public class WebappActivity extends FullScreenActivity {
         StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
         StrictMode.allowThreadDiskWrites();
         try {
+            long time = SystemClock.elapsedRealtime();
             foutput = new FileOutputStream(tabFile);
             TabState.saveState(foutput, getActivityTab().getState(), false);
+            RecordHistogram.recordTimesHistogram("Android.StrictMode.WebappSaveState",
+                    SystemClock.elapsedRealtime() - time, TimeUnit.MILLISECONDS);
         } catch (FileNotFoundException exception) {
             Log.e(TAG, "Failed to save out tab state.", exception);
         } catch (IOException exception) {
@@ -213,7 +219,7 @@ public class WebappActivity extends FullScreenActivity {
 
     @Override
     public void postInflationStartup() {
-        initializeSplashScreen();
+        initializeWebappData();
 
         super.postInflationStartup();
         WebappControlContainer controlContainer =
@@ -228,7 +234,7 @@ public class WebappActivity extends FullScreenActivity {
         return mWebappInfo;
     }
 
-    private void initializeSplashScreen() {
+    private void initializeWebappData() {
         final int backgroundColor = ColorUtils.getOpaqueColor(mWebappInfo.backgroundColor(
                 ApiCompatibilityUtils.getColor(getResources(), R.color.webapp_default_bg)));
 
@@ -246,13 +252,37 @@ public class WebappActivity extends FullScreenActivity {
                 ? WebappUma.SPLASHSCREEN_COLOR_STATUS_CUSTOM
                 : WebappUma.SPLASHSCREEN_COLOR_STATUS_DEFAULT);
 
-        WebappDataStorage.open(this, mWebappInfo.id()).getSplashScreenImage(
-                new WebappDataStorage.FetchCallback<Bitmap>() {
+        final Intent intent = getIntent();
+        WebappRegistry.getWebappDataStorage(this, mWebappInfo.id(),
+                new WebappRegistry.FetchWebappDataStorageCallback() {
                     @Override
-                    public void onDataRetrieved(Bitmap splashImage) {
-                        initializeSplashScreenWidgets(backgroundColor, splashImage);
+                    public void onWebappDataStorageRetrieved(WebappDataStorage storage) {
+                        if (storage == null) return;
+
+                        // The information in the WebappDataStorage may have been purged by the
+                        // user clearing their history or not launching the web app recently.
+                        // Restore the data if necessary from the intent.
+                        storage.updateFromShortcutIntent(intent);
+
+                        // A recent last used time is the indicator that the web app is still
+                        // present on the home screen, and enables sources such as notifications to
+                        // launch web apps. Thus, we do not update the last used time when the web
+                        // app is not directly launched from the home screen, as this interferes
+                        // with the heuristic.
+                        if (mWebappInfo.isLaunchedFromHomescreen()) {
+                            storage.updateLastUsedTime();
+                        }
+
+                        // Retrieve the splash image if it exists.
+                        storage.getSplashScreenImage(new WebappDataStorage.FetchCallback<Bitmap>() {
+                            @Override
+                            public void onDataRetrieved(Bitmap splashImage) {
+                                initializeSplashScreenWidgets(backgroundColor, splashImage);
+                            }
+                        });
                     }
-                });
+                }
+        );
     }
 
     private void initializeSplashScreenWidgets(int backgroundColor, Bitmap splashImage) {
@@ -289,7 +319,7 @@ public class WebappActivity extends FullScreenActivity {
             }
             mWebappUma.recordSplashscreenIconType(splashScreenIconType);
             mWebappUma.recordSplashscreenIconSize(
-                    Math.round((float) displayIcon.getWidth()
+                    Math.round(displayIcon.getWidth()
                             / getResources().getDisplayMetrics().density));
         }
 
@@ -539,6 +569,11 @@ public class WebappActivity extends FullScreenActivity {
                     public boolean isShowingTopControlsEnabled() {
                         if (!super.isShowingTopControlsEnabled()) return false;
                         return shouldShowTopControls(mTab.getUrl(), mTab.getSecurityLevel());
+                    }
+
+                    @Override
+                    public boolean isHidingTopControlsEnabled() {
+                        return !isShowingTopControlsEnabled();
                     }
                 };
             }

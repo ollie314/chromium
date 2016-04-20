@@ -6,16 +6,18 @@ package org.chromium.chrome.browser.webapps;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.os.StrictMode;
+import android.os.SystemClock;
 import android.util.Log;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.metrics.RecordHistogram;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Manages a rotating LRU buffer of WebappActivities to assign webapps to.
@@ -72,6 +74,14 @@ public class ActivityAssigner {
 
     private final Context mContext;
     private final List<ActivityEntry> mActivityList;
+
+    /**
+     * Pre-load shared prefs to avoid being blocked on the
+     * disk access async task in the future.
+     */
+    public static void warmUpSharedPrefs(Context context) {
+        context.getSharedPreferences(PREF_PACKAGE, Context.MODE_PRIVATE);
+    }
 
     static class ActivityEntry {
         final int mActivityIndex;
@@ -205,25 +215,16 @@ public class ActivityAssigner {
 
         // Restore any entries that were previously saved.  If it seems that the preferences have
         // been corrupted somehow, just discard the whole map.
-        // Temporarily allowing disk access while fixing. TODO: http://crbug.com/562189
-        SharedPreferences prefs = null;
-        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
+        SharedPreferences prefs = mContext.getSharedPreferences(PREF_PACKAGE, Context.MODE_PRIVATE);
         try {
-            prefs = mContext.getSharedPreferences(PREF_PACKAGE, Context.MODE_PRIVATE);
-            try {
-                // Immediately try to query from the new prefs object. This will more reliably force
-                // the StrictMode violation to happen right away if there's going to be one.
-                // This is a bit of a hack and should be removed when we fix the violation
-                // TODO: http://crbug.com/562189.
-                prefs.getInt(PREF_NUM_SAVED_ENTRIES, 0);
-            } catch (ClassCastException exception) {
-            }
-        } finally {
-            StrictMode.setThreadPolicy(oldPolicy);
-        }
-
-        try {
+            long time = SystemClock.elapsedRealtime();
             final int numSavedEntries = prefs.getInt(PREF_NUM_SAVED_ENTRIES, 0);
+            try {
+                RecordHistogram.recordTimesHistogram("Android.StrictMode.WebappSharedPrefs",
+                        SystemClock.elapsedRealtime() - time, TimeUnit.MILLISECONDS);
+            } catch (UnsatisfiedLinkError error) {
+                // Intentionally ignored - it's ok to miss recording the metric occasionally.
+            }
             if (numSavedEntries <= NUM_WEBAPP_ACTIVITIES) {
                 for (int i = 0; i < numSavedEntries; ++i) {
                     String currentActivityIndexPref = PREF_ACTIVITY_INDEX + i;
@@ -268,22 +269,7 @@ public class ActivityAssigner {
      * Saves the mapping between webapps and WebappActivities.
      */
     private void storeActivityList() {
-        // Temporarily allowing disk access while fixing. TODO: http://crbug.com/562189
-        SharedPreferences prefs = null;
-        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-        try {
-            prefs = mContext.getSharedPreferences(PREF_PACKAGE, Context.MODE_PRIVATE);
-            try {
-                // Immediately try to query from the new prefs object. This will more reliably force
-                // the StrictMode violation to happen right away if there's going to be one.
-                // This is a bit of a hack and should be removed when we fix the violation
-                // TODO: http://crbug.com/562189.
-                prefs.getInt(PREF_NUM_SAVED_ENTRIES, 0);
-            } catch (ClassCastException exception) {
-            }
-        } finally {
-            StrictMode.setThreadPolicy(oldPolicy);
-        }
+        SharedPreferences prefs = mContext.getSharedPreferences(PREF_PACKAGE, Context.MODE_PRIVATE);
         SharedPreferences.Editor editor = prefs.edit();
         editor.clear();
         editor.putInt(PREF_NUM_SAVED_ENTRIES, mActivityList.size());

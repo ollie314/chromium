@@ -6,9 +6,9 @@
 #define CHROME_BROWSER_GUEST_VIEW_WEB_VIEW_CHROME_WEB_VIEW_PERMISSION_HELPER_DELEGATE_H_
 
 #include "base/macros.h"
-#include "components/content_settings/core/common/content_settings.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper_delegate.h"
+#include "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h"
 
 namespace extensions {
 class WebViewGuest;
@@ -31,7 +31,6 @@ class ChromeWebViewPermissionHelperDelegate :
   void RequestGeolocationPermission(
       int bridge_id,
       const GURL& requesting_frame,
-      bool user_gesture,
       const base::Callback<void(bool)>& callback) override;
   void CancelGeolocationPermissionRequest(int bridge_id) override;
   void RequestFileSystemPermission(
@@ -63,7 +62,6 @@ class ChromeWebViewPermissionHelperDelegate :
   void OnCouldNotLoadPlugin(const base::FilePath& plugin_path);
   void OnBlockedOutdatedPlugin(int placeholder_id,
                                const std::string& identifier);
-  void OnNPAPINotSupported(const std::string& identifier);
   void OnOpenAboutPlugins();
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   void OnFindMissingPlugin(int placeholder_id, const std::string& mime_type);
@@ -78,8 +76,7 @@ class ChromeWebViewPermissionHelperDelegate :
 
   void OnGeolocationPermissionResponse(
       int bridge_id,
-      bool user_gesture,
-      const base::Callback<void(ContentSetting)>& callback,
+      const base::Callback<void(blink::mojom::PermissionStatus)>& callback,
       bool allow,
       const std::string& user_input);
 

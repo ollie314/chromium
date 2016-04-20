@@ -38,12 +38,14 @@
 #include "platform/testing/URLTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "platform/weborigin/KURL.h"
+#include "platform/weborigin/SchemeRegistry.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
+#include "public/platform/WebURLLoaderMockFactory.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/WebURLResponse.h"
-#include "public/platform/WebUnitTestSupport.h"
+#include "public/web/WebCache.h"
 #include "public/web/WebDocument.h"
 #include "public/web/WebFrame.h"
 #include "public/web/WebView.h"
@@ -96,7 +98,8 @@ protected:
 
     void TearDown() override
     {
-        Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
+        Platform::current()->getURLLoaderMockFactory()->unregisterAllURLs();
+        WebCache::clear();
     }
 
     void registerMockedURLLoad(const std::string& url, const WebString& fileName)
@@ -193,7 +196,7 @@ TEST_F(MHTMLTest, CheckDomain)
 
     EXPECT_STREQ(kFileURL, frame->domWindow()->location()->href().ascii().data());
 
-    SecurityOrigin* origin = document->securityOrigin();
+    SecurityOrigin* origin = document->getSecurityOrigin();
     EXPECT_STRNE("localhost", origin->domain().ascii().data());
 }
 
@@ -230,6 +233,22 @@ TEST_F(MHTMLTest, TestMHTMLEncoding)
         }
     }
     EXPECT_EQ(12, sectionCheckedCount);
+}
+
+TEST_F(MHTMLTest, MHTMLFromScheme)
+{
+    addTestResources();
+    RefPtr<SharedBuffer> data = serialize("Test Serialization", "text/html", MHTMLArchive::UseDefaultEncoding);
+    KURL httpURL = toKURL("http://www.example.com");
+    KURL fileURL = toKURL("file://foo");
+    KURL specialSchemeURL = toKURL("fooscheme://bar");
+
+    // MHTMLArchives can be initialized from any local scheme, but never a remote scheme.
+    EXPECT_EQ(nullptr, MHTMLArchive::create(httpURL, data.get()));
+    EXPECT_NE(nullptr, MHTMLArchive::create(fileURL, data.get()));
+    EXPECT_EQ(nullptr, MHTMLArchive::create(specialSchemeURL, data.get()));
+    SchemeRegistry::registerURLSchemeAsLocal("fooscheme");
+    EXPECT_NE(nullptr, MHTMLArchive::create(specialSchemeURL, data.get()));
 }
 
 } // namespace blink

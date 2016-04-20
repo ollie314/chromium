@@ -37,17 +37,9 @@ class EventCapturer : public ui::EventHandler {
   }
 
   void OnEvent(ui::Event* event) override {
-    if (event->IsMouseEvent()) {
-      events_.push_back(
-          new ui::MouseEvent(static_cast<ui::MouseEvent&>(*event)));
-    } else if (event->IsTouchEvent()) {
-      events_.push_back(
-          new ui::TouchEvent(static_cast<ui::TouchEvent&>(*event)));
-    } else if (event->IsGestureEvent()) {
-      events_.push_back(
-          new ui::GestureEvent(static_cast<ui::GestureEvent&>(*event)));
-    } else if (event->IsKeyEvent()) {
-      events_.push_back(new ui::KeyEvent(static_cast<ui::KeyEvent&>(*event)));
+    if (event->IsMouseEvent() || event->IsTouchEvent() ||
+        event->IsGestureEvent() || event->IsKeyEvent()) {
+      events_.push_back(ui::Event::Clone(*event));
     } else {
       return;
     }
@@ -185,7 +177,7 @@ class TouchExplorationControllerTestApi {
   }
 
  private:
-  scoped_ptr<TouchExplorationController> touch_exploration_controller_;
+  std::unique_ptr<TouchExplorationController> touch_exploration_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(TouchExplorationControllerTestApi);
 };
@@ -206,7 +198,8 @@ class TouchExplorationTest : public aura::test::AuraTestBase {
     root_window()->AddPreTargetHandler(&event_capturer_);
     generator_.reset(new test::EventGenerator(root_window()));
     // The generator takes ownership of the tick clock.
-    generator_->SetTickClock(scoped_ptr<base::TickClock>(simulated_clock_));
+    generator_->SetTickClock(
+        std::unique_ptr<base::TickClock>(simulated_clock_));
     cursor_client()->ShowCursor();
     cursor_client()->DisableMouseEvents();
   }
@@ -398,7 +391,7 @@ class TouchExplorationTest : public aura::test::AuraTestBase {
         simulated_clock_->NowTicks().ToInternalValue());
   }
 
-  scoped_ptr<test::EventGenerator> generator_;
+  std::unique_ptr<test::EventGenerator> generator_;
   ui::GestureDetector::Config gesture_detector_config_;
   // Owned by |generator_|.
   base::SimpleTestTickClock* simulated_clock_;
@@ -406,9 +399,9 @@ class TouchExplorationTest : public aura::test::AuraTestBase {
 
  private:
   EventCapturer event_capturer_;
-  scoped_ptr<TouchExplorationControllerTestApi>
+  std::unique_ptr<TouchExplorationControllerTestApi>
       touch_exploration_controller_;
-  scoped_ptr<aura::test::TestCursorClient> cursor_client_;
+  std::unique_ptr<aura::test::TestCursorClient> cursor_client_;
 
   DISALLOW_COPY_AND_ASSIGN(TouchExplorationTest);
 };
@@ -418,8 +411,8 @@ class TouchExplorationTest : public aura::test::AuraTestBase {
 void ConfirmEventsAreTouchAndEqual(ui::Event* e1, ui::Event* e2) {
   ASSERT_TRUE(e1->IsTouchEvent());
   ASSERT_TRUE(e2->IsTouchEvent());
-  ui::TouchEvent* touch_event1 = static_cast<ui::TouchEvent*>(e1);
-  ui::TouchEvent* touch_event2 = static_cast<ui::TouchEvent*>(e2);
+  ui::TouchEvent* touch_event1 = e1->AsTouchEvent();
+  ui::TouchEvent* touch_event2 = e2->AsTouchEvent();
   EXPECT_EQ(touch_event1->type(), touch_event2->type());
   EXPECT_EQ(touch_event1->location(), touch_event2->location());
   EXPECT_EQ(touch_event1->touch_id(), touch_event2->touch_id());
@@ -432,8 +425,8 @@ void ConfirmEventsAreTouchAndEqual(ui::Event* e1, ui::Event* e2) {
 void ConfirmEventsAreMouseAndEqual(ui::Event* e1, ui::Event* e2) {
   ASSERT_TRUE(e1->IsMouseEvent());
   ASSERT_TRUE(e2->IsMouseEvent());
-  ui::MouseEvent* mouse_event1 = static_cast<ui::MouseEvent*>(e1);
-  ui::MouseEvent* mouse_event2 = static_cast<ui::MouseEvent*>(e2);
+  ui::MouseEvent* mouse_event1 = e1->AsMouseEvent();
+  ui::MouseEvent* mouse_event2 = e2->AsMouseEvent();
   EXPECT_EQ(mouse_event1->type(), mouse_event2->type());
   EXPECT_EQ(mouse_event1->location(), mouse_event2->location());
   EXPECT_EQ(mouse_event1->root_location(), mouse_event2->root_location());
@@ -445,8 +438,8 @@ void ConfirmEventsAreMouseAndEqual(ui::Event* e1, ui::Event* e2) {
 void ConfirmEventsAreKeyAndEqual(ui::Event* e1, ui::Event* e2) {
   ASSERT_TRUE(e1->IsKeyEvent());
   ASSERT_TRUE(e2->IsKeyEvent());
-  ui::KeyEvent* key_event1 = static_cast<ui::KeyEvent*>(e1);
-  ui::KeyEvent* key_event2 = static_cast<ui::KeyEvent*>(e2);
+  ui::KeyEvent* key_event1 = e1->AsKeyEvent();
+  ui::KeyEvent* key_event2 = e2->AsKeyEvent();
   EXPECT_EQ(key_event1->type(), key_event2->type());
   EXPECT_EQ(key_event1->key_code(), key_event2->key_code());
   EXPECT_EQ(key_event1->code(), key_event2->code());

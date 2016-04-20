@@ -11,6 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/shared_memory.h"
 #include "base/process/process_handle.h"
 #include "base/single_thread_task_runner.h"
@@ -49,14 +50,9 @@ class DesktopSessionProxy::IpcSharedBufferCore
  public:
   IpcSharedBufferCore(int id,
                       base::SharedMemoryHandle handle,
-                      base::ProcessHandle process,
                       size_t size)
       : id_(id),
-#if defined(OS_WIN)
-        shared_memory_(handle, kReadOnly, process),
-#else  // !defined(OS_WIN)
         shared_memory_(handle, kReadOnly),
-#endif  // !defined(OS_WIN)
         size_(size) {
     if (!shared_memory_.Map(size)) {
       LOG(ERROR) << "Failed to map a shared buffer: id=" << id
@@ -95,7 +91,6 @@ DesktopSessionProxy::DesktopSessionProxy(
     scoped_refptr<base::SingleThreadTaskRunner> audio_capture_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner,
     base::WeakPtr<ClientSessionControl> client_session_control,
     base::WeakPtr<DesktopSessionConnector> desktop_session_connector,
     bool virtual_terminal,
@@ -103,7 +98,6 @@ DesktopSessionProxy::DesktopSessionProxy(
     : audio_capture_task_runner_(audio_capture_task_runner),
       caller_task_runner_(caller_task_runner),
       io_task_runner_(io_task_runner),
-      video_capture_task_runner_(video_capture_task_runner),
       client_session_control_(client_session_control),
       desktop_session_connector_(desktop_session_connector),
       pending_capture_frame_requests_(0),
@@ -113,33 +107,34 @@ DesktopSessionProxy::DesktopSessionProxy(
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 }
 
-scoped_ptr<AudioCapturer> DesktopSessionProxy::CreateAudioCapturer() {
+std::unique_ptr<AudioCapturer> DesktopSessionProxy::CreateAudioCapturer() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return make_scoped_ptr(new IpcAudioCapturer(this));
+  return base::WrapUnique(new IpcAudioCapturer(this));
 }
 
-scoped_ptr<InputInjector> DesktopSessionProxy::CreateInputInjector() {
+std::unique_ptr<InputInjector> DesktopSessionProxy::CreateInputInjector() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return make_scoped_ptr(new IpcInputInjector(this));
+  return base::WrapUnique(new IpcInputInjector(this));
 }
 
-scoped_ptr<ScreenControls> DesktopSessionProxy::CreateScreenControls() {
+std::unique_ptr<ScreenControls> DesktopSessionProxy::CreateScreenControls() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return make_scoped_ptr(new IpcScreenControls(this));
+  return base::WrapUnique(new IpcScreenControls(this));
 }
 
-scoped_ptr<webrtc::DesktopCapturer> DesktopSessionProxy::CreateVideoCapturer() {
+std::unique_ptr<webrtc::DesktopCapturer>
+DesktopSessionProxy::CreateVideoCapturer() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return make_scoped_ptr(new IpcVideoFrameCapturer(this));
+  return base::WrapUnique(new IpcVideoFrameCapturer(this));
 }
 
-scoped_ptr<webrtc::MouseCursorMonitor>
-    DesktopSessionProxy::CreateMouseCursorMonitor() {
-  return make_scoped_ptr(new IpcMouseCursorMonitor(this));
+std::unique_ptr<webrtc::MouseCursorMonitor>
+DesktopSessionProxy::CreateMouseCursorMonitor() {
+  return base::WrapUnique(new IpcMouseCursorMonitor(this));
 }
 
 std::string DesktopSessionProxy::GetCapabilities() const {
@@ -228,27 +223,13 @@ bool DesktopSessionProxy::AttachToDesktop(
   desktop_process_ = std::move(desktop_process);
 
 #if defined(OS_WIN)
-  // On Windows: |desktop_process| is a valid handle, but |desktop_pipe| needs
-  // to be duplicated from the desktop process.
-  HANDLE temp_handle;
-  if (!DuplicateHandle(desktop_process_.Handle(), desktop_pipe,
-                       GetCurrentProcess(), &temp_handle, 0,
-                       FALSE, DUPLICATE_SAME_ACCESS)) {
-    PLOG(ERROR) << "Failed to duplicate the desktop-to-network pipe handle";
-
-    desktop_process_.Close();
-    return false;
-  }
-  base::win::ScopedHandle pipe(temp_handle);
-
+  base::win::ScopedHandle pipe(desktop_pipe.GetHandle());
   IPC::ChannelHandle desktop_channel_handle(pipe.Get());
-
 #elif defined(OS_POSIX)
   // On posix: |desktop_pipe| is a valid file descriptor.
   DCHECK(desktop_pipe.auto_close);
 
   IPC::ChannelHandle desktop_channel_handle(std::string(), desktop_pipe);
-
 #else
 #error Unsupported platform.
 #endif
@@ -281,7 +262,7 @@ void DesktopSessionProxy::DetachFromDesktop() {
   // Generate fake responses to keep the video capturer in sync.
   while (pending_capture_frame_requests_) {
     --pending_capture_frame_requests_;
-    PostCaptureCompleted(nullptr);
+    video_capturer_->OnCaptureCompleted(nullptr);
   }
 }
 
@@ -293,30 +274,26 @@ void DesktopSessionProxy::SetAudioCapturer(
 }
 
 void DesktopSessionProxy::CaptureFrame() {
-  if (!caller_task_runner_->BelongsToCurrentThread()) {
-    caller_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&DesktopSessionProxy::CaptureFrame, this));
-    return;
-  }
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   if (desktop_channel_) {
     ++pending_capture_frame_requests_;
     SendToDesktop(new ChromotingNetworkDesktopMsg_CaptureFrame());
   } else {
-    PostCaptureCompleted(nullptr);
+    video_capturer_->OnCaptureCompleted(nullptr);
   }
 }
 
 void DesktopSessionProxy::SetVideoCapturer(
     const base::WeakPtr<IpcVideoFrameCapturer> video_capturer) {
-  DCHECK(video_capture_task_runner_->BelongsToCurrentThread());
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   video_capturer_ = video_capturer;
 }
 
 void DesktopSessionProxy::SetMouseCursorMonitor(
     const base::WeakPtr<IpcMouseCursorMonitor>& mouse_cursor_monitor) {
-  DCHECK(video_capture_task_runner_->BelongsToCurrentThread());
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   mouse_cursor_monitor_ = mouse_cursor_monitor;
 }
@@ -396,7 +373,7 @@ void DesktopSessionProxy::InjectTouchEvent(const protocol::TouchEvent& event) {
 }
 
 void DesktopSessionProxy::StartInputInjector(
-    scoped_ptr<protocol::ClipboardStub> client_clipboard) {
+    std::unique_ptr<protocol::ClipboardStub> client_clipboard) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   client_clipboard_ = std::move(client_clipboard);
@@ -456,7 +433,7 @@ void DesktopSessionProxy::OnAudioPacket(const std::string& serialized_packet) {
 
   // Parse a serialized audio packet. No further validation is done since
   // the message was sent by more privileged process.
-  scoped_ptr<AudioPacket> packet(new AudioPacket());
+  std::unique_ptr<AudioPacket> packet(new AudioPacket());
   if (!packet->ParseFromString(serialized_packet)) {
     LOG(ERROR) << "Failed to parse AudioPacket.";
     return;
@@ -475,7 +452,7 @@ void DesktopSessionProxy::OnCreateSharedBuffer(
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   scoped_refptr<IpcSharedBufferCore> shared_buffer =
-      new IpcSharedBufferCore(id, handle, desktop_process_.Handle(), size);
+      new IpcSharedBufferCore(id, handle, size);
 
   if (shared_buffer->memory() != nullptr &&
       !shared_buffers_.insert(std::make_pair(id, shared_buffer)).second) {
@@ -500,7 +477,7 @@ void DesktopSessionProxy::OnCaptureCompleted(
       GetSharedBufferCore(serialized_frame.shared_buffer_id);
   CHECK(shared_buffer_core.get());
 
-  scoped_ptr<webrtc::DesktopFrame> frame(
+  std::unique_ptr<webrtc::DesktopFrame> frame(
       new webrtc::SharedMemoryDesktopFrame(
           serialized_frame.dimensions, serialized_frame.bytes_per_row,
           new IpcSharedBuffer(shared_buffer_core)));
@@ -512,13 +489,17 @@ void DesktopSessionProxy::OnCaptureCompleted(
   }
 
   --pending_capture_frame_requests_;
-  PostCaptureCompleted(std::move(frame));
+  video_capturer_->OnCaptureCompleted(std::move(frame));
 }
 
 void DesktopSessionProxy::OnMouseCursor(
     const webrtc::MouseCursor& mouse_cursor) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
-  PostMouseCursor(make_scoped_ptr(webrtc::MouseCursor::CopyOf(mouse_cursor)));
+
+  if (mouse_cursor_monitor_) {
+    mouse_cursor_monitor_->OnMouseCursor(
+        base::WrapUnique(webrtc::MouseCursor::CopyOf(mouse_cursor)));
+  }
 }
 
 void DesktopSessionProxy::OnInjectClipboardEvent(
@@ -534,26 +515,6 @@ void DesktopSessionProxy::OnInjectClipboardEvent(
 
     client_clipboard_->InjectClipboardEvent(event);
   }
-}
-
-void DesktopSessionProxy::PostCaptureCompleted(
-    scoped_ptr<webrtc::DesktopFrame> frame) {
-  DCHECK(caller_task_runner_->BelongsToCurrentThread());
-
-  video_capture_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&IpcVideoFrameCapturer::OnCaptureCompleted, video_capturer_,
-                 base::Passed(&frame)));
-}
-
-void DesktopSessionProxy::PostMouseCursor(
-    scoped_ptr<webrtc::MouseCursor> mouse_cursor) {
-  DCHECK(caller_task_runner_->BelongsToCurrentThread());
-
-  video_capture_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&IpcMouseCursorMonitor::OnMouseCursor, mouse_cursor_monitor_,
-                 base::Passed(&mouse_cursor)));
 }
 
 void DesktopSessionProxy::SendToDesktop(IPC::Message* message) {

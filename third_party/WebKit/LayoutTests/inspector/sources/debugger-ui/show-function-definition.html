@@ -18,7 +18,7 @@ function test()
         function testRevealFunctionDefinition(next)
         {
             InspectorTest.addSniffer(panel, "showUISourceCode", showUISourceCodeHook);
-            WebInspector.context.flavor(WebInspector.ExecutionContext).evaluate("jumpToMe", "", false, true, false, false, didGetFunction);
+            WebInspector.context.flavor(WebInspector.ExecutionContext).evaluate("jumpToMe", "", false, true, false, false, false, didGetFunction);
 
             function didGetFunction(funcObject, wasThrown)
             {
@@ -44,10 +44,10 @@ function test()
 
             function onConsoleMessagesReceived()
             {
-                InspectorTest.runAfterPendingDispatches(function() {
+                InspectorTest.deprecatedRunAfterPendingDispatches(function() {
                     var messages = [];
                     InspectorTest.disableConsoleViewport();
-                    var viewMessages = WebInspector.ConsolePanel._view()._visibleViewMessages;
+                    var viewMessages = WebInspector.ConsoleView.instance()._visibleViewMessages;
                     for (var i = 0; i < viewMessages.length; ++i) {
                         var uiMessage = viewMessages[i];
                         var element = uiMessage.contentElement();

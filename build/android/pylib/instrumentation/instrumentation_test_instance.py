@@ -195,13 +195,13 @@ class InstrumentationTestInstance(test_instance.TestInstance):
 
     self._additional_apks = []
     self._apk_under_test = None
-    self._apk_under_test_permissions = None
+    self._apk_under_test_incremental_install_script = None
     self._package_info = None
     self._suite = None
     self._test_apk = None
+    self._test_apk_incremental_install_script = None
     self._test_jar = None
     self._test_package = None
-    self._test_permissions = None
     self._test_runner = None
     self._test_support_apk = None
     self._initializeApkAttributes(args, error_func)
@@ -230,61 +230,74 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._initializeTestControlAttributes(args)
 
   def _initializeApkAttributes(self, args, error_func):
-    if args.apk_under_test.endswith('.apk'):
-      self._apk_under_test = args.apk_under_test
-    else:
-      self._apk_under_test = os.path.join(
-          constants.GetOutDirectory(), constants.SDK_BUILD_APKS_DIR,
-          '%s.apk' % args.apk_under_test)
+    if args.apk_under_test:
+      apk_under_test_path = args.apk_under_test
+      if not args.apk_under_test.endswith('.apk'):
+        apk_under_test_path = os.path.join(
+            constants.GetOutDirectory(), constants.SDK_BUILD_APKS_DIR,
+            '%s.apk' % args.apk_under_test)
 
-    if not os.path.exists(self._apk_under_test):
-      error_func('Unable to find APK under test: %s' % self._apk_under_test)
+      if not os.path.exists(apk_under_test_path):
+        error_func('Unable to find APK under test: %s' % apk_under_test_path)
 
-    apk = apk_helper.ApkHelper(self._apk_under_test)
-    self._apk_under_test_permissions = apk.GetPermissions()
+      self._apk_under_test = apk_helper.ToHelper(apk_under_test_path)
 
     if args.test_apk.endswith('.apk'):
       self._suite = os.path.splitext(os.path.basename(args.test_apk))[0]
-      self._test_apk = args.test_apk
+      self._test_apk = apk_helper.ToHelper(args.test_apk)
     else:
       self._suite = args.test_apk
-      self._test_apk = os.path.join(
+      self._test_apk = apk_helper.ToHelper(os.path.join(
           constants.GetOutDirectory(), constants.SDK_BUILD_APKS_DIR,
-          '%s.apk' % args.test_apk)
+          '%s.apk' % args.test_apk))
+
+    self._apk_under_test_incremental_install_script = (
+        args.apk_under_test_incremental_install_script)
+    self._test_apk_incremental_install_script = (
+        args.test_apk_incremental_install_script)
+
+    if self._test_apk_incremental_install_script:
+      assert self._suite.endswith('_incremental')
+      self._suite = self._suite[:-len('_incremental')]
 
     self._test_jar = os.path.join(
         constants.GetOutDirectory(), constants.SDK_BUILD_TEST_JAVALIB_DIR,
         '%s.jar' % self._suite)
-    self._test_support_apk = os.path.join(
+    self._test_support_apk = apk_helper.ToHelper(os.path.join(
         constants.GetOutDirectory(), constants.SDK_BUILD_TEST_JAVALIB_DIR,
-        '%sSupport.apk' % self._suite)
+        '%sSupport.apk' % self._suite))
 
-    if not os.path.exists(self._test_apk):
-      error_func('Unable to find test APK: %s' % self._test_apk)
+    if not os.path.exists(self._test_apk.path):
+      error_func('Unable to find test APK: %s' % self._test_apk.path)
     if not os.path.exists(self._test_jar):
       error_func('Unable to find test JAR: %s' % self._test_jar)
 
-    apk = apk_helper.ApkHelper(self.test_apk)
-    self._test_package = apk.GetPackageName()
-    self._test_permissions = apk.GetPermissions()
-    self._test_runner = apk.GetInstrumentationName()
+    self._test_package = self._test_apk.GetPackageName()
+    self._test_runner = self._test_apk.GetInstrumentationName()
 
     self._package_info = None
-    for package_info in constants.PACKAGE_INFO.itervalues():
-      if self._test_package == package_info.test_package:
-        self._package_info = package_info
+    if self._apk_under_test:
+      package_under_test = self._apk_under_test.GetPackageName()
+      for package_info in constants.PACKAGE_INFO.itervalues():
+        if package_under_test == package_info.package:
+          self._package_info = package_info
     if not self._package_info:
       logging.warning('Unable to find package info for %s', self._test_package)
 
     for apk in args.additional_apks:
       if not os.path.exists(apk):
         error_func('Unable to find additional APK: %s' % apk)
-    self._additional_apks = args.additional_apks
+    self._additional_apks = (
+        [apk_helper.ToHelper(x) for x in args.additional_apks])
 
   def _initializeDataDependencyAttributes(self, args, isolate_delegate):
     self._data_deps = []
     if args.isolate_file_path:
-      self._isolate_abs_path = os.path.abspath(args.isolate_file_path)
+      if os.path.isabs(args.isolate_file_path):
+        self._isolate_abs_path = args.isolate_file_path
+      else:
+        self._isolate_abs_path = os.path.join(
+            constants.DIR_SOURCE_ROOT, args.isolate_file_path)
       self._isolate_delegate = isolate_delegate
       self._isolated_abs_path = os.path.join(
           constants.GetOutDirectory(), '%s.isolated' % self._test_package)
@@ -303,7 +316,8 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       logging.warning('No data dependencies will be pushed.')
 
   def _initializeTestFilterAttributes(self, args):
-    self._test_filter = args.test_filter
+    if args.test_filter:
+      self._test_filter = args.test_filter.replace('#', '.')
 
     def annotation_dict_element(a):
       a = a.split('=')
@@ -334,7 +348,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
         })
 
   def _initializeFlagAttributes(self, args):
-    self._flags = ['--disable-fre', '--enable-test-intents']
+    self._flags = ['--enable-test-intents']
     # TODO(jbudorick): Transition "--device-flags" to "--device-flags-file"
     if hasattr(args, 'device_flags') and args.device_flags:
       with open(args.device_flags) as device_flags_file:
@@ -372,8 +386,8 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     return self._apk_under_test
 
   @property
-  def apk_under_test_permissions(self):
-   return self._apk_under_test_permissions
+  def apk_under_test_incremental_install_script(self):
+    return self._apk_under_test_incremental_install_script
 
   @property
   def flags(self):
@@ -404,6 +418,10 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     return self._test_apk
 
   @property
+  def test_apk_incremental_install_script(self):
+    return self._test_apk_incremental_install_script
+
+  @property
   def test_jar(self):
     return self._test_jar
 
@@ -414,10 +432,6 @@ class InstrumentationTestInstance(test_instance.TestInstance):
   @property
   def test_package(self):
     return self._test_package
-
-  @property
-  def test_permissions(self):
-    return self._test_permissions
 
   @property
   def test_runner(self):

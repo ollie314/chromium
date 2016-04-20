@@ -4,6 +4,7 @@
 
 #include "chrome/test/base/test_browser_window.h"
 
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_list_observer.h"
@@ -14,12 +15,12 @@
 
 namespace chrome {
 
-scoped_ptr<Browser> CreateBrowserWithTestWindowForParams(
+std::unique_ptr<Browser> CreateBrowserWithTestWindowForParams(
     Browser::CreateParams* params) {
   TestBrowserWindow* window = new TestBrowserWindow;
   new TestBrowserWindowOwner(window);
   params->window = window;
-  return make_scoped_ptr(new Browser(*params));
+  return base::WrapUnique(new Browser(*params));
 }
 
 }  // namespace chrome
@@ -94,6 +95,10 @@ gfx::Rect TestBrowserWindow::GetBounds() const {
   return gfx::Rect();
 }
 
+gfx::Size TestBrowserWindow::GetContentsSize() const {
+  return gfx::Size();
+}
+
 bool TestBrowserWindow::IsMaximized() const {
   return false;
 }
@@ -113,29 +118,6 @@ bool TestBrowserWindow::IsFullscreen() const {
 bool TestBrowserWindow::IsFullscreenBubbleVisible() const {
   return false;
 }
-
-bool TestBrowserWindow::SupportsFullscreenWithToolbar() const {
-  return false;
-}
-
-void TestBrowserWindow::UpdateFullscreenWithToolbar(bool with_toolbar) {
-}
-
-void TestBrowserWindow::ToggleFullscreenToolbar() {}
-
-bool TestBrowserWindow::IsFullscreenWithToolbar() const {
-  return false;
-}
-
-bool TestBrowserWindow::ShouldHideFullscreenToolbar() const {
-  return false;
-}
-
-#if defined(OS_WIN)
-bool TestBrowserWindow::IsInMetroSnapMode() const {
-  return false;
-}
-#endif
 
 LocationBar* TestBrowserWindow::GetLocationBar() const {
   return const_cast<TestLocationBar*>(&location_bar_);

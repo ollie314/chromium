@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <set>
 #include <utility>
 #include <vector>
@@ -23,7 +24,6 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "gpu/command_buffer/client/gles2_cmd_helper.h"
@@ -57,7 +57,6 @@ class GLInProcessContextImpl
 
   bool Initialize(scoped_refptr<gfx::GLSurface> surface,
                   bool is_offscreen,
-                  bool use_global_share_group,
                   GLInProcessContext* share_context,
                   gfx::AcceleratedWidget window,
                   const gfx::Size& size,
@@ -68,50 +67,29 @@ class GLInProcessContextImpl
                   ImageFactory* image_factory);
 
   // GLInProcessContext implementation:
-  void SetContextLostCallback(const base::Closure& callback) override;
   gles2::GLES2Implementation* GetImplementation() override;
   size_t GetMappedMemoryLimit() override;
   void SetLock(base::Lock* lock) override;
 
-#if defined(OS_ANDROID)
-  scoped_refptr<gfx::SurfaceTexture> GetSurfaceTexture(
-      uint32_t stream_id) override;
-  uint32_t CreateStreamTexture(uint32_t texture_id) override;
-#endif
-
  private:
   void Destroy();
-  void OnContextLost();
   void OnSignalSyncPoint(const base::Closure& callback);
 
-  scoped_ptr<gles2::GLES2CmdHelper> gles2_helper_;
-  scoped_ptr<TransferBuffer> transfer_buffer_;
-  scoped_ptr<gles2::GLES2Implementation> gles2_implementation_;
-  scoped_ptr<InProcessCommandBuffer> command_buffer_;
+  std::unique_ptr<gles2::GLES2CmdHelper> gles2_helper_;
+  std::unique_ptr<TransferBuffer> transfer_buffer_;
+  std::unique_ptr<gles2::GLES2Implementation> gles2_implementation_;
+  std::unique_ptr<InProcessCommandBuffer> command_buffer_;
 
   const GLInProcessContextSharedMemoryLimits mem_limits_;
-  bool context_lost_;
-  base::Closure context_lost_callback_;
-  base::Lock* lock_;
 
   DISALLOW_COPY_AND_ASSIGN(GLInProcessContextImpl);
 };
 
-base::LazyInstance<base::Lock> g_all_shared_contexts_lock =
-    LAZY_INSTANCE_INITIALIZER;
-base::LazyInstance<std::set<GLInProcessContextImpl*> > g_all_shared_contexts =
-    LAZY_INSTANCE_INITIALIZER;
-
 GLInProcessContextImpl::GLInProcessContextImpl(
     const GLInProcessContextSharedMemoryLimits& mem_limits)
-    : mem_limits_(mem_limits), context_lost_(false), lock_(nullptr) {
-}
+    : mem_limits_(mem_limits) {}
 
 GLInProcessContextImpl::~GLInProcessContextImpl() {
-  {
-    base::AutoLock lock(g_all_shared_contexts_lock.Get());
-    g_all_shared_contexts.Get().erase(this);
-  }
   Destroy();
 }
 
@@ -124,29 +102,12 @@ size_t GLInProcessContextImpl::GetMappedMemoryLimit() {
 }
 
 void GLInProcessContextImpl::SetLock(base::Lock* lock) {
-  command_buffer_->SetLock(lock);
-  lock_ = lock;
-}
-
-void GLInProcessContextImpl::SetContextLostCallback(
-    const base::Closure& callback) {
-  context_lost_callback_ = callback;
-}
-
-void GLInProcessContextImpl::OnContextLost() {
-  scoped_ptr<base::AutoLock> lock;
-  if (lock_)
-    lock.reset(new base::AutoLock(*lock_));
-  context_lost_ = true;
-  if (!context_lost_callback_.is_null()) {
-    context_lost_callback_.Run();
-  }
+  NOTREACHED();
 }
 
 bool GLInProcessContextImpl::Initialize(
     scoped_refptr<gfx::GLSurface> surface,
     bool is_offscreen,
-    bool use_global_share_group,
     GLInProcessContext* share_context,
     gfx::AcceleratedWidget window,
     const gfx::Size& size,
@@ -155,41 +116,21 @@ bool GLInProcessContextImpl::Initialize(
     const scoped_refptr<InProcessCommandBuffer::Service>& service,
     GpuMemoryBufferManager* gpu_memory_buffer_manager,
     ImageFactory* image_factory) {
-  DCHECK(!use_global_share_group || !share_context);
   DCHECK(size.width() >= 0 && size.height() >= 0);
 
   std::vector<int32_t> attrib_vector;
   attribs.Serialize(&attrib_vector);
 
-  base::Closure wrapped_callback =
-      base::Bind(&GLInProcessContextImpl::OnContextLost, AsWeakPtr());
   command_buffer_.reset(new InProcessCommandBuffer(service));
 
-  scoped_ptr<base::AutoLock> scoped_shared_context_lock;
   scoped_refptr<gles2::ShareGroup> share_group;
-  InProcessCommandBuffer* share_command_buffer = NULL;
-  if (use_global_share_group) {
-    scoped_shared_context_lock.reset(
-        new base::AutoLock(g_all_shared_contexts_lock.Get()));
-    for (std::set<GLInProcessContextImpl*>::const_iterator it =
-             g_all_shared_contexts.Get().begin();
-         it != g_all_shared_contexts.Get().end();
-         it++) {
-      const GLInProcessContextImpl* context = *it;
-      if (!context->context_lost_) {
-        share_group = context->gles2_implementation_->share_group();
-        share_command_buffer = context->command_buffer_.get();
-        DCHECK(share_group.get());
-        DCHECK(share_command_buffer);
-        break;
-      }
-    }
-  } else if (share_context) {
+  InProcessCommandBuffer* share_command_buffer = nullptr;
+  if (share_context) {
     GLInProcessContextImpl* impl =
         static_cast<GLInProcessContextImpl*>(share_context);
     share_group = impl->gles2_implementation_->share_group();
     share_command_buffer = impl->command_buffer_.get();
-    DCHECK(share_group.get());
+    DCHECK(share_group);
     DCHECK(share_command_buffer);
   }
 
@@ -199,11 +140,10 @@ bool GLInProcessContextImpl::Initialize(
                                    size,
                                    attrib_vector,
                                    gpu_preference,
-                                   wrapped_callback,
                                    share_command_buffer,
                                    gpu_memory_buffer_manager,
                                    image_factory)) {
-    LOG(ERROR) << "Failed to initialize InProcessCommmandBuffer";
+    DLOG(ERROR) << "Failed to initialize InProcessCommmandBuffer";
     return false;
   }
 
@@ -233,11 +173,6 @@ bool GLInProcessContextImpl::Initialize(
                                      support_client_side_arrays,
                                      command_buffer_.get()));
 
-  if (use_global_share_group) {
-    g_all_shared_contexts.Get().insert(this);
-    scoped_shared_context_lock.reset();
-  }
-
   if (!gles2_implementation_->Initialize(
           mem_limits_.start_transfer_buffer_size,
           mem_limits_.min_transfer_buffer_size,
@@ -266,17 +201,6 @@ void GLInProcessContextImpl::Destroy() {
   command_buffer_.reset();
 }
 
-#if defined(OS_ANDROID)
-scoped_refptr<gfx::SurfaceTexture> GLInProcessContextImpl::GetSurfaceTexture(
-    uint32_t stream_id) {
-  return command_buffer_->GetSurfaceTexture(stream_id);
-}
-
-uint32_t GLInProcessContextImpl::CreateStreamTexture(uint32_t texture_id) {
-  return command_buffer_->CreateStreamTexture(texture_id);
-}
-#endif
-
 }  // anonymous namespace
 
 GLInProcessContextSharedMemoryLimits::GLInProcessContextSharedMemoryLimits()
@@ -295,24 +219,21 @@ GLInProcessContext* GLInProcessContext::Create(
     gfx::AcceleratedWidget window,
     const gfx::Size& size,
     GLInProcessContext* share_context,
-    bool use_global_share_group,
     const ::gpu::gles2::ContextCreationAttribHelper& attribs,
     gfx::GpuPreference gpu_preference,
     const GLInProcessContextSharedMemoryLimits& memory_limits,
     GpuMemoryBufferManager* gpu_memory_buffer_manager,
     ImageFactory* image_factory) {
-  DCHECK(!use_global_share_group || !share_context);
   if (surface.get()) {
     DCHECK_EQ(surface->IsOffscreen(), is_offscreen);
     DCHECK(surface->GetSize() == size);
     DCHECK_EQ(gfx::kNullAcceleratedWidget, window);
   }
 
-  scoped_ptr<GLInProcessContextImpl> context(
+  std::unique_ptr<GLInProcessContextImpl> context(
       new GLInProcessContextImpl(memory_limits));
   if (!context->Initialize(surface,
                            is_offscreen,
-                           use_global_share_group,
                            share_context,
                            window,
                            size,

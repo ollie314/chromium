@@ -4,6 +4,9 @@
 
 package org.chromium.chrome.browser.toolbar;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.AnimatorSet;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.ColorStateList;
@@ -24,15 +27,19 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.appmenu.AppMenuButtonHelper;
 import org.chromium.chrome.browser.compositor.Invalidator;
+import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.omaha.UpdateMenuItemHelper;
 import org.chromium.chrome.browser.omnibox.LocationBar;
+import org.chromium.chrome.browser.omnibox.UrlContainer;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.ViewUtils;
 import org.chromium.chrome.browser.widget.TintedImageButton;
 import org.chromium.chrome.browser.widget.ToolbarProgressBar;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.widget.Toast;
+
+import javax.annotation.Nullable;
 
 /**
  * Layout class that contains the base shared logic for manipulating the toolbar component. For
@@ -52,8 +59,8 @@ abstract class ToolbarLayout extends FrameLayout implements Toolbar {
     protected TintedImageButton mMenuButton;
     protected ImageView mMenuBadge;
     protected View mMenuButtonWrapper;
-    protected boolean mShowMenuBadge;
-    protected Drawable mUnbadgedMenuButtonDrawable;
+    @Nullable
+    private UrlContainer mUrlContainer;
     private AppMenuButtonHelper mAppMenuButtonHelper;
 
     protected final ColorStateList mDarkModeTint;
@@ -61,6 +68,7 @@ abstract class ToolbarLayout extends FrameLayout implements Toolbar {
 
     private ToolbarDataProvider mToolbarDataProvider;
     private ToolbarTabController mToolbarTabController;
+    @Nullable
     private ToolbarProgressBar mProgressBar;
 
     private boolean mNativeLibraryReady;
@@ -71,6 +79,10 @@ abstract class ToolbarLayout extends FrameLayout implements Toolbar {
     protected final int mToolbarHeightWithoutShadow;
 
     private boolean mFindInPageToolbarShowing;
+
+    protected boolean mShowMenuBadge;
+    private AnimatorSet mMenuBadgeAnimatorSet;
+    private boolean mIsMenuBadgeAnimationRunning;
 
     /**
      * Basic constructor for {@link ToolbarLayout}.
@@ -100,6 +112,8 @@ abstract class ToolbarLayout extends FrameLayout implements Toolbar {
         mMenuButton = (TintedImageButton) findViewById(R.id.menu_button);
         mMenuBadge = (ImageView) findViewById(R.id.menu_badge);
         mMenuButtonWrapper = findViewById(R.id.menu_button_wrapper);
+
+        mUrlContainer = (UrlContainer) findViewById(R.id.url_container);
 
         // Initialize the provider to an empty version to avoid null checking everywhere.
         mToolbarDataProvider = new ToolbarDataProvider() {
@@ -328,6 +342,24 @@ abstract class ToolbarLayout extends FrameLayout implements Toolbar {
     public void setCustomTabCloseClickHandler(OnClickListener listener) { }
 
     /**
+     * Sets whether the urlbar should be hidden on first page load.
+     */
+    public void setUrlBarHidden(boolean hide) { }
+
+    /**
+     * @return The name of the publisher of the content if it can be reliably extracted, or null
+     *         otherwise.
+     */
+    public String getContentPublisher() {
+        return null;
+    }
+
+    /**
+     * Tells the Toolbar to update what buttons it is currently displaying.
+     */
+    public void updateButtonVisibility() { }
+
+    /**
      * Gives inheriting classes the chance to update the visibility of the
      * back button.
      * @param canGoBack Whether or not the current tab has any history to go back to.
@@ -384,7 +416,11 @@ abstract class ToolbarLayout extends FrameLayout implements Toolbar {
      */
     protected void onTabOrModelChanged() {
         NewTabPage ntp = getToolbarDataProvider().getNewTabPageForCurrentTab();
-        if (ntp != null) getLocationBar().onTabLoadingNTP(ntp);
+        if (ntp != null) {
+            getLocationBar().onTabLoadingNTP(ntp);
+        } else {
+            if (mUrlContainer != null) mUrlContainer.setTrailingTextVisible(true);
+        }
 
         getLocationBar().updateMicButtonState();
     }
@@ -428,6 +464,14 @@ abstract class ToolbarLayout extends FrameLayout implements Toolbar {
     public boolean isReadyForTextureCapture() {
         return true;
     }
+
+    @Override
+    public boolean setForceTextureCapture(boolean forceTextureCapture) {
+        return false;
+    }
+
+    @Override
+    public void setLayoutUpdateHost(LayoutUpdateHost layoutUpdateHost) { }
 
     /**
      * @param attached Whether or not the web content is attached to the view heirarchy.
@@ -522,6 +566,7 @@ abstract class ToolbarLayout extends FrameLayout implements Toolbar {
      * Notified when a navigation to a different page has occurred.
      */
     protected void onNavigatedToDifferentPage() {
+        if (mUrlContainer != null) mUrlContainer.setTrailingTextVisible(true);
     }
 
     /**
@@ -552,6 +597,7 @@ abstract class ToolbarLayout extends FrameLayout implements Toolbar {
         if (mProgressBar != null) {
             mProgressBar.finish(delayed);
         }
+        if (mUrlContainer != null) mUrlContainer.setTrailingTextVisible(false);
     }
 
     /**
@@ -622,22 +668,122 @@ abstract class ToolbarLayout extends FrameLayout implements Toolbar {
     @Override
     public void showAppMenuUpdateBadge() {
         mShowMenuBadge = true;
-        mUnbadgedMenuButtonDrawable = ApiCompatibilityUtils.getDrawable(getResources(),
-                R.drawable.btn_menu);
     }
 
     @Override
-    public void removeAppMenuUpdateBadge() {
-        mMenuBadge.setVisibility(View.GONE);
+    public boolean isShowingAppMenuUpdateBadge() {
+        return mShowMenuBadge;
+    }
+
+    @Override
+    public void removeAppMenuUpdateBadge(boolean animate) {
+        boolean wasShowingMenuBadge = mShowMenuBadge;
+        mShowMenuBadge = false;
+        setMenuButtonContentDescription(false);
+
+        if (!animate || !wasShowingMenuBadge) {
+            mMenuBadge.setVisibility(View.GONE);
+            return;
+        }
+
+        if (mIsMenuBadgeAnimationRunning && mMenuBadgeAnimatorSet != null) {
+            mMenuBadgeAnimatorSet.cancel();
+        }
+
+        // Set initial states.
+        mMenuButton.setAlpha(0.f);
+
+        mMenuBadgeAnimatorSet = UpdateMenuItemHelper.createHideUpdateBadgeAnimation(
+                mMenuButton, mMenuBadge);
+
+        mMenuBadgeAnimatorSet.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationStart(Animator animation) {
+                mIsMenuBadgeAnimationRunning = true;
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                mIsMenuBadgeAnimationRunning = false;
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                mIsMenuBadgeAnimationRunning = false;
+            }
+        });
+
+        mMenuBadgeAnimatorSet.start();
     }
 
     /**
      * Sets the update badge visibility to VISIBLE and sets the menu button image to the badged
      * bitmap.
      */
-    protected void setAppMenuUpdateBadgeToVisible() {
+    protected void setAppMenuUpdateBadgeToVisible(boolean animate) {
+        setMenuButtonContentDescription(true);
+        if (!animate || mIsMenuBadgeAnimationRunning) {
+            mMenuBadge.setVisibility(View.VISIBLE);
+            return;
+        }
+
+        // Set initial states.
+        mMenuBadge.setAlpha(0.f);
         mMenuBadge.setVisibility(View.VISIBLE);
-        mMenuButton.setImageBitmap(
-                UpdateMenuItemHelper.getInstance().getBadgedMenuButtonBitmap(getContext()));
+
+        mMenuBadgeAnimatorSet = UpdateMenuItemHelper.createShowUpdateBadgeAnimation(
+                mMenuButton, mMenuBadge);
+
+        mMenuBadgeAnimatorSet.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationStart(Animator animation) {
+                mIsMenuBadgeAnimationRunning = true;
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                mIsMenuBadgeAnimationRunning = false;
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                mIsMenuBadgeAnimationRunning = false;
+            }
+        });
+
+        mMenuBadgeAnimatorSet.start();
+    }
+
+    protected void cancelAppMenuUpdateBadgeAnimation() {
+        if (mIsMenuBadgeAnimationRunning && mMenuBadgeAnimatorSet != null) {
+            mMenuBadgeAnimatorSet.cancel();
+        }
+    }
+
+    /**
+     * Sets the update menu badge drawable to the light or dark asset.
+     * @param useLightDrawable Whether the light drawable should be used.
+     */
+    protected void setAppMenuUpdateBadgeDrawable(boolean useLightDrawable) {
+        mMenuBadge.setImageResource(useLightDrawable ? R.drawable.badge_update_light
+                : R.drawable.badge_update_dark);
+    }
+
+    /**
+     * Sets the content description for the menu button.
+     * @param isUpdateBadgeVisible Whether the update menu badge is visible.
+     */
+    protected void setMenuButtonContentDescription(boolean isUpdateBadgeVisible) {
+        if (isUpdateBadgeVisible) {
+            mMenuButton.setContentDescription(getResources().getString(
+                    R.string.accessibility_toolbar_btn_menu_update));
+        } else {
+            mMenuButton.setContentDescription(getResources().getString(
+                    R.string.accessibility_toolbar_btn_menu));
+        }
+    }
+
+    @Override
+    public void setReturnButtonListener(View.OnClickListener listener) {
     }
 }

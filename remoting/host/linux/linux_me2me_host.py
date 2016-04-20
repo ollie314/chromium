@@ -55,13 +55,7 @@ DEFAULT_SIZE_NO_RANDR = "1600x1200"
 SCRIPT_PATH = os.path.abspath(sys.argv[0])
 SCRIPT_DIR = os.path.dirname(SCRIPT_PATH)
 
-IS_INSTALLED = (os.path.basename(sys.argv[0]) != 'linux_me2me_host.py')
-
-if IS_INSTALLED:
-  HOST_BINARY_NAME = "chrome-remote-desktop-host"
-else:
-  HOST_BINARY_NAME = "remoting_me2me_host"
-
+HOST_BINARY_NAME = "chrome-remote-desktop-host"
 CHROME_REMOTING_GROUP_NAME = "chrome-remote-desktop"
 
 HOME_DIR = os.environ["HOME"]
@@ -105,13 +99,16 @@ def is_supported_platform():
 def get_randr_supporting_x_server():
   """Returns a path to an X server that supports the RANDR extension, if this
   is found on the system. Otherwise returns None."""
-  try:
-    xvfb = "/usr/bin/Xvfb-randr"
-    if not os.path.exists(xvfb):
-      xvfb = locate_executable("Xvfb-randr")
+
+  xvfb = "/usr/bin/Xvfb-randr"
+  if os.path.exists(xvfb):
     return xvfb
-  except Exception:
-    return None
+
+  xvfb = os.path.join(SCRIPT_DIR, "Xvfb-randr")
+  if os.path.exists(xvfb):
+    return xvfb
+
+  return None
 
 
 class Config:
@@ -497,7 +494,8 @@ class Desktop:
 
   def launch_host(self, host_config):
     # Start remoting host
-    args = [locate_executable(HOST_BINARY_NAME), "--host-config=-"]
+    host_path = os.path.join(SCRIPT_DIR, HOST_BINARY_NAME)
+    args = [host_path, "--host-config=-"]
     if self.pulseaudio_pipe:
       args.append("--audio-pipe-name=%s" % self.pulseaudio_pipe)
     if self.server_supports_exact_resize:
@@ -512,14 +510,14 @@ class Desktop:
       self.host_ready = True
       if (ParentProcessLogger.instance() and
           False not in [desktop.host_ready for desktop in g_desktops]):
-        ParentProcessLogger.instance().release_parent()
+        ParentProcessLogger.instance().release_parent(True)
 
     signal.signal(signal.SIGUSR1, sigusr1_handler)
     args.append("--signal-parent")
 
+    logging.info(args)
     self.host_proc = subprocess.Popen(args, env=self.child_env,
                                       stdin=subprocess.PIPE)
-    logging.info(args)
     if not self.host_proc.pid:
       raise Exception("Could not start Chrome Remote Desktop host")
 
@@ -630,25 +628,6 @@ def choose_x_session():
   return None
 
 
-def locate_executable(exe_name):
-  if IS_INSTALLED:
-    # If the script is running from its installed location, search the host
-    # binary only in the same directory.
-    paths_to_try = [ SCRIPT_DIR ]
-  else:
-    paths_to_try = map(lambda p: os.path.join(SCRIPT_DIR, p),
-                       [".",
-                        "../../../out/Debug",
-                        "../../../out/Default",
-                        "../../../out/Release"])
-  for path in paths_to_try:
-    exe_path = os.path.join(path, exe_name)
-    if os.path.exists(exe_path):
-      return exe_path
-
-  raise Exception("Could not locate executable '%s'" % exe_name)
-
-
 class ParentProcessLogger(object):
   """Redirects logs to the parent process, until the host is ready or quits.
 
@@ -682,29 +661,42 @@ class ParentProcessLogger(object):
     ParentProcessLogger.__instance = self
 
   def start_logging(self):
-    """Installs a logging handler that sends log entries to a pipe.
+    """Installs a logging handler that sends log entries to a pipe, prefixed
+    with the string 'MSG:'. This allows them to be distinguished by the parent
+    process from commands sent over the same pipe.
 
     Must be called by the child process.
     """
     self._read_file.close()
     self._logging_handler = logging.StreamHandler(self._write_file)
+    self._logging_handler.setFormatter(logging.Formatter(fmt='MSG:%(message)s'))
     logging.getLogger().addHandler(self._logging_handler)
 
-  def release_parent(self):
+  def release_parent(self, success):
     """Uninstalls logging handler and closes the pipe, releasing the parent.
 
     Must be called by the child process.
+
+    success: If true, write a "host ready" message to the parent process before
+             closing the pipe.
     """
     if self._logging_handler:
       logging.getLogger().removeHandler(self._logging_handler)
       self._logging_handler = None
     if not self._write_file.closed:
+      if success:
+        self._write_file.write("READY\n")
+        self._write_file.flush()
       self._write_file.close()
 
   def wait_for_logs(self):
     """Waits and prints log lines from the daemon until the pipe is closed.
 
     Must be called by the parent process.
+
+    Returns:
+      True if the host started and successfully registered with the directory;
+      false otherwise.
     """
     # If Ctrl-C is pressed, inform the user that the daemon is still running.
     # This signal will cause the read loop below to stop with an EINTR IOError.
@@ -718,25 +710,35 @@ class ParentProcessLogger(object):
     # Install a fallback timeout to release the parent process, in case the
     # daemon never responds (e.g. host crash-looping, daemon killed).
     # This signal will cause the read loop below to stop with an EINTR IOError.
+    #
+    # The value of 120s is chosen to match the heartbeat retry timeout in
+    # hearbeat_sender.cc.
     def sigalrm_handler(signum, frame):
       _ = signum, frame
       print("No response from daemon. It may have crashed, or may still be "
             "running in the background.", file=sys.stderr)
 
     signal.signal(signal.SIGALRM, sigalrm_handler)
-    signal.alarm(30)
+    signal.alarm(120)
 
     self._write_file.close()
 
     # Print lines as they're logged to the pipe until EOF is reached or readline
     # is interrupted by one of the signal handlers above.
+    host_ready = False
     try:
       for line in iter(self._read_file.readline, ''):
-        sys.stderr.write(line)
+        if line[:4] == "MSG:":
+          sys.stderr.write(line[4:])
+        elif line == "READY\n":
+          host_ready = True
+        else:
+          sys.stderr.write("Unrecognized command: " + line)
     except IOError as e:
       if e.errno != errno.EINTR:
         raise
     print("Log file: %s" % os.environ[LOG_FILE_ENV_VAR], file=sys.stderr)
+    return host_ready
 
   @staticmethod
   def instance():
@@ -795,8 +797,10 @@ def daemonize():
       os._exit(0)  # pylint: disable=W0212
   else:
     # Parent process
-    parent_logger.wait_for_logs()
-    os._exit(0)  # pylint: disable=W0212
+    if parent_logger.wait_for_logs():
+      os._exit(0)  # pylint: disable=W0212
+    else:
+      os._exit(1)  # pylint: disable=W0212
 
   logging.info("Daemon process started in the background, logging to '%s'" %
                os.environ[LOG_FILE_ENV_VAR])
@@ -842,7 +846,7 @@ def cleanup():
 
   g_desktops = []
   if ParentProcessLogger.instance():
-    ParentProcessLogger.instance().release_parent()
+    ParentProcessLogger.instance().release_parent(False)
 
 class SignalHandler:
   """Reload the config file on SIGHUP. Since we pass the configuration to the
@@ -1067,9 +1071,6 @@ Web Store: https://chrome.google.com/remotedesktop"""
                     action="store", metavar="USER",
                     help="Adds the specified user to the chrome-remote-desktop "
                     "group (must be run as root).")
-  parser.add_option("", "--host-version", dest="host_version", default=False,
-                    action="store_true",
-                    help="Prints version of the host.")
   parser.add_option("", "--watch-resolution", dest="watch_resolution",
                     type="int", nargs=2, default=False, action="store",
                     help=optparse.SUPPRESS_HELP)
@@ -1164,10 +1165,6 @@ Web Store: https://chrome.google.com/remotedesktop"""
       return 1
 
     return 0
-
-  if options.host_version:
-    # TODO(sergeyu): Also check RPM package version once we add RPM package.
-    return os.system(locate_executable(HOST_BINARY_NAME) + " --version") >> 8
 
   if options.watch_resolution:
     watch_for_resolution_changes(options.watch_resolution)

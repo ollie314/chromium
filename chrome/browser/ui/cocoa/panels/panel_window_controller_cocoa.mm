@@ -14,6 +14,7 @@
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_*
+#import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/chrome_browser_application_mac.h"
 #include "chrome/browser/profiles/profile.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
@@ -338,8 +339,10 @@ const double kWidthOfMouseResizeArea = 15.0;
     CommandUpdater* command_updater = windowShim_->panel()->command_updater();
     if (command_updater->SupportsCommand(tag))
       return command_updater->IsCommandEnabled(tag);
-    else
-      return [[NSApp delegate] validateUserInterfaceItem:item];
+
+    AppController* appController =
+        base::mac::ObjCCastStrict<AppController>([NSApp delegate]);
+    return [appController validateUserInterfaceItem:item];
   }
   return NO;
 }
@@ -350,10 +353,13 @@ const double kWidthOfMouseResizeArea = 15.0;
   DCHECK(sender);
   NSInteger tag = [sender tag];
   CommandUpdater* command_updater = windowShim_->panel()->command_updater();
-  if (command_updater->SupportsCommand(tag))
+  if (command_updater->SupportsCommand(tag)) {
     windowShim_->panel()->ExecuteCommandIfEnabled(tag);
-  else
-    [[NSApp delegate] commandDispatch:sender];
+  } else {
+    AppController* appController =
+        base::mac::ObjCCastStrict<AppController>([NSApp delegate]);
+    [appController commandDispatch:sender];
+  }
 }
 
 // Handler for the custom Close button.
@@ -569,14 +575,6 @@ const double kWidthOfMouseResizeArea = 15.0;
 // whether it's refactoring more things into BrowserWindowUtils or making a
 // common base controller for browser windows.
 - (void)windowDidBecomeKey:(NSNotification*)notification {
-  // We need to activate the controls (in the "WebView"). To do this, get the
-  // selected WebContents's RenderWidgetHostView and tell it to activate.
-  if (WebContents* contents = windowShim_->panel()->GetWebContents()) {
-    if (content::RenderWidgetHostView* rwhv =
-        contents->GetRenderWidgetHostView())
-      rwhv->SetActive(true);
-  }
-
   windowShim_->panel()->OnActiveStateChanged(true);
 
   // Make the window user-resizable when it gains the focus.
@@ -730,14 +728,6 @@ const double kWidthOfMouseResizeArea = 15.0;
 }
 
 - (void)onWindowDidResignKey {
-  // We need to deactivate the controls (in the "WebView"). To do this, get the
-  // selected WebContents's RenderWidgetHostView and tell it to deactivate.
-  if (WebContents* contents = windowShim_->panel()->GetWebContents()) {
-    if (content::RenderWidgetHostView* rwhv =
-        contents->GetRenderWidgetHostView())
-      rwhv->SetActive(false);
-  }
-
   windowShim_->panel()->OnActiveStateChanged(false);
 
   // Make the window not user-resizable when it loses the focus. This is to

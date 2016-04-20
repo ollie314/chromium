@@ -236,9 +236,9 @@ class ServiceDiscoveryTest : public ::testing::Test {
 TEST_F(ServiceDiscoveryTest, AddRemoveService) {
   StrictMock<MockServiceWatcherClient> delegate;
 
-  scoped_ptr<ServiceWatcher> watcher(
-      service_discovery_client_.CreateServiceWatcher(
-          "_privet._tcp.local", delegate.GetCallback()));
+  std::unique_ptr<ServiceWatcher> watcher(
+      service_discovery_client_.CreateServiceWatcher("_privet._tcp.local",
+                                                     delegate.GetCallback()));
 
   watcher->Start();
 
@@ -258,9 +258,9 @@ TEST_F(ServiceDiscoveryTest, AddRemoveService) {
 TEST_F(ServiceDiscoveryTest, DiscoverNewServices) {
   StrictMock<MockServiceWatcherClient> delegate;
 
-  scoped_ptr<ServiceWatcher> watcher(
-      service_discovery_client_.CreateServiceWatcher(
-          "_privet._tcp.local", delegate.GetCallback()));
+  std::unique_ptr<ServiceWatcher> watcher(
+      service_discovery_client_.CreateServiceWatcher("_privet._tcp.local",
+                                                     delegate.GetCallback()));
 
   watcher->Start();
 
@@ -278,9 +278,9 @@ TEST_F(ServiceDiscoveryTest, ReadCachedServices) {
 
   StrictMock<MockServiceWatcherClient> delegate;
 
-  scoped_ptr<ServiceWatcher> watcher(
-      service_discovery_client_.CreateServiceWatcher(
-          "_privet._tcp.local", delegate.GetCallback()));
+  std::unique_ptr<ServiceWatcher> watcher(
+      service_discovery_client_.CreateServiceWatcher("_privet._tcp.local",
+                                                     delegate.GetCallback()));
 
   watcher->Start();
 
@@ -296,9 +296,9 @@ TEST_F(ServiceDiscoveryTest, ReadCachedServicesMultiple) {
   socket_factory_.SimulateReceive(kSamplePacketPTR2, sizeof(kSamplePacketPTR2));
 
   StrictMock<MockServiceWatcherClient> delegate;
-  scoped_ptr<ServiceWatcher> watcher =
-      service_discovery_client_.CreateServiceWatcher(
-          "_privet._tcp.local", delegate.GetCallback());
+  std::unique_ptr<ServiceWatcher> watcher =
+      service_discovery_client_.CreateServiceWatcher("_privet._tcp.local",
+                                                     delegate.GetCallback());
 
   watcher->Start();
 
@@ -316,9 +316,9 @@ TEST_F(ServiceDiscoveryTest, ReadCachedServicesMultiple) {
 
 TEST_F(ServiceDiscoveryTest, OnServiceChanged) {
   StrictMock<MockServiceWatcherClient> delegate;
-  scoped_ptr<ServiceWatcher> watcher(
-      service_discovery_client_.CreateServiceWatcher(
-          "_privet._tcp.local", delegate.GetCallback()));
+  std::unique_ptr<ServiceWatcher> watcher(
+      service_discovery_client_.CreateServiceWatcher("_privet._tcp.local",
+                                                     delegate.GetCallback()));
 
   watcher->Start();
 
@@ -343,9 +343,9 @@ TEST_F(ServiceDiscoveryTest, OnServiceChanged) {
 
 TEST_F(ServiceDiscoveryTest, SinglePacket) {
   StrictMock<MockServiceWatcherClient> delegate;
-  scoped_ptr<ServiceWatcher> watcher(
-      service_discovery_client_.CreateServiceWatcher(
-          "_privet._tcp.local", delegate.GetCallback()));
+  std::unique_ptr<ServiceWatcher> watcher(
+      service_discovery_client_.CreateServiceWatcher("_privet._tcp.local",
+                                                     delegate.GetCallback()));
 
   watcher->Start();
 
@@ -371,9 +371,9 @@ TEST_F(ServiceDiscoveryTest, SinglePacket) {
 
 TEST_F(ServiceDiscoveryTest, ActivelyRefreshServices) {
   StrictMock<MockServiceWatcherClient> delegate;
-  scoped_ptr<ServiceWatcher> watcher(
-      service_discovery_client_.CreateServiceWatcher(
-          "_privet._tcp.local", delegate.GetCallback()));
+  std::unique_ptr<ServiceWatcher> watcher(
+      service_discovery_client_.CreateServiceWatcher("_privet._tcp.local",
+                                                     delegate.GetCallback()));
 
   watcher->Start();
   watcher->SetActivelyRefreshServices(true);
@@ -412,10 +412,7 @@ class ServiceResolverTest : public ServiceDiscoveryTest {
   ServiceResolverTest() {
     metadata_expected_.push_back("hello");
     address_expected_ = net::HostPortPair("myhello.local", 8888);
-    ip_address_expected_.push_back(1);
-    ip_address_expected_.push_back(2);
-    ip_address_expected_.push_back(3);
-    ip_address_expected_.push_back(4);
+    EXPECT_TRUE(ip_address_expected_.AssignFromIPLiteral("1.2.3.4"));
   }
 
   ~ServiceResolverTest() {
@@ -440,14 +437,14 @@ class ServiceResolverTest : public ServiceDiscoveryTest {
                void(ServiceResolver::RequestStatus,
                     const std::string&,
                     const std::vector<std::string>&,
-                    const net::IPAddressNumber&));
+                    const net::IPAddress&));
 
  protected:
-  scoped_ptr<ServiceResolver> resolver_;
-  net::IPAddressNumber ip_address_;
+  std::unique_ptr<ServiceResolver> resolver_;
+  net::IPAddress ip_address_;
   net::HostPortPair address_expected_;
   std::vector<std::string> metadata_expected_;
-  net::IPAddressNumber ip_address_expected_;
+  net::IPAddress ip_address_expected_;
 };
 
 TEST_F(ServiceResolverTest, TxtAndSrvButNoA) {
@@ -459,11 +456,10 @@ TEST_F(ServiceResolverTest, TxtAndSrvButNoA) {
 
   base::MessageLoop::current()->RunUntilIdle();
 
-  EXPECT_CALL(*this,
-              OnFinishedResolvingInternal(ServiceResolver::STATUS_SUCCESS,
-                                          address_expected_.ToString(),
-                                          metadata_expected_,
-                                          net::IPAddressNumber()));
+  EXPECT_CALL(
+      *this, OnFinishedResolvingInternal(ServiceResolver::STATUS_SUCCESS,
+                                         address_expected_.ToString(),
+                                         metadata_expected_, net::IPAddress()));
 
   socket_factory_.SimulateReceive(kSamplePacketTXT, sizeof(kSamplePacketTXT));
 }

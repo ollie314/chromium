@@ -21,6 +21,8 @@
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/extensions/window_controller_list.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/lifetime/keep_alive_types.h"
+#include "chrome/browser/lifetime/scoped_keep_alive.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/task_management/web_contents_tags.h"
@@ -64,6 +66,9 @@ class PanelExtensionWindowController : public extensions::WindowController {
       const extensions::Extension* extension) const override;
   base::DictionaryValue* CreateTabValue(const extensions::Extension* extension,
                                         int tab_index) const override;
+  std::unique_ptr<extensions::api::tabs::Tab> CreateTabObject(
+      const extensions::Extension* extension,
+      int tab_index) const override;
   bool CanClose(Reason* reason) const override;
   void SetFullscreenMode(bool is_fullscreen,
                          const GURL& extension_url) const override;
@@ -110,36 +115,38 @@ PanelExtensionWindowController::CreateWindowValueWithTabs(
 
 base::DictionaryValue* PanelExtensionWindowController::CreateTabValue(
     const extensions::Extension* extension, int tab_index) const {
+  return CreateTabObject(extension, tab_index)->ToValue().release();
+}
+
+std::unique_ptr<extensions::api::tabs::Tab>
+PanelExtensionWindowController::CreateTabObject(
+    const extensions::Extension* extension,
+    int tab_index) const {
   if (tab_index > 0)
-    return NULL;
+    return nullptr;
 
   content::WebContents* web_contents = panel_->GetWebContents();
   if (!web_contents)
-    return NULL;
+    return nullptr;
 
-  base::DictionaryValue* tab_value = new base::DictionaryValue();
-  tab_value->SetInteger(extensions::tabs_constants::kIdKey,
-                        SessionTabHelper::IdForTab(web_contents));
-  tab_value->SetInteger(extensions::tabs_constants::kIndexKey, 0);
-  tab_value->SetInteger(
-      extensions::tabs_constants::kWindowIdKey,
-      SessionTabHelper::IdForWindowContainingTab(web_contents));
-  tab_value->SetString(
-      extensions::tabs_constants::kUrlKey, web_contents->GetURL().spec());
-  tab_value->SetString(extensions::tabs_constants::kStatusKey,
-                       extensions::ExtensionTabUtil::GetTabStatusText(
-                           web_contents->IsLoading()));
-  tab_value->SetBoolean(
-      extensions::tabs_constants::kActiveKey, panel_->IsActive());
-  tab_value->SetBoolean(extensions::tabs_constants::kSelectedKey, true);
-  tab_value->SetBoolean(extensions::tabs_constants::kHighlightedKey, true);
-  tab_value->SetBoolean(extensions::tabs_constants::kPinnedKey, false);
-  tab_value->SetString(
-      extensions::tabs_constants::kTitleKey, web_contents->GetTitle());
-  tab_value->SetBoolean(
-      extensions::tabs_constants::kIncognitoKey,
-      web_contents->GetBrowserContext()->IsOffTheRecord());
-  return tab_value;
+  std::unique_ptr<extensions::api::tabs::Tab> tab_object(
+      new extensions::api::tabs::Tab);
+  tab_object->id.reset(new int(SessionTabHelper::IdForTab(web_contents)));
+  tab_object->index = 0;
+  tab_object->window_id =
+      SessionTabHelper::IdForWindowContainingTab(web_contents);
+  tab_object->url.reset(new std::string(web_contents->GetURL().spec()));
+  tab_object->status.reset(
+      new std::string(extensions::ExtensionTabUtil::GetTabStatusText(
+          web_contents->IsLoading())));
+  tab_object->active = panel_->IsActive();
+  tab_object->selected = true;
+  tab_object->highlighted = true;
+  tab_object->pinned = false;
+  tab_object->title.reset(
+      new std::string(base::UTF16ToUTF8(web_contents->GetTitle())));
+  tab_object->incognito = web_contents->GetBrowserContext()->IsOffTheRecord();
+  return tab_object;
 }
 
 bool PanelExtensionWindowController::CanClose(Reason* reason) const {
@@ -161,10 +168,6 @@ bool PanelExtensionWindowController::IsVisibleToExtension(
 
 Panel::~Panel() {
   DCHECK(!collection_);
-#if !defined(USE_AURA)
-  // Invoked by native panel destructor. Do not access native_panel_ here.
-  chrome::DecrementKeepAliveCount();  // Remove shutdown prevention.
-#endif
 }
 
 PanelManager* Panel::manager() const {
@@ -376,8 +379,8 @@ void Panel::ExecuteCommandWithDisposition(int id,
     case IDC_RELOAD:
       panel_host_->Reload();
       break;
-    case IDC_RELOAD_IGNORING_CACHE:
-      panel_host_->ReloadIgnoringCache();
+    case IDC_RELOAD_BYPASSING_CACHE:
+      panel_host_->ReloadBypassingCache();
       break;
     case IDC_STOP:
       panel_host_->StopLoading();
@@ -553,10 +556,13 @@ void Panel::Initialize(const GURL& url,
                  content::Source<ThemeService>(
                     ThemeServiceFactory::GetForProfile(profile_)));
 
+// TODO(dgn): Should keep_alive be always registered regardless of the platform
+// here? (https://crbug.com/590173)
 #if !defined(USE_AURA)
   // Keep alive for AURA has been moved to panel_view.
   // Prevent the browser process from shutting down while this window is open.
-  chrome::IncrementKeepAliveCount();
+  keep_alive_.reset(new ScopedKeepAlive(KeepAliveOrigin::PANEL,
+                                        KeepAliveRestartOption::DISABLED));
 #endif
 
   UpdateAppIcon();
@@ -841,7 +847,7 @@ void Panel::InitCommandState() {
 
   // Navigation commands
   command_updater_.UpdateCommandEnabled(IDC_RELOAD, true);
-  command_updater_.UpdateCommandEnabled(IDC_RELOAD_IGNORING_CACHE, true);
+  command_updater_.UpdateCommandEnabled(IDC_RELOAD_BYPASSING_CACHE, true);
 
   // Window management commands
   command_updater_.UpdateCommandEnabled(IDC_CLOSE_WINDOW, true);

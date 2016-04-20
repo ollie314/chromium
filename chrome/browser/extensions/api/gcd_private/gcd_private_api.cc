@@ -14,6 +14,7 @@
 #include "chrome/browser/local_discovery/service_discovery_shared_client.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition.h"
 #include "net/url_request/url_request_context_getter.h"
 
 namespace extensions {
@@ -73,7 +74,7 @@ class GcdPrivateAPIImpl {
   void RemoveSession(int session_id);
   void RemoveSessionDelayed(int session_id);
 
-  scoped_ptr<base::ListValue> GetPrefetchedSSIDList();
+  std::unique_ptr<base::ListValue> GetPrefetchedSSIDList();
 
  private:
   typedef std::map<std::string /* ssid */, std::string /* password */>
@@ -144,7 +145,8 @@ void GcdPrivateAPIImpl::OnServiceResolved(int session_id,
 
   if (!context_getter_) {
     context_getter_ = new PrivetV3ContextGetter(
-        browser_context_->GetRequestContext()->GetNetworkTaskRunner());
+        content::BrowserContext::GetDefaultStoragePartition(browser_context_)->
+            GetURLRequestContext()->GetNetworkTaskRunner());
   }
 
   session_data.session.reset(new PrivetV3Session(
@@ -179,7 +181,7 @@ void GcdPrivateAPIImpl::SendMessage(int session_id,
                                     const base::DictionaryValue& input,
                                     const MessageResponseCallback& callback) {
   const base::DictionaryValue* input_actual = &input;
-  scoped_ptr<base::DictionaryValue> input_cloned;
+  std::unique_ptr<base::DictionaryValue> input_cloned;
 
   if (api == kPrivatAPISetup) {
     const base::DictionaryValue* wifi = NULL;
@@ -221,8 +223,8 @@ void GcdPrivateAPIImpl::RemoveSessionDelayed(int session_id) {
                             weak_ptr_factory_.GetWeakPtr(), session_id));
 }
 
-scoped_ptr<base::ListValue> GcdPrivateAPIImpl::GetPrefetchedSSIDList() {
-  scoped_ptr<base::ListValue> retval(new base::ListValue);
+std::unique_ptr<base::ListValue> GcdPrivateAPIImpl::GetPrefetchedSSIDList() {
+  std::unique_ptr<base::ListValue> retval(new base::ListValue);
 
   return retval;
 }
@@ -249,7 +251,7 @@ GcdPrivateGetDeviceInfoFunction::~GcdPrivateGetDeviceInfoFunction() {
 }
 
 bool GcdPrivateGetDeviceInfoFunction::RunAsync() {
-  scoped_ptr<gcd_private::CreateSession::Params> params =
+  std::unique_ptr<gcd_private::CreateSession::Params> params =
       gcd_private::CreateSession::Params::Create(*args_);
 
   if (!params)
@@ -285,7 +287,7 @@ GcdPrivateCreateSessionFunction::~GcdPrivateCreateSessionFunction() {
 }
 
 bool GcdPrivateCreateSessionFunction::RunAsync() {
-  scoped_ptr<gcd_private::CreateSession::Params> params =
+  std::unique_ptr<gcd_private::CreateSession::Params> params =
       gcd_private::CreateSession::Params::Create(*args_);
 
   if (!params)
@@ -336,7 +338,7 @@ GcdPrivateStartPairingFunction::~GcdPrivateStartPairingFunction() {
 }
 
 bool GcdPrivateStartPairingFunction::RunAsync() {
-  scoped_ptr<gcd_private::StartPairing::Params> params =
+  std::unique_ptr<gcd_private::StartPairing::Params> params =
       gcd_private::StartPairing::Params::Create(*args_);
 
   if (!params)
@@ -364,7 +366,7 @@ GcdPrivateConfirmCodeFunction::~GcdPrivateConfirmCodeFunction() {
 }
 
 bool GcdPrivateConfirmCodeFunction::RunAsync() {
-  scoped_ptr<gcd_private::ConfirmCode::Params> params =
+  std::unique_ptr<gcd_private::ConfirmCode::Params> params =
       gcd_private::ConfirmCode::Params::Create(*args_);
 
   if (!params)
@@ -392,7 +394,7 @@ GcdPrivateSendMessageFunction::~GcdPrivateSendMessageFunction() {
 }
 
 bool GcdPrivateSendMessageFunction::RunAsync() {
-  scoped_ptr<gcd_private::PassMessage::Params> params =
+  std::unique_ptr<gcd_private::PassMessage::Params> params =
       gcd_private::PassMessage::Params::Create(*args_);
 
   if (!params)
@@ -427,7 +429,7 @@ GcdPrivateTerminateSessionFunction::~GcdPrivateTerminateSessionFunction() {
 }
 
 bool GcdPrivateTerminateSessionFunction::RunAsync() {
-  scoped_ptr<gcd_private::TerminateSession::Params> params =
+  std::unique_ptr<gcd_private::TerminateSession::Params> params =
       gcd_private::TerminateSession::Params::Create(*args_);
 
   if (!params)

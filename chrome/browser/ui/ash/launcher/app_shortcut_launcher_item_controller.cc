@@ -6,8 +6,6 @@
 
 #include <stddef.h>
 
-#include "ash/shelf/shelf_model.h"
-#include "ash/shell.h"
 #include "ash/wm/window_util.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item.h"
@@ -22,7 +20,6 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
@@ -177,11 +174,7 @@ AppShortcutLauncherItemController::GetRunningApplications() {
   if (!extension)
     return items;
 
-  const BrowserList* ash_browser_list =
-      BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH);
-  for (BrowserList::const_iterator it = ash_browser_list->begin();
-       it != ash_browser_list->end(); ++it) {
-    Browser* browser = *it;
+  for (auto* browser : *BrowserList::GetInstance()) {
     if (!launcher_controller()->IsBrowserFromActiveUser(browser))
       continue;
     TabStripModel* tab_strip = browser->tab_strip_model();
@@ -208,13 +201,6 @@ AppShortcutLauncherItemController::ItemSelected(const ui::Event& event) {
 
 base::string16 AppShortcutLauncherItemController::GetTitle() {
   return GetAppTitle();
-}
-
-ui::MenuModel* AppShortcutLauncherItemController::CreateContextMenu(
-    aura::Window* root_window) {
-  ash::ShelfItem item =
-      *(launcher_controller()->model()->ItemByID(shelf_id()));
-  return new LauncherContextMenu(launcher_controller(), &item, root_window);
 }
 
 ash::ShelfMenuModel* AppShortcutLauncherItemController::CreateApplicationMenu(
@@ -250,11 +236,10 @@ content::WebContents* AppShortcutLauncherItemController::GetLRUApplication() {
   if (!extension)
     return NULL;
 
-  const BrowserList* ash_browser_list =
-      BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH);
-  for (BrowserList::const_reverse_iterator
-       it = ash_browser_list->begin_last_active();
-       it != ash_browser_list->end_last_active(); ++it) {
+  const BrowserList* browser_list = BrowserList::GetInstance();
+  for (BrowserList::const_reverse_iterator it =
+           browser_list->begin_last_active();
+       it != browser_list->end_last_active(); ++it) {
     Browser* browser = *it;
     if (!CanBrowserBeUsedForDirectActivation(browser, launcher_controller()))
       continue;
@@ -272,8 +257,8 @@ content::WebContents* AppShortcutLauncherItemController::GetLRUApplication() {
   // Coming here our application was not in the LRU list. This could have
   // happened because it did never get activated yet. So check the browser list
   // as well.
-  for (BrowserList::const_iterator it = ash_browser_list->begin();
-       it != ash_browser_list->end(); ++it) {
+  for (BrowserList::const_iterator it = browser_list->begin();
+       it != browser_list->end(); ++it) {
     Browser* browser = *it;
     if (!CanBrowserBeUsedForDirectActivation(browser, launcher_controller()))
       continue;

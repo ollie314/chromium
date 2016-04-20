@@ -4,6 +4,7 @@
 
 #include "content/renderer/pepper/plugin_instance_throttler_impl.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/time/time.h"
 #include "content/public/common/content_constants.h"
@@ -40,8 +41,8 @@ const int kAudioThrottledFrameTimeoutMilliseconds = 500;
 const int PluginInstanceThrottlerImpl::kMaximumFramesToExamine = 150;
 
 // static
-scoped_ptr<PluginInstanceThrottler> PluginInstanceThrottler::Create() {
-  return make_scoped_ptr(new PluginInstanceThrottlerImpl);
+std::unique_ptr<PluginInstanceThrottler> PluginInstanceThrottler::Create() {
+  return base::WrapUnique(new PluginInstanceThrottlerImpl);
 }
 
 // static
@@ -141,7 +142,7 @@ void PluginInstanceThrottlerImpl::Initialize(
   if (frame) {
     float zoom_factor = GetWebPlugin()->container()->pageZoomFactor();
     auto status = frame->GetPeripheralContentStatus(
-        frame->GetWebFrame()->top()->securityOrigin(), content_origin,
+        frame->GetWebFrame()->top()->getSecurityOrigin(), content_origin,
         gfx::Size(roundf(unobscured_size.width() / zoom_factor),
                   roundf(unobscured_size.height() / zoom_factor)));
     if (status != RenderFrame::CONTENT_STATUS_PERIPHERAL) {

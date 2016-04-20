@@ -12,6 +12,7 @@ import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.WebContentsFactory;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManager;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.components.navigation_interception.InterceptNavigationDelegate;
 import org.chromium.components.navigation_interception.NavigationParams;
 import org.chromium.components.web_contents_delegate_android.WebContentsDelegateAndroid;
@@ -66,7 +67,7 @@ public class OverlayPanelContent {
 
     /**
      * Whether the ContentViewCore is processing a pending navigation.
-     * NOTE(pedrosimonetti): This is being used to prevent redirections on the SERP to
+     * NOTE(pedrosimonetti): This is being used to prevent redirections on the SERP to be
      * interpreted as a regular navigation, which should cause the Contextual Search Panel
      * to be promoted as a Tab. This was added to work around a server bug that has been fixed.
      * Just checking for whether the Content has been touched is enough to determine whether a
@@ -114,10 +115,19 @@ public class OverlayPanelContent {
     // TODO(jeremycho): Consider creating a Tab with the Panel's ContentViewCore,
     // which would also handle functionality like long-press-to-paste.
     private class InterceptNavigationDelegateImpl implements InterceptNavigationDelegate {
-        final ExternalNavigationHandler mExternalNavHandler = new ExternalNavigationHandler(
-                mActivity);
+        final ExternalNavigationHandler mExternalNavHandler;
+
+        public InterceptNavigationDelegateImpl() {
+            Tab tab = mActivity.getActivityTab();
+            mExternalNavHandler = (tab != null && tab.getContentViewCore() != null)
+                    ? new ExternalNavigationHandler(tab) : null;
+        }
+
         @Override
         public boolean shouldIgnoreNavigation(NavigationParams navigationParams) {
+            // If either of the required params for the delegate are null, do not call the
+            // delegate and ignore the navigation.
+            if (mExternalNavHandler == null || navigationParams == null) return true;
             // TODO(mdjones): Rather than passing the two navigation params, instead consider
             // passing a boolean to make this API simpler.
             return !mContentDelegate.shouldInterceptNavigation(mExternalNavHandler,
@@ -180,6 +190,37 @@ public class OverlayPanelContent {
     // ============================================================================================
 
     /**
+     * Load a URL; this will trigger creation of a new ContentViewCore if being loaded immediately,
+     * otherwise one is created when the panel's content becomes visible.
+     * @param url The URL that should be loaded.
+     * @param shouldLoadImmediately If a URL should be loaded immediately or wait until visibility
+     *                        changes.
+     */
+    public void loadUrl(String url, boolean shouldLoadImmediately) {
+        mPendingUrl = null;
+
+        if (!shouldLoadImmediately) {
+            mPendingUrl = url;
+        } else {
+            createNewContentView();
+            mLoadedUrl = url;
+            mDidStartLoadingUrl = true;
+            mIsProcessingPendingNavigation = true;
+            if (!mContentDelegate.handleInterceptLoadUrl(mContentViewCore, url)) {
+                mContentViewCore.getWebContents().getNavigationController().loadUrl(
+                        new LoadUrlParams(url));
+            }
+        }
+    }
+
+    /**
+     * Makes the content visible, causing it to be rendered.
+     */
+    public void showContent() {
+        setVisibility(true);
+    }
+
+    /**
      * Creates a ContentViewCore. This method will be overridden by tests.
      * @param activity The ChromeActivity.
      * @return The newly created ContentViewCore.
@@ -222,6 +263,11 @@ public class OverlayPanelContent {
                     @Override
                     public void didStartLoading(String url) {
                         mContentDelegate.onContentLoadStarted(url);
+                    }
+
+                    @Override
+                    public void navigationEntryCommitted() {
+                        mContentDelegate.onNavigationEntryCommitted();
                     }
 
                     @Override
@@ -282,36 +328,6 @@ public class OverlayPanelContent {
         }
     }
 
-    /**
-     * Load a URL; this will trigger creation of a new ContentViewCore if being loaded immediately,
-     * otherwise one is created when the panel's content becomes visible.
-     * @param url The URL that should be loaded.
-     * @param shouldLoadImmediately If a URL should be loaded immediately or wait until visibility
-     *                        changes.
-     */
-    public void loadUrl(String url, boolean shouldLoadImmediately) {
-        mPendingUrl = null;
-
-        if (!shouldLoadImmediately) {
-            mPendingUrl = url;
-        } else {
-            createNewContentView();
-            mLoadedUrl = url;
-            mDidStartLoadingUrl = true;
-            mIsProcessingPendingNavigation = true;
-            mContentViewCore.getWebContents().getNavigationController().loadUrl(
-                    new LoadUrlParams(url));
-        }
-    }
-
-    /**
-     * Notifies that the Panel has been touched. Calling this method will turn the Content
-     * visible, causing it to be rendered.
-     */
-    public void notifyPanelTouched() {
-        setVisibility(true);
-    }
-
     // ============================================================================================
     // Utilities
     // ============================================================================================
@@ -364,7 +380,7 @@ public class OverlayPanelContent {
         mIsContentViewShowing = isVisible;
 
         if (isVisible) {
-            // If the last call to loadUrl was sepcified to be delayed, load it now.
+            // If the last call to loadUrl was specified to be delayed, load it now.
             if (!TextUtils.isEmpty(mPendingUrl)) {
                 loadUrl(mPendingUrl, true);
             }

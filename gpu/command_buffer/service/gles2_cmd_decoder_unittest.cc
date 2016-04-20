@@ -704,10 +704,9 @@ static void CheckBeginEndQueryBadMemoryFails(GLES2DecoderTestBase* test,
   error::Error error1 = error::kNoError;
   error::Error error2 = error::kNoError;
   if (query_type.is_counter) {
-    error1 = ExecuteQueryCounterCmd(test, gl, &gpu_timing_queries,
-                                    query_type.type,
-                                    client_id, service_id,
-                                    shm_id, shm_offset, 1);
+    error1 =
+        ExecuteQueryCounterCmd(test, gl, &gpu_timing_queries, query_type.type,
+                               client_id, service_id, shm_id, shm_offset, 1);
   } else {
     error1 = ExecuteBeginQueryCmd(test, gl, &gpu_timing_queries,
                                   query_type.type,
@@ -777,14 +776,11 @@ TEST_P(GLES2DecoderManualInitTest, QueryReuseTest) {
 
     // Query once.
     if (query_type.is_counter) {
-      EXPECT_EQ(error::kNoError, ExecuteQueryCounterCmd(this, gl,
-                                                        &gpu_timing_queries,
-                                                        query_type.type,
-                                                        kNewClientId,
-                                                        kNewServiceId,
-                                                        kSharedMemoryId,
-                                                        kSharedMemoryOffset,
-                                                        1));
+      EXPECT_EQ(
+          error::kNoError,
+          ExecuteQueryCounterCmd(this, gl, &gpu_timing_queries, query_type.type,
+                                 kNewClientId, kNewServiceId, kSharedMemoryId,
+                                 kSharedMemoryOffset, 1));
     } else {
       EXPECT_EQ(error::kNoError, ExecuteBeginQueryCmd(this, gl,
                                                       &gpu_timing_queries,
@@ -801,14 +797,11 @@ TEST_P(GLES2DecoderManualInitTest, QueryReuseTest) {
 
     // Reuse query.
     if (query_type.is_counter) {
-      EXPECT_EQ(error::kNoError, ExecuteQueryCounterCmd(this, gl,
-                                                        &gpu_timing_queries,
-                                                        query_type.type,
-                                                        kNewClientId,
-                                                        kNewServiceId,
-                                                        kSharedMemoryId,
-                                                        kSharedMemoryOffset,
-                                                        2));
+      EXPECT_EQ(
+          error::kNoError,
+          ExecuteQueryCounterCmd(this, gl, &gpu_timing_queries, query_type.type,
+                                 kNewClientId, kNewServiceId, kSharedMemoryId,
+                                 kSharedMemoryOffset, 2));
     } else {
       EXPECT_EQ(error::kNoError, ExecuteBeginQueryCmd(this, gl,
                                                       &gpu_timing_queries,
@@ -1018,7 +1011,7 @@ TEST_P(GLES2DecoderManualInitTest, BeginInvalidTargetQueryFails) {
 TEST_P(GLES2DecoderManualInitTest, QueryCounterEXTTimeStamp) {
   InitState init;
   init.extensions = "GL_ARB_timer_query";
-  init.gl_version = "opengl 2.0";
+  init.gl_version = "opengl es 3.0";
   init.has_alpha = true;
   init.request_alpha = true;
   init.bind_generates_resource = true;
@@ -1028,6 +1021,9 @@ TEST_P(GLES2DecoderManualInitTest, QueryCounterEXTTimeStamp) {
 
   EXPECT_CALL(*gl_, GenQueries(1, _))
       .WillOnce(SetArgPointee<1>(kNewServiceId))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, GetQueryiv(GL_TIMESTAMP, GL_QUERY_COUNTER_BITS, _))
+      .WillOnce(SetArgPointee<2>(64))
       .RetiresOnSaturation();
   EXPECT_CALL(*gl_, QueryCounter(kNewServiceId, GL_TIMESTAMP))
       .Times(1)
@@ -1343,6 +1339,7 @@ TEST_P(GLES2DecoderManualInitTest, MemoryTrackerBufferData) {
 TEST_P(GLES2DecoderManualInitTest, ImmutableCopyTexImage2D) {
   const GLenum kTarget = GL_TEXTURE_2D;
   const GLint kLevel = 0;
+  const GLint kLevels = 2;
   const GLenum kInternalFormat = GL_RGBA;
   const GLenum kSizedInternalFormat = GL_RGBA8;
   const GLsizei kWidth = 4;
@@ -1353,8 +1350,9 @@ TEST_P(GLES2DecoderManualInitTest, ImmutableCopyTexImage2D) {
   init.has_alpha = true;
   init.request_alpha = true;
   init.bind_generates_resource = true;
+  init.gl_version = "OpenGL ES 2.0";  // To avoid TexStorage emulation.
   InitDecoder(init);
-  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
 
   // CopyTexImage2D will call arbitrary amount of GetErrors.
   EXPECT_CALL(*gl_, GetError())
@@ -1368,7 +1366,7 @@ TEST_P(GLES2DecoderManualInitTest, ImmutableCopyTexImage2D) {
 
   EXPECT_CALL(*gl_,
               TexStorage2DEXT(
-                  kTarget, kLevel, kSizedInternalFormat, kWidth, kHeight))
+                  kTarget, kLevels, kSizedInternalFormat, kWidth, kHeight))
       .Times(1);
   CopyTexImage2D copy_cmd;
   copy_cmd.Init(kTarget, kLevel, kInternalFormat, 0, 0, kWidth, kHeight);
@@ -1376,7 +1374,7 @@ TEST_P(GLES2DecoderManualInitTest, ImmutableCopyTexImage2D) {
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 
   TexStorage2DEXT storage_cmd;
-  storage_cmd.Init(kTarget, kLevel, kSizedInternalFormat, kWidth, kHeight);
+  storage_cmd.Init(kTarget, kLevels, kSizedInternalFormat, kWidth, kHeight);
   EXPECT_EQ(error::kNoError, ExecuteCmd(storage_cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 

@@ -93,7 +93,7 @@ void PrintTo(const FloatRoundedRect& roundedRect, std::ostream* os)
     *os << "FloatRoundedRect(";
     PrintTo(roundedRect.rect(), os);
     *os << ", ";
-    PrintTo(roundedRect.radii(), os);
+    PrintTo(roundedRect.getRadii(), os);
     *os << ")";
 }
 
@@ -116,6 +116,15 @@ void PrintTo(const FloatSize& size, std::ostream* os)
     *os << "FloatSize("
         << size.width() << ", "
         << size.height() << ")";
+}
+
+void PrintTo(const IntRect& rect, std::ostream* os)
+{
+    *os << "IntRect("
+        << rect.x() << ", "
+        << rect.y() << ", "
+        << rect.width() << ", "
+        << rect.height() << ")";
 }
 
 void PrintTo(const LayoutRect& rect, std::ostream* os)

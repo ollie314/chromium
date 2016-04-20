@@ -3,21 +3,25 @@
 # found in the LICENSE file.
 
 {
-  # This target is included into both 'cronet_static' and 'cronet_static_small'.
+  # Included in 'cronet_static'.
   'dependencies': [
     '../base/base.gyp:base',
     '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+    '../url/url.gyp:url_url_features',
+    'chromium_url_request_java',
     'cronet_jni_headers',
-    'cronet_url_request_java',
     'cronet_version',
     'cronet_version_header',
     'metrics',
+    'url_request_error_java',
   ],
   'sources': [
     'android/chromium_url_request.cc',
     'android/chromium_url_request.h',
     'android/chromium_url_request_context.cc',
     'android/chromium_url_request_context.h',
+    'android/cronet_bidirectional_stream_adapter.cc',
+    'android/cronet_bidirectional_stream_adapter.h',
     'android/cronet_in_memory_pref_store.cc',
     'android/cronet_in_memory_pref_store.h',
     'android/cronet_library_loader.cc',
@@ -30,10 +34,14 @@
     'android/cronet_url_request_adapter.h',
     'android/cronet_url_request_context_adapter.cc',
     'android/cronet_url_request_context_adapter.h',
+    'android/io_buffer_with_byte_buffer.cc',
+    'android/io_buffer_with_byte_buffer.h',
     'android/url_request_adapter.cc',
     'android/url_request_adapter.h',
     'android/url_request_context_adapter.cc',
     'android/url_request_context_adapter.h',
+    'android/url_request_error.cc',
+    'android/url_request_error.h',
     'android/wrapped_channel_upload_element_reader.cc',
     'android/wrapped_channel_upload_element_reader.h',
     'histogram_manager.cc',

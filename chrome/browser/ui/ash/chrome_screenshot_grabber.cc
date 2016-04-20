@@ -14,7 +14,6 @@
 #include "base/files/file_util.h"
 #include "base/i18n/time_formatting.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -25,6 +24,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/ash_strings.h"
@@ -41,7 +41,7 @@
 #include "chrome/browser/notifications/notifier_state_tracker.h"
 #include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "chromeos/login/login_state.h"
-#include "components/drive/file_system_interface.h"
+#include "components/drive/chromeos/file_system_interface.h"
 #endif
 
 namespace {
@@ -90,9 +90,10 @@ void ReadFileAndCopyToClipboardLocal(const base::FilePath& screenshot_path) {
 }
 
 #if defined(OS_CHROMEOS)
-void ReadFileAndCopyToClipboardDrive(drive::FileError error,
-                                     const base::FilePath& file_path,
-                                     scoped_ptr<drive::ResourceEntry> entry) {
+void ReadFileAndCopyToClipboardDrive(
+    drive::FileError error,
+    const base::FilePath& file_path,
+    std::unique_ptr<drive::ResourceEntry> entry) {
   if (error != drive::FILE_ERROR_OK) {
     LOG(ERROR) << "Failed to read the screenshot path on drive: "
                << drive::FileErrorToString(error);
@@ -350,6 +351,29 @@ void ChromeScreenshotGrabber::HandleTakePartialScreenshot(
   content::RecordAction(base::UserMetricsAction("Screenshot_TakePartial"));
 }
 
+void ChromeScreenshotGrabber::HandleTakeWindowScreenshot(aura::Window* window) {
+  if (ScreenshotsDisabled()) {
+    screenshot_grabber_->NotifyScreenshotCompleted(
+        ui::ScreenshotGrabberObserver::SCREENSHOTS_DISABLED, base::FilePath());
+    return;
+  }
+
+  base::FilePath screenshot_directory;
+  if (!GetScreenshotDirectory(&screenshot_directory)) {
+    screenshot_grabber_->NotifyScreenshotCompleted(
+        ui::ScreenshotGrabberObserver::SCREENSHOT_GET_DIR_FAILED,
+        base::FilePath());
+    return;
+  }
+
+  base::FilePath screenshot_path =
+      screenshot_directory.AppendASCII(GetScreenshotBaseFilename() + ".png");
+  screenshot_grabber_->TakeScreenshot(window,
+                                      gfx::Rect(window->bounds().size()),
+                                      screenshot_path);
+  content::RecordAction(base::UserMetricsAction("Screenshot_TakeWindow"));
+}
+
 bool ChromeScreenshotGrabber::CanTakeScreenshot() {
   return screenshot_grabber_->CanTakeScreenshot();
 }
@@ -387,7 +411,7 @@ void ChromeScreenshotGrabber::OnScreenshotCompleted(
   if (notifier_state_tracker->IsNotifierEnabled(message_center::NotifierId(
           message_center::NotifierId::SYSTEM_COMPONENT,
           ash::system_notifier::kNotifierScreenshot))) {
-    scoped_ptr<Notification> notification(
+    std::unique_ptr<Notification> notification(
         CreateNotification(result, screenshot_path));
     g_browser_process->notification_ui_manager()->Add(*notification,
                                                       GetProfile());

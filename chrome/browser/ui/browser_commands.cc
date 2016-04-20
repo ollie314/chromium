@@ -6,7 +6,6 @@
 
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -60,6 +59,7 @@
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/prefs/pref_service.h"
 #include "components/sessions/core/live_tab_context.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/signin/core/browser/signin_header_helper.h"
@@ -198,8 +198,8 @@ WebContents* GetTabAndRevertIfNecessary(Browser* browser,
     }
     case NEW_WINDOW: {
       WebContents* new_tab = current_tab->Clone();
-      Browser* new_browser = new Browser(Browser::CreateParams(
-          browser->profile(), browser->host_desktop_type()));
+      Browser* new_browser =
+          new Browser(Browser::CreateParams(browser->profile()));
       new_browser->tab_strip_model()->AddWebContents(
           new_tab, -1, ui::PAGE_TRANSITION_LINK,
           TabStripModel::ADD_ACTIVE);
@@ -214,7 +214,7 @@ WebContents* GetTabAndRevertIfNecessary(Browser* browser,
 
 void ReloadInternal(Browser* browser,
                     WindowOpenDisposition disposition,
-                    bool ignore_cache) {
+                    bool bypass_cache) {
   // As this is caused by a user action, give the focus to the page.
   //
   // Also notify RenderViewHostDelegate of the user gesture; this is
@@ -226,11 +226,11 @@ void ReloadInternal(Browser* browser,
 
   DevToolsWindow* devtools =
       DevToolsWindow::GetInstanceForInspectedWebContents(new_tab);
-  if (devtools && devtools->ReloadInspectedWebContents(ignore_cache))
+  if (devtools && devtools->ReloadInspectedWebContents(bypass_cache))
     return;
 
-  if (ignore_cache)
-    new_tab->GetController().ReloadIgnoringCache(true);
+  if (bypass_cache)
+    new_tab->GetController().ReloadBypassingCache(true);
   else
     new_tab->GetController().Reload(true);
 }
@@ -326,7 +326,7 @@ int GetContentRestrictions(const Browser* browser) {
   return content_restrictions;
 }
 
-void NewEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
+void NewEmptyWindow(Profile* profile) {
   bool incognito = profile->IsOffTheRecord();
   PrefService* prefs = profile->GetPrefs();
   if (incognito) {
@@ -343,7 +343,7 @@ void NewEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
 
   if (incognito) {
     content::RecordAction(UserMetricsAction("NewIncognitoWindow"));
-    OpenEmptyWindow(profile->GetOffTheRecordProfile(), desktop_type);
+    OpenEmptyWindow(profile->GetOffTheRecordProfile());
   } else {
     content::RecordAction(UserMetricsAction("NewWindow"));
     SessionService* session_service =
@@ -351,32 +351,29 @@ void NewEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
             profile->GetOriginalProfile());
     if (!session_service ||
         !session_service->RestoreIfNecessary(std::vector<GURL>())) {
-      OpenEmptyWindow(profile->GetOriginalProfile(), desktop_type);
+      OpenEmptyWindow(profile->GetOriginalProfile());
     }
   }
 }
 
-Browser* OpenEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
-  Browser* browser = new Browser(
-      Browser::CreateParams(Browser::TYPE_TABBED, profile, desktop_type));
+Browser* OpenEmptyWindow(Profile* profile) {
+  Browser* browser =
+      new Browser(Browser::CreateParams(Browser::TYPE_TABBED, profile));
   AddTabAt(browser, GURL(), -1, true);
   browser->window()->Show();
   return browser;
 }
 
-void OpenWindowWithRestoredTabs(Profile* profile,
-                                HostDesktopType host_desktop_type) {
+void OpenWindowWithRestoredTabs(Profile* profile) {
   sessions::TabRestoreService* service =
       TabRestoreServiceFactory::GetForProfile(profile);
   if (service)
-    service->RestoreMostRecentEntry(NULL, host_desktop_type);
+    service->RestoreMostRecentEntry(nullptr);
 }
 
 void OpenURLOffTheRecord(Profile* profile,
-                         const GURL& url,
-                         chrome::HostDesktopType desktop_type) {
-  ScopedTabbedBrowserDisplayer displayer(profile->GetOffTheRecordProfile(),
-                                         desktop_type);
+                         const GURL& url) {
+  ScopedTabbedBrowserDisplayer displayer(profile->GetOffTheRecordProfile());
   AddSelectedTabWithURL(displayer.browser(), url,
       ui::PAGE_TRANSITION_LINK);
 }
@@ -429,8 +426,8 @@ void Reload(Browser* browser, WindowOpenDisposition disposition) {
   ReloadInternal(browser, disposition, false);
 }
 
-void ReloadIgnoringCache(Browser* browser, WindowOpenDisposition disposition) {
-  content::RecordAction(UserMetricsAction("ReloadIgnoringCache"));
+void ReloadBypassingCache(Browser* browser, WindowOpenDisposition disposition) {
+  content::RecordAction(UserMetricsAction("ReloadBypassingCache"));
   ReloadInternal(browser, disposition, true);
 }
 
@@ -442,7 +439,7 @@ void Home(Browser* browser, WindowOpenDisposition disposition) {
   content::RecordAction(UserMetricsAction("Home"));
 
   std::string extra_headers;
-#if defined(ENABLE_RLZ) && !defined(OS_IOS)
+#if defined(ENABLE_RLZ)
   // If the home page is a Google home page, add the RLZ header to the request.
   PrefService* pref_service = browser->profile()->GetPrefs();
   if (pref_service) {
@@ -452,7 +449,7 @@ void Home(Browser* browser, WindowOpenDisposition disposition) {
           rlz::RLZTracker::ChromeHomePage());
     }
   }
-#endif  // defined(ENABLE_RLZ) && !defined(OS_IOS)
+#endif  // defined(ENABLE_RLZ)
 
   GURL url = browser->profile()->GetHomePage();
 
@@ -537,13 +534,11 @@ void Stop(Browser* browser) {
 }
 
 void NewWindow(Browser* browser) {
-  NewEmptyWindow(browser->profile()->GetOriginalProfile(),
-                 browser->host_desktop_type());
+  NewEmptyWindow(browser->profile()->GetOriginalProfile());
 }
 
 void NewIncognitoWindow(Browser* browser) {
-  NewEmptyWindow(browser->profile()->GetOffTheRecordProfile(),
-                 browser->host_desktop_type());
+  NewEmptyWindow(browser->profile()->GetOffTheRecordProfile());
 }
 
 void CloseWindow(Browser* browser) {
@@ -563,8 +558,7 @@ void NewTab(Browser* browser) {
     AddTabAt(browser, GURL(), -1, true);
     browser->tab_strip_model()->GetActiveWebContents()->RestoreFocus();
   } else {
-    ScopedTabbedBrowserDisplayer displayer(browser->profile(),
-                                           browser->host_desktop_type());
+    ScopedTabbedBrowserDisplayer displayer(browser->profile());
     Browser* b = displayer.browser();
     AddTabAt(b, GURL(), -1, true);
     b->window()->Show();
@@ -671,16 +665,12 @@ WebContents* DuplicateTabAt(Browser* browser, int index) {
   } else {
     Browser* new_browser = NULL;
     if (browser->is_app() && !browser->is_type_popup()) {
-      new_browser = new Browser(
-          Browser::CreateParams::CreateForApp(browser->app_name(),
-                                              browser->is_trusted_source(),
-                                              gfx::Rect(),
-                                              browser->profile(),
-                                              browser->host_desktop_type()));
+      new_browser = new Browser(Browser::CreateParams::CreateForApp(
+          browser->app_name(), browser->is_trusted_source(), gfx::Rect(),
+          browser->profile()));
     } else {
       new_browser = new Browser(
-          Browser::CreateParams(browser->type(), browser->profile(),
-                                browser->host_desktop_type()));
+          Browser::CreateParams(browser->type(), browser->profile()));
     }
     // Preserve the size of the original window. The new window has already
     // been given an offset by the OS, so we shouldn't copy the old bounds.
@@ -720,8 +710,7 @@ void ConvertPopupToTabbedBrowser(Browser* browser) {
   TabStripModel* tab_strip = browser->tab_strip_model();
   WebContents* contents =
       tab_strip->DetachWebContentsAt(tab_strip->active_index());
-  Browser* b = new Browser(Browser::CreateParams(browser->profile(),
-                                                 browser->host_desktop_type()));
+  Browser* b = new Browser(Browser::CreateParams(browser->profile()));
   b->tab_strip_model()->AppendWebContents(contents, true);
   b->window()->Show();
 }
@@ -888,14 +877,17 @@ void Print(Browser* browser) {
 
 bool CanPrint(Browser* browser) {
   // Do not print when printing is disabled via pref or policy.
+  // Do not print when a page has crashed.
   // Do not print when a constrained window is showing. It's confusing.
   // TODO(gbillock): Need to re-assess the call to
   // IsShowingWebContentsModalDialog after a popup management policy is
   // refined -- we will probably want to just queue the print request, not
   // block it.
+  WebContents* current_tab = browser->tab_strip_model()->GetActiveWebContents();
   return browser->profile()->GetPrefs()->GetBoolean(prefs::kPrintingEnabled) &&
+      (current_tab && !current_tab->IsCrashed()) &&
       !(IsShowingWebContentsModalDialog(browser) ||
-      GetContentRestrictions(browser) & CONTENT_RESTRICTION_PRINT);
+        GetContentRestrictions(browser) & CONTENT_RESTRICTION_PRINT);
 }
 
 #if defined(ENABLE_BASIC_PRINTING)
@@ -905,27 +897,17 @@ void BasicPrint(Browser* browser) {
 
 bool CanBasicPrint(Browser* browser) {
   // If printing is not disabled via pref or policy, it is always possible to
-  // advanced print when the print preview is visible.  The exception to this
-  // is under Win8 ash, since showing the advanced print dialog will open it
-  // modally on the Desktop and hang the browser.
-#if defined(OS_WIN)
-  if (chrome::GetActiveDesktop() == chrome::HOST_DESKTOP_TYPE_ASH)
-    return false;
-#endif
-
+  // advanced print when the print preview is visible.
   return browser->profile()->GetPrefs()->GetBoolean(prefs::kPrintingEnabled) &&
       (PrintPreviewShowing(browser) || CanPrint(browser));
 }
 #endif  // ENABLE_BASIC_PRINTING
 
 bool CanRouteMedia(Browser* browser) {
-  Profile* profile = browser->profile();
-  if (profile->IsOffTheRecord() || !media_router::MediaRouterEnabled(profile))
-    return false;
-
   // Do not allow user to open Media Router dialog when there is already an
   // active modal dialog. This avoids overlapping dialogs.
-  return !IsShowingWebContentsModalDialog(browser);
+  return media_router::MediaRouterEnabled(browser->profile()) &&
+         !IsShowingWebContentsModalDialog(browser);
 }
 
 void RouteMedia(Browser* browser) {
@@ -1230,8 +1212,7 @@ void ViewSource(Browser* browser,
         add_types);
   } else {
     Browser* b = new Browser(
-        Browser::CreateParams(Browser::TYPE_TABBED, browser->profile(),
-                              browser->host_desktop_type()));
+        Browser::CreateParams(Browser::TYPE_TABBED, browser->profile()));
 
     // Preserve the size of the original window. The new window has already
     // been given an offset by the OS, so we shouldn't copy the old bounds.
@@ -1301,12 +1282,8 @@ void ConvertTabToAppWindow(Browser* browser,
   if (index >= 0)
     browser->tab_strip_model()->DetachWebContentsAt(index);
 
-  Browser* app_browser = new Browser(
-      Browser::CreateParams::CreateForApp(app_name,
-                                          true /* trusted_source */,
-                                          gfx::Rect(),
-                                          browser->profile(),
-                                          browser->host_desktop_type()));
+  Browser* app_browser = new Browser(Browser::CreateParams::CreateForApp(
+      app_name, true /* trusted_source */, gfx::Rect(), browser->profile()));
   app_browser->tab_strip_model()->AppendWebContents(contents, true);
 
   contents->GetMutableRendererPrefs()->can_accept_load_drops = false;

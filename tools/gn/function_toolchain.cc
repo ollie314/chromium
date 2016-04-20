@@ -194,8 +194,8 @@ bool IsCompilerTool(Toolchain::ToolType type) {
 }
 
 bool IsLinkerTool(Toolchain::ToolType type) {
-  return type == Toolchain::TYPE_ALINK ||
-         type == Toolchain::TYPE_SOLINK ||
+  // "alink" is not counted as in the generic "linker" tool list.
+  return type == Toolchain::TYPE_SOLINK ||
          type == Toolchain::TYPE_SOLINK_MODULE ||
          type == Toolchain::TYPE_LINK;
 }
@@ -324,7 +324,7 @@ Value RunToolchain(Scope* scope,
 
   // This object will actually be copied into the one owned by the toolchain
   // manager, but that has to be done in the lock.
-  scoped_ptr<Toolchain> toolchain(new Toolchain(scope->settings(), label));
+  std::unique_ptr<Toolchain> toolchain(new Toolchain(scope->settings(), label));
   toolchain->set_defined_from(function);
   toolchain->visibility().SetPublic();
 
@@ -407,12 +407,30 @@ const char kTool_Help[] =
     "      \"stamp\": Tool for creating stamp files\n"
     "      \"copy\": Tool to copy files.\n"
     "\n"
+    "    Platform specific tools:\n"
+    "      \"copy_bundle_data\": [iOS, OS X] Tool to copy files in a bundle.\n"
+    "      \"compile_xcassets\": [iOS, OS X] Tool to compile asset catalogs.\n"
+    "\n"
     "Tool variables\n"
     "\n"
     "    command  [string with substitutions]\n"
     "        Valid for: all tools (required)\n"
     "\n"
     "        The command to run.\n"
+    "\n"
+    "    default_output_dir  [string with substitutions]\n"
+    "        Valid for: linker tools\n"
+    "\n"
+    "        Default directory name for the output file relative to the\n"
+    "        root_build_dir. It can contain other substitution patterns.\n"
+    "        This will be the default value for the {{output_dir}} expansion\n"
+    "        (discussed below) but will be overridden by the \"output_dir\"\n"
+    "        variable in a target, if one is specified.\n"
+    "\n"
+    "        GN doesn't do anything with this string other than pass it\n"
+    "        along, potentially with target-specific overrides. It is the\n"
+    "        tool's job to use the expansion so that the files will be in\n"
+    "        the right place.\n"
     "\n"
     "    default_output_extension  [string]\n"
     "        Valid for: linker tools\n"
@@ -430,7 +448,7 @@ const char kTool_Help[] =
     "\n"
     "        Example: default_output_extension = \".exe\"\n"
     "\n"
-    "    depfile  [string]\n"
+    "    depfile  [string with substitutions]\n"
     "        Valid for: compiler tools (optional)\n"
     "\n"
     "        If the tool can write \".d\" files, this specifies the name of\n"
@@ -481,9 +499,10 @@ const char kTool_Help[] =
     "        that actually produces these files.\n"
     "\n"
     "        If you specify more than one output for shared library links,\n"
-    "        you should consider setting link_output and depend_output.\n"
-    "        Otherwise, the first entry in the outputs list should always be\n"
-    "        the main output which will be linked to.\n"
+    "        you should consider setting link_output, depend_output, and\n"
+    "        runtime_link_output. Otherwise, the first entry in the\n"
+    "        outputs list should always be the main output which will be\n"
+    "        linked to.\n"
     "\n"
     "        Example for a compiler tool that produces .obj files:\n"
     "          outputs = [\n"
@@ -491,32 +510,32 @@ const char kTool_Help[] =
     "          ]\n"
     "\n"
     "        Example for a linker tool that produces a .dll and a .lib. The\n"
-    "        use of {{output_extension}} rather than hardcoding \".dll\"\n"
-    "        allows the extension of the library to be overridden on a\n"
-    "        target-by-target basis, but in this example, it always\n"
-    "        produces a \".lib\" import library:\n"
+    "        use of {{target_output_name}}, {{output_extension}} and\n"
+    "        {{output_dir}} allows the target to override these values.\n"
     "          outputs = [\n"
-    "            \"{{root_out_dir}}/{{target_output_name}}"
+    "            \"{{output_dir}}/{{target_output_name}}"
                      "{{output_extension}}\",\n"
-    "            \"{{root_out_dir}}/{{target_output_name}}.lib\",\n"
+    "            \"{{output_dir}}/{{target_output_name}}.lib\",\n"
     "          ]\n"
     "\n"
     "    link_output  [string with substitutions]\n"
     "    depend_output  [string with substitutions]\n"
+    "    runtime_link_output  [string with substitutions]\n"
     "        Valid for: \"solink\" only (optional)\n"
     "\n"
-    "        These two files specify which of the outputs from the solink\n"
+    "        These three files specify which of the outputs from the solink\n"
     "        tool should be used for linking and dependency tracking. These\n"
     "        should match entries in the \"outputs\". If unspecified, the\n"
-    "        first item in the \"outputs\" array will be used for both. See\n"
+    "        first item in the \"outputs\" array will be used for all. See\n"
     "        \"Separate linking and dependencies for shared libraries\"\n"
-    "        below for more.\n"
+    "        below for more. If link_output is set but runtime_link_output\n"
+    "        is not set, runtime_link_output defaults to link_output.\n"
     "\n"
     "        On Windows, where the tools produce a .dll shared library and\n"
-    "        a .lib import library, you will want both of these to be the\n"
-    "        import library. On Linux, if you're not doing the separate\n"
-    "        linking/dependency optimization, both of these should be the\n"
-    "        .so output.\n"
+    "        a .lib import library, you will want the first two to be the\n"
+    "        import library and the third one to be the .dll file.\n"
+    "        On Linux, if you're not doing the separate linking/dependency\n"
+    "        optimization, all of these should be the .so output.\n"
     "\n"
     "    output_prefix  [string]\n"
     "        Valid for: Linker tools (optional)\n"
@@ -526,6 +545,10 @@ const char kTool_Help[] =
     "        output_name if one is manually specified for it) if the prefix\n"
     "        is not already there. The result will show up in the\n"
     "        {{output_name}} substitution pattern.\n"
+    "\n"
+    "        Individual targets can opt-out of the output prefix by setting:\n"
+    "          output_prefix_override = true\n"
+    "        (see \"gn help output_prefix_override\").\n"
     "\n"
     "        This is typically used to prepend \"lib\" to libraries on\n"
     "        Posix systems:\n"
@@ -613,7 +636,7 @@ const char kTool_Help[] =
     "    {{target_out_dir}}\n"
     "        The directory of the generated file and output directories,\n"
     "        respectively, for the current target. There is no trailing\n"
-    "        slash.\n"
+    "        slash. See also {{output_dir}} for linker tools.\n"
     "        Example: \"out/base/test\"\n"
     "\n"
     "    {{target_output_name}}\n"
@@ -667,6 +690,7 @@ const char kTool_Help[] =
     "        Example: \"gen/base/test\"\n"
     "\n"
     "  Linker tools have multiple inputs and (potentially) multiple outputs\n"
+    "  The static library tool (\"alink\") is not considered a linker tool.\n"
     "  The following expansions are available:\n"
     "\n"
     "    {{inputs}}\n"
@@ -696,6 +720,21 @@ const char kTool_Help[] =
     "\n"
     "        Example: \"-lfoo -lbar\"\n"
     "\n"
+    "    {{output_dir}}\n"
+    "        The value of the \"output_dir\" variable in the target, or the\n"
+    "        the value of the \"default_output_dir\" value in the tool if the\n"
+    "        target does not override the output directory. This will be\n"
+    "        relative to the root_build_dir and will not end in a slash.\n"
+    "        Will be \".\" for output to the root_build_dir.\n"
+    "\n"
+    "        This is subtly different than {{target_out_dir}} which is\n"
+    "        defined by GN based on the target's path and not overridable.\n"
+    "        {{output_dir}} is for the final output, {{target_out_dir}} is\n"
+    "        generally for object files and other outputs.\n"
+    "\n"
+    "        Usually {{output_dir}} would be defined in terms of either\n"
+    "        {{target_out_dir}} or {{root_out_dir}}\n"
+    "\n"
     "    {{output_extension}}\n"
     "        The value of the \"output_extension\" variable in the target,\n"
     "        or the value of the \"default_output_extension\" value in the\n"
@@ -711,9 +750,24 @@ const char kTool_Help[] =
     "        These should generally be treated the same as libs by your tool.\n"
     "        Example: \"libfoo.so libbar.so\"\n"
     "\n"
+    "  The static library (\"alink\") tool allows {{arflags}} plus the common\n"
+    "  tool substitutions.\n"
+    "\n"
     "  The copy tool allows the common compiler/linker substitutions, plus\n"
     "  {{source}} which is the source of the copy. The stamp tool allows\n"
     "  only the common tool substitutions.\n"
+    "\n"
+    "  The copy_bundle_data and compile_xcassets tools only allows the common\n"
+    "  tool substitutions. Both tools are required to create iOS/OS X bundles\n"
+    "  and need only be defined on those platforms.\n"
+    "\n"
+    "  The copy_bundle_data tool will be called with one source and needs to\n"
+    "  copy (optionally optimizing the data representation) to its output. It\n"
+    "  may be called with a directory as input and it needs to be recursively\n"
+    "  copied.\n"
+    "\n"
+    "  The compile_xcassets tool will be called with one or more source (each\n"
+    "  an asset catalog) that needs to be compiled to a single output.\n"
     "\n"
     "Separate linking and dependencies for shared libraries\n"
     "\n"
@@ -736,14 +790,14 @@ const char kTool_Help[] =
     "    tool(\"solink\") {\n"
     "      command = \"...\"\n"
     "      outputs = [\n"
-    "        \"{{root_out_dir}}/{{target_output_name}}{{output_extension}}\",\n"
-    "        \"{{root_out_dir}}/{{target_output_name}}"
+    "        \"{{output_dir}}/{{target_output_name}}{{output_extension}}\",\n"
+    "        \"{{output_dir}}/{{target_output_name}}"
                  "{{output_extension}}.TOC\",\n"
     "      ]\n"
     "      link_output =\n"
-    "        \"{{root_out_dir}}/{{target_output_name}}{{output_extension}}\"\n"
+    "        \"{{output_dir}}/{{target_output_name}}{{output_extension}}\"\n"
     "      depend_output =\n"
-    "        \"{{root_out_dir}}/{{target_output_name}}"
+    "        \"{{output_dir}}/{{target_output_name}}"
                  "{{output_extension}}.TOC\"\n"
     "      restat = true\n"
     "    }\n"
@@ -809,15 +863,23 @@ Value RunTool(Scope* scope,
   } else if (IsLinkerTool(tool_type)) {
     subst_validator = &IsValidLinkerSubstitution;
     subst_output_validator = &IsValidLinkerOutputsSubstitution;
-  } else if (tool_type == Toolchain::TYPE_COPY) {
+  } else if (tool_type == Toolchain::TYPE_ALINK) {
+    subst_validator = &IsValidALinkSubstitution;
+    // ALink uses the standard output file patterns as other linker tools.
+    subst_output_validator = &IsValidLinkerOutputsSubstitution;
+  } else if (tool_type == Toolchain::TYPE_COPY ||
+             tool_type == Toolchain::TYPE_COPY_BUNDLE_DATA) {
     subst_validator = &IsValidCopySubstitution;
     subst_output_validator = &IsValidCopySubstitution;
+  } else if (tool_type == Toolchain::TYPE_COMPILE_XCASSETS) {
+    subst_validator = &IsValidCompileXCassetsSubstitution;
+    subst_output_validator = &IsValidCompileXCassetsSubstitution;
   } else {
-    subst_validator = &IsValidToolSubstutition;
-    subst_output_validator = &IsValidToolSubstutition;
+    subst_validator = &IsValidToolSubstitution;
+    subst_output_validator = &IsValidToolSubstitution;
   }
 
-  scoped_ptr<Tool> tool(new Tool);
+  std::unique_ptr<Tool> tool(new Tool);
 
   if (!ReadPattern(&block_scope, "command", subst_validator, tool.get(),
                    &Tool::set_command, err) ||
@@ -827,16 +889,20 @@ Value RunTool(Scope* scope,
       !ReadDepsFormat(&block_scope, tool.get(), err) ||
       !ReadPattern(&block_scope, "description", subst_validator, tool.get(),
                    &Tool::set_description, err) ||
-      !ReadString(&block_scope, "lib_switch", tool.get(),
-                  &Tool::set_lib_switch, err) ||
+      !ReadString(&block_scope, "lib_switch", tool.get(), &Tool::set_lib_switch,
+                  err) ||
       !ReadString(&block_scope, "lib_dir_switch", tool.get(),
                   &Tool::set_lib_dir_switch, err) ||
       !ReadPattern(&block_scope, "link_output", subst_validator, tool.get(),
                    &Tool::set_link_output, err) ||
       !ReadPattern(&block_scope, "depend_output", subst_validator, tool.get(),
                    &Tool::set_depend_output, err) ||
+      !ReadPattern(&block_scope, "runtime_link_output", subst_validator,
+                   tool.get(), &Tool::set_runtime_link_output, err) ||
       !ReadString(&block_scope, "output_prefix", tool.get(),
                   &Tool::set_output_prefix, err) ||
+      !ReadPattern(&block_scope, "default_output_dir", subst_validator,
+                   tool.get(), &Tool::set_default_output_dir, err) ||
       !ReadPrecompiledHeaderType(&block_scope, tool.get(), err) ||
       !ReadBool(&block_scope, "restat", tool.get(), &Tool::set_restat, err) ||
       !ReadPattern(&block_scope, "rspfile", subst_validator, tool.get(),
@@ -846,16 +912,20 @@ Value RunTool(Scope* scope,
     return Value();
   }
 
-  if (tool_type != Toolchain::TYPE_COPY && tool_type != Toolchain::TYPE_STAMP) {
-    // All tools except the copy and stamp tools should have outputs. The copy
-    // and stamp tool's outputs are generated internally.
+  if (tool_type != Toolchain::TYPE_COPY &&
+      tool_type != Toolchain::TYPE_STAMP &&
+      tool_type != Toolchain::TYPE_COPY_BUNDLE_DATA &&
+      tool_type != Toolchain::TYPE_COMPILE_XCASSETS) {
+    // All tools should have outputs, except the copy, stamp, copy_bundle_data
+    // and compile_xcassets tools that generate their outputs internally.
     if (!ReadOutputs(&block_scope, function, subst_output_validator,
                      tool.get(), err))
       return Value();
   }
 
-  // Validate that the link_output and depend_output refer to items in the
-  // outputs and aren't defined for irrelevant tool types.
+  // Validate that the link_output, depend_output, and runtime_link_output
+  // refer to items in the outputs and aren't defined for irrelevant tool
+  // types.
   if (!tool->link_output().empty()) {
     if (tool_type != Toolchain::TYPE_SOLINK &&
         tool_type != Toolchain::TYPE_SOLINK_MODULE) {
@@ -887,6 +957,19 @@ Value RunTool(Scope* scope,
     *err = Err(function, "Both link_output and depend_output should either "
         "be specified or they should both be empty.");
     return Value();
+  }
+  if (!tool->runtime_link_output().empty()) {
+    if (tool_type != Toolchain::TYPE_SOLINK &&
+        tool_type != Toolchain::TYPE_SOLINK_MODULE) {
+      *err = Err(function, "This tool specifies a runtime_link_output.",
+          "This is only valid for solink and solink_module tools.");
+      return Value();
+    }
+    if (!IsPatternInOutputList(tool->outputs(), tool->runtime_link_output())) {
+      *err = Err(function, "This tool's runtime_link_output is bad.",
+                 "It must match one of the outputs.");
+      return Value();
+    }
   }
 
   // Make sure there weren't any vars set in this tool that were unused.

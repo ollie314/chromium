@@ -14,12 +14,12 @@ import android.test.MoreAsserts;
 import android.test.suitebuilder.annotation.LargeTest;
 import android.test.suitebuilder.annotation.MediumTest;
 
+import org.chromium.base.PathUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.notifications.NotificationTestBase;
 import org.chromium.chrome.browser.preferences.website.ContentSetting;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.test.util.TestHttpServerClient;
 import org.chromium.chrome.test.util.browser.TabTitleObserver;
 import org.chromium.chrome.test.util.browser.notifications.MockNotificationManagerProxy.NotificationEntry;
 import org.chromium.components.gcm_driver.FakeGoogleCloudMessagingSubscriber;
@@ -36,13 +36,14 @@ import java.util.concurrent.TimeoutException;
 @SuppressLint("NewApi")
 public class PushMessagingTest
         extends NotificationTestBase implements PushMessagingServiceObserver.Listener {
-    private static final String PUSH_TEST_PAGE = TestHttpServerClient.getUrl(
-            "chrome/test/data/push_messaging/push_messaging_test_android.html");
+    private static final String PUSH_TEST_PAGE =
+            "/chrome/test/data/push_messaging/push_messaging_test_android.html";
     private static final String ABOUT_BLANK = "about:blank";
-    private static final String SENDER_ID_BUNDLE_KEY = "from";
     private static final int TITLE_UPDATE_TIMEOUT_SECONDS = (int) scaleTimeout(5);
+    private static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "chrome";
 
     private final CallbackHelper mMessageHandledHelper;
+    private String mPushTestPage;
 
     public PushMessagingTest() {
         mMessageHandledHelper = new CallbackHelper();
@@ -58,6 +59,7 @@ public class PushMessagingTest
                 PushMessagingServiceObserver.setListenerForTesting(listener);
             }
         });
+        mPushTestPage = getTestServer().getURL(PUSH_TEST_PAGE);
     }
 
     @Override
@@ -85,7 +87,7 @@ public class PushMessagingTest
         FakeGoogleCloudMessagingSubscriber subscriber = new FakeGoogleCloudMessagingSubscriber();
         GCMDriver.overrideSubscriberForTesting(subscriber);
 
-        loadUrl(PUSH_TEST_PAGE);
+        loadUrl(mPushTestPage);
         setNotificationContentSettingForCurrentOrigin(ContentSetting.ALLOW);
         runScriptAndWaitForTitle("subscribePush()", "subscribe ok");
 
@@ -107,10 +109,10 @@ public class PushMessagingTest
         GCMDriver.overrideSubscriberForTesting(subscriber);
 
         // Load the push test page into the first tab.
-        loadUrl(PUSH_TEST_PAGE);
+        loadUrl(mPushTestPage);
         assertEquals(1, getActivity().getCurrentTabModel().getCount());
         Tab tab = getActivity().getActivityTab();
-        assertEquals(PUSH_TEST_PAGE, tab.getUrl());
+        assertEquals(mPushTestPage, tab.getUrl());
         assertFalse(tab.isHidden());
 
         // Set up the push subscription and capture its details.
@@ -171,8 +173,8 @@ public class PushMessagingTest
             public void run() {
                 Context context = getInstrumentation().getTargetContext().getApplicationContext();
                 Bundle extras = new Bundle();
-                extras.putString(SENDER_ID_BUNDLE_KEY, senderId);
-                GCMDriver.onMessageReceived(context, appId, extras);
+                PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX, context);
+                GCMDriver.onMessageReceived(context, appId, senderId, extras);
             }
         });
         mMessageHandledHelper.waitForCallback(mMessageHandledHelper.getCallCount());

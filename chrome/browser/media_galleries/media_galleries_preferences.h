@@ -66,6 +66,7 @@ struct MediaGalleryPrefInfo {
   };
 
   MediaGalleryPrefInfo();
+  MediaGalleryPrefInfo(const MediaGalleryPrefInfo& other);
   ~MediaGalleryPrefInfo();
 
   // The absolute path of the gallery.
@@ -217,10 +218,6 @@ class MediaGalleriesPreferences
   // |gallery_id|. Returns an empty file path if the |gallery_id| is invalid.
   // Set |include_unpermitted_galleries| to true to get the file path of the
   // gallery to which this |extension| has no access permission.
-  //
-  // TODO(tommycli): Remove this function after Media Galleries API Private
-  // is transitioned over to public. Also, the body of the function wrong.
-  // It just returns the absolute path to the device, not the gallery.
   base::FilePath LookUpGalleryPathForExtension(
       MediaGalleryPrefId gallery_id,
       const extensions::Extension* extension,
@@ -273,11 +270,6 @@ class MediaGalleriesPreferences
 
   const MediaGalleriesPrefInfoMap& known_galleries() const;
 
-  // These keep track of when we last successfully completed a media scan.
-  // This is used to provide cached results when appropriate.
-  base::Time GetLastScanCompletionTime() const;
-  void SetLastScanCompletionTime(const base::Time& time);
-
   // KeyedService implementation:
   void Shutdown() override;
 
@@ -315,7 +307,7 @@ class MediaGalleriesPreferences
 
   void OnStorageMonitorInit(bool api_has_been_used);
 
-  // Handle an iPhoto, iTunes, or Picasa finder returning a device ID to us.
+  // Handle an iTunes or Picasa finder returning a device ID to us.
   void OnFinderDeviceID(const std::string& device_id);
 
   // Builds |known_galleries_| from the persistent store.

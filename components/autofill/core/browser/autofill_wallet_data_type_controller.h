@@ -6,7 +6,7 @@
 #define COMPONENTS_SYNC_DRIVER_GLUE_AUTOFILL_WALLET_DATA_TYPE_CONTROLLER_H_
 
 #include "base/macros.h"
-#include "base/prefs/pref_change_registrar.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "components/sync_driver/non_ui_data_type_controller.h"
 
 namespace autofill {
@@ -43,8 +43,8 @@ class AutofillWalletDataTypeController
   void StopModels() override;
   bool ReadyForStart() const override;
 
-  // Callback for changes to the autofill prefs.
-  void OnSyncPrefChanged();
+  // Callback for changes to the autofill pref.
+  void OnUserPrefChanged();
 
   // Returns true if the prefs are set such that wallet sync should be enabled.
   bool IsEnabled();

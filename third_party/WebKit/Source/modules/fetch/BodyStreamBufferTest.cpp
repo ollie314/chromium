@@ -32,8 +32,8 @@ public:
     ~BodyStreamBufferTest() override {}
 
 protected:
-    ScriptState* scriptState() { return ScriptState::forMainWorld(m_page->document().frame()); }
-    ExecutionContext* executionContext() { return &m_page->document(); }
+    ScriptState* getScriptState() { return ScriptState::forMainWorld(m_page->document().frame()); }
+    ExecutionContext* getExecutionContext() { return &m_page->document(); }
 
     OwnPtr<DummyPageHolder> m_page;
 };
@@ -45,23 +45,23 @@ TEST_F(BodyStreamBufferTest, ReleaseHandle)
     BodyStreamBuffer* buffer = new BodyStreamBuffer(handle.release());
 
     EXPECT_FALSE(buffer->hasPendingActivity());
-    EXPECT_FALSE(buffer->stream()->isLocked());
-    EXPECT_FALSE(buffer->stream()->isDisturbed());
-    EXPECT_EQ(ReadableStream::Readable, buffer->stream()->stateInternal());
+    EXPECT_FALSE(buffer->isStreamLocked());
+    EXPECT_FALSE(buffer->isStreamDisturbed());
+    EXPECT_TRUE(buffer->isStreamReadable());
 
-    OwnPtr<FetchDataConsumerHandle> handle2 = buffer->releaseHandle(executionContext());
+    OwnPtr<FetchDataConsumerHandle> handle2 = buffer->releaseHandle(getExecutionContext());
 
     ASSERT_EQ(rawHandle, handle2.get());
-    EXPECT_TRUE(buffer->stream()->isLocked());
-    EXPECT_TRUE(buffer->stream()->isDisturbed());
-    EXPECT_EQ(ReadableStream::Closed, buffer->stream()->stateInternal());
+    EXPECT_TRUE(buffer->isStreamLocked());
+    EXPECT_TRUE(buffer->isStreamDisturbed());
+    EXPECT_TRUE(buffer->isStreamClosed());
 }
 
 TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsArrayBuffer)
 {
     Checkpoint checkpoint;
     MockFetchDataLoaderClient* client = MockFetchDataLoaderClient::create();
-    RefPtr<DOMArrayBuffer> arrayBuffer;
+    DOMArrayBuffer* arrayBuffer = nullptr;
 
     InSequence s;
     EXPECT_CALL(checkpoint, Call(1));
@@ -72,18 +72,18 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsArrayBuffer)
     handle->add(Command(Command::Data, "hello"));
     handle->add(Command(Command::Done));
     BodyStreamBuffer* buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(handle.release()));
-    buffer->startLoading(executionContext(), FetchDataLoader::createLoaderAsArrayBuffer(), client);
+    buffer->startLoading(getExecutionContext(), FetchDataLoader::createLoaderAsArrayBuffer(), client);
 
-    EXPECT_TRUE(buffer->stream()->isLocked());
-    EXPECT_TRUE(buffer->stream()->isDisturbed());
+    EXPECT_TRUE(buffer->isStreamLocked());
+    EXPECT_TRUE(buffer->isStreamDisturbed());
     EXPECT_TRUE(buffer->hasPendingActivity());
 
     checkpoint.Call(1);
     testing::runPendingTasks();
     checkpoint.Call(2);
 
-    EXPECT_TRUE(buffer->stream()->isLocked());
-    EXPECT_TRUE(buffer->stream()->isDisturbed());
+    EXPECT_TRUE(buffer->isStreamLocked());
+    EXPECT_TRUE(buffer->isStreamDisturbed());
     EXPECT_FALSE(buffer->hasPendingActivity());
     ASSERT_TRUE(arrayBuffer);
     EXPECT_EQ("hello", String(static_cast<const char*>(arrayBuffer->data()), arrayBuffer->byteLength()));
@@ -104,18 +104,18 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsBlob)
     handle->add(Command(Command::Data, "hello"));
     handle->add(Command(Command::Done));
     BodyStreamBuffer* buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(handle.release()));
-    buffer->startLoading(executionContext(), FetchDataLoader::createLoaderAsBlobHandle("text/plain"), client);
+    buffer->startLoading(getExecutionContext(), FetchDataLoader::createLoaderAsBlobHandle("text/plain"), client);
 
-    EXPECT_TRUE(buffer->stream()->isLocked());
-    EXPECT_TRUE(buffer->stream()->isDisturbed());
+    EXPECT_TRUE(buffer->isStreamLocked());
+    EXPECT_TRUE(buffer->isStreamDisturbed());
     EXPECT_TRUE(buffer->hasPendingActivity());
 
     checkpoint.Call(1);
     testing::runPendingTasks();
     checkpoint.Call(2);
 
-    EXPECT_TRUE(buffer->stream()->isLocked());
-    EXPECT_TRUE(buffer->stream()->isDisturbed());
+    EXPECT_TRUE(buffer->isStreamLocked());
+    EXPECT_TRUE(buffer->isStreamDisturbed());
     EXPECT_FALSE(buffer->hasPendingActivity());
     EXPECT_EQ(5u, blobDataHandle->size());
 }
@@ -134,18 +134,18 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsString)
     handle->add(Command(Command::Data, "hello"));
     handle->add(Command(Command::Done));
     BodyStreamBuffer* buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(handle.release()));
-    buffer->startLoading(executionContext(), FetchDataLoader::createLoaderAsString(), client);
+    buffer->startLoading(getExecutionContext(), FetchDataLoader::createLoaderAsString(), client);
 
-    EXPECT_TRUE(buffer->stream()->isLocked());
-    EXPECT_TRUE(buffer->stream()->isDisturbed());
+    EXPECT_TRUE(buffer->isStreamLocked());
+    EXPECT_TRUE(buffer->isStreamDisturbed());
     EXPECT_TRUE(buffer->hasPendingActivity());
 
     checkpoint.Call(1);
     testing::runPendingTasks();
     checkpoint.Call(2);
 
-    EXPECT_TRUE(buffer->stream()->isLocked());
-    EXPECT_TRUE(buffer->stream()->isDisturbed());
+    EXPECT_TRUE(buffer->isStreamLocked());
+    EXPECT_TRUE(buffer->isStreamDisturbed());
     EXPECT_FALSE(buffer->hasPendingActivity());
 }
 
@@ -153,18 +153,18 @@ TEST_F(BodyStreamBufferTest, ReleaseClosedHandle)
 {
     BodyStreamBuffer* buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(createDoneDataConsumerHandle()));
 
-    EXPECT_EQ(ReadableStream::Readable, buffer->stream()->stateInternal());
+    EXPECT_TRUE(buffer->isStreamReadable());
     testing::runPendingTasks();
-    EXPECT_EQ(ReadableStream::Closed, buffer->stream()->stateInternal());
+    EXPECT_TRUE(buffer->isStreamClosed());
 
-    EXPECT_FALSE(buffer->stream()->isLocked());
-    EXPECT_FALSE(buffer->stream()->isDisturbed());
+    EXPECT_FALSE(buffer->isStreamLocked());
+    EXPECT_FALSE(buffer->isStreamDisturbed());
     EXPECT_FALSE(buffer->hasPendingActivity());
-    OwnPtr<FetchDataConsumerHandle> handle = buffer->releaseHandle(executionContext());
+    OwnPtr<FetchDataConsumerHandle> handle = buffer->releaseHandle(getExecutionContext());
 
     EXPECT_TRUE(handle);
-    EXPECT_TRUE(buffer->stream()->isLocked());
-    EXPECT_TRUE(buffer->stream()->isDisturbed());
+    EXPECT_TRUE(buffer->isStreamLocked());
+    EXPECT_TRUE(buffer->isStreamDisturbed());
     EXPECT_FALSE(buffer->hasPendingActivity());
 }
 
@@ -180,25 +180,25 @@ TEST_F(BodyStreamBufferTest, LoadClosedHandle)
 
     BodyStreamBuffer* buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(createDoneDataConsumerHandle()));
 
-    EXPECT_EQ(ReadableStream::Readable, buffer->stream()->stateInternal());
+    EXPECT_TRUE(buffer->isStreamReadable());
     testing::runPendingTasks();
-    EXPECT_EQ(ReadableStream::Closed, buffer->stream()->stateInternal());
+    EXPECT_TRUE(buffer->isStreamClosed());
 
-    EXPECT_FALSE(buffer->stream()->isLocked());
-    EXPECT_FALSE(buffer->stream()->isDisturbed());
+    EXPECT_FALSE(buffer->isStreamLocked());
+    EXPECT_FALSE(buffer->isStreamDisturbed());
     EXPECT_FALSE(buffer->hasPendingActivity());
 
-    buffer->startLoading(executionContext(), FetchDataLoader::createLoaderAsString(), client);
-    EXPECT_TRUE(buffer->stream()->isLocked());
-    EXPECT_TRUE(buffer->stream()->isDisturbed());
+    buffer->startLoading(getExecutionContext(), FetchDataLoader::createLoaderAsString(), client);
+    EXPECT_TRUE(buffer->isStreamLocked());
+    EXPECT_TRUE(buffer->isStreamDisturbed());
     EXPECT_TRUE(buffer->hasPendingActivity());
 
     checkpoint.Call(1);
     testing::runPendingTasks();
     checkpoint.Call(2);
 
-    EXPECT_TRUE(buffer->stream()->isLocked());
-    EXPECT_TRUE(buffer->stream()->isDisturbed());
+    EXPECT_TRUE(buffer->isStreamLocked());
+    EXPECT_TRUE(buffer->isStreamDisturbed());
     EXPECT_FALSE(buffer->hasPendingActivity());
 }
 
@@ -206,17 +206,17 @@ TEST_F(BodyStreamBufferTest, ReleaseErroredHandle)
 {
     BodyStreamBuffer* buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(createUnexpectedErrorDataConsumerHandle()));
 
-    EXPECT_EQ(ReadableStream::Readable, buffer->stream()->stateInternal());
+    EXPECT_TRUE(buffer->isStreamReadable());
     testing::runPendingTasks();
-    EXPECT_EQ(ReadableStream::Errored, buffer->stream()->stateInternal());
+    EXPECT_TRUE(buffer->isStreamErrored());
 
-    EXPECT_FALSE(buffer->stream()->isLocked());
-    EXPECT_FALSE(buffer->stream()->isDisturbed());
+    EXPECT_FALSE(buffer->isStreamLocked());
+    EXPECT_FALSE(buffer->isStreamDisturbed());
     EXPECT_FALSE(buffer->hasPendingActivity());
-    OwnPtr<FetchDataConsumerHandle> handle = buffer->releaseHandle(executionContext());
+    OwnPtr<FetchDataConsumerHandle> handle = buffer->releaseHandle(getExecutionContext());
     EXPECT_TRUE(handle);
-    EXPECT_TRUE(buffer->stream()->isLocked());
-    EXPECT_TRUE(buffer->stream()->isDisturbed());
+    EXPECT_TRUE(buffer->isStreamLocked());
+    EXPECT_TRUE(buffer->isStreamDisturbed());
     EXPECT_FALSE(buffer->hasPendingActivity());
 }
 
@@ -232,24 +232,24 @@ TEST_F(BodyStreamBufferTest, LoadErroredHandle)
 
     BodyStreamBuffer* buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(createUnexpectedErrorDataConsumerHandle()));
 
-    EXPECT_EQ(ReadableStream::Readable, buffer->stream()->stateInternal());
+    EXPECT_TRUE(buffer->isStreamReadable());
     testing::runPendingTasks();
-    EXPECT_EQ(ReadableStream::Errored, buffer->stream()->stateInternal());
+    EXPECT_TRUE(buffer->isStreamErrored());
 
-    EXPECT_FALSE(buffer->stream()->isLocked());
-    EXPECT_FALSE(buffer->stream()->isDisturbed());
+    EXPECT_FALSE(buffer->isStreamLocked());
+    EXPECT_FALSE(buffer->isStreamDisturbed());
     EXPECT_FALSE(buffer->hasPendingActivity());
-    buffer->startLoading(executionContext(), FetchDataLoader::createLoaderAsString(), client);
-    EXPECT_TRUE(buffer->stream()->isLocked());
-    EXPECT_TRUE(buffer->stream()->isDisturbed());
+    buffer->startLoading(getExecutionContext(), FetchDataLoader::createLoaderAsString(), client);
+    EXPECT_TRUE(buffer->isStreamLocked());
+    EXPECT_TRUE(buffer->isStreamDisturbed());
     EXPECT_TRUE(buffer->hasPendingActivity());
 
     checkpoint.Call(1);
     testing::runPendingTasks();
     checkpoint.Call(2);
 
-    EXPECT_TRUE(buffer->stream()->isLocked());
-    EXPECT_TRUE(buffer->stream()->isDisturbed());
+    EXPECT_TRUE(buffer->isStreamLocked());
+    EXPECT_TRUE(buffer->isStreamDisturbed());
     EXPECT_FALSE(buffer->hasPendingActivity());
 }
 
@@ -267,9 +267,9 @@ TEST_F(BodyStreamBufferTest, LoaderShouldBeKeptAliveByBodyStreamBuffer)
     handle->add(Command(Command::Data, "hello"));
     handle->add(Command(Command::Done));
     Persistent<BodyStreamBuffer> buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(handle.release()));
-    buffer->startLoading(executionContext(), FetchDataLoader::createLoaderAsString(), client);
+    buffer->startLoading(getExecutionContext(), FetchDataLoader::createLoaderAsString(), client);
 
-    Heap::collectAllGarbage();
+    ThreadHeap::collectAllGarbage();
     checkpoint.Call(1);
     testing::runPendingTasks();
     checkpoint.Call(2);
@@ -290,7 +290,7 @@ public:
 
 TEST_F(BodyStreamBufferTest, SourceHandleAndReaderShouldBeDestructedWhenCanceled)
 {
-    ScriptState::Scope scope(scriptState());
+    ScriptState::Scope scope(getScriptState());
     using MockHandle = MockFetchDataConsumerHandleWithMockDestructor;
     using MockReader = DataConsumerHandleTestUtil::MockFetchDataConsumerReader;
     OwnPtr<MockHandle> handle = MockHandle::create();
@@ -310,8 +310,8 @@ TEST_F(BodyStreamBufferTest, SourceHandleAndReaderShouldBeDestructedWhenCanceled
 
     BodyStreamBuffer* buffer = new BodyStreamBuffer(handle.release());
     checkpoint.Call(1);
-    ScriptValue reason(scriptState(), v8String(scriptState()->isolate(), "reason"));
-    buffer->cancelSource(scriptState(), reason);
+    ScriptValue reason(getScriptState(), v8String(getScriptState()->isolate(), "reason"));
+    buffer->cancelSource(getScriptState(), reason);
     checkpoint.Call(2);
 }
 

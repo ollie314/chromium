@@ -16,10 +16,10 @@ class FakeRendererScheduler : public scheduler::RendererScheduler {
   ~FakeRendererScheduler() override;
 
   // RendererScheduler implementation.
-  scoped_ptr<blink::WebThread> CreateMainThread() override;
-  scoped_refptr<base::SingleThreadTaskRunner> DefaultTaskRunner() override;
-  scoped_refptr<base::SingleThreadTaskRunner> CompositorTaskRunner() override;
-  scoped_refptr<base::SingleThreadTaskRunner> LoadingTaskRunner() override;
+  std::unique_ptr<blink::WebThread> CreateMainThread() override;
+  scoped_refptr<scheduler::TaskQueue> DefaultTaskRunner() override;
+  scoped_refptr<scheduler::TaskQueue> CompositorTaskRunner() override;
+  scoped_refptr<scheduler::TaskQueue> LoadingTaskRunner() override;
   scoped_refptr<scheduler::SingleThreadIdleTaskRunner> IdleTaskRunner()
       override;
   scoped_refptr<scheduler::TaskQueue> TimerTaskRunner() override;
@@ -27,7 +27,7 @@ class FakeRendererScheduler : public scheduler::RendererScheduler {
       const char* name) override;
   scoped_refptr<scheduler::TaskQueue> NewTimerTaskRunner(
       const char* name) override;
-  scoped_ptr<scheduler::RenderWidgetSchedulingState>
+  std::unique_ptr<scheduler::RenderWidgetSchedulingState>
   NewRenderWidgetSchedulingState() override;
   void WillBeginFrame(const cc::BeginFrameArgs& args) override;
   void BeginFrameNotExpectedSoon() override;
@@ -53,8 +53,8 @@ class FakeRendererScheduler : public scheduler::RendererScheduler {
   void SuspendTimerQueue() override;
   void ResumeTimerQueue() override;
   void SetTimerQueueSuspensionWhenBackgroundedEnabled(bool enabled) override;
-  double CurrentTimeSeconds() const override;
-  double MonotonicallyIncreasingTimeSeconds() const override;
+  void SetTopLevelBlameContext(
+      base::trace_event::BlameContext* blame_context) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeRendererScheduler);

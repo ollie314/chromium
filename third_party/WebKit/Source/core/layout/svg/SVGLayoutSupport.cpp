@@ -34,6 +34,7 @@
 #include "core/layout/svg/LayoutSVGRoot.h"
 #include "core/layout/svg/LayoutSVGShape.h"
 #include "core/layout/svg/LayoutSVGText.h"
+#include "core/layout/svg/LayoutSVGTransformableContainer.h"
 #include "core/layout/svg/LayoutSVGViewportContainer.h"
 #include "core/layout/svg/SVGResources.h"
 #include "core/layout/svg/SVGResourcesCache.h"
@@ -44,21 +45,59 @@
 
 namespace blink {
 
-static inline LayoutRect adjustedEnclosingIntRect(const FloatRect& rect,
-    const AffineTransform& rootTransform, float strokeWidthForHairlinePadding)
-{
-    FloatRect adjustedRect = rect;
+struct SearchCandidate {
+    SearchCandidate()
+        : candidateLayoutObject(nullptr)
+        , candidateDistance(std::numeric_limits<float>::max())
+    {
+    }
+    SearchCandidate(LayoutObject* layoutObject, float distance)
+        : candidateLayoutObject(layoutObject)
+        , candidateDistance(distance)
+    {
+    }
+    LayoutObject* candidateLayoutObject;
+    float candidateDistance;
+};
 
-    if (strokeWidthForHairlinePadding) {
-        // For hairline strokes (stroke-width < 1 in device space), Skia rasterizes up to 0.4(9) off
-        // the stroke center. That means enclosingIntRect is not enough - we must also pad to 0.5.
-        // This is still fragile as it misses out on CC/DSF CTM components.
-        const FloatSize strokeSize = rootTransform.mapSize(
-            FloatSize(strokeWidthForHairlinePadding, strokeWidthForHairlinePadding));
-        if (strokeSize.width() < 1 || strokeSize.height() < 1) {
-            const float pad = 0.5f - std::min(strokeSize.width(), strokeSize.height()) / 2;
-            ASSERT(pad > 0);
-            adjustedRect.inflate(pad);
+FloatRect SVGLayoutSupport::localOverflowRectForPaintInvalidation(const LayoutObject& object)
+{
+    // This doesn't apply to LayoutSVGRoot. Use LayoutSVGRoot::localOverflowRectForPaintInvalidation() instead.
+    ASSERT(!object.isSVGRoot());
+
+    // Return early for any cases where we don't actually paint
+    if (object.styleRef().visibility() != VISIBLE && !object.enclosingLayer()->hasVisibleContent())
+        return FloatRect();
+
+    FloatRect paintInvalidationRect = object.paintInvalidationRectInLocalSVGCoordinates();
+    if (int outlineOutset = object.styleRef().outlineOutsetExtent())
+        paintInvalidationRect.inflate(outlineOutset);
+    return paintInvalidationRect;
+}
+
+LayoutRect SVGLayoutSupport::clippedOverflowRectForPaintInvalidation(const LayoutObject& object, const LayoutBoxModelObject& paintInvalidationContainer)
+{
+    LayoutRect rect;
+    mapToVisualRectInAncestorSpace(object, &paintInvalidationContainer, localOverflowRectForPaintInvalidation(object), rect);
+    return rect;
+}
+
+LayoutRect SVGLayoutSupport::transformPaintInvalidationRect(const LayoutObject& object, const AffineTransform& rootTransform, const FloatRect& localRect)
+{
+    FloatRect adjustedRect = rootTransform.mapRect(localRect);
+
+    if (object.isSVGShape() && object.styleRef().svgStyle().hasStroke()) {
+        if (float strokeWidthForHairlinePadding = toLayoutSVGShape(object).strokeWidth()) {
+            // For hairline strokes (stroke-width < 1 in device space), Skia rasterizes up to 0.4(9) off
+            // the stroke center. That means enclosingIntRect is not enough - we must also pad to 0.5.
+            // This is still fragile as it misses out on CC/DSF CTM components.
+            const FloatSize strokeSize = rootTransform.mapSize(
+                FloatSize(strokeWidthForHairlinePadding, strokeWidthForHairlinePadding));
+            if (strokeSize.width() < 1 || strokeSize.height() < 1) {
+                const float pad = 0.5f - std::min(strokeSize.width(), strokeSize.height()) / 2;
+                ASSERT(pad > 0);
+                adjustedRect.inflate(pad);
+            }
         }
     }
 
@@ -68,68 +107,41 @@ static inline LayoutRect adjustedEnclosingIntRect(const FloatRect& rect,
     return LayoutRect(enclosingIntRect(adjustedRect));
 }
 
-LayoutRect SVGLayoutSupport::clippedOverflowRectForPaintInvalidation(const LayoutObject& object,
-    const LayoutBoxModelObject* paintInvalidationContainer,
-    const PaintInvalidationState* paintInvalidationState, float strokeWidthForHairlinePadding)
-{
-    // Return early for any cases where we don't actually paint
-    if (object.styleRef().visibility() != VISIBLE && !object.enclosingLayer()->hasVisibleContent())
-        return LayoutRect();
-
-    FloatRect paintInvalidationRect = object.paintInvalidationRectInLocalCoordinates();
-    if (int outlineOutset = object.styleRef().outlineOutsetExtent())
-        paintInvalidationRect.inflate(outlineOutset);
-
-    if (paintInvalidationState && paintInvalidationState->canMapToContainer(paintInvalidationContainer)) {
-        // Compute accumulated SVG transform and apply to local paint rect.
-        AffineTransform transform = paintInvalidationState->svgTransform() * object.localToParentTransform();
-
-        // FIXME: These are quirks carried forward from the old paint invalidation infrastructure.
-        LayoutRect rect = adjustedEnclosingIntRect(transform.mapRect(paintInvalidationRect),
-            transform, strokeWidthForHairlinePadding);
-        // Offset by SVG root paint offset and apply clipping as needed.
-        rect.move(paintInvalidationState->paintOffset());
-        if (paintInvalidationState->isClipped())
-            rect.intersect(paintInvalidationState->clipRect());
-        return rect;
-    }
-
-    LayoutRect rect;
-    const LayoutSVGRoot& svgRoot = mapRectToSVGRootForPaintInvalidation(object,
-        paintInvalidationRect, rect, strokeWidthForHairlinePadding);
-    svgRoot.mapToVisibleRectInAncestorSpace(paintInvalidationContainer, rect, paintInvalidationState);
-    return rect;
-}
-
-const LayoutSVGRoot& SVGLayoutSupport::mapRectToSVGRootForPaintInvalidation(const LayoutObject& object,
-    const FloatRect& localPaintInvalidationRect, LayoutRect& rect, float strokeWidthForHairlinePadding)
+static const LayoutSVGRoot& computeTransformToSVGRoot(const LayoutObject& object, AffineTransform& rootBorderBoxTransform)
 {
     ASSERT(object.isSVG() && !object.isSVGRoot());
 
     const LayoutObject* parent;
-    AffineTransform rootBorderBoxTransform;
     for (parent = &object; !parent->isSVGRoot(); parent = parent->parent())
-        rootBorderBoxTransform.preMultiply(parent->localToParentTransform());
+        rootBorderBoxTransform.preMultiply(parent->localToSVGParentTransform());
 
     const LayoutSVGRoot& svgRoot = toLayoutSVGRoot(*parent);
     rootBorderBoxTransform.preMultiply(svgRoot.localToBorderBoxTransform());
-
-    rect = adjustedEnclosingIntRect(rootBorderBoxTransform.mapRect(localPaintInvalidationRect),
-        rootBorderBoxTransform, strokeWidthForHairlinePadding);
-
     return svgRoot;
 }
 
-void SVGLayoutSupport::mapLocalToAncestor(const LayoutObject* object, const LayoutBoxModelObject* ancestor, TransformState& transformState, bool* wasFixed, const PaintInvalidationState* paintInvalidationState)
+bool SVGLayoutSupport::mapToVisualRectInAncestorSpace(const LayoutObject& object, const LayoutBoxModelObject* ancestor, const FloatRect& localPaintInvalidationRect, LayoutRect& resultRect, VisualRectFlags visualRectFlags)
 {
-    transformState.applyTransform(object->localToParentTransform());
+    AffineTransform rootBorderBoxTransform;
+    const LayoutSVGRoot& svgRoot = computeTransformToSVGRoot(object, rootBorderBoxTransform);
+    resultRect = transformPaintInvalidationRect(object, rootBorderBoxTransform, localPaintInvalidationRect);
 
-    if (paintInvalidationState && paintInvalidationState->canMapToContainer(ancestor)) {
-        // |svgTransform| contains localToBorderBoxTransform mentioned below.
-        transformState.applyTransform(paintInvalidationState->svgTransform());
-        transformState.move(paintInvalidationState->paintOffset());
-        return;
+    // Apply initial viewport clip.
+    if (svgRoot.shouldApplyViewportClip()) {
+        LayoutRect clipRect(svgRoot.pixelSnappedBorderBoxRect());
+        if (visualRectFlags & EdgeInclusive) {
+            if (!resultRect.inclusiveIntersect(clipRect))
+                return false;
+        } else {
+            resultRect.intersect(clipRect);
+        }
     }
+    return svgRoot.mapToVisualRectInAncestorSpace(ancestor, resultRect, visualRectFlags);
+}
+
+void SVGLayoutSupport::mapLocalToAncestor(const LayoutObject* object, const LayoutBoxModelObject* ancestor, TransformState& transformState)
+{
+    transformState.applyTransform(object->localToSVGParentTransform());
 
     LayoutObject* parent = object->parent();
 
@@ -140,7 +152,24 @@ void SVGLayoutSupport::mapLocalToAncestor(const LayoutObject* object, const Layo
         transformState.applyTransform(toLayoutSVGRoot(parent)->localToBorderBoxTransform());
 
     MapCoordinatesFlags mode = UseTransforms;
-    parent->mapLocalToAncestor(ancestor, transformState, mode, wasFixed, paintInvalidationState);
+    parent->mapLocalToAncestor(ancestor, transformState, mode);
+}
+
+void SVGLayoutSupport::mapAncestorToLocal(const LayoutObject& object, const LayoutBoxModelObject* ancestor, TransformState& transformState)
+{
+    // |object| is either a LayoutSVGModelObject or a LayoutSVGBlock here. In
+    // the former case, |object| can never be an ancestor while in the latter
+    // the caller is responsible for doing the ancestor check. Because of this,
+    // computing the transform to the SVG root is always what we want to do here.
+    ASSERT(ancestor != &object);
+    ASSERT(object.isSVGContainer() || object.isSVGShape() || object.isSVGImage() || object.isSVGText() || object.isSVGForeignObject());
+    AffineTransform localToSVGRoot;
+    const LayoutSVGRoot& svgRoot = computeTransformToSVGRoot(object, localToSVGRoot);
+
+    MapCoordinatesFlags mode = UseTransforms | ApplyContainerFlip;
+    svgRoot.mapAncestorToLocal(ancestor, transformState, mode);
+
+    transformState.applyTransform(localToSVGRoot);
 }
 
 const LayoutObject* SVGLayoutSupport::pushMappingToContainer(const LayoutObject* object, const LayoutBoxModelObject* ancestorToStopAt, LayoutGeometryMap& geometryMap)
@@ -153,11 +182,11 @@ const LayoutObject* SVGLayoutSupport::pushMappingToContainer(const LayoutObject*
     // to map an element from SVG viewport coordinates to CSS box coordinates.
     // LayoutSVGRoot's mapLocalToAncestor method expects CSS box coordinates.
     if (parent->isSVGRoot()) {
-        TransformationMatrix matrix(object->localToParentTransform());
+        TransformationMatrix matrix(object->localToSVGParentTransform());
         matrix.multiply(toLayoutSVGRoot(parent)->localToBorderBoxTransform());
         geometryMap.push(object, matrix);
     } else {
-        geometryMap.push(object, object->localToParentTransform());
+        geometryMap.push(object, object->localToSVGParentTransform());
     }
 
     return parent;
@@ -196,10 +225,13 @@ void SVGLayoutSupport::computeContainerBoundingBoxes(const LayoutObject* contain
         if (current->isSVGShape() && toLayoutSVGShape(current)->isShapeEmpty())
             continue;
 
-        const AffineTransform& transform = current->localToParentTransform();
+        if (current->isSVGText() && !toLayoutSVGText(current)->isObjectBoundingBoxValid())
+            continue;
+
+        const AffineTransform& transform = current->localToSVGParentTransform();
         updateObjectBoundingBox(objectBoundingBox, objectBoundingBoxValid, current,
             transform.mapRect(current->objectBoundingBox()));
-        strokeBoundingBox.unite(transform.mapRect(current->paintInvalidationRectInLocalCoordinates()));
+        strokeBoundingBox.unite(transform.mapRect(current->paintInvalidationRectInLocalSVGCoordinates()));
     }
 
     paintInvalidationBoundingBox = strokeBoundingBox;
@@ -215,48 +247,40 @@ const LayoutSVGRoot* SVGLayoutSupport::findTreeRootObject(const LayoutObject* st
     return toLayoutSVGRoot(start);
 }
 
-inline bool SVGLayoutSupport::layoutSizeOfNearestViewportChanged(const LayoutObject* start)
+bool SVGLayoutSupport::layoutSizeOfNearestViewportChanged(const LayoutObject* start)
 {
-    while (start && !start->isSVGRoot() && !start->isSVGViewportContainer())
-        start = start->parent();
-
-    ASSERT(start);
-    ASSERT(start->isSVGRoot() || start->isSVGViewportContainer());
-    if (start->isSVGViewportContainer())
-        return toLayoutSVGViewportContainer(start)->isLayoutSizeChanged();
-
-    return toLayoutSVGRoot(start)->isLayoutSizeChanged();
+    for (; start; start = start->parent()) {
+        if (start->isSVGRoot())
+            return toLayoutSVGRoot(start)->isLayoutSizeChanged();
+        if (start->isSVGViewportContainer())
+            return toLayoutSVGViewportContainer(start)->isLayoutSizeChanged();
+    }
+    ASSERT_NOT_REACHED();
+    return false;
 }
 
-bool SVGLayoutSupport::transformToRootChanged(LayoutObject* ancestor)
+bool SVGLayoutSupport::transformToRootChanged(const LayoutObject* ancestor)
 {
     while (ancestor && !ancestor->isSVGRoot()) {
         if (ancestor->isSVGTransformableContainer())
-            return toLayoutSVGContainer(ancestor)->didTransformToRootUpdate();
+            return toLayoutSVGTransformableContainer(ancestor)->didTransformToRootUpdate();
         if (ancestor->isSVGViewportContainer())
             return toLayoutSVGViewportContainer(ancestor)->didTransformToRootUpdate();
         ancestor = ancestor->parent();
     }
-
     return false;
 }
 
-void SVGLayoutSupport::layoutChildren(LayoutObject* start, bool selfNeedsLayout)
+void SVGLayoutSupport::layoutChildren(LayoutObject* firstChild, bool forceLayout, bool transformChanged, bool layoutSizeChanged)
 {
-    // When hasRelativeLengths() is false, no descendants have relative lengths
-    // (hence no one is interested in viewport size changes).
-    bool layoutSizeChanged = toSVGElement(start->node())->hasRelativeLengths()
-        && layoutSizeOfNearestViewportChanged(start);
-    bool transformChanged = transformToRootChanged(start);
-
-    for (LayoutObject* child = start->slowFirstChild(); child; child = child->nextSibling()) {
-        bool forceLayout = selfNeedsLayout;
+    for (LayoutObject* child = firstChild; child; child = child->nextSibling()) {
+        bool forceChildLayout = forceLayout;
 
         if (transformChanged) {
             // If the transform changed we need to update the text metrics (note: this also happens for layoutSizeChanged=true).
             if (child->isSVGText())
                 toLayoutSVGText(child)->setNeedsTextMetricsUpdate();
-            forceLayout = true;
+            forceChildLayout = true;
         }
 
         if (layoutSizeChanged) {
@@ -272,22 +296,31 @@ void SVGLayoutSupport::layoutChildren(LayoutObject* start, bool selfNeedsLayout)
                         toLayoutSVGText(child)->setNeedsPositioningValuesUpdate();
                     }
 
-                    forceLayout = true;
+                    forceChildLayout = true;
                 }
             }
         }
 
-        SubtreeLayoutScope layoutScope(*child);
         // Resource containers are nasty: they can invalidate clients outside the current SubtreeLayoutScope.
         // Since they only care about viewport size changes (to resolve their relative lengths), we trigger
         // their invalidation directly from SVGSVGElement::svgAttributeChange() or at a higher
-        // SubtreeLayoutScope (in LayoutView::layout()).
-        if (forceLayout && !child->isSVGResourceContainer())
-            layoutScope.setNeedsLayout(child, LayoutInvalidationReason::SvgChanged);
+        // SubtreeLayoutScope (in LayoutView::layout()). We do not create a SubtreeLayoutScope for
+        // resources because their ability to reference each other leads to circular layout. We protect
+        // against that within the layout code for resources, but it causes assertions if we use a
+        // SubTreeLayoutScope for them.
+        if (child->isSVGResourceContainer()) {
+            // Lay out any referenced resources before the child.
+            layoutResourcesIfNeeded(child);
+            child->layoutIfNeeded();
+        } else {
+            SubtreeLayoutScope layoutScope(*child);
+            if (forceChildLayout)
+                layoutScope.setNeedsLayout(child, LayoutInvalidationReason::SvgChanged);
 
-        // Lay out any referenced resources before the child.
-        layoutResourcesIfNeeded(child);
-        child->layoutIfNeeded();
+            // Lay out any referenced resources before the child.
+            layoutResourcesIfNeeded(child);
+            child->layoutIfNeeded();
+        }
     }
 }
 
@@ -305,7 +338,7 @@ bool SVGLayoutSupport::isOverflowHidden(const LayoutObject* object)
     // LayoutSVGRoot should never query for overflow state - it should always clip itself to the initial viewport size.
     ASSERT(!object->isDocumentElement());
 
-    return object->style()->overflowX() == OHIDDEN || object->style()->overflowX() == OSCROLL;
+    return object->style()->overflowX() == OverflowHidden || object->style()->overflowX() == OverflowScroll;
 }
 
 void SVGLayoutSupport::intersectPaintInvalidationRectWithResources(const LayoutObject* layoutObject, FloatRect& paintInvalidationRect)
@@ -326,18 +359,10 @@ void SVGLayoutSupport::intersectPaintInvalidationRectWithResources(const LayoutO
         paintInvalidationRect.intersect(masker->resourceBoundingBox(layoutObject));
 }
 
-bool SVGLayoutSupport::filtersForceContainerLayout(LayoutObject* object)
+bool SVGLayoutSupport::hasFilterResource(const LayoutObject& object)
 {
-    // If any of this container's children need to be laid out, and a filter is applied
-    // to the container, we need to issue paint invalidations the entire container.
-    if (!object->normalChildNeedsLayout())
-        return false;
-
-    SVGResources* resources = SVGResourcesCache::cachedResourcesForLayoutObject(object);
-    if (!resources || !resources->filter())
-        return false;
-
-    return true;
+    SVGResources* resources = SVGResourcesCache::cachedResourcesForLayoutObject(&object);
+    return resources && resources->filter();
 }
 
 bool SVGLayoutSupport::pointInClippingArea(const LayoutObject* object, const FloatPoint& point)
@@ -372,7 +397,7 @@ DashArray SVGLayoutSupport::resolveSVGDashArray(const SVGDashArray& svgDashArray
     return dashArray;
 }
 
-void SVGLayoutSupport::applyStrokeStyleToStrokeData(StrokeData& strokeData, const ComputedStyle& style, const LayoutObject& object)
+void SVGLayoutSupport::applyStrokeStyleToStrokeData(StrokeData& strokeData, const ComputedStyle& style, const LayoutObject& object, float dashScaleFactor)
 {
     ASSERT(object.node());
     ASSERT(object.node()->isSVGElement());
@@ -386,7 +411,15 @@ void SVGLayoutSupport::applyStrokeStyleToStrokeData(StrokeData& strokeData, cons
     strokeData.setMiterLimit(svgStyle.strokeMiterLimit());
 
     DashArray dashArray = resolveSVGDashArray(*svgStyle.strokeDashArray(), style, lengthContext);
-    strokeData.setLineDash(dashArray, lengthContext.valueForLength(svgStyle.strokeDashOffset(), style));
+    float dashOffset = lengthContext.valueForLength(svgStyle.strokeDashOffset(), style);
+    // Apply scaling from 'pathLength'.
+    if (dashScaleFactor != 1) {
+        ASSERT(dashScaleFactor >= 0);
+        dashOffset *= dashScaleFactor;
+        for (auto& dashItem : dashArray)
+            dashItem *= dashScaleFactor;
+    }
+    strokeData.setLineDash(dashArray, dashOffset);
 }
 
 bool SVGLayoutSupport::isLayoutableTextNode(const LayoutObject* object)
@@ -436,7 +469,7 @@ AffineTransform SVGLayoutSupport::deprecatedCalculateTransformToLayer(const Layo
 {
     AffineTransform transform;
     while (layoutObject) {
-        transform = layoutObject->localToParentTransform() * transform;
+        transform = layoutObject->localToSVGParentTransform() * transform;
         if (layoutObject->isSVGRoot())
             break;
         layoutObject = layoutObject->parent();
@@ -476,4 +509,74 @@ float SVGLayoutSupport::calculateScreenFontSizeScalingFactor(const LayoutObject*
     return narrowPrecisionToFloat(sqrt((pow(ctm.xScale(), 2) + pow(ctm.yScale(), 2)) / 2));
 }
 
+static inline bool compareCandidateDistance(const SearchCandidate& r1, const SearchCandidate& r2)
+{
+    return r1.candidateDistance < r2.candidateDistance;
 }
+
+static inline float distanceToChildLayoutObject(LayoutObject* child, const FloatPoint& point)
+{
+    const AffineTransform& localToParentTransform = child->localToSVGParentTransform();
+    if (!localToParentTransform.isInvertible())
+        return std::numeric_limits<float>::max();
+    FloatPoint childLocalPoint = localToParentTransform.inverse().mapPoint(point);
+    return child->objectBoundingBox().squaredDistanceTo(childLocalPoint);
+}
+
+static SearchCandidate searchTreeForFindClosestLayoutSVGText(LayoutObject* layoutObject, const FloatPoint& point)
+{
+    // Try to find the closest LayoutSVGText.
+    SearchCandidate closestText;
+    Vector<SearchCandidate> candidates;
+
+    // Find the closest LayoutSVGText on this tree level, and also collect any
+    // containers that could contain LayoutSVGTexts that are closer.
+    for (LayoutObject* child = layoutObject->slowLastChild(); child; child = child->previousSibling()) {
+        if (child->isSVGText()) {
+            float distance = distanceToChildLayoutObject(child, point);
+            if (distance >= closestText.candidateDistance)
+                continue;
+            candidates.clear();
+            closestText.candidateLayoutObject = child;
+            closestText.candidateDistance = distance;
+            continue;
+        }
+
+        if (child->isSVGContainer() && !layoutObject->isSVGHiddenContainer()) {
+            float distance = distanceToChildLayoutObject(child, point);
+            if (distance > closestText.candidateDistance)
+                continue;
+            candidates.append(SearchCandidate(child, distance));
+        }
+    }
+
+    // If a LayoutSVGText was found and there are no potentially closer sub-trees,
+    // just return |closestText|.
+    if (closestText.candidateLayoutObject && candidates.isEmpty())
+        return closestText;
+
+    std::stable_sort(candidates.begin(), candidates.end(), compareCandidateDistance);
+
+    // Find the closest LayoutSVGText in the sub-trees in |candidates|.
+    // If a LayoutSVGText is found that is strictly closer than any previous candidate, then end the search.
+    for (const SearchCandidate& searchCandidate : candidates) {
+        if (closestText.candidateDistance < searchCandidate.candidateDistance)
+            break;
+        LayoutObject* candidateLayoutObject = searchCandidate.candidateLayoutObject;
+        FloatPoint candidateLocalPoint = candidateLayoutObject->localToSVGParentTransform().inverse().mapPoint(point);
+
+        SearchCandidate candidateText = searchTreeForFindClosestLayoutSVGText(candidateLayoutObject, candidateLocalPoint);
+
+        if (candidateText.candidateDistance < closestText.candidateDistance)
+            closestText = candidateText;
+    }
+
+    return closestText;
+}
+
+LayoutObject* SVGLayoutSupport::findClosestLayoutSVGText(LayoutObject* layoutObject, const FloatPoint& point)
+{
+    return searchTreeForFindClosestLayoutSVGText(layoutObject, point).candidateLayoutObject;
+}
+
+} // namespace blink

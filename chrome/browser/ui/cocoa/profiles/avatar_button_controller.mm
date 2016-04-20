@@ -7,6 +7,8 @@
 #include "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -33,11 +35,11 @@ const CGFloat kButtonExtraPadding = 8 - 5;
 const CGFloat kButtonHeight = 28;
 
 const ui::NinePartImageIds kNormalBorderImageIds =
-    IMAGE_GRID(IDR_AVATAR_MAC_BUTTON_NORMAL);
+    IMAGE_GRID(IDR_AVATAR_NATIVE_BUTTON_NORMAL);
 const ui::NinePartImageIds kHoverBorderImageIds =
-    IMAGE_GRID(IDR_AVATAR_MAC_BUTTON_HOVER);
+    IMAGE_GRID(IDR_AVATAR_NATIVE_BUTTON_HOVER);
 const ui::NinePartImageIds kPressedBorderImageIds =
-    IMAGE_GRID(IDR_AVATAR_MAC_BUTTON_PRESSED);
+    IMAGE_GRID(IDR_AVATAR_NATIVE_BUTTON_PRESSED);
 const ui::NinePartImageIds kThemedBorderImageIds =
     IMAGE_GRID(IDR_AVATAR_THEMED_MAC_BUTTON_NORMAL);
 
@@ -225,14 +227,15 @@ NSImage* GetImageFromResourceID(int resourceId) {
     [shadow setShadowColor:[NSColor colorWithCalibratedWhite:1.0 alpha:0.4]];
   }
 
-  const ProfileInfoCache& cache =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
+  ProfileAttributesStorage& storage =
+      g_browser_process->profile_manager()->GetProfileAttributesStorage();
   // If there is a single local profile, then use the generic avatar button
   // instead of the profile name. Never use the generic button if the active
   // profile is Guest.
-  bool useGenericButton = (!browser_->profile()->IsGuestSession() &&
-                           cache.GetNumberOfProfiles() == 1 &&
-                           !cache.ProfileIsAuthenticatedAtIndex(0));
+  bool useGenericButton =
+      !browser_->profile()->IsGuestSession() &&
+      storage.GetNumberOfProfiles() == 1 &&
+      !storage.GetAllProfilesAttributes().front()->IsAuthenticated();
 
 
   NSString* buttonTitle = base::SysUTF16ToNSString(useGenericButton ?
@@ -244,15 +247,15 @@ NSImage* GetImageFromResourceID(int resourceId) {
       base::mac::ObjCCastStrict<AvatarButton>(button_);
   if (useGenericButton) {
     [button setDefaultImage:GetImageFromResourceID(
-        IDR_AVATAR_MAC_BUTTON_AVATAR)];
+        IDR_AVATAR_NATIVE_BUTTON_AVATAR)];
     [button setHoverImage:GetImageFromResourceID(
-        IDR_AVATAR_MAC_BUTTON_AVATAR_HOVER)];
+        IDR_AVATAR_NATIVE_BUTTON_AVATAR_HOVER)];
     [button setPressedImage:GetImageFromResourceID(
-        IDR_AVATAR_MAC_BUTTON_AVATAR_PRESSED)];
+        IDR_AVATAR_NATIVE_BUTTON_AVATAR_PRESSED)];
     // This is a workaround for an issue in the HoverImageButton where the
     // button is initially sized incorrectly unless a default image is provided.
     // See crbug.com/298501.
-    [button setImage:GetImageFromResourceID(IDR_AVATAR_MAC_BUTTON_AVATAR)];
+    [button setImage:GetImageFromResourceID(IDR_AVATAR_NATIVE_BUTTON_AVATAR)];
     [button setImagePosition:NSImageOnly];
   } else if (hasError_) {
     [button setDefaultImage:GetImageFromResourceID(

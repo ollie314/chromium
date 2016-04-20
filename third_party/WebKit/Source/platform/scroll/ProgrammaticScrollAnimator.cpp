@@ -4,20 +4,16 @@
 
 #include "platform/scroll/ProgrammaticScrollAnimator.h"
 
+#include "platform/animation/CompositorAnimation.h"
+#include "platform/animation/CompositorScrollOffsetAnimationCurve.h"
 #include "platform/geometry/IntPoint.h"
+#include "platform/graphics/CompositorFactory.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebCompositorAnimation.h"
 #include "public/platform/WebCompositorSupport.h"
-#include "public/platform/WebScrollOffsetAnimationCurve.h"
 
 namespace blink {
-
-PassOwnPtrWillBeRawPtr<ProgrammaticScrollAnimator> ProgrammaticScrollAnimator::create(ScrollableArea* scrollableArea)
-{
-    return adoptPtrWillBeNoop(new ProgrammaticScrollAnimator(scrollableArea));
-}
 
 ProgrammaticScrollAnimator::ProgrammaticScrollAnimator(ScrollableArea* scrollableArea)
     : m_scrollableArea(scrollableArea)
@@ -49,12 +45,15 @@ void ProgrammaticScrollAnimator::scrollToOffsetWithoutAnimation(const FloatPoint
 
 void ProgrammaticScrollAnimator::animateToOffset(FloatPoint offset)
 {
+    if (m_runState == RunState::PostAnimationCleanup)
+        resetAnimationState();
+
     m_startTime = 0.0;
     m_targetOffset = offset;
-    m_animationCurve = adoptPtr(Platform::current()->compositorSupport()->createScrollOffsetAnimationCurve(
-        m_targetOffset,
-        WebCompositorAnimationCurve::TimingFunctionTypeEaseInOut,
-        WebScrollOffsetAnimationCurve::ScrollDurationDeltaBased));
+    m_animationCurve = adoptPtr(CompositorFactory::current().createScrollOffsetAnimationCurve(
+        compositorOffsetFromBlinkOffset(m_targetOffset),
+        CompositorAnimationCurve::TimingFunctionTypeEaseInOut,
+        CompositorScrollOffsetAnimationCurve::ScrollDurationDeltaBased));
 
     m_scrollableArea->registerForAnimation();
     if (!m_scrollableArea->scheduleAnimation()) {
@@ -79,11 +78,11 @@ void ProgrammaticScrollAnimator::tickAnimation(double monotonicTime)
         m_startTime = monotonicTime;
     double elapsedTime = monotonicTime - m_startTime;
     bool isFinished = (elapsedTime > m_animationCurve->duration());
-    FloatPoint offset = m_animationCurve->getValue(elapsedTime);
+    FloatPoint offset = blinkOffsetFromCompositorOffset(m_animationCurve->getValue(elapsedTime));
     notifyPositionChanged(IntPoint(offset.x(), offset.y()));
 
     if (isFinished) {
-        resetAnimationState();
+        m_runState = RunState::PostAnimationCleanup;
     } else if (!m_scrollableArea->scheduleAnimation()) {
         notifyPositionChanged(IntPoint(m_targetOffset.x(), m_targetOffset.y()));
         resetAnimationState();
@@ -92,6 +91,13 @@ void ProgrammaticScrollAnimator::tickAnimation(double monotonicTime)
 
 void ProgrammaticScrollAnimator::updateCompositorAnimations()
 {
+    if (m_runState == RunState::PostAnimationCleanup) {
+        // No special cleanup, simply reset animation state. We have this state
+        // here because the state machine is shared with ScrollAnimator which
+        // has to do some cleanup that requires the compositing state to be clean.
+        return resetAnimationState();
+    }
+
     if (m_compositorAnimationId && m_runState != RunState::RunningOnCompositor) {
         // If the current run state is WaitingToSendToCompositor but we have a
         // non-zero compositor animation id, there's a currently running
@@ -110,27 +116,29 @@ void ProgrammaticScrollAnimator::updateCompositorAnimations()
     }
 
     if (m_runState == RunState::WaitingToSendToCompositor) {
+        if (!m_compositorAnimationAttachedToLayerId)
+            reattachCompositorPlayerIfNeeded(getScrollableArea()->compositorAnimationTimeline());
+
         bool sentToCompositor = false;
 
-        if (GraphicsLayer* layer = m_scrollableArea->layerForScrolling()) {
-            if (!layer->platformLayer()->shouldScrollOnMainThread()) {
-                OwnPtr<WebCompositorAnimation> animation = adoptPtr(Platform::current()->compositorSupport()->createAnimation(*m_animationCurve, WebCompositorAnimation::TargetPropertyScrollOffset));
+        if (!m_scrollableArea->shouldScrollOnMainThread()) {
+            OwnPtr<CompositorAnimation> animation = adoptPtr(CompositorFactory::current().createAnimation(*m_animationCurve, CompositorTargetProperty::SCROLL_OFFSET));
 
-                int animationId = animation->id();
-                int animationGroupId = animation->group();
+            int animationId = animation->id();
+            int animationGroupId = animation->group();
 
-                if (addAnimation(animation.release())) {
-                    sentToCompositor = true;
-                    m_runState = RunState::RunningOnCompositor;
-                    m_compositorAnimationId = animationId;
-                    m_compositorAnimationGroupId = animationGroupId;
-                }
+            if (addAnimation(animation.release())) {
+                sentToCompositor = true;
+                m_runState = RunState::RunningOnCompositor;
+                m_compositorAnimationId = animationId;
+                m_compositorAnimationGroupId = animationGroupId;
             }
         }
 
         if (!sentToCompositor) {
             m_runState = RunState::RunningOnMainThread;
-            m_animationCurve->setInitialValue(FloatPoint(m_scrollableArea->scrollPosition()));
+            m_animationCurve->setInitialValue(compositorOffsetFromBlinkOffset(
+                FloatPoint(m_scrollableArea->scrollPosition())));
             if (!m_scrollableArea->scheduleAnimation()) {
                 notifyPositionChanged(IntPoint(m_targetOffset.x(), m_targetOffset.y()));
                 resetAnimationState();
@@ -139,7 +147,7 @@ void ProgrammaticScrollAnimator::updateCompositorAnimations()
     }
 }
 
-void ProgrammaticScrollAnimator::layerForCompositedScrollingDidChange(WebCompositorAnimationTimeline* timeline)
+void ProgrammaticScrollAnimator::layerForCompositedScrollingDidChange(CompositorAnimationTimeline* timeline)
 {
     reattachCompositorPlayerIfNeeded(timeline);
 
@@ -149,7 +157,8 @@ void ProgrammaticScrollAnimator::layerForCompositedScrollingDidChange(WebComposi
         m_runState = RunState::RunningOnMainThread;
         m_compositorAnimationId = 0;
         m_compositorAnimationGroupId = 0;
-        m_animationCurve->setInitialValue(FloatPoint(m_scrollableArea->scrollPosition()));
+        m_animationCurve->setInitialValue(compositorOffsetFromBlinkOffset(
+            FloatPoint(m_scrollableArea->scrollPosition())));
         m_scrollableArea->registerForAnimation();
         if (!m_scrollableArea->scheduleAnimation()) {
             resetAnimationState();

@@ -33,11 +33,13 @@ using printing::PrintSettings;
 
 namespace {
 
+#if defined(USE_CUPS)
 // CUPS Duplex attribute and values.
 const char kCUPSDuplex[] = "cups-Duplex";
 const char kDuplexNone[] = "None";
 const char kDuplexTumble[] = "DuplexTumble";
 const char kDuplexNoTumble[] = "DuplexNoTumble";
+#endif
 
 int kPaperSizeTresholdMicrons = 100;
 int kMicronsInMm = 1000;
@@ -229,7 +231,7 @@ bool PrintDialogGtk2::UpdateSettings(printing::PrintSettings* settings) {
         gtk_print_settings_copy(g_last_used_settings.Get().settings());
   }
 
-  scoped_ptr<GtkPrinterList> printer_list(new GtkPrinterList);
+  std::unique_ptr<GtkPrinterList> printer_list(new GtkPrinterList);
   printer_ = printer_list->GetPrinterWithName(
       base::UTF16ToUTF8(settings->device_name()));
   if (printer_) {
@@ -328,6 +330,7 @@ void PrintDialogGtk2::ShowDialog(
     bool has_selection,
     const PrintingContextLinux::PrintSettingsCallback& callback) {
   callback_ = callback;
+  DCHECK(!callback_.is_null());
 
   dialog_ = gtk_print_unix_dialog_new(NULL, NULL);
   libgtk2ui::SetGtkTransientForAura(dialog_, parent_view);
@@ -550,5 +553,8 @@ void PrintDialogGtk2::OnWindowDestroying(aura::Window* window) {
 
   libgtk2ui::ClearAuraTransientParent(dialog_);
   window->RemoveObserver(this);
-  Release();
+  if (!callback_.is_null()) {
+    callback_.Run(PrintingContextLinux::CANCEL);
+    callback_.Reset();
+  }
 }

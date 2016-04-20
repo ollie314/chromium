@@ -12,9 +12,9 @@
 #include <map>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
-#include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
@@ -108,14 +108,16 @@ class CONTENT_EXPORT SavePackage
 
   void Finish();
 
-  // Notifications sent from the file thread to the UI thread.
+  // Notifications sent from the FILE thread to the UI thread.
   void StartSave(const SaveFileCreateInfo* info);
   bool UpdateSaveProgress(SaveItemId save_item_id,
                           int64_t size,
                           bool write_success);
+  // Called for updating end state.
   void SaveFinished(SaveItemId save_item_id, int64_t size, bool is_success);
-  void SaveCanceled(SaveItem* save_item);
+  void SaveCanceled(const SaveItem* save_item);
 
+  // Calculate the percentage of whole save page job.
   // Rough percent complete, -1 means we don't know (since we didn't receive a
   // total size).
   int PercentComplete();
@@ -150,7 +152,14 @@ class CONTENT_EXPORT SavePackage
 
   void Stop();
   void CheckFinish();
+
+  // Initiate a saving job of a specific URL. We send the request to
+  // SaveFileManager, which will dispatch it to different approach according to
+  // the save source. |process_all_remaining_items| indicates whether we need to
+  // save all remaining items.
   void SaveNextFile(bool process_all_remainder_items);
+
+  // Continue processing the save page job after one SaveItem has been finished.
   void DoSavingProcess();
 
   // WebContentsObserver implementation.
@@ -206,6 +215,7 @@ class CONTENT_EXPORT SavePackage
   // Helper for finding or creating a SaveItem with the given parameters.
   SaveItem* CreatePendingSaveItem(
       int container_frame_tree_node_id,
+      int save_item_frame_tree_node_id,
       const GURL& url,
       const Referrer& referrer,
       SaveFileCreateInfo::SaveFileSource save_source);
@@ -214,6 +224,7 @@ class CONTENT_EXPORT SavePackage
   // creating a SaveItem with the given parameters.
   SaveItem* CreatePendingSaveItemDeduplicatingByUrl(
       int container_frame_tree_node_id,
+      int save_item_frame_tree_node_id,
       const GURL& url,
       const Referrer& referrer,
       SaveFileCreateInfo::SaveFileSource save_source);
@@ -263,8 +274,7 @@ class CONTENT_EXPORT SavePackage
   void CreateDirectoryOnFileThread(const base::FilePath& website_save_dir,
                                    const base::FilePath& download_save_dir,
                                    bool skip_dir_check,
-                                   const std::string& mime_type,
-                                   const std::string& accept_langs);
+                                   const std::string& mime_type);
   void ContinueGetSaveInfo(const base::FilePath& suggested_path,
                            bool can_save_as_complete);
   void OnPathPicked(
@@ -273,10 +283,11 @@ class CONTENT_EXPORT SavePackage
       const SavePackageDownloadCreatedCallback& cb);
 
   // Map from SaveItem::id() (aka save_item_id) into a SaveItem.
-  typedef base::hash_map<SaveItemId, SaveItem*> SaveItemIdMap;
-  // in_progress_items_ is map of all saving job in in-progress state.
+  using SaveItemIdMap =
+      std::unordered_map<SaveItemId, SaveItem*, SaveItemId::Hasher>;
+  // Map of all saving job in in-progress state.
   SaveItemIdMap in_progress_items_;
-  // saved_failed_items_ is map of all saving job which are failed.
+  // Map of all saving job which are failed.
   SaveItemIdMap saved_failed_items_;
 
   // The number of in process SaveItems.
@@ -302,8 +313,7 @@ class CONTENT_EXPORT SavePackage
   // suggested name is determined by the web document's title.
   base::FilePath GetSuggestedNameForSaveAs(
       bool can_save_as_complete,
-      const std::string& contents_mime_type,
-      const std::string& accept_langs);
+      const std::string& contents_mime_type);
 
   // Ensures that the file name has a proper extension for HTML by adding ".htm"
   // if necessary.
@@ -319,7 +329,7 @@ class CONTENT_EXPORT SavePackage
   static const base::FilePath::CharType* ExtensionForMimeType(
       const std::string& contents_mime_type);
 
-  typedef std::deque<SaveItem*> SaveItemQueue;
+  using SaveItemQueue = std::deque<SaveItem*>;
   // A queue for items we are about to start saving.
   SaveItemQueue waiting_item_queue_;
 
@@ -333,23 +343,23 @@ class CONTENT_EXPORT SavePackage
   // OnSerializedHtmlWithLocalLinksResponse) to the right SaveItem.
   // Note that |frame_tree_node_id_to_save_item_| does NOT own SaveItems - they
   // remain owned by waiting_item_queue_, in_progress_items_, etc.
-  base::hash_map<int, SaveItem*> frame_tree_node_id_to_save_item_;
+  std::unordered_map<int, SaveItem*> frame_tree_node_id_to_save_item_;
 
   // Used to limit which local paths get exposed to which frames
   // (i.e. to prevent information disclosure to oop frames).
   // Note that |frame_tree_node_id_to_contained_save_items_| does NOT own
   // SaveItems - they remain owned by waiting_item_queue_, in_progress_items_,
   // etc.
-  base::hash_map<int, std::vector<SaveItem*>>
+  std::unordered_map<int, std::vector<SaveItem*>>
       frame_tree_node_id_to_contained_save_items_;
 
   // Number of frames that we still need to get a response from.
   int number_of_frames_pending_response_;
 
-  // saved_success_items_ is map of all saving job which are successfully saved.
-  base::hash_map<SaveItemId, SaveItem*> saved_success_items_;
+  // Map of all saving job which are successfully saved.
+  SaveItemIdMap saved_success_items_;
 
-  // Non-owning pointer for handling file writing on the file thread.
+  // Non-owning pointer for handling file writing on the FILE thread.
   SaveFileManager* file_manager_;
 
   // DownloadManager owns the DownloadItem and handles history and UI.
@@ -370,9 +380,6 @@ class CONTENT_EXPORT SavePackage
   // Indicates whether the actual saving job is finishing or not.
   bool finished_;
 
-  // Indicates whether a call to Finish() has been scheduled.
-  bool mhtml_finishing_;
-
   // Indicates whether user canceled the saving job.
   bool user_canceled_;
 
@@ -392,7 +399,8 @@ class CONTENT_EXPORT SavePackage
   // This set is used to eliminate duplicated file names in saving directory.
   FileNameSet file_name_set_;
 
-  typedef base::hash_map<base::FilePath::StringType, uint32_t> FileNameCountMap;
+  using FileNameCountMap =
+      std::unordered_map<base::FilePath::StringType, uint32_t>;
   // This map is used to track serial number for specified filename.
   FileNameCountMap file_name_count_map_;
 

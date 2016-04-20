@@ -96,7 +96,7 @@ LiveRegions.prototype = {
       this.outputLiveRegionChange_(node, null);
     }
 
-    if (relevant.indexOf('text') >= 0 && type == 'nodeChanged')
+    if (relevant.indexOf('text') >= 0 && type == 'textChanged')
       this.outputLiveRegionChange_(node, null);
 
     if (relevant.indexOf('removals') >= 0 && type == 'nodeRemoved')
@@ -129,7 +129,7 @@ LiveRegions.prototype = {
     output.withSpeech(range, range, Output.EventType.NAVIGATE);
 
     if (!output.hasSpeech && node.liveAtomic)
-      output.format('$descendants', node);
+      output.format('$joinedDescendants', node);
 
     output.withSpeechCategory(cvox.TtsCategory.LIVE);
 

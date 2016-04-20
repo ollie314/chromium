@@ -15,17 +15,20 @@
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/wm/common/window_positioning_utils.h"
+#include "ash/wm/common/wm_event.h"
 #include "ash/wm/default_window_resizer.h"
 #include "ash/wm/dock/docked_window_layout_manager.h"
 #include "ash/wm/dock/docked_window_resizer.h"
 #include "ash/wm/drag_window_resizer.h"
 #include "ash/wm/panels/panel_window_resizer.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/wm_event.h"
 #include "ash/wm/workspace/phantom_window_controller.h"
 #include "ash/wm/workspace/two_step_edge_cycler.h"
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/screen_position_client.h"
@@ -42,7 +45,7 @@
 
 namespace ash {
 
-scoped_ptr<WindowResizer> CreateWindowResizer(
+std::unique_ptr<WindowResizer> CreateWindowResizer(
     aura::Window* window,
     const gfx::Point& point_in_parent,
     int window_component,
@@ -53,11 +56,11 @@ scoped_ptr<WindowResizer> CreateWindowResizer(
   // resizer already exists for this window.
   if ((!window_state->CanResize() && window_component != HTCAPTION) ||
       window_state->drag_details()) {
-    return scoped_ptr<WindowResizer>();
+    return std::unique_ptr<WindowResizer>();
   }
 
   if (window_component == HTCAPTION && !window_state->can_be_dragged())
-    return scoped_ptr<WindowResizer>();
+    return std::unique_ptr<WindowResizer>();
 
   // TODO(varkha): The chaining of window resizers causes some of the logic
   // to be repeated and the logic flow difficult to control. With some windows
@@ -73,15 +76,14 @@ scoped_ptr<WindowResizer> CreateWindowResizer(
   WindowResizer* window_resizer = NULL;
 
   if (!window_state->IsNormalOrSnapped() && !window_state->IsDocked())
-    return scoped_ptr<WindowResizer>();
+    return std::unique_ptr<WindowResizer>();
 
   int bounds_change = WindowResizer::GetBoundsChangeForWindowComponent(
       window_component);
   if (bounds_change == WindowResizer::kBoundsChangeDirection_None)
-    return scoped_ptr<WindowResizer>();
+    return std::unique_ptr<WindowResizer>();
 
-  window_state->CreateDragDetails(window, point_in_parent, window_component,
-      source);
+  window_state->CreateDragDetails(point_in_parent, window_component, source);
   if (window->parent() &&
       (window->parent()->id() == kShellWindowId_DefaultContainer ||
        window->parent()->id() == kShellWindowId_DockedContainer ||
@@ -101,7 +103,7 @@ scoped_ptr<WindowResizer> CreateWindowResizer(
        window->parent()->id() == kShellWindowId_PanelContainer)) {
     window_resizer = DockedWindowResizer::Create(window_resizer, window_state);
   }
-  return make_scoped_ptr<WindowResizer>(window_resizer);
+  return base::WrapUnique<WindowResizer>(window_resizer);
 }
 
 namespace {
@@ -763,15 +765,14 @@ bool WorkspaceWindowResizer::UpdateMagnetismWindow(const gfx::Rect& bounds,
     for (aura::Window::Windows::const_reverse_iterator i = children.rbegin();
          i != children.rend() && !matcher.AreEdgesObscured(); ++i) {
       wm::WindowState* other_state = wm::GetWindowState(*i);
-      if (other_state->window() == GetTarget() ||
+      if (other_state->aura_window() == GetTarget() ||
           !other_state->window()->IsVisible() ||
-          !other_state->IsNormalOrSnapped() ||
-          !other_state->CanResize()) {
+          !other_state->IsNormalOrSnapped() || !other_state->CanResize()) {
         continue;
       }
       if (matcher.ShouldAttach(
               other_state->window()->GetBoundsInScreen(), &magnetism_edge_)) {
-        magnetism_window_ = other_state->window();
+        magnetism_window_ = other_state->aura_window();
         window_tracker_.Add(magnetism_window_);
         return true;
       }
@@ -786,7 +787,7 @@ void WorkspaceWindowResizer::AdjustBoundsForMainWindow(
   gfx::Point last_mouse_location_in_screen = last_mouse_location_;
   ::wm::ConvertPointToScreen(GetTarget()->parent(),
                              &last_mouse_location_in_screen);
-  gfx::Display display = Shell::GetScreen()->GetDisplayNearestPoint(
+  gfx::Display display = gfx::Screen::GetScreen()->GetDisplayNearestPoint(
       last_mouse_location_in_screen);
   gfx::Rect work_area =
       ScreenUtil::ConvertRectFromScreen(GetTarget()->parent(),
@@ -966,9 +967,11 @@ void WorkspaceWindowResizer::UpdateSnapPhantomWindow(const gfx::Point& location,
     phantom_bounds = ScreenUtil::ConvertRectFromScreen(
         GetTarget()->parent(), dock_layout_->dragged_bounds());
   } else {
-    phantom_bounds = (snap_type_ == SNAP_LEFT) ?
-        wm::GetDefaultLeftSnappedWindowBoundsInParent(GetTarget()) :
-        wm::GetDefaultRightSnappedWindowBoundsInParent(GetTarget());
+    phantom_bounds = (snap_type_ == SNAP_LEFT)
+                         ? wm::GetDefaultLeftSnappedWindowBoundsInParent(
+                               wm::WmWindowAura::Get(GetTarget()))
+                         : wm::GetDefaultRightSnappedWindowBoundsInParent(
+                               wm::WmWindowAura::Get(GetTarget()));
   }
 
   if (!snap_phantom_window_controller_) {

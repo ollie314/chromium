@@ -56,11 +56,11 @@ void V8Document::openMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& inf
     Document* document = V8Document::toImpl(info.Holder());
 
     if (info.Length() > 2) {
-        RefPtrWillBeRawPtr<LocalFrame> frame = document->frame();
+        LocalFrame* frame = document->frame();
         if (!frame)
             return;
         // Fetch the global object for the frame.
-        v8::Local<v8::Context> context = toV8Context(frame.get(), DOMWrapperWorld::current(info.GetIsolate()));
+        v8::Local<v8::Context> context = toV8Context(frame, DOMWrapperWorld::current(info.GetIsolate()));
         // Bail out if we cannot get the context.
         if (context.IsEmpty())
             return;
@@ -85,7 +85,7 @@ void V8Document::openMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& inf
     }
 
     ExceptionState exceptionState(ExceptionState::ExecutionContext, "open", "Document", info.Holder(), info.GetIsolate());
-    document->open(callingDOMWindow(info.GetIsolate())->document(), exceptionState);
+    document->open(enteredDOMWindow(info.GetIsolate())->document(), exceptionState);
     if (exceptionState.throwIfNeeded())
         return;
 

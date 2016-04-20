@@ -10,7 +10,6 @@
 #include <ostream>
 
 #include "base/json/json_writer.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "sync/internal_api/public/attachments/attachment_service_proxy.h"
@@ -76,6 +75,8 @@ SyncData::SyncData(int64_t id,
       immutable_entity_(entity),
       attachment_service_(attachment_service),
       is_valid_(true) {}
+
+SyncData::SyncData(const SyncData& other) = default;
 
 SyncData::~SyncData() {}
 

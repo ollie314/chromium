@@ -14,14 +14,11 @@
     box-shadow: 0px 0px 1px 0px hsla(0, 0%, 0%, 0.13);
     border-radius: 1px;
     height: 18px;
+    color: hsl(210, 16%, 22%);
 }
 
 .device-mode-size-input:focus::-webkit-input-placeholder {
     color: transparent;
-}
-
-.device-mode-size-input.error-input {
-    outline: auto 2px red;
 }
 
 .device-mode-size-input:disabled {
@@ -33,4 +30,8 @@
 .device-mode-x {
     margin: 0 1px;
     font-size: 16px;
+}
+
+.device-mode-empty-toolbar-element {
+    width: 0;
 }

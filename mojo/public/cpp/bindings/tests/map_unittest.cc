@@ -9,9 +9,9 @@
 #include <utility>
 
 #include "mojo/public/cpp/bindings/array.h"
-#include "mojo/public/cpp/bindings/lib/array_serialization.h"
 #include "mojo/public/cpp/bindings/lib/bindings_internal.h"
 #include "mojo/public/cpp/bindings/lib/fixed_buffer.h"
+#include "mojo/public/cpp/bindings/lib/serialization.h"
 #include "mojo/public/cpp/bindings/lib/validate_params.h"
 #include "mojo/public/cpp/bindings/string.h"
 #include "mojo/public/cpp/bindings/tests/container_test_util.h"
@@ -41,6 +41,23 @@ struct StringIntData {
 const size_t kStringIntDataSize = 4;
 
 using MapTest = testing::Test;
+
+// Tests null and empty maps.
+TEST_F(MapTest, NullAndEmpty) {
+  Map<char, char> map0;
+  EXPECT_TRUE(map0.empty());
+  EXPECT_FALSE(map0.is_null());
+  map0 = nullptr;
+  EXPECT_TRUE(map0.is_null());
+  EXPECT_FALSE(map0.empty());
+
+  Map<char, char> map1(nullptr);
+  EXPECT_TRUE(map1.is_null());
+  EXPECT_FALSE(map1.empty());
+  map1.SetToEmpty();
+  EXPECT_TRUE(map1.empty());
+  EXPECT_FALSE(map1.is_null());
+}
 
 // Tests that basic Map operations work.
 TEST_F(MapTest, InsertWorks) {
@@ -92,8 +109,8 @@ TEST_F(MapTest, TestIndexOperatorMoveOnly) {
   for (size_t i = 0; i < kStringIntDataSize; ++i) {
     auto it = map.find(kStringIntData[i].string_data);
     ASSERT_TRUE(it != map.end());
-    ASSERT_EQ(1u, it.GetValue().size());
-    EXPECT_EQ(kStringIntData[i].int_data, it.GetValue()[0]);
+    ASSERT_EQ(1u, it->second.size());
+    EXPECT_EQ(kStringIntData[i].int_data, it->second[0]);
   }
 }
 
@@ -173,7 +190,7 @@ TEST_F(MapTest, Insert_Copyable) {
   // std::map doesn't have a capacity() method like std::vector so this test is
   // a lot more boring.
 
-  map.reset();
+  map = nullptr;
   EXPECT_EQ(0u, CopyableType::num_instances());
 }
 
@@ -199,7 +216,7 @@ TEST_F(MapTest, Insert_MoveOnly) {
   // std::map doesn't have a capacity() method like std::vector so this test is
   // a lot more boring.
 
-  map.reset();
+  map = nullptr;
   EXPECT_EQ(0u, MoveOnlyType::num_instances());
 }
 
@@ -225,7 +242,7 @@ TEST_F(MapTest, IndexOperator_MoveOnly) {
   // std::map doesn't have a capacity() method like std::vector so this test is
   // a lot more boring.
 
-  map.reset();
+  map = nullptr;
   EXPECT_EQ(0u, MoveOnlyType::num_instances());
 }
 
@@ -266,8 +283,8 @@ TEST_F(MapTest, MapArrayClone) {
   Map<String, Array<String>> m2 = m.Clone();
 
   for (auto it = m2.begin(); it != m2.end(); ++it) {
-    ASSERT_EQ(1u, it.GetValue().size());
-    EXPECT_EQ(it.GetKey(), it.GetValue().at(0));
+    ASSERT_EQ(1u, it->second.size());
+    EXPECT_EQ(it->first, it->second.at(0));
   }
 }
 
@@ -276,12 +293,12 @@ TEST_F(MapTest, ArrayOfMap) {
     Array<Map<int32_t, int8_t>> array(1);
     array[0].insert(1, 42);
 
-    size_t size = GetSerializedSize_(array);
+    size_t size = GetSerializedSize_(array, nullptr);
     FixedBufferForTesting buf(size);
     Array_Data<Map_Data<int32_t, int8_t>*>* data;
     ArrayValidateParams validate_params(
         0, false, new ArrayValidateParams(0, false, nullptr));
-    SerializeArray_(std::move(array), &buf, &data, &validate_params);
+    SerializeArray_(std::move(array), &buf, &data, &validate_params, nullptr);
 
     Array<Map<int32_t, int8_t>> deserialized_array;
     Deserialize_(data, &deserialized_array, nullptr);
@@ -298,13 +315,13 @@ TEST_F(MapTest, ArrayOfMap) {
     map_value[1] = true;
     array[0].insert("hello world", std::move(map_value));
 
-    size_t size = GetSerializedSize_(array);
+    size_t size = GetSerializedSize_(array, nullptr);
     FixedBufferForTesting buf(size);
     Array_Data<Map_Data<String_Data*, Array_Data<bool>*>*>* data;
     ArrayValidateParams validate_params(
         0, false, new ArrayValidateParams(
                       0, false, new ArrayValidateParams(0, false, nullptr)));
-    SerializeArray_(std::move(array), &buf, &data, &validate_params);
+    SerializeArray_(std::move(array), &buf, &data, &validate_params, nullptr);
 
     Array<Map<String, Array<bool>>> deserialized_array;
     Deserialize_(data, &deserialized_array, nullptr);
@@ -314,6 +331,41 @@ TEST_F(MapTest, ArrayOfMap) {
     ASSERT_FALSE(deserialized_array[0].at("hello world")[0]);
     ASSERT_TRUE(deserialized_array[0].at("hello world")[1]);
   }
+}
+
+TEST_F(MapTest, MoveFromAndToSTLMap_Copyable) {
+  std::map<int32_t, CopyableType> map1;
+  map1.insert(std::make_pair(123, CopyableType()));
+  map1[123].ResetCopied();
+
+  Map<int32_t, CopyableType> mojo_map(std::move(map1));
+  ASSERT_EQ(1u, mojo_map.size());
+  ASSERT_NE(mojo_map.end(), mojo_map.find(123));
+  ASSERT_FALSE(mojo_map[123].copied());
+
+  std::map<int32_t, CopyableType> map2(mojo_map.PassStorage());
+  ASSERT_EQ(1u, map2.size());
+  ASSERT_NE(map2.end(), map2.find(123));
+  ASSERT_FALSE(map2[123].copied());
+
+  ASSERT_EQ(0u, mojo_map.size());
+  ASSERT_TRUE(mojo_map.is_null());
+}
+
+TEST_F(MapTest, MoveFromAndToSTLMap_MoveOnly) {
+  std::map<int32_t, MoveOnlyType> map1;
+  map1.insert(std::make_pair(123, MoveOnlyType()));
+
+  Map<int32_t, MoveOnlyType> mojo_map(std::move(map1));
+  ASSERT_EQ(1u, mojo_map.size());
+  ASSERT_NE(mojo_map.end(), mojo_map.find(123));
+
+  std::map<int32_t, MoveOnlyType> map2(mojo_map.PassStorage());
+  ASSERT_EQ(1u, map2.size());
+  ASSERT_NE(map2.end(), map2.find(123));
+
+  ASSERT_EQ(0u, mojo_map.size());
+  ASSERT_TRUE(mojo_map.is_null());
 }
 
 }  // namespace

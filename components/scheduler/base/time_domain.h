@@ -8,6 +8,7 @@
 #include <map>
 
 #include "base/callback.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -44,7 +45,17 @@ class SCHEDULER_EXPORT TimeDomain {
   // Returns a LazyNow that evaluate this TimeDomain's Now.  Can be called from
   // any thread.
   // TODO(alexclarke): Make this main thread only.
-  virtual LazyNow CreateLazyNow() = 0;
+  virtual LazyNow CreateLazyNow() const = 0;
+
+  // Evaluate this TimeDomain's Now. Can be called from any thread.
+  virtual base::TimeTicks Now() const = 0;
+
+  // Computes a runtime which is >= |time_domain_now| + |delay|. This is used to
+  // allow the TimeDomain to decide if the real or virtual time should be used
+  // when computing the task run time.  This can be called from any thread.
+  virtual base::TimeTicks ComputeDelayedRunTime(
+      base::TimeTicks time_domain_now,
+      base::TimeDelta delay) const = 0;
 
   // Some TimeDomains support virtual time, this method tells us to advance time
   // if possible and return true if time was advanced.
@@ -79,7 +90,7 @@ class SCHEDULER_EXPORT TimeDomain {
   // when this TimeDomain reaches |delayed_run_time|.
   void ScheduleDelayedWork(internal::TaskQueueImpl* queue,
                            base::TimeTicks delayed_run_time,
-                           LazyNow* lazy_now);
+                           base::TimeTicks now);
 
   // Registers the |queue|.
   void RegisterQueue(internal::TaskQueueImpl* queue);
@@ -104,7 +115,7 @@ class SCHEDULER_EXPORT TimeDomain {
   // NOTE this is only called by ScheduleDelayedWork if the scheduled runtime
   // is sooner than any previously sheduled work or if there is no other
   // scheduled work.
-  virtual void RequestWakeup(LazyNow* lazy_now, base::TimeDelta delay) = 0;
+  virtual void RequestWakeup(base::TimeTicks now, base::TimeDelta delay) = 0;
 
   // For implementation specific tracing.
   virtual void AsValueIntoInternal(
@@ -140,9 +151,7 @@ class SCHEDULER_EXPORT TimeDomain {
   // only be accessed from the main thread.
   std::set<internal::TaskQueueImpl*> updatable_queue_set_;
 
-  std::set<internal::TaskQueueImpl*> registered_task_queues_;
-
-  Observer* observer_;
+  Observer* observer_;  // NOT OWNED.
 
   base::ThreadChecker main_thread_checker_;
 

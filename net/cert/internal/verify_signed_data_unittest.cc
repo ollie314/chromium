@@ -4,6 +4,7 @@
 
 #include "net/cert/internal/verify_signed_data.h"
 
+#include <memory>
 #include <set>
 
 #include "net/cert/internal/signature_algorithm.h"
@@ -60,7 +61,7 @@ void RunTestCaseUsingPolicy(VerifyResult expected_result,
 
   ASSERT_TRUE(ReadTestDataFromPemFile(path, mappings));
 
-  scoped_ptr<SignatureAlgorithm> signature_algorithm =
+  std::unique_ptr<SignatureAlgorithm> signature_algorithm =
       SignatureAlgorithm::CreateFromDer(der::Input(&algorithm));
   ASSERT_TRUE(signature_algorithm);
 
@@ -101,9 +102,7 @@ TEST(VerifySignedDataTest, Rsa2048Pkcs1Sha512) {
 }
 
 TEST(VerifySignedDataTest, RsaPkcs1Sha256KeyEncodedBer) {
-  // TODO(eroman): This should fail! (SPKI should be DER-encoded). See
-  // https://crbug.com/522228
-  RunTestCase(SUCCESS, "rsa-pkcs1-sha256-key-encoded-ber.pem");
+  RunTestCase(FAILURE, "rsa-pkcs1-sha256-key-encoded-ber.pem");
 }
 
 TEST(VerifySignedDataTest, EcdsaSecp384r1Sha256) {
@@ -175,9 +174,7 @@ TEST(VerifySignedDataTest, EcdsaPrime256v1Sha512UsingEcmqvKey) {
 }
 
 TEST(VerifySignedDataTest, RsaPkcs1Sha1KeyParamsAbsent) {
-  // TODO(eroman): This should fail! (key algoritm parsing is too permissive)
-  // See https://crbug.com/522228
-  RunTestCase(SUCCESS, "rsa-pkcs1-sha1-key-params-absent.pem");
+  RunTestCase(FAILURE, "rsa-pkcs1-sha1-key-params-absent.pem");
 }
 
 TEST(VerifySignedDataTest, RsaPssSha1Salt20UsingPssKeyNoParams) {
@@ -211,15 +208,11 @@ TEST(VerifySignedDataTest, EcdsaPrime256v1Sha512SpkiParamsNull) {
 }
 
 TEST(VerifySignedDataTest, RsaPkcs1Sha256UsingIdEaRsa) {
-  // TODO(eroman): This should fail! (shouldn't recognize this weird OID).
-  // See https://crbug.com/522228
-  RunTestCase(SUCCESS, "rsa-pkcs1-sha256-using-id-ea-rsa.pem");
+  RunTestCase(FAILURE, "rsa-pkcs1-sha256-using-id-ea-rsa.pem");
 }
 
 TEST(VerifySignedDataTest, RsaPkcs1Sha256SpkiNonNullParams) {
-  // TODO(eroman): This should fail! (shouldn't recognize bogus params in rsa
-  // SPKI). See https://crbug.com/522228
-  RunTestCase(SUCCESS, "rsa-pkcs1-sha256-spki-non-null-params.pem");
+  RunTestCase(FAILURE, "rsa-pkcs1-sha256-spki-non-null-params.pem");
 }
 
 TEST(VerifySignedDataTest, EcdsaPrime256v1Sha512UnusedBitsSignature) {

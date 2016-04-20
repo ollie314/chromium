@@ -6,14 +6,15 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <set>
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "cc/test/test_context_provider.h"
+#include "cc/test/test_gpu_memory_buffer_manager.h"
 #include "cc/test/test_web_graphics_context_3d.h"
-#include "content/browser/compositor/gpu_surfaceless_browser_compositor_output_surface.h"
-#include "content/browser/gpu/browser_gpu_memory_buffer_manager.h"
-#include "content/common/gpu/client/gl_helper.h"
+#include "content/browser/compositor/gl_helper.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -50,19 +51,24 @@ class StubGpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
   }
 };
 
-class StubBrowserGpuMemoryBufferManager : public BrowserGpuMemoryBufferManager {
+class StubGpuMemoryBufferManager : public cc::TestGpuMemoryBufferManager {
  public:
-  StubBrowserGpuMemoryBufferManager()
-      : BrowserGpuMemoryBufferManager(1, 1), allocate_succeeds_(true) {}
+  StubGpuMemoryBufferManager() : allocate_succeeds_(true) {}
 
   void set_allocate_succeeds(bool value) { allocate_succeeds_ = value; }
 
-  scoped_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBufferForScanout(
+  std::unique_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBuffer(
       const gfx::Size& size,
       gfx::BufferFormat format,
+      gfx::BufferUsage usage,
       int32_t surface_id) override {
+    if (!surface_id) {
+      return TestGpuMemoryBufferManager::AllocateGpuMemoryBuffer(
+          size, format, usage, surface_id);
+    }
     if (allocate_succeeds_)
-      return make_scoped_ptr<gfx::GpuMemoryBuffer>(new StubGpuMemoryBufferImpl);
+      return base::WrapUnique<gfx::GpuMemoryBuffer>(
+          new StubGpuMemoryBufferImpl);
     return nullptr;
   }
 
@@ -73,7 +79,7 @@ class StubBrowserGpuMemoryBufferManager : public BrowserGpuMemoryBufferManager {
 class MockBufferQueue : public BufferQueue {
  public:
   MockBufferQueue(scoped_refptr<cc::ContextProvider> context_provider,
-                  BrowserGpuMemoryBufferManager* gpu_memory_buffer_manager,
+                  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
                   unsigned int target,
                   unsigned int internalformat)
       : BufferQueue(context_provider,
@@ -94,11 +100,11 @@ class BufferQueueTest : public ::testing::Test {
     InitWithContext(cc::TestWebGraphicsContext3D::Create());
   }
 
-  void InitWithContext(scoped_ptr<cc::TestWebGraphicsContext3D> context) {
+  void InitWithContext(std::unique_ptr<cc::TestWebGraphicsContext3D> context) {
     scoped_refptr<cc::TestContextProvider> context_provider =
         cc::TestContextProvider::Create(std::move(context));
     context_provider->BindToCurrentThread();
-    gpu_memory_buffer_manager_.reset(new StubBrowserGpuMemoryBufferManager);
+    gpu_memory_buffer_manager_.reset(new StubGpuMemoryBufferManager);
     mock_output_surface_ =
         new MockBufferQueue(context_provider, gpu_memory_buffer_manager_.get(),
                             GL_TEXTURE_2D, GL_RGBA);
@@ -111,11 +117,12 @@ class BufferQueueTest : public ::testing::Test {
                ? output_surface_->current_surface_->image
                : 0;
   }
-  const std::vector<scoped_ptr<BufferQueue::AllocatedSurface>>&
+  const std::vector<std::unique_ptr<BufferQueue::AllocatedSurface>>&
   available_surfaces() {
     return output_surface_->available_surfaces_;
   }
-  std::deque<scoped_ptr<BufferQueue::AllocatedSurface>>& in_flight_surfaces() {
+  std::deque<std::unique_ptr<BufferQueue::AllocatedSurface>>&
+  in_flight_surfaces() {
     return output_surface_->in_flight_surfaces_;
   }
 
@@ -178,8 +185,8 @@ class BufferQueueTest : public ::testing::Test {
     return true;
   }
 
-  scoped_ptr<StubBrowserGpuMemoryBufferManager> gpu_memory_buffer_manager_;
-  scoped_ptr<BufferQueue> output_surface_;
+  std::unique_ptr<StubGpuMemoryBufferManager> gpu_memory_buffer_manager_;
+  std::unique_ptr<BufferQueue> output_surface_;
   MockBufferQueue* mock_output_surface_;
   bool doublebuffering_;
   bool first_frame_;
@@ -217,23 +224,23 @@ class BufferQueueMockedContextTest : public BufferQueueTest {
  public:
   void SetUp() override {
     context_ = new MockedContext();
-    InitWithContext(scoped_ptr<cc::TestWebGraphicsContext3D>(context_));
+    InitWithContext(std::unique_ptr<cc::TestWebGraphicsContext3D>(context_));
   }
 
  protected:
   MockedContext* context_;
 };
 
-scoped_ptr<BufferQueue> CreateOutputSurfaceWithMock(
+std::unique_ptr<BufferQueue> CreateOutputSurfaceWithMock(
     unsigned int target,
     MockedContext** context,
-    BrowserGpuMemoryBufferManager* gpu_memory_buffer_manager) {
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager) {
   *context = new MockedContext();
   scoped_refptr<cc::TestContextProvider> context_provider =
       cc::TestContextProvider::Create(
-          scoped_ptr<cc::TestWebGraphicsContext3D>(*context));
+          std::unique_ptr<cc::TestWebGraphicsContext3D>(*context));
   context_provider->BindToCurrentThread();
-  scoped_ptr<BufferQueue> buffer_queue(
+  std::unique_ptr<BufferQueue> buffer_queue(
       new BufferQueue(context_provider, target, GL_RGBA, nullptr,
                       gpu_memory_buffer_manager, 1));
   buffer_queue->Initialize();
@@ -242,9 +249,9 @@ scoped_ptr<BufferQueue> CreateOutputSurfaceWithMock(
 
 TEST(BufferQueueStandaloneTest, FboInitialization) {
   MockedContext* context;
-  scoped_ptr<BrowserGpuMemoryBufferManager> gpu_memory_buffer_manager(
-      new StubBrowserGpuMemoryBufferManager);
-  scoped_ptr<BufferQueue> output_surface = CreateOutputSurfaceWithMock(
+  std::unique_ptr<StubGpuMemoryBufferManager> gpu_memory_buffer_manager(
+      new StubGpuMemoryBufferManager);
+  std::unique_ptr<BufferQueue> output_surface = CreateOutputSurfaceWithMock(
       GL_TEXTURE_2D, &context, gpu_memory_buffer_manager.get());
 
   EXPECT_CALL(*context, bindFramebuffer(GL_FRAMEBUFFER, Ne(0U)));
@@ -259,9 +266,9 @@ TEST(BufferQueueStandaloneTest, FboBinding) {
   for (size_t i = 0; i < 2; ++i) {
     GLenum target = targets[i];
     MockedContext* context;
-    scoped_ptr<BrowserGpuMemoryBufferManager> gpu_memory_buffer_manager(
-        new StubBrowserGpuMemoryBufferManager);
-    scoped_ptr<BufferQueue> output_surface = CreateOutputSurfaceWithMock(
+    std::unique_ptr<StubGpuMemoryBufferManager> gpu_memory_buffer_manager(
+        new StubGpuMemoryBufferManager);
+    std::unique_ptr<BufferQueue> output_surface = CreateOutputSurfaceWithMock(
         target, &context, gpu_memory_buffer_manager.get());
     EXPECT_CALL(*context, bindTexture(target, Ne(0U)));
     EXPECT_CALL(*context, destroyImageCHROMIUM(1));
@@ -285,14 +292,14 @@ TEST(BufferQueueStandaloneTest, FboBinding) {
 }
 
 TEST(BufferQueueStandaloneTest, CheckBoundFramebuffer) {
-  scoped_ptr<BrowserGpuMemoryBufferManager> gpu_memory_buffer_manager;
-  scoped_ptr<BufferQueue> output_surface;
+  std::unique_ptr<StubGpuMemoryBufferManager> gpu_memory_buffer_manager;
+  std::unique_ptr<BufferQueue> output_surface;
   scoped_refptr<cc::TestContextProvider> context_provider =
       cc::TestContextProvider::Create(cc::TestWebGraphicsContext3D::Create());
   context_provider->BindToCurrentThread();
-  gpu_memory_buffer_manager.reset(new StubBrowserGpuMemoryBufferManager);
+  gpu_memory_buffer_manager.reset(new StubGpuMemoryBufferManager);
 
-  scoped_ptr<GLHelper> gl_helper;
+  std::unique_ptr<GLHelper> gl_helper;
   gl_helper.reset(new GLHelper(context_provider->ContextGL(),
                                context_provider->ContextSupport()));
 

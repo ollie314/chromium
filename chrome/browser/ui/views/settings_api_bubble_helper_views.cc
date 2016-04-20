@@ -11,12 +11,12 @@
 #include "chrome/browser/extensions/settings_api_bubble_delegate.h"
 #include "chrome/browser/extensions/settings_api_helpers.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/extensions/extension_message_bubble_bridge.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/views/extensions/extension_message_bubble_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/settings_api_bubble_helper_views.h"
 #include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/home_button.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_actions_bar_bubble_views.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/extensions/manifest_handlers/settings_overrides_handler.h"
 #include "chrome/common/url_constants.h"
@@ -31,15 +31,19 @@ void ShowSettingsApiBubble(SettingsApiOverrideType type,
                            Browser* browser,
                            views::View* anchor_view,
                            views::BubbleBorder::Arrow arrow) {
-  scoped_ptr<ExtensionMessageBubbleController> settings_api_bubble(
+  std::unique_ptr<ExtensionMessageBubbleController> settings_api_bubble(
       new ExtensionMessageBubbleController(
           new SettingsApiBubbleDelegate(browser->profile(), type), browser));
   if (!settings_api_bubble->ShouldShow())
     return;
 
-  ExtensionMessageBubbleView* bubble = new ExtensionMessageBubbleView(
-      anchor_view, arrow, std::move(settings_api_bubble));
-  views::BubbleDelegateView::CreateBubble(bubble);
+  // TODO(devlin): This should go through the ToolbarActionsBar.
+  ToolbarActionsBarBubbleViews* bubble = new ToolbarActionsBarBubbleViews(
+      anchor_view,
+      std::unique_ptr<ToolbarActionsBarBubbleDelegate>(
+          new ExtensionMessageBubbleBridge(std::move(settings_api_bubble))));
+  bubble->set_arrow(arrow);
+  views::BubbleDialogDelegateView::CreateBubble(bubble);
   bubble->Show();
 }
 
@@ -62,13 +66,13 @@ void MaybeShowExtensionControlledHomeNotification(Browser* browser) {
 void MaybeShowExtensionControlledSearchNotification(
     Profile* profile,
     content::WebContents* web_contents,
-    const AutocompleteMatch& match) {
+    AutocompleteMatch::Type match_type) {
 #if !defined(OS_WIN)
   return;
 #endif
 
-  if (AutocompleteMatch::IsSearchType(match.type) &&
-      match.type != AutocompleteMatchType::SEARCH_OTHER_ENGINE) {
+  if (AutocompleteMatch::IsSearchType(match_type) &&
+      match_type != AutocompleteMatchType::SEARCH_OTHER_ENGINE) {
     Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
     ToolbarView* toolbar =
         BrowserView::GetBrowserViewForBrowser(browser)->toolbar();
@@ -102,18 +106,21 @@ void MaybeShowExtensionControlledNewTabPage(
   if (ntp_url != active_url)
     return;  // Not being overridden by an extension.
 
-  scoped_ptr<ExtensionMessageBubbleController> ntp_overridden_bubble(
+  std::unique_ptr<ExtensionMessageBubbleController> ntp_overridden_bubble(
       new ExtensionMessageBubbleController(
           new NtpOverriddenBubbleDelegate(browser->profile()), browser));
   if (!ntp_overridden_bubble->ShouldShow())
     return;
 
-  ExtensionMessageBubbleView* bubble = new ExtensionMessageBubbleView(
+  ToolbarActionsBarBubbleViews* bubble =
+      new ToolbarActionsBarBubbleViews(
       BrowserView::GetBrowserViewForBrowser(browser)
           ->toolbar()
           ->app_menu_button(),
-      views::BubbleBorder::TOP_RIGHT, std::move(ntp_overridden_bubble));
-  views::BubbleDelegateView::CreateBubble(bubble);
+      std::unique_ptr<ToolbarActionsBarBubbleDelegate>(
+          new ExtensionMessageBubbleBridge(std::move(ntp_overridden_bubble))));
+  bubble->set_arrow(views::BubbleBorder::TOP_RIGHT);
+  views::BubbleDialogDelegateView::CreateBubble(bubble);
   bubble->Show();
 }
 

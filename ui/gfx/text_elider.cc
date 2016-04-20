@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -19,7 +20,6 @@
 #include "base/i18n/char_iterator.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
@@ -198,7 +198,7 @@ base::string16 ElideText(const base::string16& text,
                          ElideBehavior behavior) {
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
   DCHECK_NE(behavior, FADE_TAIL);
-  scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
+  std::unique_ptr<RenderText> render_text(RenderText::CreateInstance());
   render_text->SetCursorEnabled(false);
   // TODO(bshe): 5000 is out dated. We should remove it. See crbug.com/551660.
   // Do not bother accurately sizing strings over 5000 characters here, for
@@ -259,10 +259,9 @@ base::string16 ElideText(const base::string16& text,
 }
 
 bool ElideString(const base::string16& input,
-                 int max_len,
+                 size_t max_len,
                  base::string16* output) {
-  DCHECK_GE(max_len, 0);
-  if (static_cast<int>(input.length()) <= max_len) {
+  if (input.length() <= max_len) {
     output->assign(input);
     return false;
   }
@@ -571,7 +570,7 @@ void RectangleText::AddString(const base::string16& input) {
       // The BREAK_NEWLINE iterator will keep the trailing newline character,
       // except in the case of the last line, which may not have one.  Remove
       // the newline character, if it exists.
-      last_line_ended_in_lf_ = !line.empty() && line[line.length() - 1] == '\n';
+      last_line_ended_in_lf_ = !line.empty() && line.back() == '\n';
       if (last_line_ended_in_lf_)
         line.resize(line.length() - 1);
       AddLine(line);
@@ -774,7 +773,7 @@ base::string16 TruncateString(const base::string16& string,
   if (word_break) {
     // Use a word iterator to find the first boundary.
     UErrorCode status = U_ZERO_ERROR;
-    scoped_ptr<icu::BreakIterator> bi(
+    std::unique_ptr<icu::BreakIterator> bi(
         icu::RuleBasedBreakIterator::createWordInstance(
             icu::Locale::getDefault(), status));
     if (U_FAILURE(status))

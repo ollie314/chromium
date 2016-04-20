@@ -71,11 +71,11 @@ FocusController::FocusController(FocusControllerDelegate* delegate,
 FocusController::~FocusController() {
 }
 
-void FocusController::SetFocusedWindow(ServerWindow* window) {
+bool FocusController::SetFocusedWindow(ServerWindow* window) {
   if (GetFocusedWindow() == window)
-    return;
+    return true;
 
-  SetFocusedWindowImpl(FocusControllerChangeSource::EXPLICIT, window);
+  return SetFocusedWindowImpl(FocusControllerChangeSource::EXPLICIT, window);
 }
 
 ServerWindow* FocusController::GetFocusedWindow() {
@@ -177,6 +177,9 @@ bool FocusController::CanBeActivated(ServerWindow* window) const {
   if (!delegate_->CanHaveActiveChildren(window->parent()))
     return false;
 
+  if (!window->can_focus())
+    return false;
+
   // The window must be drawn, or if it's not drawn, it must be minimized.
   if (!window->IsDrawn()) {
     bool is_minimized = false;
@@ -184,7 +187,7 @@ bool FocusController::CanBeActivated(ServerWindow* window) const {
     if (props.count(mojom::WindowManager::kShowState_Property)) {
       is_minimized =
           props.find(mojom::WindowManager::kShowState_Property)->second[0] ==
-          mus::mojom::SHOW_STATE_MINIMIZED;
+          static_cast<int>(mus::mojom::ShowState::MINIMIZED);
     }
     if (!is_minimized)
       return false;
@@ -204,11 +207,12 @@ ServerWindow* FocusController::GetActivatableAncestorOf(
   return nullptr;
 }
 
-void FocusController::SetFocusedWindowImpl(
+bool FocusController::SetFocusedWindowImpl(
     FocusControllerChangeSource change_source,
     ServerWindow* window) {
   if (window && !CanBeFocused(window))
-    return;
+    return false;
+
   ServerWindow* old_focused = GetFocusedWindow();
 
   DCHECK(!window || window->IsDrawn());
@@ -235,17 +239,24 @@ void FocusController::SetFocusedWindowImpl(
     drawn_tracker_.reset(new ServerWindowDrawnTracker(track_window, this));
   else
     drawn_tracker_.reset();
+  return true;
 }
 
 void FocusController::OnDrawnStateWillChange(ServerWindow* ancestor,
                                              ServerWindow* window,
                                              bool is_drawn) {
   DCHECK(!is_drawn);
+  DCHECK_NE(ancestor, window);
   DCHECK(root_->Contains(window));
   drawn_tracker_.reset();
 
-  auto will_be_hidden = [ancestor, window](ServerWindow* w) {
-    return w != ancestor && ancestor->Contains(w) && w->Contains(window);
+  // Find the window that triggered this state-change notification.
+  ServerWindow* trigger = window;
+  while (trigger->parent() != ancestor)
+    trigger = trigger->parent();
+  DCHECK(trigger);
+  auto will_be_hidden = [trigger](ServerWindow* w) {
+    return trigger->Contains(w);
   };
 
   // If |window| is |active_window_|, then activate the next activatable window
@@ -293,7 +304,7 @@ void FocusController::OnDrawnStateWillChange(ServerWindow* ancestor,
 void FocusController::OnDrawnStateChanged(ServerWindow* ancestor,
                                           ServerWindow* window,
                                           bool is_drawn) {
-  DCHECK(false);
+  // DCHECK(false);  TODO(sadrul):
 }
 
 }  // namespace ws

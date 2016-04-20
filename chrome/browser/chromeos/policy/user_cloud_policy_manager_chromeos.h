@@ -5,13 +5,13 @@
 #ifndef CHROME_BROWSER_CHROMEOS_POLICY_USER_CLOUD_POLICY_MANAGER_CHROMEOS_H_
 #define CHROME_BROWSER_CHROMEOS_POLICY_USER_CLOUD_POLICY_MANAGER_CHROMEOS_H_
 
+#include <memory>
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -53,8 +53,8 @@ class UserCloudPolicyManagerChromeOS : public CloudPolicyManager,
   // |io_task_runner| is used for network IO. Currently this must be the IO
   // BrowserThread.
   UserCloudPolicyManagerChromeOS(
-      scoped_ptr<CloudPolicyStore> store,
-      scoped_ptr<CloudExternalDataManager> external_data_manager,
+      std::unique_ptr<CloudPolicyStore> store,
+      std::unique_ptr<CloudExternalDataManager> external_data_manager,
       const base::FilePath& component_policy_cache_path,
       bool wait_for_policy_fetch,
       base::TimeDelta initial_policy_fetch_timeout,
@@ -132,16 +132,18 @@ class UserCloudPolicyManagerChromeOS : public CloudPolicyManager,
 
   // Cancels waiting for the policy fetch and flags the
   // ConfigurationPolicyProvider ready (assuming all other initialization tasks
-  // have completed).
-  void CancelWaitForPolicyFetch();
+  // have completed). Pass |true| if policy fetch was successful (either
+  // because policy was successfully fetched, or if DMServer has notified us
+  // that the user is not managed).
+  void CancelWaitForPolicyFetch(bool success);
 
   void StartRefreshSchedulerIfReady();
 
   // Owns the store, note that CloudPolicyManager just keeps a plain pointer.
-  scoped_ptr<CloudPolicyStore> store_;
+  std::unique_ptr<CloudPolicyStore> store_;
 
   // Manages external data referenced by policies.
-  scoped_ptr<CloudExternalDataManager> external_data_manager_;
+  std::unique_ptr<CloudExternalDataManager> external_data_manager_;
 
   // Username for the wildcard login check if applicable, empty otherwise.
   std::string wildcard_username_;
@@ -153,6 +155,11 @@ class UserCloudPolicyManagerChromeOS : public CloudPolicyManager,
   // IsInitializationComplete().
   bool wait_for_policy_fetch_;
 
+  // Whether we should allow policy fetches to fail, or wait forever until they
+  // succeed (typically we won't allow them to fail until we have loaded policy
+  // at least once).
+  bool allow_failed_policy_fetches_;
+
   // A timer that puts a hard limit on the maximum time to wait for the initial
   // policy fetch.
   base::Timer policy_fetch_timeout_;
@@ -162,10 +169,10 @@ class UserCloudPolicyManagerChromeOS : public CloudPolicyManager,
 
   // Used to fetch the policy OAuth token, when necessary. This object holds
   // a callback with an unretained reference to the manager, when it exists.
-  scoped_ptr<PolicyOAuth2TokenFetcher> token_fetcher_;
+  std::unique_ptr<PolicyOAuth2TokenFetcher> token_fetcher_;
 
   // Keeps alive the wildcard checker while its running.
-  scoped_ptr<WildcardLoginChecker> wildcard_login_checker_;
+  std::unique_ptr<WildcardLoginChecker> wildcard_login_checker_;
 
   // The access token passed to OnAccessTokenAvailable. It is stored here so
   // that it can be used if OnInitializationCompleted is called later.

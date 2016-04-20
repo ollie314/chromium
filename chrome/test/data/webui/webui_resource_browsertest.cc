@@ -74,6 +74,15 @@ IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, CrTest) {
   LoadFile(base::FilePath(FILE_PATH_LITERAL("cr_test.html")));
 }
 
+IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, CrReloadTest) {
+  AddLibrary(IDR_WEBUI_JS_CR);
+  AddLibrary(IDR_WEBUI_JS_CR_UI);
+  // Loading cr.js again on purpose to check whether it overwrites the cr
+  // namespace.
+  AddLibrary(IDR_WEBUI_JS_CR);
+  LoadFile(base::FilePath(FILE_PATH_LITERAL("cr_reload_test.html")));
+}
+
 IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, EventTargetTest) {
   AddLibrary(IDR_WEBUI_JS_CR);
   AddLibrary(IDR_WEBUI_JS_CR_EVENT_TARGET);
@@ -217,4 +226,22 @@ IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, MenuButtonTest) {
   AddLibrary(IDR_WEBUI_JS_CR_UI_MENU_BUTTON);
   AddLibrary(IDR_WEBUI_JS_CR_UI_MENU);
   LoadFile(base::FilePath(FILE_PATH_LITERAL("menu_button_test.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, SplitterTest) {
+  AddLibrary(IDR_WEBUI_JS_CR);
+  AddLibrary(IDR_WEBUI_JS_CR_UI);
+  AddLibrary(IDR_WEBUI_JS_CR_UI_SPLITTER);
+  LoadFile(base::FilePath(FILE_PATH_LITERAL("splitter_test.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, UtilTest) {
+  AddLibrary(IDR_WEBUI_JS_UTIL);
+  LoadFile(base::FilePath(FILE_PATH_LITERAL("util_test.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, PromiseResolverTest) {
+  AddLibrary(IDR_WEBUI_JS_ASSERT);
+  AddLibrary(IDR_WEBUI_JS_PROMISE_RESOLVER);
+  LoadFile(base::FilePath(FILE_PATH_LITERAL("promise_resolver_test.html")));
 }

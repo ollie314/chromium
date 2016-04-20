@@ -222,8 +222,13 @@ import java.util.UUID;
     }
 
     @Override
-    public void releaseMediaPlayers() {
-        nativeReleaseMediaPlayers(mNativeWebContentsAndroid);
+    public void suspendAllMediaPlayers() {
+        nativeSuspendAllMediaPlayers(mNativeWebContentsAndroid);
+    }
+
+    @Override
+    public void setAudioMuted(boolean mute) {
+        nativeSetAudioMuted(mNativeWebContentsAndroid, mute);
     }
 
     @Override
@@ -290,6 +295,7 @@ import java.util.UUID;
 
     @Override
     public String getUrl() {
+        if (isDestroyed()) return null;
         return nativeGetURL(mNativeWebContentsAndroid);
     }
 
@@ -310,13 +316,14 @@ import java.util.UUID;
 
     @Override
     public void evaluateJavaScript(String script, JavaScriptCallback callback) {
-        if (isDestroyed()) return;
+        if (isDestroyed() || script == null) return;
         nativeEvaluateJavaScript(mNativeWebContentsAndroid, script, callback);
     }
 
     @Override
     @VisibleForTesting
     public void evaluateJavaScriptForTests(String script, JavaScriptCallback callback) {
+        if (script == null) return;
         nativeEvaluateJavaScriptForTests(mNativeWebContentsAndroid, script, callback);
     }
 
@@ -436,7 +443,7 @@ import java.util.UUID;
     public void getContentBitmapAsync(Bitmap.Config config, float scale, Rect srcRect,
             ContentBitmapCallback callback) {
         nativeGetContentBitmap(mNativeWebContentsAndroid, callback, config, scale,
-                srcRect.top, srcRect.left, srcRect.width(), srcRect.height());
+                srcRect.left, srcRect.top, srcRect.width(), srcRect.height());
     }
 
     @Override
@@ -463,6 +470,11 @@ import java.util.UUID;
         callback.onFinishGetBitmap(bitmap, response);
     }
 
+    @Override
+    public void reloadLoFiImages() {
+        nativeReloadLoFiImages(mNativeWebContentsAndroid);
+    }
+
     // This is static to avoid exposing a public destroy method on the native side of this class.
     private static native void nativeDestroyWebContents(long webContentsAndroidPtr);
 
@@ -482,7 +494,8 @@ import java.util.UUID;
     private native void nativeInsertCSS(long nativeWebContentsAndroid, String css);
     private native void nativeOnHide(long nativeWebContentsAndroid);
     private native void nativeOnShow(long nativeWebContentsAndroid);
-    private native void nativeReleaseMediaPlayers(long nativeWebContentsAndroid);
+    private native void nativeSuspendAllMediaPlayers(long nativeWebContentsAndroid);
+    private native void nativeSetAudioMuted(long nativeWebContentsAndroid, boolean mute);
     private native int nativeGetBackgroundColor(long nativeWebContentsAndroid);
     private native void nativeShowInterstitialPage(long nativeWebContentsAndroid,
             String url, long nativeInterstitialPageDelegateAndroid);
@@ -522,4 +535,5 @@ import java.util.UUID;
             ContentBitmapCallback callback, Bitmap.Config config, float scale,
             float x, float y, float width, float height);
     private native void nativeOnContextMenuClosed(long nativeWebContentsAndroid);
+    private native void nativeReloadLoFiImages(long nativeWebContentsAndroid);
 }

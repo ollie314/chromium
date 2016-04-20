@@ -38,8 +38,7 @@ class MdDownloadsDOMHandler : public content::WebUIMessageHandler {
 
   // WebUIMessageHandler implementation.
   void RegisterMessages() override;
-
-  void RenderViewReused(content::RenderViewHost* render_view_host);
+  void RenderViewReused() override;
 
   // Callback for the "getDownloads" message.
   void HandleGetDownloads(const base::ListValue* args);
@@ -129,6 +128,9 @@ class MdDownloadsDOMHandler : public content::WebUIMessageHandler {
 
   // Remove all downloads in |to_remove| with the ability to undo removal later.
   void RemoveDownloads(const DownloadVector& to_remove);
+
+  // Checks whether a download's file was removed from its original location.
+  void CheckForRemovedFiles();
 
   DownloadsListTracker list_tracker_;
 

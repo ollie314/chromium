@@ -6,9 +6,9 @@
 #define CHROME_BROWSER_UI_WEBUI_SETTINGS_SETTINGS_STARTUP_PAGES_HANDLER_H_
 
 #include "base/macros.h"
-#include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/custom_home_pages_table_model.h"
-#include "chrome/browser/ui/webui/settings/md_settings_ui.h"
+#include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "ui/base/models/table_model_observer.h"
 
 namespace base {
@@ -28,8 +28,9 @@ class StartupPagesHandler : public SettingsPageUIHandler,
   explicit StartupPagesHandler(content::WebUI* webui);
   ~StartupPagesHandler() override;
 
-  // OptionsPageUIHandler:
+  // SettingsPageUIHandler:
   void RegisterMessages() override;
+  void RenderViewReused() override;
 
   // ui::TableModelObserver:
   void OnModelChanged() override;
@@ -39,20 +40,26 @@ class StartupPagesHandler : public SettingsPageUIHandler,
 
  private:
   // Adds a startup page with the given URL after the given index.
-  // Called from WebUI.
-  void AddStartupPage(const base::ListValue* args);
+  void HandleAddStartupPage(const base::ListValue* args);
 
-  // Informs the code that the JS page has loaded. Called from WebUI.
-  void OnStartupPrefsPageLoad(const base::ListValue* args);
+  // Changes the startup page at the given index to the given URL.
+  void HandleEditStartupPage(const base::ListValue* args);
 
-  // Removes the startup page at the given index. Called from WebUI.
-  void RemoveStartupPage(const base::ListValue* args);
+  // Informs the code that the JS page has loaded.
+  void HandleOnStartupPrefsPageLoad(const base::ListValue* args);
+
+  // Removes the startup page at the given index.
+  void HandleRemoveStartupPage(const base::ListValue* args);
+
+  // Sets the startup page set to the current pages.
+  void HandleSetStartupPagesToCurrentPages(const base::ListValue* args);
+
+  // Handles the "validateStartupPage" message. Passed a URL that might be a
+  // valid startup page.
+  void HandleValidateStartupPage(const base::ListValue* args);
 
   // Stores the current state of the startup page preferences.
   void SaveStartupPagesPref();
-
-  // Sets the startup page set to the current pages. Called from WebUI.
-  void SetStartupPagesToCurrentPages(const base::ListValue* args);
 
   // Informs the that the preferences have changed.  It is a callback
   // for the pref changed registrar.

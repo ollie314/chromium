@@ -4,15 +4,12 @@
 
 #include "ash/test/shell_test_api.h"
 
+#include "ash/display/display_configuration_controller.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_state_delegate.h"
 #include "ash/shelf/shelf_delegate.h"
 #include "ash/shell.h"
-
-#if defined(OS_CHROMEOS)
-#include "ash/display/display_animator.h"
-#include "ui/display/chromeos/display_configurator.h"
-#endif
+#include "ash/shell_delegate.h"
 
 namespace ash {
 namespace test {
@@ -47,18 +44,12 @@ DragDropController* ShellTestApi::drag_drop_controller() {
   return shell_->drag_drop_controller_.get();
 }
 
-AppListController* ShellTestApi::app_list_controller() {
-  return shell_->app_list_controller_.get();
+app_list::AppListPresenter* ShellTestApi::app_list_presenter() {
+  return shell_->delegate_->GetAppListPresenter();
 }
 
 void ShellTestApi::DisableDisplayAnimator() {
-#if defined(OS_CHROMEOS)
-  if (shell_->display_animator_) {
-    shell_->display_configurator_->RemoveObserver(
-        shell_->display_animator_.get());
-    shell_->display_animator_.reset();
-  }
-#endif  // defined(OS_CHROMEOS)
+  shell_->display_configuration_controller()->ResetAnimatorForTest();
 }
 
 void ShellTestApi::SetShelfDelegate(ShelfDelegate* delegate) {

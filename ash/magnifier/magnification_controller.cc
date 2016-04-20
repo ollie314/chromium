@@ -4,6 +4,7 @@
 
 #include "ash/magnifier/magnification_controller.h"
 
+#include <memory>
 #include <utility>
 
 #include "ash/accelerators/accelerator_controller.h"
@@ -372,8 +373,8 @@ bool MagnificationControllerImpl::RedrawDIP(const gfx::PointF& position_in_dip,
       base::TimeDelta::FromMilliseconds(duration_in_ms));
 
   gfx::Display display =
-      Shell::GetScreen()->GetDisplayNearestWindow(root_window_);
-  scoped_ptr<RootWindowTransformer> transformer(
+      gfx::Screen::GetScreen()->GetDisplayNearestWindow(root_window_);
+  std::unique_ptr<RootWindowTransformer> transformer(
       CreateRootWindowTransformerForDisplay(root_window_, display));
   GetRootWindowController(root_window_)
       ->ash_host()
@@ -671,7 +672,7 @@ void MagnificationControllerImpl::OnScrollEvent(ui::ScrollEvent* event) {
     }
 
     if (event->type() == ui::ET_SCROLL) {
-      ui::ScrollEvent* scroll_event = static_cast<ui::ScrollEvent*>(event);
+      ui::ScrollEvent* scroll_event = event->AsScrollEvent();
       float scale = GetScale();
       scale += scroll_event->y_offset() * kScrollScaleChangeFactor;
       SetScale(scale, true);
@@ -816,7 +817,7 @@ void MagnificationControllerImpl::OnCaretBoundsChanged(
 
   caret_point_ = caret_bounds.CenterPoint();
   // |caret_point_| in |root_window_| coordinates.
-  wm::ConvertPointFromScreen(root_window_, &caret_point_);
+  ::wm::ConvertPointFromScreen(root_window_, &caret_point_);
 
   // If the feature for centering the text input focus is disabled, the
   // magnifier window will be moved to follow the focus with a panning margin.

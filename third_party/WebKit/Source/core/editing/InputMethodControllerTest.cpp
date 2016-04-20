@@ -26,14 +26,14 @@ private:
     void SetUp() override;
 
     OwnPtr<DummyPageHolder> m_dummyPageHolder;
-    RefPtrWillBePersistent<HTMLDocument> m_document;
+    Persistent<HTMLDocument> m_document;
 };
 
 void InputMethodControllerTest::SetUp()
 {
     m_dummyPageHolder = DummyPageHolder::create(IntSize(800, 600));
     m_document = toHTMLDocument(&m_dummyPageHolder->document());
-    ASSERT(m_document);
+    DCHECK(m_document);
 }
 
 Element* InputMethodControllerTest::insertHTMLElement(
@@ -97,11 +97,11 @@ TEST_F(InputMethodControllerTest, SetCompositionFromExistingText)
     underlines.append(CompositionUnderline(0, 5, Color(255, 0, 0), false, 0));
     controller().setCompositionFromExistingText(underlines, 0, 5);
 
-    RefPtrWillBeRawPtr<Range> range = controller().compositionRange();
+    Range* range = controller().compositionRange();
     EXPECT_EQ(0, range->startOffset());
     EXPECT_EQ(5, range->endOffset());
 
-    PlainTextRange plainTextRange(PlainTextRange::create(*div, *range.get()));
+    PlainTextRange plainTextRange(PlainTextRange::create(*div, *range));
     EXPECT_EQ(0u, plainTextRange.start());
     EXPECT_EQ(5u, plainTextRange.end());
 }
@@ -157,11 +157,11 @@ TEST_F(InputMethodControllerTest, SetCompositionFromExistingTextWithCollapsedWhi
     underlines.append(CompositionUnderline(0, 5, Color(255, 0, 0), false, 0));
     controller().setCompositionFromExistingText(underlines, 0, 5);
 
-    RefPtrWillBeRawPtr<Range> range = controller().compositionRange();
+    Range* range = controller().compositionRange();
     EXPECT_EQ(1, range->startOffset());
     EXPECT_EQ(6, range->endOffset());
 
-    PlainTextRange plainTextRange(PlainTextRange::create(*div, *range.get()));
+    PlainTextRange plainTextRange(PlainTextRange::create(*div, *range));
     EXPECT_EQ(0u, plainTextRange.start());
     EXPECT_EQ(5u, plainTextRange.end());
 }

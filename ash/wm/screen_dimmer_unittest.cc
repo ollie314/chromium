@@ -4,11 +4,12 @@
 
 #include "ash/wm/screen_dimmer.h"
 
+#include <memory>
+
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/dim_window.h"
-#include "base/memory/scoped_ptr.h"
 //#include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/compositor/layer.h"
@@ -63,7 +64,13 @@ TEST_F(ScreenDimmerTest, DimAndUndim) {
   ASSERT_EQ(nullptr, GetDimWindowLayer());
 }
 
-TEST_F(ScreenDimmerTest, ResizeLayer) {
+#if defined(OS_WIN) && !defined(USE_ASH)
+// TODO(msw): Times out on Windows. http://crbug.com/584038
+#define MAYBE_ResizeLayer DISABLED_ResizeLayer
+#else
+#define MAYBE_ResizeLayer ResizeLayer
+#endif
+TEST_F(ScreenDimmerTest, MAYBE_ResizeLayer) {
   // The dimming layer should be initially sized to cover the root window.
   dimmer_->SetDimming(true);
   ui::Layer* dimming_layer = GetDimWindowLayer();
@@ -89,7 +96,7 @@ TEST_F(ScreenDimmerTest, RootDimmer) {
 TEST_F(ScreenDimmerTest, DimAtBottom) {
   ScreenDimmer* root_dimmer = ScreenDimmer::GetForRoot();
   aura::Window* root_window = Shell::GetPrimaryRootWindow();
-  scoped_ptr<aura::Window> window(
+  std::unique_ptr<aura::Window> window(
       aura::test::CreateTestWindowWithId(1, root_window));
   root_dimmer->SetDimming(true);
   std::vector<aura::Window*>::const_iterator dim_iter =

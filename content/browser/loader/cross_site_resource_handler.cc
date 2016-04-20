@@ -63,13 +63,13 @@ struct CrossSiteResponseParams {
 };
 
 void OnCrossSiteResponseHelper(const CrossSiteResponseParams& params) {
-  scoped_ptr<CrossSiteTransferringRequest> cross_site_transferring_request(
+  std::unique_ptr<CrossSiteTransferringRequest> cross_site_transferring_request(
       new CrossSiteTransferringRequest(params.global_request_id));
 
   RenderFrameHostImpl* rfh =
       RenderFrameHostImpl::FromID(params.global_request_id.child_id,
                                   params.render_frame_id);
-  if (rfh) {
+  if (rfh && rfh->is_active()) {
     if (rfh->GetParent()) {
       // We should only swap processes for subframes in --site-per-process mode.
       // CrossSiteResourceHandler is not installed on subframe requests in
@@ -80,7 +80,7 @@ void OnCrossSiteResponseHelper(const CrossSiteResponseParams& params) {
         params.global_request_id, std::move(cross_site_transferring_request),
         params.transfer_url_chain, params.referrer, params.page_transition,
         params.should_replace_current_entry);
-  } else if (leak_requests_for_testing_ && cross_site_transferring_request) {
+  } else if (leak_requests_for_testing_) {
     // Some unit tests expect requests to be leaked in this case, so they can
     // pass them along manually.
     cross_site_transferring_request->ReleaseRequest();
@@ -97,7 +97,7 @@ CheckNavigationPolicyOnUI(GURL real_url, int process_id, int render_frame_id) {
   // Without a valid RFH against which to check, we must cancel the request,
   // to prevent the resource at |url| from being delivered to a potentially
   // unsuitable renderer process.
-  if (!rfh)
+  if (!rfh || !rfh->is_active())
     return CrossSiteResourceHandler::NavigationDecision::CANCEL_REQUEST;
 
   RenderFrameHostManager* manager = rfh->frame_tree_node()->render_manager();
@@ -110,7 +110,7 @@ CheckNavigationPolicyOnUI(GURL real_url, int process_id, int render_frame_id) {
 }  // namespace
 
 CrossSiteResourceHandler::CrossSiteResourceHandler(
-    scoped_ptr<ResourceHandler> next_handler,
+    std::unique_ptr<ResourceHandler> next_handler,
     net::URLRequest* request)
     : LayeredResourceHandler(request, std::move(next_handler)),
       has_started_response_(false),
@@ -327,7 +327,8 @@ void CrossSiteResourceHandler::StartCrossSiteTransition(
   int render_frame_id = info->GetRenderFrameID();
   transfer_url_chain = request()->url_chain();
   referrer = Referrer(GURL(request()->referrer()), info->GetReferrerPolicy());
-  ResourceDispatcherHostImpl::Get()->MarkAsTransferredNavigation(global_id);
+  ResourceDispatcherHostImpl::Get()->MarkAsTransferredNavigation(global_id,
+                                                                 response_);
 
   BrowserThread::PostTask(
       BrowserThread::UI,

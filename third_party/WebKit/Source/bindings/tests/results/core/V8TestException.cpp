@@ -9,11 +9,8 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
-#include "core/dom/ContextFeatures.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalDOMWindow.h"
-#include "platform/RuntimeEnabledFeatures.h"
-#include "platform/TraceEvent.h"
 #include "wtf/GetPtr.h"
 #include "wtf/RefPtr.h"
 
@@ -25,7 +22,7 @@ namespace blink {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo V8TestException::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestException::domTemplate, V8TestException::refObject, V8TestException::derefObject, V8TestException::trace, 0, 0, V8TestException::preparePrototypeAndInterfaceObject, V8TestException::installConditionallyEnabledProperties, "TestException", 0, WrapperTypeInfo::WrapperTypeExceptionPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestException::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestException::domTemplate, V8TestException::trace, 0, 0, V8TestException::preparePrototypeAndInterfaceObject, V8TestException::installConditionallyEnabledProperties, "TestException", 0, WrapperTypeInfo::WrapperTypeExceptionPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
 #endif
@@ -46,9 +43,7 @@ static void readonlyUnsignedShortAttributeAttributeGetter(const v8::FunctionCall
 
 static void readonlyUnsignedShortAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestExceptionV8Internal::readonlyUnsignedShortAttributeAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void readonlyStringAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -60,9 +55,7 @@ static void readonlyStringAttributeAttributeGetter(const v8::FunctionCallbackInf
 
 static void readonlyStringAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestExceptionV8Internal::readonlyStringAttributeAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void toStringMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -73,9 +66,7 @@ static void toStringMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
 
 static void toStringMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
     TestExceptionV8Internal::toStringMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -92,7 +83,7 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
         if (exceptionState.throwIfNeeded())
             return;
     }
-    RefPtr<TestException> impl = TestException::create(argument);
+    TestException* impl = TestException::create(argument);
     v8::Local<v8::Object> wrapper = info.Holder();
     wrapper = impl->associateWithWrapper(info.GetIsolate(), &V8TestException::wrapperTypeInfo, wrapper);
     v8SetReturnValue(info, wrapper);
@@ -101,8 +92,8 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
 } // namespace TestExceptionV8Internal
 
 const V8DOMConfiguration::AccessorConfiguration V8TestExceptionAccessors[] = {
-    {"readonlyUnsignedShortAttribute", TestExceptionV8Internal::readonlyUnsignedShortAttributeAttributeGetterCallback, 0, 0, 0, 0, v8::DEFAULT, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder},
-    {"readonlyStringAttribute", TestExceptionV8Internal::readonlyStringAttributeAttributeGetterCallback, 0, 0, 0, 0, v8::DEFAULT, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder},
+    {"readonlyUnsignedShortAttribute", TestExceptionV8Internal::readonlyUnsignedShortAttributeAttributeGetterCallback, 0, 0, 0, 0, v8::DEFAULT, static_cast<v8::PropertyAttribute>(v8::ReadOnly), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder},
+    {"readonlyStringAttribute", TestExceptionV8Internal::readonlyStringAttributeAttributeGetterCallback, 0, 0, 0, 0, v8::DEFAULT, static_cast<v8::PropertyAttribute>(v8::ReadOnly), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder},
 };
 
 const V8DOMConfiguration::MethodConfiguration V8TestExceptionMethods[] = {
@@ -111,7 +102,6 @@ const V8DOMConfiguration::MethodConfiguration V8TestExceptionMethods[] = {
 
 void V8TestException::constructorCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SCOPED_SAMPLING_STATE("blink", "DOMConstructor");
     if (!info.IsConstructCall()) {
         V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::constructorNotCallableAsFunction("TestException"));
         return;
@@ -125,30 +115,30 @@ void V8TestException::constructorCallback(const v8::FunctionCallbackInfo<v8::Val
     TestExceptionV8Internal::constructor(info);
 }
 
-static void installV8TestExceptionTemplate(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+static void installV8TestExceptionTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world, v8::Local<v8::FunctionTemplate> interfaceTemplate)
 {
-    functionTemplate->ReadOnlyPrototype();
-
-    v8::Local<v8::Signature> defaultSignature;
-    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "TestException", v8::Local<v8::FunctionTemplate>(), V8TestException::internalFieldCount,
-        0, 0,
-        V8TestExceptionAccessors, WTF_ARRAY_LENGTH(V8TestExceptionAccessors),
-        V8TestExceptionMethods, WTF_ARRAY_LENGTH(V8TestExceptionMethods));
-    functionTemplate->SetCallHandler(V8TestException::constructorCallback);
-    functionTemplate->SetLength(1);
-    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    // Initialize the interface object's template.
+    V8DOMConfiguration::initializeDOMInterfaceTemplate(isolate, interfaceTemplate, V8TestException::wrapperTypeInfo.interfaceName, v8::Local<v8::FunctionTemplate>(), V8TestException::internalFieldCount);
+    interfaceTemplate->SetCallHandler(V8TestException::constructorCallback);
+    interfaceTemplate->SetLength(1);
+    v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
+    ALLOW_UNUSED_LOCAL(signature);
+    v8::Local<v8::ObjectTemplate> instanceTemplate = interfaceTemplate->InstanceTemplate();
     ALLOW_UNUSED_LOCAL(instanceTemplate);
-    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = interfaceTemplate->PrototypeTemplate();
     ALLOW_UNUSED_LOCAL(prototypeTemplate);
+    // Register DOM constants, attributes and operations.
     const V8DOMConfiguration::ConstantConfiguration V8TestExceptionConstants[] = {
         {"UNSIGNED_SHORT_CONSTANT", 1, 0, V8DOMConfiguration::ConstantTypeUnsignedShort},
     };
-    V8DOMConfiguration::installConstants(isolate, functionTemplate, prototypeTemplate, V8TestExceptionConstants, WTF_ARRAY_LENGTH(V8TestExceptionConstants));
+    V8DOMConfiguration::installConstants(isolate, interfaceTemplate, prototypeTemplate, V8TestExceptionConstants, WTF_ARRAY_LENGTH(V8TestExceptionConstants));
+    V8DOMConfiguration::installAccessors(isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate, signature, V8TestExceptionAccessors, WTF_ARRAY_LENGTH(V8TestExceptionAccessors));
+    V8DOMConfiguration::installMethods(isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate, signature, V8TestExceptionMethods, WTF_ARRAY_LENGTH(V8TestExceptionMethods));
 }
 
-v8::Local<v8::FunctionTemplate> V8TestException::domTemplate(v8::Isolate* isolate)
+v8::Local<v8::FunctionTemplate> V8TestException::domTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world)
 {
-    return V8DOMConfiguration::domClassTemplate(isolate, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestExceptionTemplate);
+    return V8DOMConfiguration::domClassTemplate(isolate, world, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestExceptionTemplate);
 }
 
 bool V8TestException::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
@@ -164,16 +154,6 @@ v8::Local<v8::Object> V8TestException::findInstanceInPrototypeChain(v8::Local<v8
 TestException* V8TestException::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
     return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
-}
-
-void V8TestException::refObject(ScriptWrappable* scriptWrappable)
-{
-    scriptWrappable->toImpl<TestException>()->ref();
-}
-
-void V8TestException::derefObject(ScriptWrappable* scriptWrappable)
-{
-    scriptWrappable->toImpl<TestException>()->deref();
 }
 
 } // namespace blink

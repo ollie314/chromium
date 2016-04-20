@@ -27,6 +27,7 @@
 #include "core/css/resolver/ElementResolveContext.h"
 #include "core/css/resolver/MatchRequest.h"
 #include "core/css/resolver/MatchResult.h"
+#include "wtf/RefCounted.h"
 #include "wtf/RefPtr.h"
 #include "wtf/Vector.h"
 
@@ -39,8 +40,9 @@ class RuleSet;
 class SelectorFilter;
 class StaticCSSRuleList;
 
+// TODO(kochi): CascadeOrder is used only for Shadow DOM V0 bug-compatible cascading order.
+//              Once Shadow DOM V0 implementation is gone, remove this completely.
 using CascadeOrder = unsigned;
-
 const CascadeOrder ignoreCascadeOrder = 0;
 
 class MatchedRule {
@@ -54,7 +56,7 @@ public:
         ASSERT(m_ruleData);
         static const unsigned BitsForPositionInRuleData = 18;
         static const unsigned BitsForStyleSheetIndex = 32;
-        m_position = ((uint64_t)cascadeOrder << (BitsForStyleSheetIndex + BitsForPositionInRuleData)) + ((uint64_t)styleSheetIndex << BitsForPositionInRuleData)+ m_ruleData->position();
+        m_position = ((uint64_t)cascadeOrder << (BitsForStyleSheetIndex + BitsForPositionInRuleData)) + ((uint64_t)styleSheetIndex << BitsForPositionInRuleData) + m_ruleData->position();
     }
 
     const RuleData* ruleData() const { return m_ruleData; }
@@ -67,14 +69,14 @@ public:
     }
 
 private:
-    // FIXME: Oilpan: RuleData is in the oilpan heap and this pointer
+    // TODO(Oilpan): RuleData is in the oilpan heap and this pointer
     // really should be traced. However, RuleData objects are
     // allocated inside larger TerminatedArray objects and we cannot
     // trace a raw rule data pointer at this point.
     const RuleData* m_ruleData;
     unsigned m_specificity;
     uint64_t m_position;
-    RawPtrWillBeMember<const CSSStyleSheet> m_parentStyleSheet;
+    Member<const CSSStyleSheet> m_parentStyleSheet;
 };
 
 } // namespace blink
@@ -83,20 +85,7 @@ WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::MatchedRule);
 
 namespace blink {
 
-#if ENABLE(OILPAN)
 using StyleRuleList = HeapVector<Member<StyleRule>>;
-#else
-class StyleRuleList final : public RefCounted<StyleRuleList> {
-public:
-    static PassRefPtr<StyleRuleList> create() { return adoptRef(new StyleRuleList()); }
-
-    void append(StyleRule* rule) { m_list.append(rule); }
-    StyleRule* at(size_t index) const { return m_list[index]; }
-    size_t size() const { return m_list.size(); }
-
-    Vector<StyleRule*> m_list;
-};
-#endif
 
 // ElementRuleCollector is designed to be used as a stack object.
 // Create one, ask what rules the ElementResolveContext matches
@@ -117,8 +106,8 @@ public:
     bool hasAnyMatchingRules(RuleSet*);
 
     const MatchResult& matchedResult() const;
-    PassRefPtrWillBeRawPtr<StyleRuleList> matchedStyleRuleList();
-    PassRefPtrWillBeRawPtr<CSSRuleList> matchedCSSRuleList();
+    StyleRuleList* matchedStyleRuleList();
+    CSSRuleList* matchedCSSRuleList();
 
     void collectMatchingRules(const MatchRequest&, CascadeOrder = ignoreCascadeOrder, bool matchingTreeBoundaryRules = false);
     void collectMatchingShadowHostRules(const MatchRequest&, CascadeOrder = ignoreCascadeOrder);
@@ -129,6 +118,7 @@ public:
     void finishAddingAuthorRulesForTreeScope() { m_result.finishAddingAuthorRulesForTreeScope(); }
     void setIncludeEmptyRules(bool include) { m_includeEmptyRules = include; }
     bool includeEmptyRules() const { return m_includeEmptyRules; }
+    bool isCollectingForPseudoElement() const { return m_pseudoStyleRequest.pseudoId != PseudoIdNone; }
 
 private:
     template<typename RuleDataListType>
@@ -157,11 +147,11 @@ private:
     bool m_matchingUARules;
     bool m_includeEmptyRules;
 
-    WillBeHeapVector<MatchedRule, 32> m_matchedRules;
+    HeapVector<MatchedRule, 32> m_matchedRules;
 
     // Output.
-    RefPtrWillBeMember<StaticCSSRuleList> m_cssRuleList;
-    RefPtrWillBeMember<StyleRuleList> m_styleRuleList;
+    Member<StaticCSSRuleList> m_cssRuleList;
+    Member<StyleRuleList> m_styleRuleList;
     MatchResult m_result;
 };
 

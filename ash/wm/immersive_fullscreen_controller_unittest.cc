@@ -11,13 +11,16 @@
 #include "ash/shelf/shelf_types.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/display_manager_test_api.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/display/manager/display_layout.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/events/test/test_event_handler.h"
@@ -104,9 +107,7 @@ class ImmersiveFullscreenControllerTest : public ash::test::AshTestBase {
   };
 
   ImmersiveFullscreenControllerTest()
-      : widget_(NULL),
-        top_container_(NULL),
-        content_view_(NULL) {}
+      : widget_(nullptr), top_container_(nullptr), content_view_(nullptr) {}
   ~ImmersiveFullscreenControllerTest() override {}
 
   ImmersiveFullscreenController* controller() {
@@ -250,8 +251,8 @@ class ImmersiveFullscreenControllerTest : public ash::test::AshTestBase {
     }
   }
 
-  scoped_ptr<ImmersiveFullscreenController> controller_;
-  scoped_ptr<MockImmersiveFullscreenControllerDelegate> delegate_;
+  std::unique_ptr<ImmersiveFullscreenController> controller_;
+  std::unique_ptr<MockImmersiveFullscreenControllerDelegate> delegate_;
   views::Widget* widget_;  // Owned by the native widget.
   views::View* top_container_;  // Owned by |widget_|'s root-view.
   views::NativeViewHost* content_view_;  // Owned by |widget_|'s root-view.
@@ -290,8 +291,8 @@ TEST_F(ImmersiveFullscreenControllerTest, Delegate) {
 
 // GetRevealedLock() specific tests.
 TEST_F(ImmersiveFullscreenControllerTest, RevealedLock) {
-  scoped_ptr<ImmersiveRevealedLock> lock1;
-  scoped_ptr<ImmersiveRevealedLock> lock2;
+  std::unique_ptr<ImmersiveRevealedLock> lock1;
+  std::unique_ptr<ImmersiveRevealedLock> lock2;
 
   // Immersive fullscreen is not on by default.
   EXPECT_FALSE(controller()->IsEnabled());
@@ -444,9 +445,7 @@ TEST_F(ImmersiveFullscreenControllerTest, OnMouseEvent) {
 TEST_F(ImmersiveFullscreenControllerTest, Inactive) {
   // Set up initial state.
   views::Widget* popup_widget = views::Widget::CreateWindowWithContextAndBounds(
-      NULL,
-      CurrentContext(),
-      gfx::Rect(0, 0, 200, 200));
+      nullptr, CurrentContext(), gfx::Rect(0, 0, 200, 200));
   popup_widget->Show();
   ASSERT_FALSE(top_container()->GetWidget()->IsActive());
 
@@ -506,9 +505,8 @@ TEST_F(ImmersiveFullscreenControllerTest, MouseEventsVerticalDisplayLayout) {
 
   // Set up initial state.
   UpdateDisplay("800x600,800x600");
-  ash::DisplayLayout display_layout(ash::DisplayLayout::TOP, 0);
   ash::Shell::GetInstance()->display_manager()->SetLayoutForCurrentDisplays(
-      display_layout);
+      test::CreateDisplayLayout(display::DisplayPlacement::TOP, 0));
 
   SetEnabled(true);
   ASSERT_TRUE(controller()->IsEnabled());
@@ -574,9 +572,7 @@ TEST_F(ImmersiveFullscreenControllerTest, MouseEventsVerticalDisplayLayout) {
   // Test that it is possible to reveal the top-of-window views by overshooting
   // the top edge slightly when the top container's widget is not active.
   views::Widget* popup_widget = views::Widget::CreateWindowWithContextAndBounds(
-      NULL,
-      CurrentContext(),
-      gfx::Rect(0, 200, 100, 100));
+      nullptr, CurrentContext(), gfx::Rect(0, 200, 100, 100));
   popup_widget->Show();
   ASSERT_FALSE(top_container()->GetWidget()->IsActive());
   ASSERT_FALSE(top_container()->GetBoundsInScreen().Intersects(
@@ -589,7 +585,7 @@ TEST_F(ImmersiveFullscreenControllerTest, MouseEventsVerticalDisplayLayout) {
 // Test behavior when the mouse becomes hovered without moving.
 TEST_F(ImmersiveFullscreenControllerTest, MouseHoveredWithoutMoving) {
   SetEnabled(true);
-  scoped_ptr<ImmersiveRevealedLock> lock;
+  std::unique_ptr<ImmersiveRevealedLock> lock;
 
   // 1) Test that if the mouse becomes hovered without the mouse moving due to a
   // lock causing the top-of-window views to be revealed (and the mouse
@@ -699,7 +695,7 @@ TEST_F(ImmersiveFullscreenControllerTest, MAYBE_EndRevealViaGesture) {
   // If some other code is holding onto a lock, a gesture should not be able to
   // end the reveal.
   AttemptReveal(MODALITY_MOUSE);
-  scoped_ptr<ImmersiveRevealedLock> lock(controller()->GetRevealedLock(
+  std::unique_ptr<ImmersiveRevealedLock> lock(controller()->GetRevealedLock(
       ImmersiveFullscreenController::ANIMATE_REVEAL_NO));
   EXPECT_TRUE(controller()->IsRevealed());
   AttemptUnreveal(MODALITY_GESTURE_SCROLL);
@@ -717,11 +713,9 @@ TEST_F(ImmersiveFullscreenControllerTest, RevealViaGestureChildConsumesEvents) {
   EXPECT_FALSE(controller()->IsRevealed());
 
   aura::test::TestWindowDelegate child_delegate;
-  scoped_ptr<aura::Window> child(
-      CreateTestWindowInShellWithDelegateAndType(&child_delegate,
-                                                 ui::wm::WINDOW_TYPE_CONTROL,
-                                                 1234,
-                                                 gfx::Rect()));
+  std::unique_ptr<aura::Window> child(
+      CreateTestWindowInShellWithDelegateAndType(
+          &child_delegate, ui::wm::WINDOW_TYPE_CONTROL, 1234, gfx::Rect()));
   content_view()->Attach(child.get());
   child->Show();
 
@@ -745,7 +739,7 @@ TEST_F(ImmersiveFullscreenControllerTest, RevealViaGestureChildConsumesEvents) {
 TEST_F(ImmersiveFullscreenControllerTest, EventsDoNotLeakToWindowUnderneath) {
   gfx::Rect window_bounds = window()->GetBoundsInScreen();
   aura::test::TestWindowDelegate child_delegate;
-  scoped_ptr<aura::Window> behind(CreateTestWindowInShellWithDelegate(
+  std::unique_ptr<aura::Window> behind(CreateTestWindowInShellWithDelegate(
       &child_delegate, 1234, window_bounds));
   behind->Show();
   behind->SetBounds(window_bounds);
@@ -845,7 +839,7 @@ TEST_F(ImmersiveFullscreenControllerTest, Focus) {
   child_view->RequestFocus();
   EXPECT_TRUE(controller()->IsRevealed());
   SetEnabled(false);
-  scoped_ptr<ImmersiveRevealedLock> lock(controller()->GetRevealedLock(
+  std::unique_ptr<ImmersiveRevealedLock> lock(controller()->GetRevealedLock(
       ImmersiveFullscreenController::ANIMATE_REVEAL_NO));
   EXPECT_FALSE(controller()->IsRevealed());
   unrelated_view->RequestFocus();
@@ -871,7 +865,7 @@ TEST_F(ImmersiveFullscreenControllerTest, Transient) {
       views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   transient_params.parent = top_container_widget->GetNativeView();
   transient_params.bounds = gfx::Rect(0, 100, 100, 100);
-  scoped_ptr<views::Widget> transient_widget(new views::Widget());
+  std::unique_ptr<views::Widget> transient_widget(new views::Widget());
   transient_widget->Init(transient_params);
 
   EXPECT_FALSE(controller()->IsRevealed());
@@ -890,7 +884,7 @@ TEST_F(ImmersiveFullscreenControllerTest, Transient) {
       views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   non_transient_params.context = top_container_widget->GetNativeView();
   non_transient_params.bounds = gfx::Rect(0, 100, 100, 100);
-  scoped_ptr<views::Widget> non_transient_widget(new views::Widget());
+  std::unique_ptr<views::Widget> non_transient_widget(new views::Widget());
   non_transient_widget->Init(non_transient_params);
 
   EXPECT_FALSE(controller()->IsRevealed());
@@ -903,7 +897,7 @@ TEST_F(ImmersiveFullscreenControllerTest, Transient) {
 
 // Test how bubbles affect whether the top-of-window views are revealed.
 TEST_F(ImmersiveFullscreenControllerTest, Bubbles) {
-  scoped_ptr<ImmersiveRevealedLock> revealed_lock;
+  std::unique_ptr<ImmersiveRevealedLock> revealed_lock;
   views::Widget* top_container_widget = top_container()->GetWidget();
 
   // Add views to the view hierarchy to which we will anchor bubbles.

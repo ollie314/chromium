@@ -7,18 +7,13 @@
 #include <stddef.h>
 
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-
-#if defined(ENABLE_CONFIGURATION_POLICY)
 #include "chrome/browser/policy/cloud/user_policy_signin_service.h"
 #include "chrome/browser/policy/cloud/user_policy_signin_service_factory.h"
-#endif
-
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
-#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_window.h"
@@ -39,8 +34,10 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_metrics.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "content/public/browser/user_metrics.h"
 #include "net/base/url_util.h"
@@ -89,11 +86,11 @@ OneClickSigninSyncStarter::OneClickSigninSyncStarter(
     : content::WebContentsObserver(web_contents),
       profile_(NULL),
       start_mode_(start_mode),
-      desktop_type_(chrome::HOST_DESKTOP_TYPE_NATIVE),
       confirmation_required_(confirmation_required),
       current_url_(current_url),
       continue_url_(continue_url),
       sync_setup_completed_callback_(sync_setup_completed_callback),
+      first_account_added_to_cookie_(false),
       weak_pointer_factory_(this) {
   DCHECK(profile);
   DCHECK(web_contents || continue_url.is_empty());
@@ -130,14 +127,6 @@ void OneClickSigninSyncStarter::Initialize(Profile* profile, Browser* browser) {
 
   LoginUIServiceFactory::GetForProfile(profile_)->AddObserver(this);
 
-  // Cache the parent desktop for the browser, so we can reuse that same
-  // desktop for any UI we want to display.
-  if (browser) {
-    desktop_type_ = browser->host_desktop_type();
-  } else {
-    desktop_type_ = chrome::GetActiveDesktop();
-  }
-
   signin_tracker_ = SigninTrackerFactory::CreateForProfile(profile_, this);
 
   // Let the sync service know that setup is in progress so it doesn't start
@@ -158,7 +147,6 @@ void OneClickSigninSyncStarter::ConfirmSignin(const std::string& oauth_token) {
   // If this is a new signin (no account authenticated yet) try loading
   // policy for this user now, before any signed in services are initialized.
   if (!signin->IsAuthenticated()) {
-#if defined(ENABLE_CONFIGURATION_POLICY)
     policy::UserPolicySigninService* policy_service =
         policy::UserPolicySigninServiceFactory::GetForProfile(profile_);
     policy_service->RegisterForPolicy(
@@ -167,9 +155,6 @@ void OneClickSigninSyncStarter::ConfirmSignin(const std::string& oauth_token) {
         base::Bind(&OneClickSigninSyncStarter::OnRegisteredForPolicy,
                    weak_pointer_factory_.GetWeakPtr()));
     return;
-#else
-    ConfirmAndSignin();
-#endif
   } else {
     // The user is already signed in - just tell SigninManager to continue
     // with its re-auth flow.
@@ -177,10 +162,9 @@ void OneClickSigninSyncStarter::ConfirmSignin(const std::string& oauth_token) {
   }
 }
 
-#if defined(ENABLE_CONFIGURATION_POLICY)
 OneClickSigninSyncStarter::SigninDialogDelegate::SigninDialogDelegate(
     base::WeakPtr<OneClickSigninSyncStarter> sync_starter)
-  : sync_starter_(sync_starter) {
+    : sync_starter_(sync_starter) {
 }
 
 OneClickSigninSyncStarter::SigninDialogDelegate::~SigninDialogDelegate() {
@@ -232,7 +216,7 @@ void OneClickSigninSyncStarter::OnRegisteredForPolicy(
   client_id_ = client_id;
 
   // Allow user to create a new profile before continuing with sign-in.
-  browser_ = EnsureBrowser(browser_, profile_, desktop_type_);
+  browser_ = EnsureBrowser(browser_, profile_);
   content::WebContents* web_contents =
       browser_->tab_strip_model()->GetActiveWebContents();
   if (!web_contents) {
@@ -281,17 +265,16 @@ void OneClickSigninSyncStarter::CreateNewSignedInProfile() {
   // Create a new profile and have it call back when done so we can inject our
   // signin credentials.
   size_t icon_index = g_browser_process->profile_manager()->
-      GetProfileInfoCache().ChooseAvatarIconIndexForNewProfile();
+      GetProfileAttributesStorage().ChooseAvatarIconIndexForNewProfile();
   ProfileManager::CreateMultiProfileAsync(
       base::UTF8ToUTF16(signin->GetUsernameForAuthInProgress()),
       profiles::GetDefaultAvatarIconUrl(icon_index),
       base::Bind(&OneClickSigninSyncStarter::CompleteInitForNewProfile,
-                 weak_pointer_factory_.GetWeakPtr(), desktop_type_),
+                 weak_pointer_factory_.GetWeakPtr()),
       std::string());
 }
 
 void OneClickSigninSyncStarter::CompleteInitForNewProfile(
-    chrome::HostDesktopType desktop_type,
     Profile* new_profile,
     Profile::CreateStatus status) {
   DCHECK_NE(profile_, new_profile);
@@ -330,7 +313,8 @@ void OneClickSigninSyncStarter::CompleteInitForNewProfile(
       // the signin for the original profile was cancelled (must do this after
       // we have called Initialize() with the new profile, as otherwise this
       // object will get freed when the signin on the old profile is cancelled.
-      old_signin_manager->SignOut(signin_metrics::TRANSFER_CREDENTIALS);
+      old_signin_manager->SignOut(signin_metrics::TRANSFER_CREDENTIALS,
+                                  signin_metrics::SignoutDelete::IGNORE_METRIC);
 
       // Load policy for the just-created profile - once policy has finished
       // loading the signin process will complete.
@@ -341,7 +325,6 @@ void OneClickSigninSyncStarter::CompleteInitForNewProfile(
         new_profile,
         chrome::startup::IS_PROCESS_STARTUP,
         chrome::startup::IS_FIRST_RUN,
-        desktop_type,
         false);
       break;
     }
@@ -354,11 +337,11 @@ void OneClickSigninSyncStarter::CompleteInitForNewProfile(
     }
   }
 }
-#endif
 
 void OneClickSigninSyncStarter::CancelSigninAndDelete() {
-  SigninManagerFactory::GetForProfile(profile_)->SignOut(
-      signin_metrics::ABORT_SIGNIN);
+  SigninManagerFactory::GetForProfile(profile_)
+      ->SignOut(signin_metrics::ABORT_SIGNIN,
+                signin_metrics::SignoutDelete::IGNORE_METRIC);
   // The statement above results in a call to SigninFailed() which will free
   // this object, so do not refer to the OneClickSigninSyncStarter object
   // after this point.
@@ -367,14 +350,12 @@ void OneClickSigninSyncStarter::CancelSigninAndDelete() {
 void OneClickSigninSyncStarter::ConfirmAndSignin() {
   SigninManager* signin = SigninManagerFactory::GetForProfile(profile_);
   if (confirmation_required_ == CONFIRM_UNTRUSTED_SIGNIN) {
-    browser_ = EnsureBrowser(browser_, profile_, desktop_type_);
+    browser_ = EnsureBrowser(browser_, profile_);
     content::RecordAction(
         base::UserMetricsAction("Signin_Show_UntrustedSigninPrompt"));
     // Display a confirmation dialog to the user.
-    browser_->window()->ShowOneClickSigninBubble(
-        BrowserWindow::ONE_CLICK_SIGNIN_BUBBLE_TYPE_SAML_MODAL_DIALOG,
+    browser_->window()->ShowOneClickSigninConfirmation(
         base::UTF8ToUTF16(signin->GetUsernameForAuthInProgress()),
-        base::string16(),  // No error message to display.
         base::Bind(&OneClickSigninSyncStarter::UntrustedSigninConfirmed,
                    weak_pointer_factory_.GetWeakPtr()));
     LoginUIServiceFactory::GetForProfile(profile_)->UntrustedLoginUIShown();
@@ -409,18 +390,32 @@ void OneClickSigninSyncStarter::UntrustedSigninConfirmed(
 }
 
 void OneClickSigninSyncStarter::OnSyncConfirmationUIClosed(
-    bool configure_sync_first) {
-  if (configure_sync_first) {
-    content::RecordAction(
-        base::UserMetricsAction("Signin_Signin_WithAdvancedSyncSettings"));
-    chrome::ShowSettingsSubPage(browser_, chrome::kSyncSetupSubPage);
-  } else {
-    content::RecordAction(
-        base::UserMetricsAction("Signin_Signin_WithDefaultSyncSettings"));
-    ProfileSyncService* profile_sync_service = GetProfileSyncService();
-    if (profile_sync_service)
-      profile_sync_service->SetSyncSetupCompleted();
-    FinishProfileSyncServiceSetup();
+    LoginUIService::SyncConfirmationUIClosedResult result) {
+
+  if (switches::UsePasswordSeparatedSigninFlow()) {
+    // We didn't run this callback in AccountAddedToCookie so do it now.
+    if (!sync_setup_completed_callback_.is_null())
+      sync_setup_completed_callback_.Run(SYNC_SETUP_SUCCESS);
+  }
+
+  switch (result) {
+    case LoginUIService::CONFIGURE_SYNC_FIRST:
+      content::RecordAction(
+          base::UserMetricsAction("Signin_Signin_WithAdvancedSyncSettings"));
+      chrome::ShowSettingsSubPage(browser_, chrome::kSyncSetupSubPage);
+      break;
+    case LoginUIService::SYNC_WITH_DEFAULT_SETTINGS: {
+      content::RecordAction(
+          base::UserMetricsAction("Signin_Signin_WithDefaultSyncSettings"));
+      ProfileSyncService* profile_sync_service = GetProfileSyncService();
+      if (profile_sync_service)
+        profile_sync_service->SetFirstSetupComplete();
+      FinishProfileSyncServiceSetup();
+      break;
+    }
+    case LoginUIService::ABORT_SIGNIN:
+      FinishProfileSyncServiceSetup();
+      break;
   }
 
   delete this;
@@ -462,8 +457,21 @@ void OneClickSigninSyncStarter::SigninSuccess() {
 
 void OneClickSigninSyncStarter::AccountAddedToCookie(
     const GoogleServiceAuthError& error) {
+  if (first_account_added_to_cookie_)
+    return;
+
+  first_account_added_to_cookie_ = true;
+
   // Regardless of whether the account was successfully added or not,
   // continue with sync starting.
+
+  if (switches::UsePasswordSeparatedSigninFlow()) {
+    // Under the new signin flow, the sync confirmation dialog should always be
+    // shown regardless of |start_mode_|. |sync_setup_completed_callback_| will
+    // be run after the modal is closed.
+    DisplayModalSyncConfirmationWindow();
+    return;
+  }
 
   if (!sync_setup_completed_callback_.is_null())
     sync_setup_completed_callback_.Run(SYNC_SETUP_SUCCESS);
@@ -473,7 +481,7 @@ void OneClickSigninSyncStarter::AccountAddedToCookie(
       // Just kick off the sync machine, no need to configure it first.
       ProfileSyncService* profile_sync_service = GetProfileSyncService();
       if (profile_sync_service)
-        profile_sync_service->SetSyncSetupCompleted();
+        profile_sync_service->SetFirstSetupComplete();
       FinishProfileSyncServiceSetup();
       if (confirmation_required_ == CONFIRM_AFTER_SIGNIN) {
         base::string16 message;
@@ -512,24 +520,26 @@ void OneClickSigninSyncStarter::AccountAddedToCookie(
 
 void OneClickSigninSyncStarter::DisplayFinalConfirmationBubble(
     const base::string16& custom_message) {
-  browser_ = EnsureBrowser(browser_, profile_, desktop_type_);
+  browser_ = EnsureBrowser(browser_, profile_);
   LoginUIServiceFactory::GetForProfile(browser_->profile())->
       DisplayLoginResult(browser_, custom_message);
 }
 
+void OneClickSigninSyncStarter::DisplayModalSyncConfirmationWindow() {
+  browser_ = EnsureBrowser(browser_, profile_);
+  browser_->ShowModalSyncConfirmationWindow();
+}
+
 // static
-Browser* OneClickSigninSyncStarter::EnsureBrowser(
-    Browser* browser,
-    Profile* profile,
-    chrome::HostDesktopType desktop_type) {
+Browser* OneClickSigninSyncStarter::EnsureBrowser(Browser* browser,
+                                                  Profile* profile) {
   if (!browser) {
     // The user just created a new profile or has closed the browser that
     // we used previously. Grab the most recently active browser or else
     // create a new one.
-    browser = chrome::FindLastActiveWithProfile(profile, desktop_type);
+    browser = chrome::FindLastActiveWithProfile(profile);
     if (!browser) {
-      browser = new Browser(Browser::CreateParams(profile,
-                                                   desktop_type));
+      browser = new Browser(Browser::CreateParams(profile));
       chrome::AddTabAt(browser, GURL(), -1, true);
     }
     browser->window()->Show();
@@ -547,7 +557,7 @@ void OneClickSigninSyncStarter::ShowSettingsPage(bool configure_sync) {
   if (login_ui->current_login_ui()) {
     login_ui->current_login_ui()->FocusUI();
   } else {
-    browser_ = EnsureBrowser(browser_, profile_, desktop_type_);
+    browser_ = EnsureBrowser(browser_, profile_);
 
     // If the sign in tab is showing the native signin page or the blank page
     // for web-based flow, and is not about to be closed, use it to show the

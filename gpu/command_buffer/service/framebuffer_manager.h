@@ -8,12 +8,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/gpu_export.h"
@@ -21,6 +21,7 @@
 namespace gpu {
 namespace gles2 {
 
+class FeatureInfo;
 class FramebufferCompletenessCache;
 class FramebufferManager;
 class Renderbuffer;
@@ -45,17 +46,23 @@ class GPU_EXPORT Framebuffer : public base::RefCounted<Framebuffer> {
         RenderbufferManager* renderbuffer_manager,
         TextureManager* texture_manager,
         bool cleared) = 0;
+    virtual bool IsPartiallyCleared() const = 0;
+    virtual bool IsTextureAttachment() const = 0;
+    virtual bool IsRenderbufferAttachment() const = 0;
     virtual bool IsTexture(TextureRef* texture) const = 0;
     virtual bool IsRenderbuffer(
         Renderbuffer* renderbuffer) const = 0;
-    virtual bool CanRenderTo() const = 0;
+    virtual bool Is3D() const = 0;
+    virtual bool CanRenderTo(const FeatureInfo* feature_info) const = 0;
     virtual void DetachFromFramebuffer(Framebuffer* framebuffer) const = 0;
     virtual bool ValidForAttachmentType(GLenum attachment_type,
+                                        ContextType context_type,
                                         uint32_t max_color_attachments) = 0;
     virtual size_t GetSignatureSize(TextureManager* texture_manager) const = 0;
     virtual void AddToSignature(
         TextureManager* texture_manager, std::string* signature) const = 0;
     virtual bool FormsFeedbackLoop(TextureRef* texture, GLint level) const = 0;
+    virtual bool EmulatingRGB() const = 0;
 
    protected:
     friend class base::RefCounted<Attachment>;
@@ -70,6 +77,15 @@ class GPU_EXPORT Framebuffer : public base::RefCounted<Framebuffer> {
 
   bool HasUnclearedAttachment(GLenum attachment) const;
   bool HasUnclearedColorAttachments() const;
+
+  void ClearUnclearedIntOr3DTexturesOrPartiallyClearedTextures(
+      GLES2Decoder* decoder,
+      TextureManager* texture_manager);
+
+  bool HasUnclearedIntRenderbufferAttachments() const;
+
+  void ClearUnclearedIntRenderbufferAttachments(
+    RenderbufferManager* renderbuffer_manager);
 
   void MarkAttachmentAsCleared(
     RenderbufferManager* renderbuffer_manager,
@@ -134,7 +150,7 @@ class GPU_EXPORT Framebuffer : public base::RefCounted<Framebuffer> {
   // Note that receiving GL_FRAMEBUFFER_COMPLETE from this function does
   // not mean the real OpenGL will consider it framebuffer complete. It just
   // means it passed our tests.
-  GLenum IsPossiblyComplete() const;
+  GLenum IsPossiblyComplete(const FeatureInfo* feature_info) const;
 
   // Implements optimized glGetFramebufferStatus.
   GLenum GetStatus(TextureManager* texture_manager, GLenum target) const;
@@ -148,14 +164,12 @@ class GPU_EXPORT Framebuffer : public base::RefCounted<Framebuffer> {
 
   // If a color buffer is attached to GL_COLOR_ATTACHMENTi, enable that
   // draw buffer for glClear().
-  void PrepareDrawBuffersForClear() const;
+  // Return true if the DrawBuffers() is actually called.
+  bool PrepareDrawBuffersForClear() const;
 
   // Restore draw buffers states that have been changed in
   // PrepareDrawBuffersForClear().
   void RestoreDrawBuffersAfterClear() const;
-
-  // Clear all the active INT or UINT type color buffers to (0, 0, 0, 0).
-  void ClearIntegerBuffers();
 
   // Return true if any draw buffers has an alpha channel.
   bool HasAlphaMRT() const;
@@ -193,10 +207,6 @@ class GPU_EXPORT Framebuffer : public base::RefCounted<Framebuffer> {
     return framebuffer_complete_state_count_id_;
   }
 
-  // Helper function for PrepareDrawBuffersForClear() and
-  // RestoreDrawBuffersAfterClear().
-  void ChangeDrawBuffersHelper(bool recover) const;
-
   // The managers that owns this.
   FramebufferManager* manager_;
 
@@ -215,7 +225,7 @@ class GPU_EXPORT Framebuffer : public base::RefCounted<Framebuffer> {
   typedef base::hash_map<GLenum, scoped_refptr<Attachment> > AttachmentMap;
   AttachmentMap attachments_;
 
-  scoped_ptr<GLenum[]> draw_buffers_;
+  std::unique_ptr<GLenum[]> draw_buffers_;
 
   GLenum read_buffer_;
 

@@ -160,10 +160,13 @@ class CustomButtonParams {
         Bundle singleBundle = IntentUtils.safeGetBundleExtra(intent,
                 CustomTabsIntent.EXTRA_ACTION_BUTTON_BUNDLE);
         ArrayList<Bundle> bundleList = IntentUtils.getParcelableArrayListExtra(intent,
-                CustomTabsIntent.EXTRA_ACTION_BAR_ITEMS);
+                CustomTabsIntent.EXTRA_TOOLBAR_ITEMS);
         boolean tinted = IntentUtils.safeGetBooleanExtra(intent,
                 CustomTabsIntent.EXTRA_TINT_ACTION_BUTTON, false);
-        if (singleBundle != null) paramsList.add(fromBundle(context, singleBundle, tinted, false));
+        if (singleBundle != null) {
+            CustomButtonParams singleParams = fromBundle(context, singleBundle, tinted, false);
+            if (singleParams != null) paramsList.add(singleParams);
+        }
         if (bundleList != null) {
             Set<Integer> ids = new HashSet<>();
             for (Bundle bundle : bundleList) {
@@ -216,16 +219,16 @@ class CustomButtonParams {
                     + "CustomTabsIntent.html#KEY_ICON");
         }
 
-        PendingIntent pi = IntentUtils.safeGetParcelable(bundle,
+        PendingIntent pendingIntent = IntentUtils.safeGetParcelable(bundle,
                 CustomTabsIntent.KEY_PENDING_INTENT);
         // PendingIntent is a must for buttons on the toolbar, but it's optional for bottom bar.
-        if (onToolbar && pi == null) {
+        if (onToolbar && pendingIntent == null) {
             Log.w(TAG, "Invalid action button on toolbar: pending intent not present in bundle!");
             bitmap.recycle();
             return null;
         }
 
-        return new CustomButtonParams(id, bitmap, description, pi, tinted, onToolbar);
+        return new CustomButtonParams(id, bitmap, description, pendingIntent, tinted, onToolbar);
     }
 
     /**

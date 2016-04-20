@@ -21,11 +21,20 @@
             "className": "WebInspector.LoadTimelineHandler"
         },
         {
+            "type": "@WebInspector.UISourceCodeFrame.LineDecorator",
+            "className": "WebInspector.TimelineUIUtils.PerformanceLineDecorator",
+            "decoratorType": "performance"
+        },
+        {
             "type": "@WebInspector.ActionDelegate",
             "actionId": "timeline.toggle-recording",
             "iconClass": "record-toolbar-item",
             "contextTypes": ["WebInspector.TimelinePanel"],
             "className": "WebInspector.TimelinePanel.ActionDelegate",
+            "options": [
+                { "value": true, "title": "Record" },
+                { "value": false, "title": "Stop" }
+            ],
             "bindings": [
                 {
                     "platform": "windows,linux",
@@ -96,6 +105,8 @@
     "dependencies": [
         "components",
         "components_lazy",
+        "source_frame",
+        "sources",
         "ui_lazy"
     ],
     "scripts": [
@@ -106,8 +117,11 @@
         "LayerViewHost.js",
         "Layers3DView.js",
         "MemoryCountersGraph.js",
+        "TimelineController.js",
         "TimelineModel.js",
+        "TimelineIRModel.js",
         "TimelineJSProfile.js",
+        "TimelineLoader.js",
         "TimelineFrameModel.js",
         "TimelineEventOverview.js",
         "TimelineFlameChart.js",
@@ -115,6 +129,7 @@
         "TimelineUIUtils.js",
         "TimelineLayersView.js",
         "TimelinePaintProfilerView.js",
+        "TimelineProfileTree.js",
         "TransformController.js",
         "PaintProfilerView.js",
         "TimelinePanel.js"

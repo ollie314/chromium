@@ -5,11 +5,11 @@
 #ifndef CONTENT_RENDERER_PEPPER_PEPPER_WEBPLUGIN_IMPL_H_
 #define CONTENT_RENDERER_PEPPER_PEPPER_WEBPLUGIN_IMPL_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "ppapi/c/pp_var.h"
@@ -36,7 +36,7 @@ class PepperWebPluginImpl : public blink::WebPlugin {
   PepperWebPluginImpl(PluginModule* module,
                       const blink::WebPluginParams& params,
                       RenderFrameImpl* render_frame,
-                      scoped_ptr<PluginInstanceThrottlerImpl> throttler);
+                      std::unique_ptr<PluginInstanceThrottlerImpl> throttler);
 
   PepperPluginInstanceImpl* instance() { return instance_.get(); }
 
@@ -45,8 +45,7 @@ class PepperWebPluginImpl : public blink::WebPlugin {
   bool initialize(blink::WebPluginContainer* container) override;
   void destroy() override;
   v8::Local<v8::Object> v8ScriptableObject(v8::Isolate* isolate) override;
-  bool getFormValue(blink::WebString& value) override;
-  void layoutIfNeeded() override {}
+  void updateAllLifecyclePhases() override {}
   void paint(blink::WebCanvas* canvas, const blink::WebRect& rect) override;
   void updateGeometry(const blink::WebRect& window_rect,
                       const blink::WebRect& clip_rect,
@@ -55,7 +54,6 @@ class PepperWebPluginImpl : public blink::WebPlugin {
                       bool is_visible) override;
   void updateFocus(bool focused, blink::WebFocusType focus_type) override;
   void updateVisibility(bool visible) override;
-  bool acceptsInputEvents() override;
   blink::WebInputEventResult handleInputEvent(
       const blink::WebInputEvent& event,
       blink::WebCursorInfo& cursor_info) override;
@@ -91,16 +89,19 @@ class PepperWebPluginImpl : public blink::WebPlugin {
   virtual ~PepperWebPluginImpl();
   struct InitData;
 
-  scoped_ptr<InitData> init_data_;  // Cleared upon successful initialization.
+  std::unique_ptr<InitData>
+      init_data_;  // Cleared upon successful initialization.
   // True if the instance represents the entire document in a frame instead of
   // being an embedded resource.
   bool full_frame_;
-  scoped_ptr<PluginInstanceThrottlerImpl> throttler_;
+  std::unique_ptr<PluginInstanceThrottlerImpl> throttler_;
   scoped_refptr<PepperPluginInstanceImpl> instance_;
   gfx::Rect plugin_rect_;
   PP_Var instance_object_;
   blink::WebPluginContainer* container_;
-  base::WeakPtrFactory<PepperWebPluginImpl> weak_factory_;
+
+  // TODO(tommycli): Remove once we fix https://crbug.com/588624.
+  bool destroyed_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperWebPluginImpl);
 };

@@ -9,8 +9,9 @@
 
 namespace switches {
 
-extern const char kEnableRendererMojoChannel[];
-extern const char kDisableMojoChannel[];
+extern const char kEnableMojoChannel[];
+CONTENT_EXPORT extern const char kMojoChannelToken[];
+CONTENT_EXPORT extern const char kMojoApplicationChannelToken[];
 
 }  // namespace switches
 

@@ -7,11 +7,12 @@
 #include <string>
 
 #include "base/metrics/field_trial.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
+#include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
 #include "components/variations/variations_associated_data.h"
 
 namespace password_bubble_experiment {
@@ -28,7 +29,8 @@ void RegisterPrefs(PrefRegistrySimple* registry) {
       password_manager::prefs::kWasSavePrompFirstRunExperienceShown, false);
 
   registry->RegisterBooleanPref(
-      password_manager::prefs::kWasAutoSignInFirstRunExperienceShown, false);
+      password_manager::prefs::kWasAutoSignInFirstRunExperienceShown, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
 }
 
 int GetSmartBubbleDismissalThreshold() {
@@ -53,12 +55,17 @@ SmartLockBranding GetSmartLockBrandingState(
   if (group_name == kSmartLockBrandingGroupName)
     return SmartLockBranding::FULL;
   if (group_name == kSmartLockBrandingSavePromptOnlyGroupName)
-    return SmartLockBranding::SAVE_BUBBLE_ONLY;
+    return SmartLockBranding::SAVE_PROMPT_ONLY;
   return SmartLockBranding::NONE;
 }
 
 bool IsSmartLockBrandingEnabled(const sync_driver::SyncService* sync_service) {
   return GetSmartLockBrandingState(sync_service) == SmartLockBranding::FULL;
+}
+
+bool IsSmartLockBrandingSavePromptEnabled(
+    const sync_driver::SyncService* sync_service) {
+  return GetSmartLockBrandingState(sync_service) != SmartLockBranding::NONE;
 }
 
 bool ShouldShowSavePromptFirstRunExperience(
@@ -81,6 +88,11 @@ bool ShouldShowAutoSignInPromptFirstRunExperience(PrefService* prefs) {
 }
 
 void RecordAutoSignInPromptFirstRunExperienceWasShown(PrefService* prefs) {
+  prefs->SetBoolean(
+      password_manager::prefs::kWasAutoSignInFirstRunExperienceShown, true);
+}
+
+void TurnOffAutoSignin(PrefService* prefs) {
   prefs->SetBoolean(
       password_manager::prefs::kWasAutoSignInFirstRunExperienceShown, true);
 }

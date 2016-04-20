@@ -8,15 +8,17 @@
 #include "base/macros.h"
 #include "media/base/cdm_factory.h"
 
-namespace media {
-
-namespace interfaces {
-class ServiceFactory;
+namespace shell {
+namespace mojom {
+class InterfaceProvider;
 }
+}
+
+namespace media {
 
 class MojoCdmFactory : public CdmFactory {
  public:
-  explicit MojoCdmFactory(interfaces::ServiceFactory* service_factory);
+  explicit MojoCdmFactory(shell::mojom::InterfaceProvider* interface_provider);
   ~MojoCdmFactory() final;
 
   // CdmFactory implementation.
@@ -31,7 +33,7 @@ class MojoCdmFactory : public CdmFactory {
               const CdmCreatedCB& cdm_created_cb) final;
 
  private:
-  interfaces::ServiceFactory* service_factory_;
+  shell::mojom::InterfaceProvider* interface_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(MojoCdmFactory);
 };

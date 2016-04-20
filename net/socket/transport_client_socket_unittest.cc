@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
 #include <string>
 
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
 #include "net/base/address_list.h"
 #include "net/base/io_buffer.h"
+#include "net/base/ip_address.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/mock_host_resolver.h"
@@ -84,11 +85,11 @@ class TransportClientSocketTest
   uint16_t listen_port_;
   TestNetLog net_log_;
   ClientSocketFactory* const socket_factory_;
-  scoped_ptr<StreamSocket> sock_;
-  scoped_ptr<StreamSocket> connected_sock_;
+  std::unique_ptr<StreamSocket> sock_;
+  std::unique_ptr<StreamSocket> connected_sock_;
 
  private:
-  scoped_ptr<TCPServerSocket> listen_sock_;
+  std::unique_ptr<TCPServerSocket> listen_sock_;
   bool close_server_socket_on_next_send_;
 };
 
@@ -97,9 +98,7 @@ void TransportClientSocketTest::SetUp() {
 
   // Open a server socket on an ephemeral port.
   listen_sock_.reset(new TCPServerSocket(NULL, NetLog::Source()));
-  IPAddressNumber address;
-  ParseIPLiteralToNumber("127.0.0.1", &address);
-  IPEndPoint local_address(address, 0);
+  IPEndPoint local_address(IPAddress::IPv4Localhost(), 0);
   ASSERT_EQ(OK, listen_sock_->Listen(local_address, 1));
   // Get the server's address (including the actual port number).
   ASSERT_EQ(OK, listen_sock_->GetLocalAddress(&local_address));
@@ -110,7 +109,7 @@ void TransportClientSocketTest::SetUp() {
 
   AddressList addr;
   // MockHostResolver resolves everything to 127.0.0.1.
-  scoped_ptr<HostResolver> resolver(new MockHostResolver());
+  std::unique_ptr<HostResolver> resolver(new MockHostResolver());
   HostResolver::RequestInfo info(HostPortPair("localhost", listen_port_));
   TestCompletionCallback callback;
   int rv = resolver->Resolve(info, DEFAULT_PRIORITY, &addr, callback.callback(),
@@ -118,7 +117,7 @@ void TransportClientSocketTest::SetUp() {
   CHECK_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
   CHECK_EQ(rv, OK);
-  sock_ = socket_factory_->CreateTransportClientSocket(addr, &net_log_,
+  sock_ = socket_factory_->CreateTransportClientSocket(addr, NULL, &net_log_,
                                                        NetLog::Source());
 }
 

@@ -5,7 +5,9 @@
 #ifndef CC_TREES_REMOTE_PROTO_CHANNEL_H_
 #define CC_TREES_REMOTE_PROTO_CHANNEL_H_
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
+#include "cc/base/cc_export.h"
 
 namespace cc {
 
@@ -15,20 +17,25 @@ class CompositorMessage;
 
 // Provides a bridge for getting compositor protobuf messages to/from the
 // outside world.
-class RemoteProtoChannel {
+class CC_EXPORT RemoteProtoChannel {
  public:
   // Meant to be implemented by a RemoteChannel that needs to receive and parse
   // incoming protobufs.
-  class ProtoReceiver {
+  class CC_EXPORT ProtoReceiver {
    public:
+    // TODO(khushalsagar): This should probably include a closure that returns
+    // the status of processing this proto. See crbug/576974
     virtual void OnProtoReceived(
-        scoped_ptr<proto::CompositorMessage> proto) = 0;
+        std::unique_ptr<proto::CompositorMessage> proto) = 0;
 
    protected:
     virtual ~ProtoReceiver() {}
   };
 
+  // Called by the ProtoReceiver. The RemoteProtoChannel must outlive its
+  // receiver.
   virtual void SetProtoReceiver(ProtoReceiver* receiver) = 0;
+
   virtual void SendCompositorProto(const proto::CompositorMessage& proto) = 0;
 
  protected:

@@ -5,14 +5,19 @@
 #include "ui/views/controls/button/custom_button.h"
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/layout.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/animation/ink_drop_delegate.h"
 #include "ui/views/animation/ink_drop_host.h"
+#include "ui/views/animation/test/test_ink_drop_delegate.h"
+#include "ui/views/animation/test/test_ink_drop_host.h"
+#include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/label_button.h"
@@ -30,7 +35,24 @@
 
 namespace views {
 
+using test::TestInkDropDelegate;
+
 namespace {
+
+// No-op test double of a ContextMenuController.
+class TestContextMenuController : public ContextMenuController {
+ public:
+  TestContextMenuController() {}
+  ~TestContextMenuController() override {}
+
+  // ContextMenuController:
+  void ShowContextMenuForView(View* source,
+                              const gfx::Point& point,
+                              ui::MenuSourceType source_type) override {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestContextMenuController);
+};
 
 class TestCustomButton : public CustomButton, public ButtonListener {
  public:
@@ -56,102 +78,65 @@ class TestCustomButton : public CustomButton, public ButtonListener {
     canceled_ = false;
   }
 
-  // CustomButton methods:
-  bool IsChildWidget() const override { return is_child_widget_; }
-  bool FocusInChildWidget() const override { return focus_in_child_widget_; }
-
-  void set_child_widget(bool b) { is_child_widget_ = b; }
-  void set_focus_in_child_widget(bool b) { focus_in_child_widget_ = b; }
-
  private:
   bool pressed_ = false;
   bool canceled_ = false;
-  bool is_child_widget_ = false;
-  bool focus_in_child_widget_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(TestCustomButton);
 };
 
-class TestWidget : public Widget {
- public:
-  TestWidget() : Widget() {}
-
-  // Widget method:
-  bool IsActive() const override { return active_; }
-
-  void set_active(bool active) { active_ = active; }
-
- private:
-  bool active_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(TestWidget);
-};
-
 // An InkDropDelegate that keeps track of ink drop visibility.
-class TestInkDropDelegate : public InkDropDelegate {
+class TestInkDropDelegateThatTracksVisibilty : public InkDropDelegate {
  public:
-  TestInkDropDelegate(InkDropHost* ink_drop_host,
-                      bool* ink_shown,
-                      bool* ink_hidden)
-      : ink_drop_host_(ink_drop_host),
-        ink_shown_(ink_shown),
-        ink_hidden_(ink_hidden) {
-    ink_drop_host_->AddInkDropLayer(nullptr);
-  }
-  ~TestInkDropDelegate() override {}
+  TestInkDropDelegateThatTracksVisibilty(bool* ink_shown, bool* ink_hidden)
+      : ink_shown_(ink_shown), ink_hidden_(ink_hidden) {}
+  ~TestInkDropDelegateThatTracksVisibilty() override {}
 
   // InkDropDelegate:
-  void SetInkDropSize(int large_size,
-                      int large_corner_radius,
-                      int small_size,
-                      int small_corner_radius) override {}
-  void OnLayout() override {}
   void OnAction(InkDropState state) override {
     switch (state) {
       case InkDropState::ACTION_PENDING:
-      case InkDropState::SLOW_ACTION_PENDING:
+      case InkDropState::ALTERNATE_ACTION_PENDING:
       case InkDropState::ACTIVATED:
         *ink_shown_ = true;
         break;
       case InkDropState::HIDDEN:
         *ink_hidden_ = true;
         break;
-      case InkDropState::QUICK_ACTION:
-      case InkDropState::SLOW_ACTION:
+      case InkDropState::ACTION_TRIGGERED:
+      case InkDropState::ALTERNATE_ACTION_TRIGGERED:
       case InkDropState::DEACTIVATED:
         break;
     }
   }
 
+  void SnapToActivated() override { *ink_shown_ = true; }
+
+  void SetHovered(bool is_hovered) override {}
+
  private:
-  InkDropHost* ink_drop_host_;
   bool* ink_shown_;
   bool* ink_hidden_;
 
-  DISALLOW_COPY_AND_ASSIGN(TestInkDropDelegate);
+  DISALLOW_COPY_AND_ASSIGN(TestInkDropDelegateThatTracksVisibilty);
 };
 
 // A test Button class that owns a TestInkDropDelegate.
 class TestButtonWithInkDrop : public TestCustomButton {
  public:
-  TestButtonWithInkDrop(bool* ink_shown, bool* ink_hidden)
-      : TestCustomButton(),
-        ink_drop_delegate_(
-            new TestInkDropDelegate(this, ink_shown, ink_hidden)) {
+  TestButtonWithInkDrop(std::unique_ptr<InkDropDelegate> ink_drop_delegate)
+      : TestCustomButton(), ink_drop_delegate_(std::move(ink_drop_delegate)) {
     set_ink_drop_delegate(ink_drop_delegate_.get());
   }
   ~TestButtonWithInkDrop() override {}
 
-  // views::InkDropHost:
-  void AddInkDropLayer(ui::Layer* ink_drop_layer) override {}
-  void RemoveInkDropLayer(ui::Layer* ink_drop_layer) override {}
-  gfx::Point CalculateInkDropCenter() const override { return gfx::Point(); }
-
  private:
-  scoped_ptr<views::InkDropDelegate> ink_drop_delegate_;
+  std::unique_ptr<views::InkDropDelegate> ink_drop_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(TestButtonWithInkDrop);
 };
+
+}  // namespace
 
 class CustomButtonTest : public ViewsTestBase {
  public:
@@ -163,7 +148,7 @@ class CustomButtonTest : public ViewsTestBase {
 
     // Create a widget so that the CustomButton can query the hover state
     // correctly.
-    widget_.reset(new TestWidget);
+    widget_.reset(new Widget);
     Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
     params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
     params.bounds = gfx::Rect(0, 0, 650, 650);
@@ -179,42 +164,35 @@ class CustomButtonTest : public ViewsTestBase {
     ViewsTestBase::TearDown();
   }
 
-  void CreateButtonWithInkDrop() {
+  void CreateButtonWithInkDrop(
+      std::unique_ptr<InkDropDelegate> ink_drop_delegate) {
     delete button_;
-    ink_shown_ = false;
-    ink_hidden_ = false;
-    button_ = new TestButtonWithInkDrop(&ink_shown_, &ink_hidden_);
+    button_ = new TestButtonWithInkDrop(std::move(ink_drop_delegate));
     widget_->SetContentsView(button_);
   }
 
  protected:
-  TestWidget* widget() { return widget_.get(); }
+  Widget* widget() { return widget_.get(); }
   TestCustomButton* button() { return button_; }
-  bool ink_shown() const { return ink_shown_; }
-  bool ink_hidden() const { return ink_hidden_; }
+  void SetDraggedView(View* dragged_view) {
+    widget_->dragged_view_ = dragged_view;
+  }
 
  private:
-  scoped_ptr<TestWidget> widget_;
+  std::unique_ptr<Widget> widget_;
   TestCustomButton* button_;
-  bool ink_shown_ = false;
-  bool ink_hidden_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(CustomButtonTest);
 };
 
-}  // namespace
-
 // Tests that hover state changes correctly when visiblity/enableness changes.
 TEST_F(CustomButtonTest, HoverStateOnVisibilityChange) {
-  gfx::Point center(10, 10);
-  button()->OnMousePressed(ui::MouseEvent(
-      ui::ET_MOUSE_PRESSED, center, center, ui::EventTimeForNow(),
-      ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
+  ui::test::EventGenerator generator(GetContext(), widget()->GetNativeWindow());
+
+  generator.PressLeftButton();
   EXPECT_EQ(CustomButton::STATE_PRESSED, button()->state());
 
-  button()->OnMouseReleased(ui::MouseEvent(
-      ui::ET_MOUSE_RELEASED, center, center, ui::EventTimeForNow(),
-      ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
+  generator.ReleaseLeftButton();
   EXPECT_EQ(CustomButton::STATE_HOVERED, button()->state());
 
   button()->SetEnabled(false);
@@ -314,33 +292,6 @@ TEST_F(CustomButtonTest, NotifyAction) {
   EXPECT_FALSE(button()->pressed());
 }
 
-TEST_F(CustomButtonTest, HandleAccelerator) {
-  // Child widgets shouldn't handle accelerators when they are not focused.
-  EXPECT_FALSE(button()->IsChildWidget());
-  EXPECT_FALSE(button()->FocusInChildWidget());
-  EXPECT_FALSE(widget()->IsActive());
-  button()->AcceleratorPressed(ui::Accelerator(ui::VKEY_RETURN, ui::EF_NONE));
-  EXPECT_FALSE(button()->pressed());
-  // Child without focus.
-  button()->set_child_widget(true);
-  button()->set_focus_in_child_widget(false);
-  button()->AcceleratorPressed(ui::Accelerator(ui::VKEY_RETURN, ui::EF_NONE));
-  EXPECT_FALSE(button()->pressed());
-  button()->Reset();
-  // Child with focus.
-  button()->set_child_widget(true);
-  button()->set_focus_in_child_widget(true);
-  button()->AcceleratorPressed(ui::Accelerator(ui::VKEY_RETURN, ui::EF_NONE));
-  EXPECT_TRUE(button()->pressed());
-  button()->Reset();
-  // Not a child, but active.
-  button()->set_child_widget(false);
-  button()->set_focus_in_child_widget(true);
-  widget()->set_active(true);
-  button()->AcceleratorPressed(ui::Accelerator(ui::VKEY_RETURN, ui::EF_NONE));
-  EXPECT_TRUE(button()->pressed());
-}
-
 // Tests that OnClickCanceled gets called when NotifyClick is not expected
 // anymore.
 TEST_F(CustomButtonTest, NotifyActionNoClick) {
@@ -423,7 +374,7 @@ TEST_F(CustomButtonTest, AsCustomButton) {
   RadioButton radio_button(text, 0);
   EXPECT_TRUE(CustomButton::AsCustomButton(&radio_button));
 
-  MenuButton menu_button(NULL, text, NULL, false);
+  MenuButton menu_button(text, NULL, false);
   EXPECT_TRUE(CustomButton::AsCustomButton(&menu_button));
 
   Label label;
@@ -441,35 +392,76 @@ TEST_F(CustomButtonTest, AsCustomButton) {
 // Note: Ink drop is not hidden upon release because CustomButton descendants
 // may enter a different ink drop state.
 TEST_F(CustomButtonTest, ButtonClickTogglesInkDrop) {
-  gfx::Point old_cursor = gfx::Screen::GetScreenFor(
-      widget()->GetNativeView())->GetCursorScreenPoint();
-  CreateButtonWithInkDrop();
+  gfx::Point old_cursor = gfx::Screen::GetScreen()->GetCursorScreenPoint();
+  bool ink_shown = false;
+  bool ink_hidden = false;
+  CreateButtonWithInkDrop(base::WrapUnique(
+      new TestInkDropDelegateThatTracksVisibilty(&ink_shown, &ink_hidden)));
 
   ui::test::EventGenerator generator(GetContext(), widget()->GetNativeWindow());
   generator.set_current_location(gfx::Point(50, 50));
   generator.PressLeftButton();
-  EXPECT_TRUE(ink_shown());
-  EXPECT_FALSE(ink_hidden());
+  EXPECT_TRUE(ink_shown);
+  EXPECT_FALSE(ink_hidden);
 
   generator.ReleaseLeftButton();
-  EXPECT_FALSE(ink_hidden());
+  EXPECT_FALSE(ink_hidden);
 }
 
 // Tests that pressing a button shows and releasing capture hides ink drop.
+// Releasing capture should also reset PRESSED button state to NORMAL.
 TEST_F(CustomButtonTest, CaptureLossHidesInkDrop) {
-  gfx::Point old_cursor = gfx::Screen::GetScreenFor(
-      widget()->GetNativeView())->GetCursorScreenPoint();
-  CreateButtonWithInkDrop();
+  gfx::Point old_cursor = gfx::Screen::GetScreen()->GetCursorScreenPoint();
+  bool ink_shown = false;
+  bool ink_hidden = false;
+  CreateButtonWithInkDrop(base::WrapUnique(
+      new TestInkDropDelegateThatTracksVisibilty(&ink_shown, &ink_hidden)));
 
   ui::test::EventGenerator generator(GetContext(), widget()->GetNativeWindow());
   generator.set_current_location(gfx::Point(50, 50));
   generator.PressLeftButton();
-  EXPECT_TRUE(ink_shown());
-  EXPECT_FALSE(ink_hidden());
+  EXPECT_TRUE(ink_shown);
+  EXPECT_FALSE(ink_hidden);
 
+  EXPECT_EQ(Button::ButtonState::STATE_PRESSED, button()->state());
+  SetDraggedView(button());
   widget()->SetCapture(button());
   widget()->ReleaseCapture();
-  EXPECT_TRUE(ink_hidden());
+  SetDraggedView(nullptr);
+  EXPECT_TRUE(ink_hidden);
+  EXPECT_EQ(ui::MaterialDesignController::IsModeMaterial()
+                ? Button::ButtonState::STATE_NORMAL
+                : Button::ButtonState::STATE_PRESSED,
+            button()->state());
+}
+
+TEST_F(CustomButtonTest, InkDropAfterShowingContextMenu) {
+  TestInkDropDelegate* ink_drop_delegate = new TestInkDropDelegate();
+  CreateButtonWithInkDrop(base::WrapUnique(ink_drop_delegate));
+  TestContextMenuController context_menu_controller;
+  button()->set_context_menu_controller(&context_menu_controller);
+
+  ink_drop_delegate->SetHovered(true);
+  ink_drop_delegate->OnAction(InkDropState::ACTION_PENDING);
+
+  button()->ShowContextMenu(gfx::Point(), ui::MENU_SOURCE_MOUSE);
+
+  EXPECT_FALSE(ink_drop_delegate->is_hovered());
+  EXPECT_EQ(InkDropState::HIDDEN, ink_drop_delegate->state());
+}
+
+TEST_F(CustomButtonTest, InkDropAfterTryingToShowContextMenu) {
+  TestInkDropDelegate* ink_drop_delegate = new TestInkDropDelegate();
+  CreateButtonWithInkDrop(base::WrapUnique(ink_drop_delegate));
+  button()->set_context_menu_controller(nullptr);
+
+  ink_drop_delegate->SetHovered(true);
+  ink_drop_delegate->OnAction(InkDropState::ACTION_PENDING);
+
+  button()->ShowContextMenu(gfx::Point(), ui::MENU_SOURCE_MOUSE);
+
+  EXPECT_TRUE(ink_drop_delegate->is_hovered());
+  EXPECT_EQ(InkDropState::ACTION_PENDING, ink_drop_delegate->state());
 }
 
 }  // namespace views

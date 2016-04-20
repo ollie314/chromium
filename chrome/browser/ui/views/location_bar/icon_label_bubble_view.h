@@ -11,7 +11,7 @@
 #include "base/strings/string16.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/views/controls/image_view.h"
+#include "ui/views/animation/ink_drop_host_view.h"
 #include "ui/views/controls/label.h"
 
 namespace gfx {
@@ -21,6 +21,7 @@ class ImageSkia;
 }
 
 namespace views {
+class ImageView;
 class Label;
 class Painter;
 }
@@ -28,7 +29,7 @@ class Painter;
 // View used to draw a bubble, containing an icon and a label. We use this as a
 // base for the classes that handle the location icon (including the EV bubble),
 // tab-to-search UI, and content settings.
-class IconLabelBubbleView : public views::ImageView {
+class IconLabelBubbleView : public views::InkDropHostView {
  public:
   IconLabelBubbleView(int contained_image,
                       const gfx::FontList& font_list,
@@ -47,9 +48,13 @@ class IconLabelBubbleView : public views::ImageView {
     is_extension_icon_ = is_extension_icon;
   }
 
+  const views::ImageView* GetImageView() const { return image_; }
+  views::ImageView* GetImageView() { return image_; }
+
  protected:
   views::ImageView* image() { return image_; }
   views::Label* label() { return label_; }
+  const views::Label* label() const { return label_; }
 
   // Gets the color for displaying text.
   virtual SkColor GetTextColor() const = 0;
@@ -66,44 +71,59 @@ class IconLabelBubbleView : public views::ImageView {
   // full-width view and can be used to animate the width of the view.
   virtual double WidthMultiplier() const;
 
-  // Returns the amount of horizontal space needed to draw the image and its
-  // padding before the label.
-  virtual int GetImageAndPaddingWidth() const;
+  // Returns true when animation is in progress and is shrinking.
+  virtual bool IsShrinking() const;
 
   // views::View:
   gfx::Size GetPreferredSize() const override;
   void Layout() override;
   void OnNativeThemeChanged(const ui::NativeTheme* native_theme) override;
+  void AddInkDropLayer(ui::Layer* ink_drop_layer) override;
+  void RemoveInkDropLayer(ui::Layer* ink_drop_layer) override;
+  std::unique_ptr<views::InkDropHover> CreateInkDropHover() const override;
+  SkColor GetInkDropBaseColor() const override;
 
   const gfx::FontList& font_list() const { return label_->font_list(); }
 
   SkColor GetParentBackgroundColor() const;
 
-  gfx::Size GetSizeForLabelWidth(int width) const;
+  gfx::Size GetSizeForLabelWidth(int label_width) const;
+
+  // Returns the minimum width the view can be to show the complete image when
+  // the background is showing.
+  int MinimumWidthForImageWithBackgroundShown() const;
 
  private:
   // Sets a background color on |label_| based on |chip_background_color| and
   // the parent's bg color.
   void SetLabelBackgroundColor(SkColor chip_background_color);
 
-  // Amount of padding at the edges of the bubble.  If |leading| is true, this
-  // is the padding at the beginning of the bubble (left in LTR), otherwise it's
-  // the end padding.
-  int GetBubbleOuterPadding(bool leading) const;
+  // Amount of padding from the leading edge of the view to the leading edge of
+  // the image (if |leading| is true), or from the trailing edge of the label
+  // (or image, if the label is invisible) to the trailing edge of the view.
+  int GetOuterPadding(bool leading) const;
 
-  // As above, but for Material Design. TODO(estade): remove/replace the above.
-  int GetBubbleOuterPaddingMd(bool leading) const;
+  // Spacing between the image and the label.
+  int GetInternalSpacing() const;
 
   // views::View:
   const char* GetClassName() const override;
   void OnPaint(gfx::Canvas* canvas) override;
 
   // For painting the background. TODO(estade): remove post MD launch.
-  scoped_ptr<views::Painter> background_painter_;
+  std::unique_ptr<views::Painter> background_painter_;
 
   // The contents of the bubble.
   views::ImageView* image_;
   views::Label* label_;
+
+  // How much horizontal padding (fully-transparent columns) is inside the
+  // image.  These are subtracted from the desired padding values when
+  // calculating the padding around the image, so that the image always appears
+  // to have the same visible padding no matter what its composition is.  Only
+  // used in MD.
+  int builtin_leading_padding_;
+  int builtin_trailing_padding_;
 
   bool is_extension_icon_;
 

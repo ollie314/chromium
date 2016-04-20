@@ -12,15 +12,15 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/policy/server_backed_device_state.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/pref_names.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
 #include "components/policy/core/common/cloud/system_policy_request_context.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/sha2.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -57,7 +57,7 @@ void UpdateDict(base::DictionaryValue* dict,
                 const char* pref_path,
                 bool set_or_clear,
                 base::Value* value) {
-  scoped_ptr<base::Value> scoped_value(value);
+  std::unique_ptr<base::Value> scoped_value(value);
   if (set_or_clear)
     dict->Set(pref_path, scoped_value.release());
   else
@@ -221,15 +221,16 @@ void AutoEnrollmentClient::ReportProgress(AutoEnrollmentState state) {
 }
 
 void AutoEnrollmentClient::NextStep() {
-  if (!RetryStep()) {
-    // Protocol finished successfully, report result.
-    const RestoreMode restore_mode = GetRestoreMode();
-    bool trigger_enrollment =
-        (restore_mode == RESTORE_MODE_REENROLLMENT_REQUESTED ||
-         restore_mode == RESTORE_MODE_REENROLLMENT_ENFORCED);
+  if (RetryStep())
+    return;
 
-    ReportProgress(trigger_enrollment ? AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT
-                                      : AUTO_ENROLLMENT_STATE_NO_ENROLLMENT);
+  // Protocol finished successfully, report result.
+  const RestoreMode restore_mode = GetRestoreMode();
+  if (restore_mode == RESTORE_MODE_REENROLLMENT_REQUESTED ||
+      restore_mode == RESTORE_MODE_REENROLLMENT_ENFORCED) {
+    ReportProgress(AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT);
+  } else {
+    ReportProgress(AUTO_ENROLLMENT_STATE_NO_ENROLLMENT);
   }
 }
 
@@ -395,6 +396,9 @@ bool AutoEnrollmentClient::OnDeviceStateRequestCompletion(
                  state_response.has_disabled_state(),
                  new base::StringValue(
                      state_response.disabled_state().message()));
+
+      // Logging as "WARNING" to make sure it's preserved in the logs.
+      LOG(WARNING) << "Restore mode: " << restore_mode;
     }
     local_state_->CommitPendingWrite();
     device_state_available_ = true;

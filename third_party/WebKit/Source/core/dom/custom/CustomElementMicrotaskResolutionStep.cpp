@@ -35,12 +35,12 @@
 
 namespace blink {
 
-PassOwnPtrWillBeRawPtr<CustomElementMicrotaskResolutionStep> CustomElementMicrotaskResolutionStep::create(PassRefPtrWillBeRawPtr<CustomElementRegistrationContext> context, PassRefPtrWillBeRawPtr<Element> element, const CustomElementDescriptor& descriptor)
+CustomElementMicrotaskResolutionStep* CustomElementMicrotaskResolutionStep::create(CustomElementRegistrationContext* context, Element* element, const CustomElementDescriptor& descriptor)
 {
-    return adoptPtrWillBeNoop(new CustomElementMicrotaskResolutionStep(context, element, descriptor));
+    return new CustomElementMicrotaskResolutionStep(context, element, descriptor);
 }
 
-CustomElementMicrotaskResolutionStep::CustomElementMicrotaskResolutionStep(PassRefPtrWillBeRawPtr<CustomElementRegistrationContext> context, PassRefPtrWillBeRawPtr<Element> element, const CustomElementDescriptor& descriptor)
+CustomElementMicrotaskResolutionStep::CustomElementMicrotaskResolutionStep(CustomElementRegistrationContext* context, Element* element, const CustomElementDescriptor& descriptor)
     : m_context(context)
     , m_element(element)
     , m_descriptor(descriptor)

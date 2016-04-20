@@ -38,7 +38,7 @@ struct AttachmentDownloaderImpl::DownloadState {
   // |access_token| needed to invalidate if downloading attachment fails with
   // HTTP_UNAUTHORIZED.
   std::string access_token;
-  scoped_ptr<net::URLFetcher> url_fetcher;
+  std::unique_ptr<net::URLFetcher> url_fetcher;
   std::vector<DownloadCallback> user_callbacks;
   base::TimeTicks start_time;
 };
@@ -86,15 +86,17 @@ void AttachmentDownloaderImpl::DownloadAttachment(
                           sync_service_url_, attachment_id).spec();
 
   StateMap::iterator iter = state_map_.find(url);
-  if (iter == state_map_.end()) {
+  DownloadState* download_state =
+      iter != state_map_.end() ? iter->second.get() : nullptr;
+  if (!download_state) {
     // There is no request started for this attachment id. Let's create
     // DownloadState and request access token for it.
-    scoped_ptr<DownloadState> new_download_state(
+    std::unique_ptr<DownloadState> new_download_state(
         new DownloadState(attachment_id, url));
-    iter = state_map_.add(url, std::move(new_download_state)).first;
-    RequestAccessToken(iter->second);
+    download_state = new_download_state.get();
+    state_map_[url] = std::move(new_download_state);
+    RequestAccessToken(download_state);
   }
-  DownloadState* download_state = iter->second;
   DCHECK(download_state->attachment_id == attachment_id);
   download_state->user_callbacks.push_back(callback);
 }
@@ -136,8 +138,11 @@ void AttachmentDownloaderImpl::OnGetTokenFailure(
     scoped_refptr<base::RefCountedString> null_attachment_data;
     ReportResult(*download_state, DOWNLOAD_TRANSIENT_ERROR,
                  null_attachment_data);
-    DCHECK(state_map_.find(download_state->attachment_url) != state_map_.end());
-    state_map_.erase(download_state->attachment_url);
+    // Don't delete using the URL directly to avoid an access after free error
+    // due to std::unordered_map's implementation. See crbug.com/603275.
+    auto erase_iter = state_map_.find(download_state->attachment_url);
+    DCHECK(erase_iter != state_map_.end());
+    state_map_.erase(erase_iter);
   }
   requests_waiting_for_access_token_.clear();
 }
@@ -206,10 +211,10 @@ void AttachmentDownloaderImpl::OnURLFetchComplete(
   state_map_.erase(iter);
 }
 
-scoped_ptr<net::URLFetcher> AttachmentDownloaderImpl::CreateFetcher(
+std::unique_ptr<net::URLFetcher> AttachmentDownloaderImpl::CreateFetcher(
     const AttachmentUrl& url,
     const std::string& access_token) {
-  scoped_ptr<net::URLFetcher> url_fetcher =
+  std::unique_ptr<net::URLFetcher> url_fetcher =
       net::URLFetcher::Create(GURL(url), net::URLFetcher::GET, this);
   AttachmentUploaderImpl::ConfigureURLFetcherCommon(
       url_fetcher.get(), access_token, raw_store_birthday_, model_type_,
@@ -235,7 +240,7 @@ void AttachmentDownloaderImpl::ReportResult(
   for (iter = download_state.user_callbacks.begin();
        iter != download_state.user_callbacks.end();
        ++iter) {
-    scoped_ptr<Attachment> attachment;
+    std::unique_ptr<Attachment> attachment;
     if (result == DOWNLOAD_SUCCESS) {
       attachment.reset(new Attachment(Attachment::CreateFromParts(
           download_state.attachment_id, attachment_data)));
@@ -256,7 +261,7 @@ bool AttachmentDownloaderImpl::ExtractCrc32c(
 
   std::string crc32c_encoded;
   std::string header_value;
-  void* iter = NULL;
+  size_t iter = 0;
   // Iterate over all matching headers.
   while (headers->EnumerateHeader(&iter, "x-goog-hash", &header_value)) {
     // Because EnumerateHeader is smart about list values, header_value will

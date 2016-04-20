@@ -66,6 +66,14 @@ cr.define('options', function() {
         PageManager.closeOverlay();
       };
 
+      $('password-manager-import').onclick = function() {
+        chrome.send('importPassword');
+      };
+
+      $('password-manager-export').onclick = function() {
+        chrome.send('exportPassword');
+      };
+
       $('password-search-box').addEventListener('search',
           this.handleSearchQueryChange_.bind(this));
 
@@ -165,6 +173,42 @@ cr.define('options', function() {
     },
 
     /**
+     * Updates eliding of origins. If there is no enough space to show the full
+     * origin, the origin is elided from the left with ellipsis.
+     * @param {!cr.ui.List} list The list to update eliding.
+     */
+    updateOriginsEliding_: function(list) {
+      var entries = list.getElementsByClassName('deletable-item');
+      if (entries.length == 0)
+        return;
+      var entry = entries[0];
+      var computedStyle = window.getComputedStyle(entry.urlDiv);
+      var columnWidth = entry.urlDiv.offsetWidth -
+          parseInt(computedStyle.webkitMarginStart, 10) -
+          parseInt(computedStyle.webkitPaddingStart, 10);
+      for (var i = 0; i < entries.length; ++i) {
+        entry = entries[i];
+        // For android://com.example, elide from the right.
+        if (!entry.isClickable)
+          continue;
+        var cellWidth = columnWidth;
+        if (entry.androidUriSuffix)
+          cellWidth -= entry.androidUriSuffix.offsetWidth;
+        var urlLink = entry.urlLink;
+        if (cellWidth <= 0) {
+          console.error('cellWidth <= 0. Skip origins eliding for ' +
+              urlLink.textContent);
+          continue;
+        }
+        if (urlLink.offsetWidth <= cellWidth)
+          continue;
+        urlLink.textContent = '…' + urlLink.textContent.substring(1);
+        while (urlLink.offsetWidth > cellWidth)
+          urlLink.textContent = '…' + urlLink.textContent.substring(2);
+      }
+    },
+
+    /**
      * Updates the data model for the saved passwords list with the values from
      * |entries|.
      * @param {!Array} entries The list of saved password data.
@@ -176,9 +220,9 @@ cr.define('options', function() {
         var query = this.lastQuery_;
         var filter = function(entry, index, list) {
           // Search both shown URL and username.
-          var shownUrl = entry[options.passwordManager.SHOWN_URL_FIELD];
+          var shownOrigin = entry[options.passwordManager.SHOWN_ORIGIN_FIELD];
           var username = entry[options.passwordManager.USERNAME_FIELD];
-          if (shownUrl.toLowerCase().indexOf(query.toLowerCase()) >= 0 ||
+          if (shownOrigin.toLowerCase().indexOf(query.toLowerCase()) >= 0 ||
               username.toLowerCase().indexOf(query.toLowerCase()) >= 0) {
             // Keep the original index so we can delete correctly. See also
             // deleteItemAtIndex() in password_manager_list.js that uses this.
@@ -191,6 +235,9 @@ cr.define('options', function() {
       }
       this.savedPasswordsList_.dataModel = new ArrayDataModel(entries);
       this.updateListVisibility_(this.savedPasswordsList_);
+      // updateOriginsEliding_ should be called after updateListVisibility_,
+      // otherwise updateOrigins... might be not able to read width of elements.
+      this.updateOriginsEliding_(this.savedPasswordsList_);
     },
 
     /**
@@ -201,6 +248,9 @@ cr.define('options', function() {
     setPasswordExceptionsList_: function(entries) {
       this.passwordExceptionsList_.dataModel = new ArrayDataModel(entries);
       this.updateListVisibility_(this.passwordExceptionsList_);
+      // updateOriginsEliding_ should be called after updateListVisibility_,
+      // otherwise updateOrigins... might be not able to read width of elements.
+      this.updateOriginsEliding_(this.passwordExceptionsList_);
     },
 
     /**
@@ -228,6 +278,20 @@ cr.define('options', function() {
       var item = this.savedPasswordsList_.getListItemByIndex(index);
       item.showPassword(password);
     },
+
+    /**
+     * @param {boolean} visible Whether the link should be visible.
+     * @private
+     */
+    setManageAccountLinkVisibility_: function(visible) {
+      $('manage-passwords-span').hidden = !visible;
+    },
+
+    /** @private */
+    showImportExportButton_: function() {
+      $('password-manager-import').hidden = false;
+      $('password-manager-export').hidden = false;
+    },
   };
 
   /**
@@ -235,9 +299,9 @@ cr.define('options', function() {
    * @param {number} rowIndex indicating the row to remove.
    */
   PasswordManager.removeSavedPassword = function(rowIndex) {
-      chrome.send('removeSavedPassword', [String(rowIndex)]);
-      chrome.send('coreOptionsUserMetricsAction',
-                  ['Options_PasswordManagerDeletePassword']);
+    chrome.send('removeSavedPassword', [String(rowIndex)]);
+    chrome.send('coreOptionsUserMetricsAction',
+                ['Options_PasswordManagerDeletePassword']);
   };
 
   /**
@@ -245,7 +309,7 @@ cr.define('options', function() {
    * @param {number} rowIndex indicating the row to remove.
    */
   PasswordManager.removePasswordException = function(rowIndex) {
-      chrome.send('removePasswordException', [String(rowIndex)]);
+    chrome.send('removePasswordException', [String(rowIndex)]);
   };
 
   PasswordManager.requestShowPassword = function(index) {
@@ -256,7 +320,8 @@ cr.define('options', function() {
   cr.makePublic(PasswordManager, [
     'setSavedPasswordsList',
     'setPasswordExceptionsList',
-    'showPassword'
+    'showImportExportButton',
+    'showPassword',
   ]);
 
   // Export

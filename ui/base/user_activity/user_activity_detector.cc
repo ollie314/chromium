@@ -53,9 +53,7 @@ UserActivityDetector::UserActivityDetector() {
 
   ui::PlatformEventSource* platform_event_source =
       ui::PlatformEventSource::GetInstance();
-#if defined(OS_CHROMEOS) || defined(OS_LINUX)
-  CHECK(platform_event_source);
-#endif
+  // TODO(sad): Need a PES for mus.
   if (platform_event_source)
     platform_event_source->AddPlatformEventObserver(this);
 }
@@ -63,9 +61,6 @@ UserActivityDetector::UserActivityDetector() {
 UserActivityDetector::~UserActivityDetector() {
   ui::PlatformEventSource* platform_event_source =
       ui::PlatformEventSource::GetInstance();
-#if defined(OS_CHROMEOS) || defined(OS_LINUX)
-  CHECK(platform_event_source);
-#endif
   if (platform_event_source)
     platform_event_source->RemovePlatformEventObserver(this);
   g_instance = nullptr;
@@ -96,7 +91,7 @@ void UserActivityDetector::OnDisplayPowerChanging() {
 
 void UserActivityDetector::DidProcessEvent(
     const PlatformEvent& platform_event) {
-  scoped_ptr<ui::Event> event(ui::EventFromNative(platform_event));
+  std::unique_ptr<ui::Event> event(ui::EventFromNative(platform_event));
   ProcessReceivedEvent(event.get());
 }
 

@@ -172,17 +172,31 @@ bool TegraV4L2Device::Initialize() {
   return true;
 }
 
+std::vector<base::ScopedFD> TegraV4L2Device::GetDmabufsForV4L2Buffer(
+    int /* index */,
+    size_t num_planes,
+    enum v4l2_buf_type /* type */) {
+  std::vector<base::ScopedFD> dmabuf_fds;
+  // Tegra does not actually provide dmabuf fds currently. Fill the vector with
+  // invalid descriptors to prevent the caller from failing on an empty vector
+  // being returned. TegraV4L2Device::CreateEGLImage() will ignore the invalid
+  // descriptors and create images based on V4L2 index passed to it.
+  dmabuf_fds.resize(num_planes);
+  return dmabuf_fds;
+}
+
 bool TegraV4L2Device::CanCreateEGLImageFrom(uint32_t v4l2_pixfmt) {
   return v4l2_pixfmt == V4L2_PIX_FMT_NV12M;
 }
 
-EGLImageKHR TegraV4L2Device::CreateEGLImage(EGLDisplay egl_display,
-                                            EGLContext egl_context,
-                                            GLuint texture_id,
-                                            gfx::Size /* frame_buffer_size */,
-                                            unsigned int buffer_index,
-                                            uint32_t v4l2_pixfmt,
-                                            size_t /* num_v4l2_planes */) {
+EGLImageKHR TegraV4L2Device::CreateEGLImage(
+    EGLDisplay egl_display,
+    EGLContext egl_context,
+    GLuint texture_id,
+    const gfx::Size& /* size */,
+    unsigned int buffer_index,
+    uint32_t v4l2_pixfmt,
+    const std::vector<base::ScopedFD>& /* dmabuf_fds */) {
   DVLOG(3) << "CreateEGLImage()";
   if (!CanCreateEGLImageFrom(v4l2_pixfmt)) {
     LOG(ERROR) << "Unsupported V4L2 pixel format";

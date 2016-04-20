@@ -5,6 +5,7 @@
 #include "media/formats/mp4/hevc.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -52,6 +53,9 @@ bool HEVCDecoderConfigurationRecord::Parse(const uint8_t* data, int data_size) {
 
 HEVCDecoderConfigurationRecord::HVCCNALArray::HVCCNALArray()
     : first_byte(0) {}
+
+HEVCDecoderConfigurationRecord::HVCCNALArray::HVCCNALArray(
+    const HVCCNALArray& other) = default;
 
 HEVCDecoderConfigurationRecord::HVCCNALArray::~HVCCNALArray() {}
 
@@ -129,7 +133,7 @@ bool HEVC::InsertParamSetsAnnexB(
     std::vector<SubsampleEntry>* subsamples) {
   DCHECK(HEVC::IsValidAnnexB(*buffer, *subsamples));
 
-  scoped_ptr<H265Parser> parser(new H265Parser());
+  std::unique_ptr<H265Parser> parser(new H265Parser());
   const uint8_t* start = &(*buffer)[0];
   parser->SetEncryptedStream(start, buffer->size(), *subsamples);
 
@@ -209,9 +213,9 @@ bool HEVC::IsValidAnnexB(const uint8_t* buffer,
 }
 
 HEVCBitstreamConverter::HEVCBitstreamConverter(
-    scoped_ptr<HEVCDecoderConfigurationRecord> hevc_config)
+    std::unique_ptr<HEVCDecoderConfigurationRecord> hevc_config)
     : hevc_config_(std::move(hevc_config)) {
-    DCHECK(hevc_config_);
+  DCHECK(hevc_config_);
 }
 
 HEVCBitstreamConverter::~HEVCBitstreamConverter() {

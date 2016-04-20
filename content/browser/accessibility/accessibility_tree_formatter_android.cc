@@ -22,7 +22,8 @@ using base::StringPrintf;
 namespace content {
 
 namespace {
-const char* BOOL_ATTRIBUTES[] = {
+
+const char* const BOOL_ATTRIBUTES[] = {
   "checkable",
   "checked",
   "clickable",
@@ -45,11 +46,11 @@ const char* BOOL_ATTRIBUTES[] = {
   "selected"
 };
 
-const char* STRING_ATTRIBUTES[] = {
+const char* const STRING_ATTRIBUTES[] = {
   "name"
 };
 
-const char* INT_ATTRIBUTES[] = {
+const char* const INT_ATTRIBUTES[] = {
   "item_index",
   "item_count",
   "row_count",
@@ -66,11 +67,12 @@ const char* INT_ATTRIBUTES[] = {
   "text_change_added_count",
   "text_change_removed_count",
 };
-}
+
+}  // namespace
 
 class AccessibilityTreeFormatterAndroid : public AccessibilityTreeFormatter {
  public:
-  explicit AccessibilityTreeFormatterAndroid();
+  AccessibilityTreeFormatterAndroid();
   ~AccessibilityTreeFormatterAndroid() override;
 
  private:
@@ -127,6 +129,7 @@ void AccessibilityTreeFormatterAndroid::AddProperties(
 
   // String attributes.
   dict->SetString("name", android_node->GetText());
+  dict->SetString("role_description", android_node->GetRoleDescription());
 
   // Int attributes.
   dict->SetInteger("item_index", android_node->GetItemIndex());
@@ -170,6 +173,15 @@ base::string16 AccessibilityTreeFormatterAndroid::ToString(
   base::string16 class_value;
   dict.GetString("class", &class_value);
   WriteAttribute(true, base::UTF16ToUTF8(class_value), &line);
+
+  std::string role_description;
+  dict.GetString("role_description", &role_description);
+  if (!role_description.empty()) {
+    WriteAttribute(
+        true,
+        StringPrintf("role_description='%s'", role_description.c_str()),
+        &line);
+  }
 
   for (unsigned i = 0; i < arraysize(BOOL_ATTRIBUTES); i++) {
     const char* attribute_name = BOOL_ATTRIBUTES[i];

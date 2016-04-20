@@ -9,7 +9,6 @@
 
 #include "base/bind.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -20,6 +19,7 @@
 #include "chrome/browser/supervised_user/legacy/supervised_user_sync_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_utils.h"
@@ -97,8 +97,8 @@ class SupervisedUserRegistrationUtilityTest : public ::testing::Test {
   void TearDown() override;
 
  protected:
-  scoped_ptr<SyncChangeProcessor> CreateChangeProcessor();
-  scoped_ptr<SyncErrorFactory> CreateErrorFactory();
+  std::unique_ptr<SyncChangeProcessor> CreateChangeProcessor();
+  std::unique_ptr<SyncErrorFactory> CreateErrorFactory();
   SyncData CreateRemoteData(const std::string& id, const std::string& name);
 
   SyncMergeResult StartInitialSync();
@@ -130,7 +130,7 @@ class SupervisedUserRegistrationUtilityTest : public ::testing::Test {
   TestingProfile profile_;
   SupervisedUserSyncService* service_;
   SupervisedUserSharedSettingsService* shared_settings_service_;
-  scoped_ptr<SupervisedUserRegistrationUtility> registration_utility_;
+  std::unique_ptr<SupervisedUserRegistrationUtility> registration_utility_;
 
   // Owned by the SupervisedUserSyncService.
   MockChangeProcessor* change_processor_;
@@ -169,16 +169,16 @@ void SupervisedUserRegistrationUtilityTest::TearDown() {
   content::RunAllBlockingPoolTasksUntilIdle();
 }
 
-scoped_ptr<SyncChangeProcessor>
+std::unique_ptr<SyncChangeProcessor>
 SupervisedUserRegistrationUtilityTest::CreateChangeProcessor() {
   EXPECT_FALSE(change_processor_);
   change_processor_ = new MockChangeProcessor();
-  return scoped_ptr<SyncChangeProcessor>(change_processor_);
+  return std::unique_ptr<SyncChangeProcessor>(change_processor_);
 }
 
-scoped_ptr<SyncErrorFactory>
+std::unique_ptr<SyncErrorFactory>
 SupervisedUserRegistrationUtilityTest::CreateErrorFactory() {
-  return scoped_ptr<SyncErrorFactory>(new syncer::SyncErrorFactoryMock());
+  return std::unique_ptr<SyncErrorFactory>(new syncer::SyncErrorFactoryMock());
 }
 
 SyncMergeResult SupervisedUserRegistrationUtilityTest::StartInitialSync() {
@@ -204,7 +204,7 @@ SupervisedUserRegistrationUtilityTest::GetRegistrationUtility() {
   if (registration_utility_.get())
     return registration_utility_.get();
 
-  scoped_ptr<SupervisedUserRefreshTokenFetcher> token_fetcher(
+  std::unique_ptr<SupervisedUserRefreshTokenFetcher> token_fetcher(
       new MockSupervisedUserRefreshTokenFetcher);
   registration_utility_.reset(SupervisedUserRegistrationUtility::CreateImpl(
       prefs(), std::move(token_fetcher), service(), shared_settings_service()));

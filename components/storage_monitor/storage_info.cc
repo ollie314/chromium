@@ -22,7 +22,6 @@ const char kMtpPtpPrefix[] = "mtp:";
 const char kMacImageCapturePrefix[] = "ic:";
 const char kITunesPrefix[] = "itunes:";
 const char kPicasaPrefix[] = "picasa:";
-const char kIPhotoPrefix[] = "iphoto:";
 
 base::string16 GetDisplayNameForDevice(uint64_t storage_size_in_bytes,
                                        const base::string16& name) {
@@ -54,6 +53,8 @@ namespace storage_monitor {
 
 StorageInfo::StorageInfo() : total_size_in_bytes_(0) {
 }
+
+StorageInfo::StorageInfo(const StorageInfo& other) = default;
 
 StorageInfo::StorageInfo(const std::string& device_id_in,
                          const base::FilePath::StringType& device_location,
@@ -89,8 +90,6 @@ std::string StorageInfo::MakeDeviceId(Type type, const std::string& unique_id) {
       return std::string(kITunesPrefix) + unique_id;
     case PICASA:
       return std::string(kPicasaPrefix) + unique_id;
-    case IPHOTO:
-      return std::string(kIPhotoPrefix) + unique_id;
   }
   NOTREACHED();
   return std::string();
@@ -119,8 +118,6 @@ bool StorageInfo::CrackDeviceId(const std::string& device_id,
     found_type = ITUNES;
   } else if (prefix == kPicasaPrefix) {
     found_type = PICASA;
-  } else if (prefix == kIPhotoPrefix) {
-    found_type = IPHOTO;
   } else {
     NOTREACHED();
     return false;
@@ -159,7 +156,6 @@ bool StorageInfo::IsMassStorageDevice(const std::string& device_id) {
           type == REMOVABLE_MASS_STORAGE_NO_DCIM ||
           type == FIXED_MASS_STORAGE ||
           type == ITUNES ||
-          type == IPHOTO ||
           type == PICASA);
 }
 
@@ -167,12 +163,6 @@ bool StorageInfo::IsMassStorageDevice(const std::string& device_id) {
 bool StorageInfo::IsITunesDevice(const std::string& device_id) {
   Type type;
   return CrackDeviceId(device_id, &type, NULL) && type == ITUNES;
-}
-
-// static
-bool StorageInfo::IsIPhotoDevice(const std::string& device_id) {
-  Type type;
-  return CrackDeviceId(device_id, &type, NULL) && type == IPHOTO;
 }
 
 // static

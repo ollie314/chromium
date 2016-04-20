@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
 #include <string>
 
 #include "base/base_switches.h"
@@ -9,13 +10,10 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
@@ -31,6 +29,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/search_engines/default_search_manager.h"
 #include "components/user_prefs/tracked/tracked_preference_histogram_names.h"
 #include "extensions/browser/pref_names.h"
@@ -69,7 +69,7 @@ int GetTrackedPrefHistogramCount(const char* histogram_name,
   if (!histogram)
     return 0;
 
-  scoped_ptr<base::HistogramSamples> samples(histogram->SnapshotSamples());
+  std::unique_ptr<base::HistogramSamples> samples(histogram->SnapshotSamples());
   int sum = 0;
   for (int i = 0; i < 100; ++i) {
     int count_for_id = samples->GetCount(i);
@@ -84,22 +84,22 @@ int GetTrackedPrefHistogramCount(const char* histogram_name,
   return sum;
 }
 
-scoped_ptr<base::DictionaryValue> ReadPrefsDictionary(
+std::unique_ptr<base::DictionaryValue> ReadPrefsDictionary(
     const base::FilePath& pref_file) {
   JSONFileValueDeserializer deserializer(pref_file);
   int error_code = JSONFileValueDeserializer::JSON_NO_ERROR;
   std::string error_str;
-  scoped_ptr<base::Value> prefs =
+  std::unique_ptr<base::Value> prefs =
       deserializer.Deserialize(&error_code, &error_str);
   if (!prefs || error_code != JSONFileValueDeserializer::JSON_NO_ERROR) {
     ADD_FAILURE() << "Error #" << error_code << ": " << error_str;
-    return scoped_ptr<base::DictionaryValue>();
+    return std::unique_ptr<base::DictionaryValue>();
   }
   if (!prefs->IsType(base::Value::TYPE_DICTIONARY)) {
     ADD_FAILURE();
-    return scoped_ptr<base::DictionaryValue>();
+    return std::unique_ptr<base::DictionaryValue>();
   }
-  return scoped_ptr<base::DictionaryValue>(
+  return std::unique_ptr<base::DictionaryValue>(
       static_cast<base::DictionaryValue*>(prefs.release()));
 }
 
@@ -199,12 +199,12 @@ class PrefHashBrowserTestBase
     EXPECT_EQ(protection_level_ > PROTECTION_DISABLED_ON_PLATFORM,
               base::PathExists(protected_pref_file));
 
-    scoped_ptr<base::DictionaryValue> unprotected_preferences(
+    std::unique_ptr<base::DictionaryValue> unprotected_preferences(
         ReadPrefsDictionary(unprotected_pref_file));
     if (!unprotected_preferences)
       return false;
 
-    scoped_ptr<base::DictionaryValue> protected_preferences;
+    std::unique_ptr<base::DictionaryValue> protected_preferences;
     if (protection_level_ > PROTECTION_DISABLED_ON_PLATFORM) {
       protected_preferences = ReadPrefsDictionary(protected_pref_file);
       if (!protected_preferences)

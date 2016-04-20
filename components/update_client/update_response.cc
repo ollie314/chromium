@@ -28,22 +28,26 @@ UpdateResponse::~UpdateResponse() {
 
 UpdateResponse::Results::Results() : daystart_elapsed_seconds(kNoDaystart) {
 }
+UpdateResponse::Results::Results(const Results& other) = default;
 UpdateResponse::Results::~Results() {
 }
 
 UpdateResponse::Result::Result() {
 }
-
+UpdateResponse::Result::Result(const Result& other) = default;
 UpdateResponse::Result::~Result() {
 }
 
 UpdateResponse::Result::Manifest::Manifest() {
 }
+UpdateResponse::Result::Manifest::Manifest(const Manifest& other) = default;
 UpdateResponse::Result::Manifest::~Manifest() {
 }
 
 UpdateResponse::Result::Manifest::Package::Package() : size(0), sizediff(0) {
 }
+UpdateResponse::Result::Manifest::Package::Package(const Package& other) =
+    default;
 UpdateResponse::Result::Manifest::Package::~Package() {
 }
 
@@ -283,6 +287,7 @@ bool ParseAppTag(xmlNode* app,
 
 bool UpdateResponse::Parse(const std::string& response_xml) {
   results_.daystart_elapsed_seconds = kNoDaystart;
+  results_.daystart_elapsed_days = kNoDaystart;
   results_.list.clear();
   errors_.clear();
 
@@ -330,6 +335,11 @@ bool UpdateResponse::Parse(const std::string& response_xml) {
     int parsed_elapsed = kNoDaystart;
     if (base::StringToInt(elapsed_seconds, &parsed_elapsed)) {
       results_.daystart_elapsed_seconds = parsed_elapsed;
+    }
+    std::string elapsed_days = GetAttribute(first, "elapsed_days");
+    parsed_elapsed = kNoDaystart;
+    if (base::StringToInt(elapsed_days, &parsed_elapsed)) {
+      results_.daystart_elapsed_days = parsed_elapsed;
     }
   }
 

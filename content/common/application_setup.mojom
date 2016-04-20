@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-module content;
+module content.mojom;
 
-import "mojo/shell/public/interfaces/service_provider.mojom";
+import "services/shell/public/interfaces/interface_provider.mojom";
 
 interface ApplicationSetup {
-  ExchangeServiceProviders(mojo.ServiceProvider& services,
-                           mojo.ServiceProvider exposed_services);
+  ExchangeInterfaceProviders(
+      shell.mojom.InterfaceProvider& remote_interfaces,
+      shell.mojom.InterfaceProvider local_interfaces);
 };

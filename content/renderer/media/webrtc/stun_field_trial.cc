@@ -40,7 +40,8 @@ enum NatType {
 };
 
 // This needs to match "NatType" in histograms.xml.
-const char* NatTypeNames[] = {"NoNAT", "UnknownNAT", "SymNAT", "NonSymNAT"};
+const char* const NatTypeNames[] =
+    {"NoNAT", "UnknownNAT", "SymNAT", "NonSymNAT"};
 static_assert(arraysize(NatTypeNames) == NAT_TYPE_MAX,
               "NatType enums must match names");
 
@@ -261,7 +262,7 @@ void StunProberTrial::OnNetworksChanged() {
   total_probers_ = params.total_batches * batch_size_;
 
   for (int i = 0; i < total_probers_; i++) {
-    scoped_ptr<StunProber> prober(
+    std::unique_ptr<StunProber> prober(
         new StunProber(factory_, rtc::Thread::Current(), networks));
     if (!prober->Prepare(params.servers, (params.shared_socket_mode != 0),
                          params.interval_ms, params.requests_per_ip, 1000,

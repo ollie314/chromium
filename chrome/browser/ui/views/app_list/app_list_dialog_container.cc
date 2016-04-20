@@ -8,7 +8,6 @@
 
 #include "base/macros.h"
 #include "build/build_config.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "ui/app_list/app_list_constants.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -171,9 +170,12 @@ class AppListDialogContainer : public BaseDialogContainer,
 // A BubbleFrameView that allows its client view to extend all the way to the
 // top of the dialog, overlapping the BubbleFrameView's close button. This
 // allows dialog content to appear closer to the top, in place of a title.
+// TODO(estade): the functionality here should probably be folded into
+// BubbleFrameView.
 class FullSizeBubbleFrameView : public views::BubbleFrameView {
  public:
-  FullSizeBubbleFrameView() : views::BubbleFrameView(gfx::Insets()) {}
+  FullSizeBubbleFrameView()
+      : views::BubbleFrameView(gfx::Insets(), gfx::Insets()) {}
   ~FullSizeBubbleFrameView() override {}
 
  private:
@@ -218,7 +220,7 @@ class NativeDialogContainer : public BaseDialogContainer {
   views::NonClientFrameView* CreateNonClientFrameView(
       views::Widget* widget) override {
     FullSizeBubbleFrameView* frame = new FullSizeBubbleFrameView();
-    scoped_ptr<views::BubbleBorder> border(new views::BubbleBorder(
+    std::unique_ptr<views::BubbleBorder> border(new views::BubbleBorder(
         views::BubbleBorder::FLOAT, kShadowType, gfx::kPlaceholderColor));
     border->set_use_theme_background_color(true);
     frame->SetBubbleBorder(std::move(border));

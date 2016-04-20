@@ -32,7 +32,6 @@
 
 #include "platform/text/DateTimeFormat.h"
 #include "public/platform/Platform.h"
-#include "wtf/MainThread.h"
 #include "wtf/text/StringBuilder.h"
 
 namespace blink {
@@ -414,21 +413,19 @@ String Locale::stripInvalidNumberCharacters(const String& input, const String& s
     return builder.toString();
 }
 
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 String Locale::localizedDecimalSeparator()
 {
     initializeLocaleData();
     return m_decimalSymbols[DecimalSeparatorIndex];
 }
-#endif
 
 String Locale::formatDateTime(const DateComponents& date, FormatType formatType)
 {
-    if (date.type() == DateComponents::Invalid)
+    if (date.getType() == DateComponents::Invalid)
         return String();
 
     DateTimeStringBuilder builder(*this, date);
-    switch (date.type()) {
+    switch (date.getType()) {
     case DateComponents::Time:
         builder.build(formatType == FormatTypeShort ? shortTimeFormat() : timeFormat());
         break;

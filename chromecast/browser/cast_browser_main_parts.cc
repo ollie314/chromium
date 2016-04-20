@@ -12,9 +12,9 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_registry_simple.h"
 #include "base/run_loop.h"
 #include "base/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -28,26 +28,33 @@
 #include "chromecast/browser/cast_browser_context.h"
 #include "chromecast/browser/cast_browser_process.h"
 #include "chromecast/browser/cast_content_browser_client.h"
+#include "chromecast/browser/cast_memory_pressure_monitor.h"
 #include "chromecast/browser/cast_net_log.h"
 #include "chromecast/browser/devtools/remote_debugging_server.h"
 #include "chromecast/browser/metrics/cast_metrics_prefs.h"
 #include "chromecast/browser/metrics/cast_metrics_service_client.h"
 #include "chromecast/browser/pref_service_helper.h"
 #include "chromecast/browser/url_request_context_factory.h"
+#include "chromecast/chromecast_features.h"
 #include "chromecast/common/platform_client_auth.h"
+#include "chromecast/media/audio/cast_audio_manager_factory.h"
 #include "chromecast/media/base/key_systems_common.h"
 #include "chromecast/media/base/media_message_loop.h"
+#include "chromecast/media/base/media_resource_tracker.h"
+#include "chromecast/media/base/video_plane_controller.h"
+#include "chromecast/media/cma/backend/media_pipeline_backend_manager.h"
 #include "chromecast/net/connectivity_checker.h"
 #include "chromecast/public/cast_media_shlib.h"
 #include "chromecast/public/cast_sys_info.h"
 #include "chromecast/service/cast_service.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/gpu_data_manager.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "media/audio/audio_manager.h"
-#include "media/audio/audio_manager_factory.h"
 #include "media/base/media.h"
 #include "ui/compositor/compositor_switches.h"
 
@@ -70,9 +77,12 @@
 #endif
 
 #if defined(USE_AURA)
+// gn check ignored on OverlayManagerCast as it's not a public ozone
+// header, but is exported to allow injecting the overlay-composited
+// callback.
 #include "chromecast/graphics/cast_screen.h"
-#include "ui/aura/env.h"
 #include "ui/gfx/screen.h"
+#include "ui/ozone/platform/cast/overlay_manager_cast.h"  // nogncheck
 #endif
 
 namespace {
@@ -167,6 +177,7 @@ void DeregisterKillOnAlarm() {
     DCHECK_EQ(sa_old.sa_handler, KillOnAlarm);
   }
 }
+
 #endif  // !defined(OS_ANDROID)
 
 }  // namespace
@@ -192,27 +203,22 @@ DefaultCommandLineSwitch g_default_switches[] = {
 #endif
   // Always enable HTMLMediaElement logs.
   { switches::kBlinkPlatformLogChannels, "Media"},
-#if defined(DISABLE_DISPLAY)
+#if BUILDFLAG(DISABLE_DISPLAY)
   { switches::kDisableGpu, "" },
 #endif
 #if defined(OS_LINUX)
 #if defined(ARCH_CPU_X86_FAMILY)
-  // This is needed for now to enable the egltest Ozone platform to work with
+  // This is needed for now to enable the x11 Ozone platform to work with
   // current Linux/NVidia OpenGL drivers.
   { switches::kIgnoreGpuBlacklist, ""},
 #elif defined(ARCH_CPU_ARM_FAMILY)
   // On Linux arm, enable CMA pipeline by default.
   { switches::kEnableCmaMediaPipeline, "" },
-#if !defined(DISABLE_DISPLAY)
+#if !BUILDFLAG(DISABLE_DISPLAY)
   { switches::kEnableHardwareOverlays, "" },
 #endif
 #endif
 #endif  // defined(OS_LINUX)
-  // Enable prefixed EME until all Cast partner apps are moved off of it.
-  { switches::kEnablePrefixedEncryptedMedia, "" },
-  // Needed to fix a bug where the raster thread doesn't get scheduled for a
-  // substantial time (~5 seconds).  See https://crbug.com/441895.
-  { switches::kUseNormalPriorityForTileTaskWorkerThreads, "" },
   // Needed so that our call to GpuDataManager::SetGLStrings doesn't race
   // against GPU process creation (which is otherwise triggered from
   // BrowserThreadsStarted).  The GPU process will be created as soon as a
@@ -246,10 +252,39 @@ CastBrowserMainParts::CastBrowserMainParts(
       net_log_(new CastNetLog()) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   AddDefaultCommandLineSwitches(command_line);
+
+#if !defined(OS_ANDROID)
+  media_resource_tracker_ = nullptr;
+#endif  // !defined(OS_ANDROID)
 }
 
 CastBrowserMainParts::~CastBrowserMainParts() {
 }
+
+scoped_refptr<base::SingleThreadTaskRunner>
+CastBrowserMainParts::GetMediaTaskRunner() const {
+  // TODO(alokp): Obtain task runner from a local thread or mojo media app.
+  return media::MediaMessageLoop::GetTaskRunner();
+}
+
+#if !defined(OS_ANDROID)
+media::MediaResourceTracker* CastBrowserMainParts::media_resource_tracker() {
+  if (!media_resource_tracker_) {
+    media_resource_tracker_ = new media::MediaResourceTracker(
+        base::ThreadTaskRunnerHandle::Get(), GetMediaTaskRunner());
+  }
+  return media_resource_tracker_;
+}
+
+media::MediaPipelineBackendManager*
+CastBrowserMainParts::media_pipeline_backend_manager() {
+  if (!media_pipeline_backend_manager_) {
+    media_pipeline_backend_manager_.reset(
+        new media::MediaPipelineBackendManager(GetMediaTaskRunner()));
+  }
+  return media_pipeline_backend_manager_.get();
+}
+#endif
 
 void CastBrowserMainParts::PreMainMessageLoopStart() {
   // GroupedHistograms needs to be initialized before any threads are created
@@ -269,7 +304,7 @@ void CastBrowserMainParts::PreMainMessageLoopStart() {
 }
 
 void CastBrowserMainParts::PostMainMessageLoopStart() {
-  cast_browser_process_->SetMetricsHelper(make_scoped_ptr(
+  cast_browser_process_->SetMetricsHelper(base::WrapUnique(
       new metrics::CastMetricsHelper(base::ThreadTaskRunnerHandle::Get())));
 
 #if defined(OS_ANDROID)
@@ -303,18 +338,28 @@ int CastBrowserMainParts::PreCreateThreads() {
     LOG(ERROR) << "Could not find crash dump location.";
   }
   cast_browser_process_->SetCrashDumpManager(
-      make_scoped_ptr(new breakpad::CrashDumpManager(crash_dumps_dir)));
+      base::WrapUnique(new breakpad::CrashDumpManager(crash_dumps_dir)));
 #else
   base::FilePath home_dir;
   CHECK(PathService::Get(DIR_CAST_HOME, &home_dir));
   if (!base::CreateDirectory(home_dir))
     return 1;
 
+  // Hook for internal code
+  cast_browser_process_->browser_client()->PreCreateThreads();
+
   // AudioManager is created immediately after threads are created, requiring
   // AudioManagerFactory to be set beforehand.
-  scoped_ptr< ::media::AudioManagerFactory> audio_manager_factory =
-      cast_browser_process_->browser_client()->CreateAudioManagerFactory();
-  ::media::AudioManager::SetFactory(audio_manager_factory.release());
+  ::media::AudioManager::SetFactory(
+      new media::CastAudioManagerFactory(media_pipeline_backend_manager()));
+
+  // Set GL strings so GPU config code can make correct feature blacklisting/
+  // whitelisting decisions.
+  // Note: SetGLStrings can be called before GpuDataManager::Initialize.
+  std::unique_ptr<CastSysInfo> sys_info = CreateSysInfo();
+  content::GpuDataManager::GetInstance()->SetGLStrings(
+      sys_info->GetGlVendor(), sys_info->GetGlRenderer(),
+      sys_info->GetGlVersion());
 #endif
 
 #if defined(USE_AURA)
@@ -322,10 +367,9 @@ int CastBrowserMainParts::PreCreateThreads() {
   // is assumed as an interface to access display information, e.g. from metrics
   // code.  See CastContentWindow::CreateWindowTree for update when resolution
   // is available.
-  cast_browser_process_->SetCastScreen(make_scoped_ptr(new CastScreen));
-  DCHECK(!gfx::Screen::GetScreenByType(gfx::SCREEN_TYPE_NATIVE));
-  gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE,
-                                 cast_browser_process_->cast_screen());
+  cast_browser_process_->SetCastScreen(base::WrapUnique(new CastScreen));
+  DCHECK(!gfx::Screen::GetScreen());
+  gfx::Screen::SetScreenInstance(cast_browser_process_->cast_screen());
 #endif
 
   content::ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
@@ -334,24 +378,15 @@ int CastBrowserMainParts::PreCreateThreads() {
 }
 
 void CastBrowserMainParts::PreMainMessageLoopRun() {
-#if !defined(OS_ANDROID)
-  // Set GL strings so GPU config code can make correct feature blacklisting/
-  // whitelisting decisions.
-  // Note: SetGLStrings MUST be called after GpuDataManager::Initialize.
-  scoped_ptr<CastSysInfo> sys_info = CreateSysInfo();
-  content::GpuDataManager::GetInstance()->SetGLStrings(
-      sys_info->GetGlVendor(), sys_info->GetGlRenderer(),
-      sys_info->GetGlVersion());
-#endif  // !defined(OS_ANDROID)
-
   scoped_refptr<PrefRegistrySimple> pref_registry(new PrefRegistrySimple());
   metrics::RegisterPrefs(pref_registry.get());
   cast_browser_process_->SetPrefService(
       PrefServiceHelper::CreatePrefService(pref_registry.get()));
 
-  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
 #if defined(OS_ANDROID)
   ::media::SetMediaClientAndroid(new media::CastMediaClientAndroid());
+#else
+  memory_pressure_monitor_.reset(new CastMemoryPressureMonitor());
 #endif  // defined(OS_ANDROID)
 
   cast_browser_process_->SetConnectivityChecker(
@@ -364,29 +399,48 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
   url_request_context_factory_->InitializeOnUIThread(net_log_.get());
 
   cast_browser_process_->SetBrowserContext(
-      make_scoped_ptr(new CastBrowserContext(url_request_context_factory_)));
+      base::WrapUnique(new CastBrowserContext(url_request_context_factory_)));
   cast_browser_process_->SetMetricsServiceClient(
       metrics::CastMetricsServiceClient::Create(
           content::BrowserThread::GetBlockingPool(),
           cast_browser_process_->pref_service(),
-          cast_browser_process_->browser_context()->GetRequestContext()));
+          content::BrowserContext::GetDefaultStoragePartition(
+              cast_browser_process_->browser_context())->
+                  GetURLRequestContext()));
 
   if (!PlatformClientAuth::Initialize())
     LOG(ERROR) << "PlatformClientAuth::Initialize failed.";
 
-  cast_browser_process_->SetRemoteDebuggingServer(make_scoped_ptr(
-      new RemoteDebuggingServer(cast_browser_process_->browser_client()->
-          EnableRemoteDebuggingImmediately())));
+  cast_browser_process_->SetRemoteDebuggingServer(base::WrapUnique(
+      new RemoteDebuggingServer(cast_browser_process_->browser_client()
+                                    ->EnableRemoteDebuggingImmediately())));
 
-  media::CastMediaShlib::Initialize(cmd_line->argv());
-  ::media::InitializeMediaLibrary();
+#if defined(USE_AURA) && !BUILDFLAG(DISABLE_DISPLAY)
+  // TODO(halliwell) move audio builds to use ozone_platform_cast, then can
+  // simplify this by removing DISABLE_DISPLAY condition.  Should then also
+  // assert(ozone_platform_cast) in BUILD.gn where it depends on //ui/ozone.
+  video_plane_controller_.reset(
+      new media::VideoPlaneController(GetMediaTaskRunner()));
+  cast_browser_process_->cast_screen()->SetDisplayResizeCallback(
+      base::Bind(&media::VideoPlaneController::SetGraphicsPlaneResolution,
+                 base::Unretained(video_plane_controller_.get())));
+  ui::OverlayManagerCast::SetOverlayCompositedCallback(
+      base::Bind(&media::VideoPlaneController::SetGeometry,
+                 base::Unretained(video_plane_controller_.get())));
+#endif
 
   cast_browser_process_->SetCastService(
       cast_browser_process_->browser_client()->CreateCastService(
           cast_browser_process_->browser_context(),
           cast_browser_process_->pref_service(),
-          url_request_context_factory_->GetSystemGetter()));
+          url_request_context_factory_->GetSystemGetter(),
+          video_plane_controller_.get()));
   cast_browser_process_->cast_service()->Initialize();
+
+#if !defined(OS_ANDROID)
+  media_resource_tracker()->InitializeMediaLib();
+#endif
+  ::media::InitializeMediaLibrary();
 
   // Initializing metrics service and network delegates must happen after cast
   // service is intialized because CastMetricsServiceClient and
@@ -437,11 +491,15 @@ void CastBrowserMainParts::PostMainMessageLoopRun() {
   cast_browser_process_->metrics_service_client()->Finalize();
   cast_browser_process_.reset();
 
-#if defined(USE_AURA)
-  aura::Env::DeleteInstance();
-#endif
-
   DeregisterKillOnAlarm();
+#endif
+}
+
+void CastBrowserMainParts::PostDestroyThreads() {
+#if !defined(OS_ANDROID)
+  media_resource_tracker_->FinalizeAndDestroy();
+  media_resource_tracker_ = nullptr;
+  media_pipeline_backend_manager_.reset();
 #endif
 }
 

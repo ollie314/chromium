@@ -50,7 +50,7 @@ size_t totalLength(const Vector<String>& strings)
 
 using namespace HTMLNames;
 
-StyledMarkupAccumulator::StyledMarkupAccumulator(EAbsoluteURLs shouldResolveURLs, const TextOffset& start, const TextOffset& end, const PassRefPtrWillBeRawPtr<Document> document, EAnnotateForInterchange shouldAnnotate, ConvertBlocksToInlines convertBlocksToInlines)
+StyledMarkupAccumulator::StyledMarkupAccumulator(EAbsoluteURLs shouldResolveURLs, const TextOffset& start, const TextOffset& end, Document* document, EAnnotateForInterchange shouldAnnotate, ConvertBlocksToInlines convertBlocksToInlines)
     : m_formatter(shouldResolveURLs)
     , m_start(start)
     , m_end(end)
@@ -93,12 +93,12 @@ void StyledMarkupAccumulator::appendText(Text& text)
     MarkupFormatter::appendCharactersReplacingEntities(m_result, str, start, length, m_formatter.entityMaskForText(text));
 }
 
-void StyledMarkupAccumulator::appendTextWithInlineStyle(Text& text, PassRefPtrWillBeRawPtr<EditingStyle> inlineStyle)
+void StyledMarkupAccumulator::appendTextWithInlineStyle(Text& text, EditingStyle* inlineStyle)
 {
     if (inlineStyle) {
         // wrappingStyleForAnnotatedSerialization should have removed -webkit-text-decorations-in-effect
-        ASSERT(!shouldAnnotate() || propertyMissingOrEqualToNone(inlineStyle->style(), CSSPropertyWebkitTextDecorationsInEffect));
-        ASSERT(m_document);
+        DCHECK(!shouldAnnotate() || propertyMissingOrEqualToNone(inlineStyle->style(), CSSPropertyWebkitTextDecorationsInEffect));
+        DCHECK(m_document);
 
         m_result.appendLiteral("<span style=\"");
         MarkupFormatter::appendAttributeValue(m_result, inlineStyle->style()->asText(), m_document->isHTMLDocument());
@@ -117,12 +117,12 @@ void StyledMarkupAccumulator::appendTextWithInlineStyle(Text& text, PassRefPtrWi
         m_result.append("</span>");
 }
 
-void StyledMarkupAccumulator::appendElementWithInlineStyle(const Element& element, PassRefPtrWillBeRawPtr<EditingStyle> style)
+void StyledMarkupAccumulator::appendElementWithInlineStyle(const Element& element, EditingStyle* style)
 {
     appendElementWithInlineStyle(m_result, element, style);
 }
 
-void StyledMarkupAccumulator::appendElementWithInlineStyle(StringBuilder& out, const Element& element, PassRefPtrWillBeRawPtr<EditingStyle> style)
+void StyledMarkupAccumulator::appendElementWithInlineStyle(StringBuilder& out, const Element& element, EditingStyle* style)
 {
     const bool documentIsHTML = element.document().isHTMLDocument();
     m_formatter.appendOpenTag(out, element, nullptr);
@@ -158,8 +158,8 @@ void StyledMarkupAccumulator::appendElement(StringBuilder& out, const Element& e
 void StyledMarkupAccumulator::wrapWithStyleNode(StylePropertySet* style)
 {
     // wrappingStyleForSerialization should have removed -webkit-text-decorations-in-effect
-    ASSERT(propertyMissingOrEqualToNone(style, CSSPropertyWebkitTextDecorationsInEffect));
-    ASSERT(m_document);
+    DCHECK(propertyMissingOrEqualToNone(style, CSSPropertyWebkitTextDecorationsInEffect));
+    DCHECK(m_document);
 
     StringBuilder openTag;
     openTag.appendLiteral("<div style=\"");

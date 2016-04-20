@@ -13,11 +13,13 @@
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/fileapi/file_system_backend.h"
+#include "chrome/browser/extensions/api/file_handlers/directory_util.h"
 #include "chrome/browser/extensions/api/file_handlers/mime_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/file_manager_private.h"
 #include "chrome/common/extensions/api/file_manager_private_internal.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/entry_info.h"
 #include "net/base/filename_util.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_url.h"
@@ -67,7 +69,7 @@ bool FileManagerPrivateInternalExecuteTaskFunction::RunAsync() {
   using extensions::api::file_manager_private_internal::ExecuteTask::Params;
   using extensions::api::file_manager_private_internal::ExecuteTask::Results::
       Create;
-  const scoped_ptr<Params> params(Params::Create(*args_));
+  const std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   file_manager::file_tasks::TaskDescriptor task;
@@ -128,7 +130,7 @@ FileManagerPrivateInternalGetFileTasksFunction::
 
 bool FileManagerPrivateInternalGetFileTasksFunction::RunAsync() {
   using extensions::api::file_manager_private_internal::GetFileTasks::Params;
-  const scoped_ptr<Params> params(Params::Create(*args_));
+  const std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   if (params->urls.empty())
@@ -149,8 +151,9 @@ bool FileManagerPrivateInternalGetFileTasksFunction::RunAsync() {
     local_paths_.push_back(file_system_url.path());
   }
 
-  collector_.reset(new app_file_handler_util::MimeTypeCollector(GetProfile()));
-  collector_->CollectForLocalPaths(
+  mime_type_collector_.reset(
+      new app_file_handler_util::MimeTypeCollector(GetProfile()));
+  mime_type_collector_->CollectForLocalPaths(
       local_paths_,
       base::Bind(
           &FileManagerPrivateInternalGetFileTasksFunction::OnMimeTypesCollected,
@@ -160,31 +163,44 @@ bool FileManagerPrivateInternalGetFileTasksFunction::RunAsync() {
 }
 
 void FileManagerPrivateInternalGetFileTasksFunction::OnMimeTypesCollected(
-    scoped_ptr<std::vector<std::string>> mime_types) {
-  app_file_handler_util::PathAndMimeTypeSet path_mime_set;
+    std::unique_ptr<std::vector<std::string>> mime_types) {
+  is_directory_collector_.reset(
+      new app_file_handler_util::IsDirectoryCollector(GetProfile()));
+  is_directory_collector_->CollectForEntriesPaths(
+      local_paths_, base::Bind(&FileManagerPrivateInternalGetFileTasksFunction::
+                                   OnAreDirectoriesAndMimeTypesCollected,
+                               this, base::Passed(std::move(mime_types))));
+}
+
+void FileManagerPrivateInternalGetFileTasksFunction::
+    OnAreDirectoriesAndMimeTypesCollected(
+        std::unique_ptr<std::vector<std::string>> mime_types,
+        std::unique_ptr<std::set<base::FilePath>> directory_paths) {
+  std::vector<EntryInfo> entries;
   for (size_t i = 0; i < local_paths_.size(); ++i) {
-    path_mime_set.insert(std::make_pair(local_paths_[i], (*mime_types)[i]));
+    entries.push_back(EntryInfo(
+        local_paths_[i], (*mime_types)[i],
+        directory_paths->find(local_paths_[i]) != directory_paths->end()));
   }
 
   std::vector<file_manager::file_tasks::FullTaskDescriptor> tasks;
   file_manager::file_tasks::FindAllTypesOfTasks(
       GetProfile(), drive::util::GetDriveAppRegistryByProfile(GetProfile()),
-      path_mime_set, urls_, &tasks);
+      entries, urls_, &tasks);
 
   // Convert the tasks into JSON compatible objects.
   using api::file_manager_private::FileTask;
-  std::vector<linked_ptr<FileTask> > results;
-  for (size_t i = 0; i < tasks.size(); ++i) {
-    const file_manager::file_tasks::FullTaskDescriptor& task = tasks[i];
-    const linked_ptr<FileTask> converted(new FileTask);
-    converted->task_id = file_manager::file_tasks::TaskDescriptorToId(
-        task.task_descriptor());
+  std::vector<FileTask> results;
+  for (const file_manager::file_tasks::FullTaskDescriptor& task : tasks) {
+    FileTask converted;
+    converted.task_id =
+        file_manager::file_tasks::TaskDescriptorToId(task.task_descriptor());
     if (!task.icon_url().is_empty())
-      converted->icon_url = task.icon_url().spec();
-    converted->title = task.task_title();
-    converted->is_default = task.is_default();
-    converted->is_generic_file_handler = task.is_generic_file_handler();
-    results.push_back(converted);
+      converted.icon_url = task.icon_url().spec();
+    converted.title = task.task_title();
+    converted.is_default = task.is_default();
+    converted.is_generic_file_handler = task.is_generic_file_handler();
+    results.push_back(std::move(converted));
   }
 
   results_ = extensions::api::file_manager_private_internal::GetFileTasks::
@@ -194,7 +210,7 @@ void FileManagerPrivateInternalGetFileTasksFunction::OnMimeTypesCollected(
 
 bool FileManagerPrivateInternalSetDefaultTaskFunction::RunSync() {
   using extensions::api::file_manager_private_internal::SetDefaultTask::Params;
-  const scoped_ptr<Params> params(Params::Create(*args_));
+  const std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   const scoped_refptr<storage::FileSystemContext> file_system_context =

@@ -30,8 +30,6 @@
 #include "core/events/EventQueue.h"
 #include "wtf/HashSet.h"
 #include "wtf/ListHashSet.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
@@ -39,20 +37,14 @@ class Event;
 class DOMWindowEventQueueTimer;
 class ExecutionContext;
 
-#if ENABLE(OILPAN)
-#define DOMWINDOWEVENTQUEUE_BASE_CLASSES public EventQueue
-#else
-#define DOMWINDOWEVENTQUEUE_BASE_CLASSES public RefCounted<DOMWindowEventQueue>, public EventQueue
-#endif
-
-class DOMWindowEventQueue final : DOMWINDOWEVENTQUEUE_BASE_CLASSES {
+class DOMWindowEventQueue final : public EventQueue {
 public:
-    static PassRefPtrWillBeRawPtr<DOMWindowEventQueue> create(ExecutionContext*);
+    static DOMWindowEventQueue* create(ExecutionContext*);
     ~DOMWindowEventQueue() override;
 
     // EventQueue
     DECLARE_VIRTUAL_TRACE();
-    bool enqueueEvent(PassRefPtrWillBeRawPtr<Event>) override;
+    bool enqueueEvent(Event*) override;
     bool cancelEvent(Event*) override;
     void close() override;
 
@@ -60,15 +52,15 @@ private:
     explicit DOMWindowEventQueue(ExecutionContext*);
 
     void pendingEventTimerFired();
-    void dispatchEvent(PassRefPtrWillBeRawPtr<Event>);
+    void dispatchEvent(Event*);
 
-    OwnPtrWillBeMember<DOMWindowEventQueueTimer> m_pendingEventTimer;
-    WillBeHeapListHashSet<RefPtrWillBeMember<Event>, 16> m_queuedEvents;
+    Member<DOMWindowEventQueueTimer> m_pendingEventTimer;
+    HeapListHashSet<Member<Event>, 16> m_queuedEvents;
     bool m_isClosed;
 
     friend class DOMWindowEventQueueTimer;
 };
 
-}
+} // namespace blink
 
 #endif // DOMWindowEventQueue_h

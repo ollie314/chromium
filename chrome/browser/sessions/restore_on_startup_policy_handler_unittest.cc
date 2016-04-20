@@ -2,21 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/sessions/restore_on_startup_policy_handler.h"
+
+#include <memory>
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_value_map.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
-#include "chrome/browser/sessions/restore_on_startup_policy_handler.h"
 #include "chrome/common/pref_names.h"
 #include "components/policy/core/browser/configuration_policy_handler.h"
 #include "components/policy/core/browser/policy_error_map.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/prefs/pref_value_map.h"
 #include "grit/components_strings.h"
 #include "policy/policy_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -102,7 +103,7 @@ TEST_F(RestoreOnStartupPolicyHandlerTest,
   SetPolicyValue(
       key::kRestoreOnStartup,
       new base::FundamentalValue(SessionStartupPref::kPrefValueLast));
-  scoped_ptr<base::ListValue> urls(new base::ListValue);
+  std::unique_ptr<base::ListValue> urls(new base::ListValue);
   urls->AppendString("http://foo.com");
   SetPolicyValue(key::kCookiesSessionOnlyForUrls, urls.release());
   // Checking should succeed but add an error to the error map.

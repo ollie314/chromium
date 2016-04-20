@@ -5,6 +5,8 @@
 #ifndef CONTENT_TEST_TEST_BLINK_WEB_UNIT_TEST_SUPPORT_H_
 #define CONTENT_TEST_TEST_BLINK_WEB_UNIT_TEST_SUPPORT_H_
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
@@ -15,8 +17,7 @@
 #include "content/child/webfileutilities_impl.h"
 #include "content/test/mock_webblob_registry_impl.h"
 #include "content/test/mock_webclipboard_impl.h"
-#include "content/test/weburl_loader_mock_factory.h"
-#include "third_party/WebKit/public/platform/WebUnitTestSupport.h"
+#include "third_party/WebKit/public/platform/WebURLLoaderMockFactory.h"
 
 namespace base {
 class StatsTable;
@@ -32,10 +33,8 @@ class RendererScheduler;
 
 namespace content {
 
-// An implementation of blink::WebUnitTestSupport and BlinkPlatformImpl for
-// tests.
-class TestBlinkWebUnitTestSupport : public blink::WebUnitTestSupport,
-                                    public BlinkPlatformImpl {
+// An implementation of BlinkPlatformImpl for tests.
+class TestBlinkWebUnitTestSupport : public BlinkPlatformImpl {
  public:
   TestBlinkWebUnitTestSupport();
   ~TestBlinkWebUnitTestSupport() override;
@@ -71,20 +70,8 @@ class TestBlinkWebUnitTestSupport : public blink::WebUnitTestSupport,
       const blink::WebFloatPoint& velocity,
       const blink::WebSize& cumulative_scroll) override;
 
-  blink::WebUnitTestSupport* unitTestSupport() override;
+  blink::WebURLLoaderMockFactory* getURLLoaderMockFactory() override;
 
-  // WebUnitTestSupport implementation
-  void registerMockedURL(const blink::WebURL& url,
-                         const blink::WebURLResponse& response,
-                         const blink::WebString& filePath) override;
-  void registerMockedErrorURL(const blink::WebURL& url,
-                              const blink::WebURLResponse& response,
-                              const blink::WebURLError& error) override;
-  void unregisterMockedURL(const blink::WebURL& url) override;
-  void unregisterAllMockedURLs() override;
-  void serveAsynchronousMockedRequests() override;
-  void setLoaderDelegate(blink::WebURLLoaderTestDelegate* delegate) override;
-  blink::WebLayerTreeView* createLayerTreeViewForTesting() override;
   blink::WebThread* currentThread() override;
 
   void getPluginList(bool refresh,
@@ -93,16 +80,16 @@ class TestBlinkWebUnitTestSupport : public blink::WebUnitTestSupport,
  private:
   MockWebBlobRegistryImpl blob_registry_;
   SimpleWebMimeRegistryImpl mime_registry_;
-  scoped_ptr<MockWebClipboardImpl> mock_clipboard_;
+  std::unique_ptr<MockWebClipboardImpl> mock_clipboard_;
   WebFileUtilitiesImpl file_utilities_;
   base::ScopedTempDir file_system_root_;
-  scoped_ptr<WebURLLoaderMockFactory> url_loader_factory_;
+  std::unique_ptr<blink::WebURLLoaderMockFactory> url_loader_factory_;
   cc_blink::WebCompositorSupportImpl compositor_support_;
-  scoped_ptr<scheduler::RendererScheduler> renderer_scheduler_;
-  scoped_ptr<blink::WebThread> web_thread_;
+  std::unique_ptr<scheduler::RendererScheduler> renderer_scheduler_;
+  std::unique_ptr<blink::WebThread> web_thread_;
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  blink::WebThemeEngine* active_theme_engine_;
+  blink::WebThemeEngine* active_theme_engine_ = nullptr;
 #endif
   DISALLOW_COPY_AND_ASSIGN(TestBlinkWebUnitTestSupport);
 };

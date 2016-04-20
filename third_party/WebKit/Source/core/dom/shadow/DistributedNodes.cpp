@@ -36,18 +36,18 @@ void DistributedNodes::swap(DistributedNodes& other)
     m_indices.swap(other.m_indices);
 }
 
-void DistributedNodes::append(PassRefPtrWillBeRawPtr<Node> node)
+void DistributedNodes::append(Node* node)
 {
-    ASSERT(node);
-    ASSERT(!node->isSlotOrActiveInsertionPoint());
+    DCHECK(node);
+    DCHECK(!node->isSlotOrActiveInsertionPoint());
     size_t size = m_nodes.size();
-    m_indices.set(node.get(), size);
+    m_indices.set(node, size);
     m_nodes.append(node);
 }
 
 size_t DistributedNodes::find(const Node* node) const
 {
-    WillBeHeapHashMap<RawPtrWillBeMember<const Node>, size_t>::const_iterator it = m_indices.find(node);
+    HeapHashMap<Member<const Node>, size_t>::const_iterator it = m_indices.find(node);
     if (it == m_indices.end())
         return kNotFound;
 
@@ -59,7 +59,7 @@ Node* DistributedNodes::nextTo(const Node* node) const
     size_t index = find(node);
     if (index == kNotFound || index + 1 == size())
         return 0;
-    return at(index + 1).get();
+    return at(index + 1);
 }
 
 Node* DistributedNodes::previousTo(const Node* node) const
@@ -67,15 +67,13 @@ Node* DistributedNodes::previousTo(const Node* node) const
     size_t index = find(node);
     if (index == kNotFound || !index)
         return 0;
-    return at(index - 1).get();
+    return at(index - 1);
 }
 
 DEFINE_TRACE(DistributedNodes)
 {
-#if ENABLE(OILPAN)
     visitor->trace(m_nodes);
     visitor->trace(m_indices);
-#endif
 }
 
 } // namespace blink

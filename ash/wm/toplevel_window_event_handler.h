@@ -5,15 +5,15 @@
 #ifndef ASH_WM_TOPLEVEL_WINDOW_EVENT_HANDLER_H_
 #define ASH_WM_TOPLEVEL_WINDOW_EVENT_HANDLER_H_
 
+#include <memory>
 #include <set>
 
 #include "ash/ash_export.h"
 #include "ash/display/window_tree_host_manager.h"
-#include "ash/wm/wm_types.h"
+#include "ash/wm/common/wm_types.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "ui/events/event_handler.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
@@ -119,7 +119,7 @@ class ASH_EXPORT ToplevelWindowEventHandler
   // Whether the drag was reverted. Set by CompleteDrag().
   bool drag_reverted_;
 
-  scoped_ptr<ScopedWindowResizer> window_resizer_;
+  std::unique_ptr<ScopedWindowResizer> window_resizer_;
 
   base::Closure quit_closure_;
 

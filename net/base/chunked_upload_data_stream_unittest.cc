@@ -4,9 +4,9 @@
 
 #include "net/base/chunked_upload_data_stream.h"
 
+#include <memory>
 #include <string>
 
-#include "base/memory/scoped_ptr.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -303,6 +303,30 @@ TEST(ChunkedUploadDataStreamTest, RewindWhileReading) {
   EXPECT_EQ(kTestDataSize, stream.position());
   ASSERT_TRUE(stream.IsEOF());
   EXPECT_FALSE(callback.have_result());
+}
+
+// Check the behavior of ChunkedUploadDataStream::Writer.
+TEST(ChunkedUploadDataStreamTest, ChunkedUploadDataStreamWriter) {
+  std::unique_ptr<ChunkedUploadDataStream> stream(
+      new ChunkedUploadDataStream(0));
+  std::unique_ptr<ChunkedUploadDataStream::Writer> writer(
+      stream->CreateWriter());
+
+  // Write before Init.
+  ASSERT_TRUE(writer->AppendData(kTestData, 1, false));
+  ASSERT_EQ(OK, stream->Init(TestCompletionCallback().callback()));
+
+  // Write after Init.
+  ASSERT_TRUE(writer->AppendData(kTestData + 1, kTestDataSize - 1, false));
+
+  TestCompletionCallback callback;
+  std::string data = ReadSync(stream.get(), kTestBufferSize);
+  EXPECT_EQ(kTestData, data);
+
+  // Writing data should gracefully fail if the stream is deleted while still
+  // appending data to it.
+  stream.reset();
+  EXPECT_FALSE(writer->AppendData(kTestData, kTestDataSize, true));
 }
 
 }  // namespace net

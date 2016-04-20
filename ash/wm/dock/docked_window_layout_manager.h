@@ -5,8 +5,9 @@
 #ifndef ASH_WM_DOCK_DOCKED_WINDOW_LAYOUT_MANAGER_H_
 #define ASH_WM_DOCK_DOCKED_WINDOW_LAYOUT_MANAGER_H_
 
+#include <memory>
+
 #include "ash/ash_export.h"
-#include "ash/shelf/shelf_layout_manager_observer.h"
 #include "ash/shell_observer.h"
 #include "ash/snap_to_pixel_layout_manager.h"
 #include "ash/wm/dock/dock_types.h"
@@ -14,7 +15,6 @@
 #include "ash/wm/window_state_observer.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "ui/aura/window.h"
@@ -40,18 +40,7 @@ class DockedBackgroundWidget;
 class DockedWindowLayoutManagerObserver;
 class DockedWindowResizerTest;
 class Shelf;
-class ShelfLayoutManager;
 class WorkspaceController;
-
-struct WindowWithHeight {
-  explicit WindowWithHeight(aura::Window* window) :
-    window_(window),
-    height_(window->bounds().height()) { }
-  aura::Window* window() { return window_; }
-  const aura::Window* window() const { return window_; }
-  aura::Window* window_;
-  int height_;
-};
 
 // DockedWindowLayoutManager is responsible for organizing windows when they are
 // docked to the side of a screen. It is associated with a specific container
@@ -71,7 +60,6 @@ class ASH_EXPORT DockedWindowLayoutManager
       public aura::WindowObserver,
       public aura::client::ActivationChangeObserver,
       public keyboard::KeyboardControllerObserver,
-      public ShelfLayoutManagerObserver,
       public wm::WindowStateObserver {
  public:
   // Maximum width of the docked windows area.
@@ -162,10 +150,6 @@ class ASH_EXPORT DockedWindowLayoutManager
                                 aura::Window* root_window) override;
   void OnShelfAlignmentChanged(aura::Window* root_window) override;
 
-  // ShelfLayoutManagerObserver:
-  void OnBackgroundUpdated(ShelfBackgroundType background_type,
-                           BackgroundAnimatorChangeType change_type) override;
-
   // wm::WindowStateObserver:
   void OnPreWindowStateTypeChange(wm::WindowState* window_state,
                                   wm::WindowStateType old_type) override;
@@ -184,7 +168,11 @@ class ASH_EXPORT DockedWindowLayoutManager
       aura::Window* lost_active) override;
 
  private:
+  struct CompareMinimumHeight;
+  struct CompareWindowPos;
   class ShelfWindowObserver;
+  struct WindowWithHeight;
+
   friend class DockedWindowLayoutManagerTest;
   friend class DockedWindowResizerTest;
 
@@ -319,10 +307,10 @@ class ASH_EXPORT DockedWindowLayoutManager
   base::Time last_action_time_;
 
   // Observes shelf for bounds changes.
-  scoped_ptr<ShelfWindowObserver> shelf_observer_;
+  std::unique_ptr<ShelfWindowObserver> shelf_observer_;
 
   // Widget used to paint a background for the docked area.
-  scoped_ptr<DockedBackgroundWidget> background_widget_;
+  std::unique_ptr<DockedBackgroundWidget> background_widget_;
 
   // Observers of dock bounds changes.
   base::ObserverList<DockedWindowLayoutManagerObserver> observer_list_;

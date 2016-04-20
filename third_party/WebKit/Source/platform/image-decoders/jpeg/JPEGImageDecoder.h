@@ -40,22 +40,21 @@ public:
 
     // ImageDecoder:
     String filenameExtension() const override { return "jpg"; }
-    void onSetData(SharedBuffer* data) override;
-    bool hasColorProfile() const override { return m_hasColorProfile; }
+    void onSetData(SegmentReader* data) override;
     IntSize decodedSize() const override { return m_decodedSize; }
-    IntSize decodedYUVSize(int component, SizeType) const override;
     bool setSize(unsigned width, unsigned height) override;
+    IntSize decodedYUVSize(int component) const override;
+    size_t decodedYUVWidthBytes(int component) const override;
     bool canDecodeToYUV() override;
     bool decodeToYUV() override;
     void setImagePlanes(PassOwnPtr<ImagePlanes>) override;
-    bool hasImagePlanes() const { return m_imagePlanes; }
+    bool hasImagePlanes() const { return m_imagePlanes.get(); }
 
     bool outputScanlines();
     unsigned desiredScaleNumerator() const;
     void complete();
 
     void setOrientation(ImageOrientation orientation) { m_orientation = orientation; }
-    void setHasColorProfile(bool hasColorProfile) { m_hasColorProfile = hasColorProfile; }
     void setDecodedSize(unsigned width, unsigned height);
 
 private:
@@ -71,7 +70,6 @@ private:
     OwnPtr<JPEGImageReader> m_reader;
     OwnPtr<ImagePlanes> m_imagePlanes;
     IntSize m_decodedSize;
-    bool m_hasColorProfile;
 };
 
 } // namespace blink

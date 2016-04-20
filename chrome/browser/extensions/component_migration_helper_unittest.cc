@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/prefs/pref_registry_simple.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/component_migration_helper.h"
 #include "chrome/browser/extensions/extension_action_test_util.h"
@@ -14,6 +13,7 @@
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/feature_switch.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -96,8 +96,8 @@ class ComponentMigrationHelperTest : public ExtensionServiceTestBase {
   }
 
   StrictMock<MockComponentActionDelegate> mock_delegate_;
-  scoped_ptr<StrictMock<MockComponentMigrationHelper>> mock_helper_;
-  scoped_ptr<FeatureSwitch::ScopedOverride> extension_action_redesign_;
+  std::unique_ptr<StrictMock<MockComponentMigrationHelper>> mock_helper_;
+  std::unique_ptr<FeatureSwitch::ScopedOverride> extension_action_redesign_;
 
   // Migrated extensions with browser actions.
   scoped_refptr<const Extension> migrated_extension_a_;
@@ -189,6 +189,24 @@ TEST_F(ComponentMigrationHelperTest, InstallUnregisteredExtension) {
   EXPECT_FALSE(IsTestComponentActionEnabled());
   EXPECT_TRUE(
       registry()->enabled_extensions().Contains(unregistered_extension_->id()));
+}
+
+TEST_F(ComponentMigrationHelperTest, RemoveComponentAction) {
+  mock_helper_->SetTestComponentActionPref(true);
+
+  EXPECT_CALL(mock_delegate_, HasComponentAction(kTestActionId))
+      .WillOnce(Return(false));
+  EXPECT_CALL(mock_delegate_, AddComponentAction(kTestActionId));
+
+  mock_helper_->OnFeatureEnabled(kTestActionId);
+  EXPECT_TRUE(IsTestComponentActionEnabled());
+
+  EXPECT_CALL(mock_delegate_, HasComponentAction(kTestActionId))
+      .WillOnce(Return(true));
+  EXPECT_CALL(mock_delegate_, RemoveComponentAction(kTestActionId));
+
+  mock_helper_->OnActionRemoved(kTestActionId);
+  EXPECT_FALSE(IsTestComponentActionEnabled());
 }
 
 }  // namespace extensions

@@ -10,3 +10,12 @@ BreakpadWinDeathTest.TestDebugbreak
 
 # DrM-i#1465
 RdpClientTest.Basic
+
+# https://crbug.com/581519
+Webrtc/ConnectionTest.Video/0
+
+# https://crbug.com/599769
+RemoteSecurityKeyMessageReaderTest.MultipleMessages
+
+# https://crbug.com/603357
+RemoteSecurityKeyMessageReaderImplTest.MultipleMessages

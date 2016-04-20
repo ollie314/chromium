@@ -35,7 +35,7 @@ protected:
         WebLocalFrameImpl& frameImpl = *m_webViewHelper.webViewImpl()->mainFrameImpl();
         frameImpl.viewImpl()->resize(WebSize(640, 480));
         frameImpl.viewImpl()->updateAllLifecyclePhases();
-        m_document = PassRefPtrWillBeRawPtr<Document>(frameImpl.document());
+        m_document = static_cast<Document*>(frameImpl.document());
         m_textFinder = &frameImpl.ensureTextFinder();
     }
 
@@ -46,8 +46,8 @@ protected:
 
 private:
     FrameTestHelpers::WebViewHelper m_webViewHelper;
-    RefPtrWillBePersistent<Document> m_document;
-    RawPtrWillBePersistent<TextFinder> m_textFinder;
+    Persistent<Document> m_document;
+    Persistent<TextFinder> m_textFinder;
 };
 
 Document& TextFinderTest::document() const
@@ -62,8 +62,8 @@ TextFinder& TextFinderTest::textFinder() const
 
 WebFloatRect TextFinderTest::findInPageRect(Node* startContainer, int startOffset, Node* endContainer, int endOffset)
 {
-    RefPtrWillBeRawPtr<Range> range = Range::create(startContainer->document(), startContainer, startOffset, endContainer, endOffset);
-    return WebFloatRect(findInPageRectFromRange(range.get()));
+    Range* range = Range::create(startContainer->document(), startContainer, startOffset, endContainer, endOffset);
+    return WebFloatRect(findInPageRectFromRange(range));
 }
 
 TEST_F(TextFinderTest, FindTextSimple)
@@ -186,7 +186,7 @@ TEST_F(TextFinderTest, FindTextNotFound)
 TEST_F(TextFinderTest, FindTextInShadowDOM)
 {
     document().body()->setInnerHTML("<b>FOO</b><i>foo</i>", ASSERT_NO_EXCEPTION);
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = document().body()->createShadowRootInternal(ShadowRootType::V0, ASSERT_NO_EXCEPTION);
+    ShadowRoot* shadowRoot = document().body()->createShadowRootInternal(ShadowRootType::V0, ASSERT_NO_EXCEPTION);
     shadowRoot->setInnerHTML("<content select=\"i\"></content><u>Foo</u><content></content>", ASSERT_NO_EXCEPTION);
     Node* textInBElement = document().body()->firstChild()->firstChild();
     Node* textInIElement = document().body()->lastChild()->firstChild();
@@ -198,7 +198,7 @@ TEST_F(TextFinderTest, FindTextInShadowDOM)
     bool wrapWithinFrame = true;
     WebRect* selectionRect = nullptr;
 
-    // TextIterator currently returns the matches in the composed treeorder, so
+    // TextIterator currently returns the matches in the flat treeorder, so
     // in this case the matches will be returned in the order of
     // <i> -> <u> -> <b>.
     ASSERT_TRUE(textFinder().find(identifier, searchText, findOptions, wrapWithinFrame, selectionRect));
@@ -300,7 +300,7 @@ TEST_F(TextFinderTest, ScopeTextMatchesSimple)
 TEST_F(TextFinderTest, ScopeTextMatchesWithShadowDOM)
 {
     document().body()->setInnerHTML("<b>FOO</b><i>foo</i>", ASSERT_NO_EXCEPTION);
-    RefPtrWillBeRawPtr<ShadowRoot> shadowRoot = document().body()->createShadowRootInternal(ShadowRootType::V0, ASSERT_NO_EXCEPTION);
+    ShadowRoot* shadowRoot = document().body()->createShadowRootInternal(ShadowRootType::V0, ASSERT_NO_EXCEPTION);
     shadowRoot->setInnerHTML("<content select=\"i\"></content><u>Foo</u><content></content>", ASSERT_NO_EXCEPTION);
     Node* textInBElement = document().body()->firstChild()->firstChild();
     Node* textInIElement = document().body()->lastChild()->firstChild();
@@ -315,7 +315,7 @@ TEST_F(TextFinderTest, ScopeTextMatchesWithShadowDOM)
     while (textFinder().scopingInProgress())
         runPendingTasks();
 
-    // TextIterator currently returns the matches in the composed tree order,
+    // TextIterator currently returns the matches in the flat tree order,
     // so in this case the matches will be returned in the order of
     // <i> -> <u> -> <b>.
     EXPECT_EQ(3, textFinder().totalMatchCount());
@@ -394,44 +394,83 @@ TEST_F(TextFinderTest, SequentialMatches)
     EXPECT_EQ(findInPageRect(textNode, 4, textNode, 6), matchRects[2]);
 }
 
+TEST_F(TextFinderTest, FindTextJavaScriptUpdatesDOM)
+{
+    document().body()->setInnerHTML("<b>XXXXFindMeYYYY</b><i></i>", ASSERT_NO_EXCEPTION);
+
+    int identifier = 0;
+    WebString searchText(String("FindMe"));
+    WebFindOptions findOptions; // Default.
+    bool wrapWithinFrame = true;
+    WebRect* selectionRect = nullptr;
+    bool activeNow;
+
+    textFinder().resetMatchCount();
+    textFinder().scopeStringMatches(identifier, searchText, findOptions, true);
+    while (textFinder().scopingInProgress())
+        runPendingTasks();
+
+    findOptions.findNext = true;
+    ASSERT_TRUE(textFinder().find(identifier, searchText, findOptions, wrapWithinFrame, selectionRect, &activeNow));
+    EXPECT_TRUE(activeNow);
+    ASSERT_TRUE(textFinder().find(identifier, searchText, findOptions, wrapWithinFrame, selectionRect, &activeNow));
+    EXPECT_TRUE(activeNow);
+
+    // Add new text to DOM and try FindNext.
+    Element* iElement = toElement(document().body()->lastChild());
+    ASSERT_TRUE(iElement);
+    iElement->setInnerHTML("ZZFindMe", ASSERT_NO_EXCEPTION);
+
+    ASSERT_TRUE(textFinder().find(identifier, searchText, findOptions, wrapWithinFrame, selectionRect, &activeNow));
+    Range* activeMatch = textFinder().activeMatch();
+    ASSERT_TRUE(activeMatch);
+    EXPECT_FALSE(activeNow);
+    EXPECT_EQ(2, activeMatch->startOffset());
+    EXPECT_EQ(8, activeMatch->endOffset());
+
+    // Restart full search and check that added text is found.
+    findOptions.findNext = false;
+    textFinder().resetMatchCount();
+    textFinder().cancelPendingScopingEffort();
+    textFinder().scopeStringMatches(identifier, searchText, findOptions, true);
+    while (textFinder().scopingInProgress())
+        runPendingTasks();
+    EXPECT_EQ(2, textFinder().totalMatchCount());
+
+    WebVector<WebFloatRect> matchRects;
+    textFinder().findMatchRects(matchRects);
+    ASSERT_EQ(2u, matchRects.size());
+    Node* textInBElement = document().body()->firstChild()->firstChild();
+    Node* textInIElement = document().body()->lastChild()->firstChild();
+    EXPECT_EQ(findInPageRect(textInBElement, 4, textInBElement, 10), matchRects[0]);
+    EXPECT_EQ(findInPageRect(textInIElement, 2, textInIElement, 8), matchRects[1]);
+}
+
 class TextFinderFakeTimerTest : public TextFinderTest {
 protected:
-    // A simple platform that mocks out the clock.
-    class TimeProxyPlatform : public TestingPlatformSupport {
-    public:
-        TimeProxyPlatform()
-            : m_timeCounter(m_oldPlatform->currentTimeSeconds())
-        {
-        }
+    void SetUp() override
+    {
+        s_timeElapsed = 0.0;
+        m_originalTimeFunction = setTimeFunctionsForTesting(returnMockTime);
+    }
 
-    private:
-        Platform& ensureFallback()
-        {
-            ASSERT(m_oldPlatform);
-            return *m_oldPlatform;
-        }
+    void TearDown() override
+    {
+        setTimeFunctionsForTesting(m_originalTimeFunction);
+    }
 
-        // From blink::Platform:
-        double currentTimeSeconds() override
-        {
-            return ++m_timeCounter;
-        }
+private:
+    static double returnMockTime()
+    {
+        s_timeElapsed += 1.0;
+        return s_timeElapsed;
+    }
 
-        // These two methods allow timers to work correctly.
-        double monotonicallyIncreasingTimeSeconds() override
-        {
-            return ensureFallback().monotonicallyIncreasingTimeSeconds();
-        }
-
-        WebUnitTestSupport* unitTestSupport() override { return ensureFallback().unitTestSupport(); }
-        WebString defaultLocale() override { return ensureFallback().defaultLocale(); }
-        WebCompositorSupport* compositorSupport() override { return ensureFallback().compositorSupport(); }
-
-        double m_timeCounter;
-    };
-
-    TimeProxyPlatform m_proxyTimePlatform;
+    TimeFunction m_originalTimeFunction;
+    static double s_timeElapsed;
 };
+
+double TextFinderFakeTimerTest::s_timeElapsed;
 
 TEST_F(TextFinderFakeTimerTest, ScopeWithTimeouts)
 {

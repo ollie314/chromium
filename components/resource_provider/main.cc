@@ -4,10 +4,10 @@
 
 #include "components/resource_provider/resource_provider_app.h"
 #include "mojo/public/c/system/main.h"
-#include "mojo/shell/public/cpp/application_runner.h"
+#include "services/shell/public/cpp/application_runner.h"
 
 MojoResult MojoMain(MojoHandle shell_handle) {
-  mojo::ApplicationRunner runner(
+  shell::ApplicationRunner runner(
       new resource_provider::ResourceProviderApp("mojo:resource_provider"));
   return runner.Run(shell_handle);
 }

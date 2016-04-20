@@ -80,7 +80,8 @@ class SQLitePersistentCookieStorePerfTest : public testing::Test {
         t += base::TimeDelta::FromInternalValue(10);
         store_->AddCookie(CanonicalCookie(
             gurl, base::StringPrintf("Cookie_%d", cookie_num), "1", domain_name,
-            "/", t, t, t, false, false, false, COOKIE_PRIORITY_DEFAULT));
+            "/", t, t, t, false, false, CookieSameSite::DEFAULT_MODE,
+            COOKIE_PRIORITY_DEFAULT));
       }
     }
     // Replace the store effectively destroying the current one and forcing it
@@ -103,7 +104,7 @@ class SQLitePersistentCookieStorePerfTest : public testing::Test {
 
  protected:
   base::MessageLoop main_loop_;
-  scoped_ptr<base::SequencedWorkerPoolOwner> pool_owner_;
+  std::unique_ptr<base::SequencedWorkerPoolOwner> pool_owner_;
   base::WaitableEvent loaded_event_;
   base::WaitableEvent key_loaded_event_;
   std::vector<CanonicalCookie*> cookies_;

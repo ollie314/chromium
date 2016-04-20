@@ -11,11 +11,18 @@
 
 #include "components/safe_browsing_db/database_manager.h"
 
+namespace net {
+class URLRequestContextGetter;
+}
+
 namespace safe_browsing {
+
+struct V4ProtocolConfig;
 
 // This is a non-pure-virtual implementation of the SafeBrowsingDatabaseManager
 // interface.  It's used in tests by overriding only the functions that get
-// called, and it'll complain if you call one that isn't overriden.
+// called, and it'll complain if you call one that isn't overriden. The
+// non-abstract methods in the base class are not overridden.
 class TestSafeBrowsingDatabaseManager
     : public SafeBrowsingDatabaseManager {
  public:
@@ -25,23 +32,22 @@ class TestSafeBrowsingDatabaseManager
   bool ChecksAreAlwaysAsync() const override;
   bool CanCheckResourceType(content::ResourceType resource_type) const override;
   bool CanCheckUrl(const GURL& url) const override;
-  bool download_protection_enabled() const override;
+  bool IsDownloadProtectionEnabled() const override;
   bool CheckBrowseUrl(const GURL& url, Client* client) override;
   bool CheckDownloadUrl(const std::vector<GURL>& url_chain,
                         Client* client) override;
   bool CheckExtensionIDs(const std::set<std::string>& extension_ids,
                          Client* client) override;
+  bool CheckResourceUrl(const GURL& url, Client* client) override;
   bool MatchCsdWhitelistUrl(const GURL& url) override;
   bool MatchMalwareIP(const std::string& ip_address) override;
   bool MatchDownloadWhitelistUrl(const GURL& url) override;
   bool MatchDownloadWhitelistString(const std::string& str) override;
   bool MatchInclusionWhitelistUrl(const GURL& url) override;
+  bool MatchModuleWhitelistString(const std::string& str) override;
   bool IsMalwareKillSwitchOn() override;
   bool IsCsdWhitelistKillSwitchOn() override;
   void CancelCheck(Client* client) override;
-  void CheckApiBlacklistUrl(const GURL& url, Client* client) override;
-  void StartOnIOThread() override;
-  void StopOnIOThread(bool shutdown) override;
 
  protected:
   ~TestSafeBrowsingDatabaseManager() override {};

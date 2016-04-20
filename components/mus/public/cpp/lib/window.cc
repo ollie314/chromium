@@ -15,10 +15,12 @@
 #include "components/mus/common/transient_window_utils.h"
 #include "components/mus/public/cpp/lib/window_private.h"
 #include "components/mus/public/cpp/lib/window_tree_client_impl.h"
+#include "components/mus/public/cpp/property_type_converters.h"
 #include "components/mus/public/cpp/window_observer.h"
+#include "components/mus/public/cpp/window_property.h"
 #include "components/mus/public/cpp/window_surface.h"
 #include "components/mus/public/cpp/window_tracker.h"
-#include "mojo/shell/public/cpp/service_provider_impl.h"
+#include "components/mus/public/interfaces/window_manager.mojom.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -79,7 +81,7 @@ class ScopedTreeNotifier {
  private:
   WindowObserver::TreeChangeParams params_;
 
-  MOJO_DISALLOW_COPY_AND_ASSIGN(ScopedTreeNotifier);
+  DISALLOW_COPY_AND_ASSIGN(ScopedTreeNotifier);
 };
 
 void RemoveChildImpl(Window* child, Window::Children* children) {
@@ -118,7 +120,7 @@ class OrderChangedNotifier {
   Window* relative_window_;
   mojom::OrderDirection direction_;
 
-  MOJO_DISALLOW_COPY_AND_ASSIGN(OrderChangedNotifier);
+  DISALLOW_COPY_AND_ASSIGN(OrderChangedNotifier);
 };
 
 class ScopedSetBoundsNotifier {
@@ -141,7 +143,7 @@ class ScopedSetBoundsNotifier {
   const gfx::Rect old_bounds_;
   const gfx::Rect new_bounds_;
 
-  MOJO_DISALLOW_COPY_AND_ASSIGN(ScopedSetBoundsNotifier);
+  DISALLOW_COPY_AND_ASSIGN(ScopedSetBoundsNotifier);
 };
 
 // Some operations are only permitted in the connection that created the window.
@@ -159,7 +161,7 @@ bool OwnsWindowOrIsRoot(Window* window) {
   return OwnsWindow(window->connection(), window) || IsConnectionRoot(window);
 }
 
-void EmptyEmbedCallback(bool result, ConnectionSpecificId connection_id) {}
+void EmptyEmbedCallback(bool result) {}
 
 }  // namespace
 
@@ -210,7 +212,8 @@ void Window::SetClientArea(
     return;
 
   if (connection_)
-    tree_client()->SetClientArea(id_, client_area, additional_client_areas);
+    tree_client()->SetClientArea(server_id_, client_area,
+                                 additional_client_areas);
   LocalSetClientArea(client_area, additional_client_areas);
 }
 
@@ -223,19 +226,25 @@ void Window::SetVisible(bool value) {
   LocalSetVisible(value);
 }
 
+void Window::SetOpacity(float opacity) {
+  if (connection_)
+    tree_client()->SetOpacity(this, opacity);
+  LocalSetOpacity(opacity);
+}
+
 void Window::SetPredefinedCursor(mus::mojom::Cursor cursor_id) {
   if (cursor_id_ == cursor_id)
     return;
 
   if (connection_)
-    tree_client()->SetPredefinedCursor(id_, cursor_id);
+    tree_client()->SetPredefinedCursor(server_id_, cursor_id);
   LocalSetPredefinedCursor(cursor_id);
 }
 
 bool Window::IsDrawn() const {
   if (!visible_)
     return false;
-  return parent_ ? parent_->IsDrawn() : drawn_;
+  return parent_ ? parent_->IsDrawn() : parent_drawn_;
 }
 
 scoped_ptr<WindowSurface> Window::RequestSurface(mojom::SurfaceType type) {
@@ -248,7 +257,7 @@ scoped_ptr<WindowSurface> Window::RequestSurface(mojom::SurfaceType type) {
 void Window::AttachSurface(mojom::SurfaceType type,
                            scoped_ptr<WindowSurfaceBinding> surface_binding) {
   tree_client()->AttachSurface(
-      id_, type, std::move(surface_binding->surface_request_),
+      server_id_, type, std::move(surface_binding->surface_request_),
       mojo::MakeProxy(std::move(surface_binding->surface_client_)));
 }
 
@@ -285,7 +294,7 @@ void Window::AddChild(Window* child) {
     return;
   LocalAddChild(child);
   if (connection_)
-    tree_client()->AddChild(this, child->id());
+    tree_client()->AddChild(this, child->server_id());
 }
 
 void Window::RemoveChild(Window* child) {
@@ -295,36 +304,36 @@ void Window::RemoveChild(Window* child) {
     CHECK_EQ(child->connection(), connection_);
   LocalRemoveChild(child);
   if (connection_)
-    tree_client()->RemoveChild(this, child->id());
+    tree_client()->RemoveChild(this, child->server_id());
 }
 
 void Window::Reorder(Window* relative, mojom::OrderDirection direction) {
   if (!LocalReorder(relative, direction))
     return;
   if (connection_)
-    tree_client()->Reorder(this, relative->id(), direction);
+    tree_client()->Reorder(this, relative->server_id(), direction);
 }
 
 void Window::MoveToFront() {
   if (!parent_ || parent_->children_.back() == this)
     return;
-  Reorder(parent_->children_.back(), mojom::ORDER_DIRECTION_ABOVE);
+  Reorder(parent_->children_.back(), mojom::OrderDirection::ABOVE);
 }
 
 void Window::MoveToBack() {
   if (!parent_ || parent_->children_.front() == this)
     return;
-  Reorder(parent_->children_.front(), mojom::ORDER_DIRECTION_BELOW);
+  Reorder(parent_->children_.front(), mojom::OrderDirection::BELOW);
 }
 
-bool Window::Contains(Window* child) const {
+bool Window::Contains(const Window* child) const {
   if (!child)
     return false;
   if (child == this)
     return true;
   if (connection_)
-    CHECK_EQ(child->connection(), connection_);
-  for (Window* p = child->parent(); p; p = p->parent()) {
+    CHECK_EQ(child->connection_, connection_);
+  for (const Window* p = child->parent(); p; p = p->parent()) {
     if (p == this)
       return true;
   }
@@ -336,7 +345,7 @@ void Window::AddTransientWindow(Window* transient_window) {
     CHECK_EQ(transient_window->connection(), connection_);
   LocalAddTransientWindow(transient_window);
   if (connection_)
-    tree_client()->AddTransientWindow(this, transient_window->id());
+    tree_client()->AddTransientWindow(this, transient_window->server_id());
 }
 
 void Window::RemoveTransientWindow(Window* transient_window) {
@@ -347,30 +356,52 @@ void Window::RemoveTransientWindow(Window* transient_window) {
     tree_client()->RemoveTransientWindowFromParent(transient_window);
 }
 
-Window* Window::GetChildById(Id id) {
-  if (id == id_)
+void Window::SetModal() {
+  if (is_modal_)
+    return;
+
+  LocalSetModal();
+  if (connection_)
+    tree_client()->SetModal(this);
+}
+
+Window* Window::GetChildByLocalId(int id) {
+  if (id == local_id_)
     return this;
   // TODO(beng): this could be improved depending on how we decide to own
   // windows.
-  Children::const_iterator it = children_.begin();
-  for (; it != children_.end(); ++it) {
-    Window* window = (*it)->GetChildById(id);
-    if (window)
-      return window;
+  for (Window* child : children_) {
+    Window* matching_child = child->GetChildByLocalId(id);
+    if (matching_child)
+      return matching_child;
   }
   return nullptr;
 }
 
 void Window::SetTextInputState(mojo::TextInputStatePtr state) {
   if (connection_)
-    tree_client()->SetWindowTextInputState(id_, std::move(state));
+    tree_client()->SetWindowTextInputState(server_id_, std::move(state));
 }
 
 void Window::SetImeVisibility(bool visible, mojo::TextInputStatePtr state) {
   // SetImeVisibility() shouldn't be used if the window is not editable.
-  DCHECK(state.is_null() || state->type != mojo::TEXT_INPUT_TYPE_NONE);
+  DCHECK(state.is_null() || state->type != mojo::TextInputType::NONE);
   if (connection_)
-    tree_client()->SetImeVisibility(id_, visible, std::move(state));
+    tree_client()->SetImeVisibility(server_id_, visible, std::move(state));
+}
+
+bool Window::HasCapture() const {
+  return connection_ && connection_->GetCaptureWindow() == this;
+}
+
+void Window::SetCapture() {
+  if (connection_)
+    tree_client()->SetCapture(this);
+}
+
+void Window::ReleaseCapture() {
+  if (connection_)
+    tree_client()->ReleaseCapture(this);
 }
 
 void Window::SetFocus() {
@@ -384,26 +415,31 @@ bool Window::HasFocus() const {
 
 void Window::SetCanFocus(bool can_focus) {
   if (connection_)
-    tree_client()->SetCanFocus(id_, can_focus);
+    tree_client()->SetCanFocus(server_id_, can_focus);
 }
 
 void Window::Embed(mus::mojom::WindowTreeClientPtr client) {
-  Embed(std::move(client), mus::mojom::WindowTree::ACCESS_POLICY_DEFAULT,
-        base::Bind(&EmptyEmbedCallback));
+  Embed(std::move(client), base::Bind(&EmptyEmbedCallback));
 }
 
 void Window::Embed(mus::mojom::WindowTreeClientPtr client,
-                   uint32_t policy_bitmask,
                    const EmbedCallback& callback) {
   if (PrepareForEmbed())
-    tree_client()->Embed(id_, std::move(client), policy_bitmask, callback);
+    tree_client()->Embed(server_id_, std::move(client), callback);
   else
-    callback.Run(false, 0);
+    callback.Run(false);
 }
 
 void Window::RequestClose() {
   if (tree_client())
     tree_client()->RequestClose(this);
+}
+
+std::string Window::GetName() const {
+  if (HasSharedProperty(mojom::WindowManager::kName_Property))
+    return GetSharedProperty<std::string>(mojom::WindowManager::kName_Property);
+
+  return std::string();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -476,15 +512,17 @@ Window::~Window() {
 
 Window::Window(WindowTreeConnection* connection, Id id)
     : connection_(connection),
-      id_(id),
+      server_id_(id),
       parent_(nullptr),
       stacking_target_(nullptr),
       transient_parent_(nullptr),
+      is_modal_(false),
       input_event_handler_(nullptr),
       viewport_metrics_(CreateEmptyViewportMetrics()),
       visible_(false),
-      cursor_id_(mojom::CURSOR_NULL),
-      drawn_(false) {}
+      opacity_(1.0f),
+      cursor_id_(mojom::Cursor::CURSOR_NULL),
+      parent_drawn_(false) {}
 
 WindowTreeClientImpl* Window::tree_client() {
   return static_cast<WindowTreeClientImpl*>(connection_);
@@ -496,7 +534,7 @@ void Window::SetSharedPropertyInternal(const std::string& name,
     return;
 
   if (connection_) {
-    mojo::Array<uint8_t> transport_value;
+    mojo::Array<uint8_t> transport_value(nullptr);
     if (value) {
       transport_value.resize(value->size());
       if (value->size())
@@ -575,6 +613,10 @@ void Window::LocalRemoveTransientWindow(Window* transient_window) {
   // TODO(fsamuel): We might want a notification here.
 }
 
+void Window::LocalSetModal() {
+  is_modal_ = true;
+}
+
 bool Window::LocalReorder(Window* relative, mojom::OrderDirection direction) {
   OrderChangedNotifier notifier(this, relative, direction);
   return ReorderImpl(this, relative, direction, &notifier);
@@ -612,18 +654,18 @@ void Window::LocalSetViewportMetrics(
       OnWindowViewportMetricsChanged(this, old_metrics, new_metrics));
 }
 
-void Window::LocalSetDrawn(bool value) {
-  if (drawn_ == value)
+void Window::LocalSetParentDrawn(bool value) {
+  if (parent_drawn_ == value)
     return;
 
-  // As IsDrawn() is derived from |visible_| and |drawn_|, only send drawn
-  // notification is the value of IsDrawn() is really changing.
+  // As IsDrawn() is derived from |visible_| and |parent_drawn_|, only send
+  // drawn notification is the value of IsDrawn() is really changing.
   if (IsDrawn() == value) {
-    drawn_ = value;
+    parent_drawn_ = value;
     return;
   }
   FOR_EACH_OBSERVER(WindowObserver, observers_, OnWindowDrawnChanging(this));
-  drawn_ = value;
+  parent_drawn_ = value;
   FOR_EACH_OBSERVER(WindowObserver, observers_, OnWindowDrawnChanged(this));
 }
 
@@ -635,6 +677,16 @@ void Window::LocalSetVisible(bool visible) {
                     OnWindowVisibilityChanging(this));
   visible_ = visible;
   NotifyWindowVisibilityChanged(this);
+}
+
+void Window::LocalSetOpacity(float opacity) {
+  if (opacity_ == opacity)
+    return;
+
+  float old_opacity = opacity_;
+  opacity_ = opacity;
+  FOR_EACH_OBSERVER(WindowObserver, observers_,
+                    OnWindowOpacityChanged(this, old_opacity, opacity_));
 }
 
 void Window::LocalSetPredefinedCursor(mojom::Cursor cursor_id) {
@@ -737,7 +789,7 @@ void Window::NotifyWindowVisibilityChangedUp(Window* target) {
 }
 
 bool Window::PrepareForEmbed() {
-  if (!OwnsWindow(connection_, this) && !tree_client()->is_embed_root())
+  if (!OwnsWindow(connection_, this))
     return false;
 
   while (!children_.empty())
@@ -791,15 +843,15 @@ bool Window::ReorderImpl(Window* window,
       std::find(window->parent_->children_.begin(),
                 window->parent_->children_.end(), relative) -
       window->parent_->children_.begin();
-  if ((direction == mojom::ORDER_DIRECTION_ABOVE && child_i == target_i + 1) ||
-      (direction == mojom::ORDER_DIRECTION_BELOW && child_i + 1 == target_i)) {
+  if ((direction == mojom::OrderDirection::ABOVE && child_i == target_i + 1) ||
+      (direction == mojom::OrderDirection::BELOW && child_i + 1 == target_i)) {
     return false;
   }
 
   if (notifier)
     notifier->NotifyWindowReordering();
 
-  const size_t dest_i = direction == mojom::ORDER_DIRECTION_ABOVE
+  const size_t dest_i = direction == mojom::OrderDirection::ABOVE
                             ? (child_i < target_i ? target_i : target_i + 1)
                             : (child_i < target_i ? target_i - 1 : target_i);
   window->parent_->children_.erase(window->parent_->children_.begin() +

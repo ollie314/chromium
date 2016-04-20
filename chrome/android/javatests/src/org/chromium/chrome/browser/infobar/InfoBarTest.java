@@ -6,11 +6,13 @@ package org.chromium.chrome.browser.infobar;
 
 import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
+import android.os.Environment;
 import android.test.suitebuilder.annotation.MediumTest;
 import android.test.suitebuilder.annotation.Smoke;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.ChromeActivity;
@@ -19,11 +21,11 @@ import org.chromium.chrome.browser.WebContentsFactory;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 import org.chromium.chrome.test.util.InfoBarTestAnimationListener;
 import org.chromium.chrome.test.util.InfoBarUtil;
-import org.chromium.chrome.test.util.TestHttpServerClient;
 import org.chromium.chrome.test.util.browser.LocationSettingsTestUtil;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.net.test.EmbeddedTestServer;
 
 import java.util.List;
 
@@ -32,15 +34,16 @@ public class InfoBarTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private static final long MAX_TIMEOUT = scaleTimeout(2000);
     private static final int CHECK_INTERVAL = 500;
     private static final String GEOLOCATION_PAGE =
-            "chrome/test/data/geolocation/geolocation_on_load.html";
+            "/chrome/test/data/geolocation/geolocation_on_load.html";
     private static final String POPUP_PAGE =
-            "chrome/test/data/popup_blocker/popup-window-open.html";
+            "/chrome/test/data/popup_blocker/popup-window-open.html";
     public static final String HELLO_WORLD_URL = UrlUtils.encodeHtmlDataUri(
             "<html>"
             + "<head><title>Hello, World!</title></head>"
             + "<body>Hello, World!</body>"
             + "</html>");
 
+    private EmbeddedTestServer mTestServer;
     private InfoBarTestAnimationListener mListener;
 
     public InfoBarTest() {
@@ -57,7 +60,7 @@ public class InfoBarTest extends ChromeActivityTestCaseBase<ChromeActivity> {
         super.setUp();
 
         // Register for animation notifications
-        CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 if (getActivity().getActivityTab() == null) return false;
@@ -68,6 +71,15 @@ public class InfoBarTest extends ChromeActivityTestCaseBase<ChromeActivity> {
         InfoBarContainer container = getActivity().getActivityTab().getInfoBarContainer();
         mListener =  new InfoBarTestAnimationListener();
         container.setAnimationListener(mListener);
+
+        mTestServer = EmbeddedTestServer.createAndStartFileServer(
+                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+    }
+
+    @Override
+    protected void tearDown() throws Exception {
+        mTestServer.stopAndDestroyServer();
+        super.tearDown();
     }
 
     /**
@@ -76,8 +88,9 @@ public class InfoBarTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     @Smoke
     @MediumTest
     @Feature({"Browser", "Main"})
+    @DisabledTest // crbug.com/593003
     public void testInfoBarForPopUp() throws InterruptedException {
-        loadUrl(TestHttpServerClient.getUrl(POPUP_PAGE));
+        loadUrl(mTestServer.getURL(POPUP_PAGE));
         assertTrue("InfoBar not added", mListener.addInfoBarAnimationFinished());
 
         List<InfoBar> infoBars = getInfoBars();
@@ -89,7 +102,7 @@ public class InfoBarTest extends ChromeActivityTestCaseBase<ChromeActivity> {
         assertEquals("Wrong infobar count", 0, infoBars.size());
 
         // A second load should not show the infobar.
-        loadUrl(TestHttpServerClient.getUrl(POPUP_PAGE));
+        loadUrl(mTestServer.getURL(POPUP_PAGE));
         assertFalse("InfoBar added when it should not", mListener.addInfoBarAnimationFinished());
     }
 
@@ -101,7 +114,7 @@ public class InfoBarTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     @Feature({"Browser", "Main"})
     public void testInfoBarForGeolocation() throws InterruptedException {
         LocationSettingsTestUtil.setSystemLocationSettingEnabled(true);
-        loadUrl(TestHttpServerClient.getUrl(GEOLOCATION_PAGE));
+        loadUrl(mTestServer.getURL(GEOLOCATION_PAGE));
         assertTrue("InfoBar not added", mListener.addInfoBarAnimationFinished());
 
         // Make sure it has OK/Cancel buttons.
@@ -124,7 +137,7 @@ public class InfoBarTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     public void testInfoBarForGeolocationDisappearsOnBack() throws InterruptedException {
         LocationSettingsTestUtil.setSystemLocationSettingEnabled(true);
         loadUrl(HELLO_WORLD_URL);
-        loadUrl(TestHttpServerClient.getUrl(GEOLOCATION_PAGE));
+        loadUrl(mTestServer.getURL(GEOLOCATION_PAGE));
         assertTrue("InfoBar not added.", mListener.addInfoBarAnimationFinished());
 
         assertEquals("Wrong infobar count", 1, getInfoBars().size());
@@ -137,7 +150,7 @@ public class InfoBarTest extends ChromeActivityTestCaseBase<ChromeActivity> {
                         getActivity().getActivityTab().goBack();
                     }
                 });
-        CriteriaHelper.pollForCriteria(
+        CriteriaHelper.pollInstrumentationThread(
                 new Criteria() {
                     @Override
                     public boolean isSatisfied() {
@@ -229,7 +242,7 @@ public class InfoBarTest extends ChromeActivityTestCaseBase<ChromeActivity> {
         // The renderer should have been killed and the InfoBar removed.
         assertTrue("InfoBar not removed.", mListener.removeInfoBarAnimationFinished());
         assertTrue("Wrong infobar count", getInfoBars().isEmpty());
-        CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 return getActivity().getActivityTab().isShowingSadTab();
@@ -245,7 +258,7 @@ public class InfoBarTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     public void testInfoBarContainerSwapsWebContents() throws InterruptedException {
         // Add an infobar.
         LocationSettingsTestUtil.setSystemLocationSettingEnabled(true);
-        loadUrl(TestHttpServerClient.getUrl(GEOLOCATION_PAGE));
+        loadUrl(mTestServer.getURL(GEOLOCATION_PAGE));
         assertTrue("InfoBar not added", mListener.addInfoBarAnimationFinished());
         assertEquals("Wrong infobar count", 1, getInfoBars().size());
 
@@ -266,7 +279,7 @@ public class InfoBarTest extends ChromeActivityTestCaseBase<ChromeActivity> {
         // Revisiting the original page should make the InfoBar reappear.
         InfoBarTestAnimationListener addListener = new InfoBarTestAnimationListener();
         getActivity().getActivityTab().getInfoBarContainer().setAnimationListener(addListener);
-        loadUrl(TestHttpServerClient.getUrl(GEOLOCATION_PAGE));
+        loadUrl(mTestServer.getURL(GEOLOCATION_PAGE));
         assertTrue("InfoBar not added", addListener.addInfoBarAnimationFinished());
         assertEquals("Wrong infobar count", 1, getInfoBars().size());
     }

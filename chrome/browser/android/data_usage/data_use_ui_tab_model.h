@@ -93,7 +93,7 @@ class DataUseUITabModel : public KeyedService,
  private:
   FRIEND_TEST_ALL_PREFIXES(DataUseUITabModelTest, ConvertTransitionType);
   FRIEND_TEST_ALL_PREFIXES(DataUseUITabModelTest, EntranceExitState);
-  FRIEND_TEST_ALL_PREFIXES(DataUseUITabModelTest, EntraceExitStateForDialog);
+  FRIEND_TEST_ALL_PREFIXES(DataUseUITabModelTest, EntranceExitStateForDialog);
   FRIEND_TEST_ALL_PREFIXES(DataUseUITabModelTest, ReportTabEventsTest);
 
   // DataUseTrackingEvent indicates the state of a tab.
@@ -124,12 +124,13 @@ class DataUseUITabModel : public KeyedService,
   // returns true. Otherwise, returns false without modifying the entry.
   bool RemoveTabEvent(SessionID::id_type tab_id, DataUseTrackingEvent event);
 
-  // Converts |page_transition| to DataUseTabModel::TransitionType enum.
-  // Returns true if conversion was successful, and updates |transition_type|.
-  // Otherwise, returns false, and |transition_type| is not changed.
-  // |transition_type| must not be null.
+  // Converts |page_transition| to page with GURL |gurl| to
+  // DataUseTabModel::TransitionType enum. Returns true if conversion was
+  // successful, and updates |transition_type|. Otherwise, returns false, and
+  // |transition_type| is not changed. |transition_type| must not be null.
   bool ConvertTransitionType(
       ui::PageTransition page_transition,
+      const GURL& gurl,
       DataUseTabModel::TransitionType* transition_type) const;
 
   // |tab_events_| stores tracking events of multiple tabs.

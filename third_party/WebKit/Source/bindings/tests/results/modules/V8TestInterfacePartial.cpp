@@ -15,14 +15,10 @@
 #include "bindings/core/v8/V8ObjectConstructor.h"
 #include "bindings/core/v8/V8TestInterface.h"
 #include "bindings/tests/idls/modules/TestPartialInterfaceImplementation3.h"
-#include "core/dom/ContextFeatures.h"
 #include "core/dom/Document.h"
-#include "core/experiments/ExperimentalFeatures.h"
 #include "core/frame/LocalFrame.h"
-#include "core/inspector/ConsoleMessage.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/ScriptForbiddenScope.h"
-#include "platform/TraceEvent.h"
 #include "wtf/GetPtr.h"
 #include "wtf/RefPtr.h"
 
@@ -244,16 +240,7 @@ static void partialVoidTestEnumModulesArgMethodMethod(const v8::FunctionCallback
 
 static void partialVoidTestEnumModulesArgMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
-    ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
-    String errorMessage;
-    if (!ExperimentalFeatures::featureNameEnabled(executionContext, errorMessage)) {
-         v8SetReturnValue(info, v8::Undefined(info.GetIsolate()));
-         toDocument(executionContext)->addConsoleMessage(ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, errorMessage));
-         return;
-    }
     TestInterfaceImplementationPartialV8Internal::partialVoidTestEnumModulesArgMethodMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void partial2StaticVoidMethod2Method(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -295,16 +282,7 @@ static void unscopeableVoidMethodMethod(const v8::FunctionCallbackInfo<v8::Value
 
 static void unscopeableVoidMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
-    ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
-    String errorMessage;
-    if (!ExperimentalFeatures::featureNameEnabled(executionContext, errorMessage)) {
-         v8SetReturnValue(info, v8::Undefined(info.GetIsolate()));
-         toDocument(executionContext)->addConsoleMessage(ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, errorMessage));
-         return;
-    }
     TestInterfaceImplementationPartialV8Internal::unscopeableVoidMethodMethod(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 } // namespace TestInterfaceImplementationPartialV8Internal
@@ -314,29 +292,29 @@ const V8DOMConfiguration::MethodConfiguration V8TestInterfaceMethods[] = {
     {"unscopeableVoidMethod", TestInterfaceImplementationPartialV8Internal::unscopeableVoidMethodMethodCallback, 0, 0, v8::None, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnPrototype},
 };
 
-void V8TestInterfacePartial::installV8TestInterfaceTemplate(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+void V8TestInterfacePartial::installV8TestInterfaceTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world, v8::Local<v8::FunctionTemplate> interfaceTemplate)
 {
-    V8TestInterface::installV8TestInterfaceTemplate(functionTemplate, isolate);
-
-    v8::Local<v8::Signature> defaultSignature;
-    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "TestInterface", v8::Local<v8::FunctionTemplate>(), V8TestInterface::internalFieldCount,
-        0, 0,
-        0, 0,
-        V8TestInterfaceMethods, WTF_ARRAY_LENGTH(V8TestInterfaceMethods));
-    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    // Initialize the interface object's template.
+    V8TestInterface::installV8TestInterfaceTemplate(isolate, world, interfaceTemplate);
+    v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
+    ALLOW_UNUSED_LOCAL(signature);
+    v8::Local<v8::ObjectTemplate> instanceTemplate = interfaceTemplate->InstanceTemplate();
     ALLOW_UNUSED_LOCAL(instanceTemplate);
-    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = interfaceTemplate->PrototypeTemplate();
     ALLOW_UNUSED_LOCAL(prototypeTemplate);
-    const V8DOMConfiguration::ConstantConfiguration V8TestInterfaceConstants[] = {
-        {"PARTIAL3_UNSIGNED_SHORT", 0, 0, V8DOMConfiguration::ConstantTypeUnsignedShort},
-    };
-    V8DOMConfiguration::installConstants(isolate, functionTemplate, prototypeTemplate, V8TestInterfaceConstants, WTF_ARRAY_LENGTH(V8TestInterfaceConstants));
-    functionTemplate->InstanceTemplate()->SetCallAsFunctionHandler(V8TestInterface::legacyCallCustom);
+    // Register DOM constants, attributes and operations.
+    if (RuntimeEnabledFeatures::featureNameEnabled()) {
+        const V8DOMConfiguration::ConstantConfiguration V8TestInterfaceConstants[] = {
+            {"PARTIAL3_UNSIGNED_SHORT", 0, 0, V8DOMConfiguration::ConstantTypeUnsignedShort},
+        };
+        V8DOMConfiguration::installConstants(isolate, interfaceTemplate, prototypeTemplate, V8TestInterfaceConstants, WTF_ARRAY_LENGTH(V8TestInterfaceConstants));
+        V8DOMConfiguration::installMethods(isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate, signature, V8TestInterfaceMethods, WTF_ARRAY_LENGTH(V8TestInterfaceMethods));
+    } // if (RuntimeEnabledFeatures::featureNameEnabled())
 }
 
-void V8TestInterfacePartial::preparePrototypeAndInterfaceObject(v8::Local<v8::Context> context, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate)
+void V8TestInterfacePartial::preparePrototypeAndInterfaceObject(v8::Local<v8::Context> context, const DOMWrapperWorld& world, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate)
 {
-    V8TestInterface::preparePrototypeAndInterfaceObject(context, prototypeObject, interfaceObject, interfaceTemplate);
+    V8TestInterface::preparePrototypeAndInterfaceObject(context, world, prototypeObject, interfaceObject, interfaceTemplate);
     v8::Isolate* isolate = context->GetIsolate();
     v8::Local<v8::Name> unscopablesSymbol(v8::Symbol::GetUnscopables(isolate));
     v8::Local<v8::Object> unscopeables;
@@ -350,7 +328,7 @@ void V8TestInterfacePartial::preparePrototypeAndInterfaceObject(v8::Local<v8::Co
 
 void V8TestInterfacePartial::initialize()
 {
-    // Should be invoked from initModules.
+    // Should be invoked from ModulesInitializer.
     V8TestInterface::updateWrapperTypeInfo(
         &V8TestInterfacePartial::installV8TestInterfaceTemplate,
         &V8TestInterfacePartial::preparePrototypeAndInterfaceObject);

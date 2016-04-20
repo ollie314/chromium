@@ -5,12 +5,12 @@
 #include "chrome/browser/profile_resetter/profile_resetter.h"
 
 #include <stddef.h>
+
+#include <memory>
 #include <utility>
 
-#include "base/json/json_string_value_serializer.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_service.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_path_override.h"
 #include "build/build_config.h"
@@ -35,6 +35,7 @@
 #include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/browser/website_settings_info.h"
+#include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/search_engines/template_url_service_client.h"
 #include "content/public/browser/web_contents.h"
@@ -118,7 +119,7 @@ class ProfileResetterTest : public extensions::ExtensionServiceTestBase,
 
   TestingProfile* profile() { return profile_.get(); }
 
-  static scoped_ptr<KeyedService> CreateTemplateURLService(
+  static std::unique_ptr<KeyedService> CreateTemplateURLService(
       content::BrowserContext* context);
 
  private:
@@ -155,15 +156,16 @@ void ProfileResetterTest::SetUp() {
 }
 
 // static
-scoped_ptr<KeyedService> ProfileResetterTest::CreateTemplateURLService(
+std::unique_ptr<KeyedService> ProfileResetterTest::CreateTemplateURLService(
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  return make_scoped_ptr(new TemplateURLService(
+  return base::WrapUnique(new TemplateURLService(
       profile->GetPrefs(),
-      scoped_ptr<SearchTermsData>(new UIThreadSearchTermsData(profile)),
+      std::unique_ptr<SearchTermsData>(new UIThreadSearchTermsData(profile)),
       WebDataServiceFactory::GetKeywordWebDataForProfile(
           profile, ServiceAccessType::EXPLICIT_ACCESS),
-      scoped_ptr<TemplateURLServiceClient>(), NULL, NULL, base::Closure()));
+      std::unique_ptr<TemplateURLServiceClient>(), NULL, NULL,
+      base::Closure()));
 }
 
 
@@ -222,12 +224,12 @@ class ConfigParserTest : public testing::Test {
   ConfigParserTest();
   virtual ~ConfigParserTest();
 
-  scoped_ptr<BrandcodeConfigFetcher> WaitForRequest(const GURL& url);
+  std::unique_ptr<BrandcodeConfigFetcher> WaitForRequest(const GURL& url);
 
   net::FakeURLFetcherFactory& factory() { return factory_; }
 
  private:
-  scoped_ptr<net::FakeURLFetcher> CreateFakeURLFetcher(
+  std::unique_ptr<net::FakeURLFetcher> CreateFakeURLFetcher(
       const GURL& url,
       net::URLFetcherDelegate* fetcher_delegate,
       const std::string& response_data,
@@ -252,14 +254,12 @@ ConfigParserTest::ConfigParserTest()
 
 ConfigParserTest::~ConfigParserTest() {}
 
-scoped_ptr<BrandcodeConfigFetcher> ConfigParserTest::WaitForRequest(
+std::unique_ptr<BrandcodeConfigFetcher> ConfigParserTest::WaitForRequest(
     const GURL& url) {
   EXPECT_CALL(*this, Callback());
-  scoped_ptr<BrandcodeConfigFetcher> fetcher(
-      new BrandcodeConfigFetcher(base::Bind(&ConfigParserTest::Callback,
-                                            base::Unretained(this)),
-                                 url,
-                                 "ABCD"));
+  std::unique_ptr<BrandcodeConfigFetcher> fetcher(new BrandcodeConfigFetcher(
+      base::Bind(&ConfigParserTest::Callback, base::Unretained(this)), url,
+      "ABCD"));
   base::MessageLoop::current()->RunUntilIdle();
   EXPECT_FALSE(fetcher->IsActive());
   // Look for the brand code in the request.
@@ -267,16 +267,15 @@ scoped_ptr<BrandcodeConfigFetcher> ConfigParserTest::WaitForRequest(
   return fetcher;
 }
 
-scoped_ptr<net::FakeURLFetcher> ConfigParserTest::CreateFakeURLFetcher(
+std::unique_ptr<net::FakeURLFetcher> ConfigParserTest::CreateFakeURLFetcher(
     const GURL& url,
     net::URLFetcherDelegate* fetcher_delegate,
     const std::string& response_data,
     net::HttpStatusCode response_code,
     net::URLRequestStatus::Status status) {
   request_listener_.real_delegate = fetcher_delegate;
-  scoped_ptr<net::FakeURLFetcher> fetcher(
-      new net::FakeURLFetcher(
-          url, &request_listener_, response_data, response_code, status));
+  std::unique_ptr<net::FakeURLFetcher> fetcher(new net::FakeURLFetcher(
+      url, &request_listener_, response_data, response_code, status));
   scoped_refptr<net::HttpResponseHeaders> download_headers =
       new net::HttpResponseHeaders("");
   download_headers->AddHeader("Content-Type: text/xml");
@@ -492,8 +491,7 @@ TEST_F(ProfileResetterTest, ResetHomepagePartially) {
 TEST_F(ProfileResetterTest, ResetContentSettings) {
   HostContentSettingsMap* host_content_settings_map =
       HostContentSettingsMapFactory::GetForProfile(profile());
-  ContentSettingsPattern pattern =
-      ContentSettingsPattern::FromString("[*.]example.org");
+  GURL url("http://example.org");
   std::map<ContentSettingsType, ContentSetting> default_settings;
 
   // TODO(raymes): Clean up this test so that we don't have such ugly iteration
@@ -522,9 +520,8 @@ TEST_F(ProfileResetterTest, ResetContentSettings) {
                                                           wildcard_setting);
     }
     if (info->IsSettingValid(site_setting)) {
-      host_content_settings_map->SetContentSetting(
-          pattern, ContentSettingsPattern::Wildcard(), content_type,
-          std::string(), site_setting);
+      host_content_settings_map->SetContentSettingDefaultScope(
+          url, url, content_type, std::string(), site_setting);
       ContentSettingsForOneType host_settings;
       host_content_settings_map->GetSettingsForOneType(
           content_type, std::string(), &host_settings);
@@ -730,10 +727,10 @@ TEST_F(ProfileResetterTest, ResetStartPagePartially) {
 }
 
 TEST_F(PinnedTabsResetTest, ResetPinnedTabs) {
-  scoped_ptr<content::WebContents> contents1(CreateWebContents());
-  scoped_ptr<content::WebContents> contents2(CreateWebContents());
-  scoped_ptr<content::WebContents> contents3(CreateWebContents());
-  scoped_ptr<content::WebContents> contents4(CreateWebContents());
+  std::unique_ptr<content::WebContents> contents1(CreateWebContents());
+  std::unique_ptr<content::WebContents> contents2(CreateWebContents());
+  std::unique_ptr<content::WebContents> contents3(CreateWebContents());
+  std::unique_ptr<content::WebContents> contents4(CreateWebContents());
   TabStripModel* tab_strip_model = browser()->tab_strip_model();
 
   tab_strip_model->AppendWebContents(contents4.get(), true);
@@ -785,7 +782,7 @@ TEST_F(ConfigParserTest, NoConnectivity) {
   factory().SetFakeResponse(url, "", net::HTTP_INTERNAL_SERVER_ERROR,
                             net::URLRequestStatus::FAILED);
 
-  scoped_ptr<BrandcodeConfigFetcher> fetcher = WaitForRequest(GURL(url));
+  std::unique_ptr<BrandcodeConfigFetcher> fetcher = WaitForRequest(GURL(url));
   EXPECT_FALSE(fetcher->GetSettings());
 }
 
@@ -800,8 +797,8 @@ TEST_F(ConfigParserTest, ParseConfig) {
   factory().SetFakeResponse(url, xml_config, net::HTTP_OK,
                             net::URLRequestStatus::SUCCESS);
 
-  scoped_ptr<BrandcodeConfigFetcher> fetcher = WaitForRequest(GURL(url));
-  scoped_ptr<BrandcodedDefaultSettings> settings = fetcher->GetSettings();
+  std::unique_ptr<BrandcodeConfigFetcher> fetcher = WaitForRequest(GURL(url));
+  std::unique_ptr<BrandcodedDefaultSettings> settings = fetcher->GetSettings();
   ASSERT_TRUE(settings);
 
   std::vector<std::string> extension_ids;
@@ -813,7 +810,7 @@ TEST_F(ConfigParserTest, ParseConfig) {
   EXPECT_TRUE(settings->GetHomepage(&homepage));
   EXPECT_EQ("http://www.foo.com", homepage);
 
-  scoped_ptr<base::ListValue> startup_list(
+  std::unique_ptr<base::ListValue> startup_list(
       settings->GetUrlsToRestoreOnStartup());
   EXPECT_TRUE(startup_list);
   std::vector<std::string> startup_pages;
@@ -914,74 +911,6 @@ TEST_F(ProfileResetterTest, CheckSnapshots) {
   }
 }
 
-TEST_F(ProfileResetterTest, FeedbackSerializationTest) {
-  // Reset to non organic defaults.
-  ResetAndWait(ProfileResetter::DEFAULT_SEARCH_ENGINE |
-               ProfileResetter::HOMEPAGE |
-               ProfileResetter::STARTUP_PAGES,
-               kDistributionConfig);
-
-  scoped_refptr<Extension> ext = CreateExtension(
-      base::ASCIIToUTF16("example"),
-      base::FilePath(FILE_PATH_LITERAL("//nonexistent")),
-      Manifest::INVALID_LOCATION,
-      extensions::Manifest::TYPE_EXTENSION,
-      false);
-  ASSERT_TRUE(ext.get());
-  service_->AddExtension(ext.get());
-
-  ShortcutHandler shortcut;
-  ShortcutCommand command_line = shortcut.CreateWithArguments(
-      base::ASCIIToUTF16("chrome.lnk"),
-      base::ASCIIToUTF16("--profile-directory=Default foo.com"));
-
-  ResettableSettingsSnapshot nonorganic_snap(profile());
-  nonorganic_snap.RequestShortcuts(base::Closure());
-  // Let it enumerate shortcuts on the FILE thread.
-  base::MessageLoop::current()->RunUntilIdle();
-
-  static_assert(ResettableSettingsSnapshot::ALL_FIELDS == 31,
-                "this test needs to be expanded");
-  for (int field_mask = 0; field_mask <= ResettableSettingsSnapshot::ALL_FIELDS;
-       ++field_mask) {
-    std::string report = SerializeSettingsReport(nonorganic_snap, field_mask);
-    JSONStringValueDeserializer json(report);
-    std::string error;
-    scoped_ptr<base::Value> root(json.Deserialize(NULL, &error));
-    ASSERT_TRUE(root) << error;
-    ASSERT_TRUE(root->IsType(base::Value::TYPE_DICTIONARY)) << error;
-
-    base::DictionaryValue* dict =
-        static_cast<base::DictionaryValue*>(root.get());
-
-    base::ListValue* startup_urls = NULL;
-    int startup_type = 0;
-    std::string homepage;
-    bool homepage_is_ntp = true;
-    bool show_home_button = true;
-    std::string default_search_engine;
-    base::ListValue* extensions = NULL;
-    base::ListValue* shortcuts = NULL;
-
-    EXPECT_EQ(!!(field_mask & ResettableSettingsSnapshot::STARTUP_MODE),
-              dict->GetList("startup_urls", &startup_urls));
-    EXPECT_EQ(!!(field_mask & ResettableSettingsSnapshot::STARTUP_MODE),
-              dict->GetInteger("startup_type", &startup_type));
-    EXPECT_EQ(!!(field_mask & ResettableSettingsSnapshot::HOMEPAGE),
-              dict->GetString("homepage", &homepage));
-    EXPECT_EQ(!!(field_mask & ResettableSettingsSnapshot::HOMEPAGE),
-              dict->GetBoolean("homepage_is_ntp", &homepage_is_ntp));
-    EXPECT_EQ(!!(field_mask & ResettableSettingsSnapshot::HOMEPAGE),
-              dict->GetBoolean("show_home_button", &show_home_button));
-    EXPECT_EQ(!!(field_mask & ResettableSettingsSnapshot::DSE_URL),
-              dict->GetString("default_search_engine", &default_search_engine));
-    EXPECT_EQ(!!(field_mask & ResettableSettingsSnapshot::EXTENSIONS),
-              dict->GetList("enabled_extensions", &extensions));
-    EXPECT_EQ(!!(field_mask & ResettableSettingsSnapshot::SHORTCUTS),
-              dict->GetList("shortcuts", &shortcuts));
-  }
-}
-
 TEST_F(ProfileResetterTest, FeedbackSerializationAsProtoTest) {
   // Reset to non organic defaults.
   ResetAndWait(ProfileResetter::DEFAULT_SEARCH_ENGINE |
@@ -1012,7 +941,7 @@ TEST_F(ProfileResetterTest, FeedbackSerializationAsProtoTest) {
                 "this test needs to be expanded");
   for (int field_mask = 0; field_mask <= ResettableSettingsSnapshot::ALL_FIELDS;
        ++field_mask) {
-    scoped_ptr<reset_report::ChromeResetReport> report =
+    std::unique_ptr<reset_report::ChromeResetReport> report =
         SerializeSettingsReportToProto(nonorganic_snap, field_mask);
 
     EXPECT_EQ(!!(field_mask & ResettableSettingsSnapshot::STARTUP_MODE),
@@ -1048,7 +977,7 @@ struct FeedbackCapture {
 
   MOCK_METHOD0(OnUpdatedList, void(void));
 
-  scoped_ptr<base::ListValue> list_;
+  std::unique_ptr<base::ListValue> list_;
 };
 
 // Make sure GetReadableFeedback handles non-ascii letters.
@@ -1091,7 +1020,7 @@ TEST_F(ProfileResetterTest, GetReadableFeedback) {
   ::testing::Mock::VerifyAndClearExpectations(&capture);
   // The homepage and the startup page are in punycode. They are unreadable.
   // Trying to find the extension name.
-  scoped_ptr<base::ListValue> list = std::move(capture.list_);
+  std::unique_ptr<base::ListValue> list = std::move(capture.list_);
   ASSERT_TRUE(list);
   bool checked_extensions = false;
   bool checked_shortcuts = false;
@@ -1119,7 +1048,7 @@ TEST_F(ProfileResetterTest, GetReadableFeedback) {
 
 TEST_F(ProfileResetterTest, DestroySnapshotFast) {
   FeedbackCapture capture;
-  scoped_ptr<ResettableSettingsSnapshot> deleted_snapshot(
+  std::unique_ptr<ResettableSettingsSnapshot> deleted_snapshot(
       new ResettableSettingsSnapshot(profile()));
   deleted_snapshot->RequestShortcuts(base::Bind(&FeedbackCapture::Fail,
                                                 base::Unretained(&capture)));

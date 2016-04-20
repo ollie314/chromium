@@ -10,12 +10,12 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/prefs/pref_change_registrar.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/keyed_service/core/refcounted_keyed_service.h"
+#include "components/prefs/pref_change_registrar.h"
 
 class ContentSettingsPattern;
 class GURL;
@@ -77,18 +77,15 @@ class CookieSettings : public RefcountedKeyedService {
   // This should only be called on the UI thread.
   void SetDefaultCookieSetting(ContentSetting setting);
 
-  // Sets the cookie setting for the given patterns.
+  // Sets the cookie setting for the given url.
   //
   // This should only be called on the UI thread.
-  void SetCookieSetting(const ContentSettingsPattern& primary_pattern,
-                        const ContentSettingsPattern& secondary_pattern,
-                        ContentSetting setting);
+  void SetCookieSetting(const GURL& primary_url, ContentSetting setting);
 
-  // Resets the cookie setting for the given patterns.
+  // Resets the cookie setting for the given url.
   //
   // This should only be called on the UI thread.
-  void ResetCookieSetting(const ContentSettingsPattern& primary_pattern,
-                          const ContentSettingsPattern& secondary_pattern);
+  void ResetCookieSetting(const GURL& primary_url);
 
   bool IsStorageDurable(const GURL& origin) const;
 

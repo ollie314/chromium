@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -18,6 +17,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/web_ui.h"
 
 namespace options {
@@ -138,7 +138,7 @@ void HandlerOptionsHandler::UpdateHandlerList() {
     handlers.Append(handler_value);
   }
 
-  scoped_ptr<base::ListValue> ignored_handlers(new base::ListValue());
+  std::unique_ptr<base::ListValue> ignored_handlers(new base::ListValue());
   GetIgnoredHandlers(ignored_handlers.get());
   web_ui()->CallJavascriptFunction("HandlerOptions.setHandlers", handlers);
   web_ui()->CallJavascriptFunction("HandlerOptions.setIgnoredHandlers",

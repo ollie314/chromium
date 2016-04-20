@@ -5,7 +5,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+
 #include <locale>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -18,7 +20,6 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
@@ -34,6 +35,7 @@
 #include "chrome/test/chromedriver/net/port_server.h"
 #include "chrome/test/chromedriver/server/http_handler.h"
 #include "chrome/test/chromedriver/version.h"
+#include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/server/http_server.h"
@@ -43,12 +45,25 @@
 
 namespace {
 
-const char kLocalHostAddress[] = "127.0.0.1";
 const int kBufferSize = 100 * 1024 * 1024;  // 100 MB
 
 typedef base::Callback<
     void(const net::HttpServerRequestInfo&, const HttpResponseSenderFunc&)>
     HttpRequestHandlerFunc;
+
+int ListenOnIPv4(net::ServerSocket* socket, uint16_t port, bool allow_remote) {
+  std::string binding_ip = net::IPAddress::IPv4Localhost().ToString();
+  if (allow_remote)
+    binding_ip = net::IPAddress::IPv4AllZeros().ToString();
+  return socket->ListenWithAddressAndPort(binding_ip, port, 1);
+}
+
+int ListenOnIPv6(net::ServerSocket* socket, uint16_t port, bool allow_remote) {
+  std::string binding_ip = net::IPAddress::IPv6Localhost().ToString();
+  if (allow_remote)
+    binding_ip = net::IPAddress::IPv6AllZeros().ToString();
+  return socket->ListenWithAddressAndPort(binding_ip, port, 1);
+}
 
 class HttpServer : public net::HttpServer::Delegate {
  public:
@@ -59,12 +74,15 @@ class HttpServer : public net::HttpServer::Delegate {
   ~HttpServer() override {}
 
   bool Start(uint16_t port, bool allow_remote) {
-    std::string binding_ip = kLocalHostAddress;
-    if (allow_remote)
-      binding_ip = "0.0.0.0";
-    scoped_ptr<net::ServerSocket> server_socket(
+    std::unique_ptr<net::ServerSocket> server_socket(
         new net::TCPServerSocket(NULL, net::NetLog::Source()));
-    server_socket->ListenWithAddressAndPort(binding_ip, port, 1);
+    if (ListenOnIPv4(server_socket.get(), port, allow_remote) != net::OK) {
+      // If we fail to listen on IPv4, try using an IPv6 address. This will work
+      // on an IPv6-only host, but we will be IPv4-only on dual-stack hosts.
+      // TODO(samuong): change this to listen on both IPv4 and IPv6.
+      if (ListenOnIPv6(server_socket.get(), port, allow_remote) != net::OK)
+        return false;
+    }
     server_.reset(new net::HttpServer(std::move(server_socket), this));
     net::IPEndPoint address;
     return server_->GetLocalAddress(&address) == net::OK;
@@ -91,7 +109,7 @@ class HttpServer : public net::HttpServer::Delegate {
 
  private:
   void OnResponse(int connection_id,
-                  scoped_ptr<net::HttpServerResponseInfo> response) {
+                  std::unique_ptr<net::HttpServerResponseInfo> response) {
     // Don't support keep-alive, since there's no way to detect if the
     // client is HTTP/1.0. In such cases, the client may hang waiting for
     // the connection to close (e.g., python 2.7 urllib).
@@ -102,14 +120,14 @@ class HttpServer : public net::HttpServer::Delegate {
   }
 
   HttpRequestHandlerFunc handle_request_func_;
-  scoped_ptr<net::HttpServer> server_;
+  std::unique_ptr<net::HttpServer> server_;
   base::WeakPtrFactory<HttpServer> weak_factory_;  // Should be last.
 };
 
 void SendResponseOnCmdThread(
     const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
     const HttpResponseSenderFunc& send_response_on_io_func,
-    scoped_ptr<net::HttpServerResponseInfo> response) {
+    std::unique_ptr<net::HttpServerResponseInfo> response) {
   io_task_runner->PostTask(
       FROM_HERE, base::Bind(send_response_on_io_func, base::Passed(&response)));
 }
@@ -121,11 +139,11 @@ void HandleRequestOnCmdThread(
     const HttpResponseSenderFunc& send_response_func) {
   if (!whitelisted_ips.empty()) {
     std::string peer_address = request.peer.ToStringWithoutPort();
-    if (peer_address != kLocalHostAddress &&
+    if (peer_address != net::IPAddress::IPv4Localhost().ToString() &&
         std::find(whitelisted_ips.begin(), whitelisted_ips.end(),
                   peer_address) == whitelisted_ips.end()) {
       LOG(WARNING) << "unauthorized access from " << request.peer.ToString();
-      scoped_ptr<net::HttpServerResponseInfo> response(
+      std::unique_ptr<net::HttpServerResponseInfo> response(
           new net::HttpServerResponseInfo(net::HTTP_UNAUTHORIZED));
       response->SetBody("Unauthorized access", "text/plain");
       send_response_func.Run(std::move(response));
@@ -161,7 +179,7 @@ void StopServerOnIOThread() {
 void StartServerOnIOThread(uint16_t port,
                            bool allow_remote,
                            const HttpRequestHandlerFunc& handle_request_func) {
-  scoped_ptr<HttpServer> temp_server(new HttpServer(handle_request_func));
+  std::unique_ptr<HttpServer> temp_server(new HttpServer(handle_request_func));
   if (!temp_server->Start(port, allow_remote)) {
     printf("Port not available. Exiting...\n");
     exit(1);
@@ -174,7 +192,7 @@ void RunServer(uint16_t port,
                const std::vector<std::string>& whitelisted_ips,
                const std::string& url_base,
                int adb_port,
-               scoped_ptr<PortServer> port_server) {
+               std::unique_ptr<PortServer> port_server) {
   base::Thread io_thread("ChromeDriver IO");
   CHECK(io_thread.StartWithOptions(
       base::Thread::Options(base::MessageLoop::TYPE_IO, 0)));
@@ -222,7 +240,7 @@ int main(int argc, char *argv[]) {
   bool allow_remote = false;
   std::vector<std::string> whitelisted_ips;
   std::string url_base;
-  scoped_ptr<PortServer> port_server;
+  std::unique_ptr<PortServer> port_server;
   if (cmd_line->HasSwitch("h") || cmd_line->HasSwitch("help")) {
     std::string options;
     const char* const kOptionAndDescriptions[] = {
@@ -285,9 +303,9 @@ int main(int argc, char *argv[]) {
   }
   if (cmd_line->HasSwitch("url-base"))
     url_base = cmd_line->GetSwitchValueASCII("url-base");
-  if (url_base.empty() || url_base[0] != '/')
+  if (url_base.empty() || url_base.front() != '/')
     url_base = "/" + url_base;
-  if (url_base[url_base.length() - 1] != '/')
+  if (url_base.back() != '/')
     url_base = url_base + "/";
   if (cmd_line->HasSwitch("whitelisted-ips")) {
     allow_remote = true;

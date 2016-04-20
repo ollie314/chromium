@@ -11,7 +11,6 @@
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_view.h"
-#include "third_party/WebKit/public/web/WebScopedMicrotaskSuppression.h"
 
 namespace {
 
@@ -99,14 +98,16 @@ void GuestViewContainer::Destroy(bool embedder_frame_destroyed) {
   if (element_instance_id() != guest_view::kInstanceIDNone)
     g_guest_view_container_map.Get().erase(element_instance_id());
 
-  if (pending_response_.get())
-    pending_response_->ExecuteCallbackIfAvailable(0 /* argc */, nullptr);
+  if (!embedder_frame_destroyed) {
+    if (pending_response_.get())
+      pending_response_->ExecuteCallbackIfAvailable(0 /* argc */, nullptr);
 
-  while (pending_requests_.size() > 0) {
-    linked_ptr<GuestViewRequest> pending_request = pending_requests_.front();
-    pending_requests_.pop_front();
-    // Call the JavaScript callbacks with no arguments which implies an error.
-    pending_request->ExecuteCallbackIfAvailable(0 /* argc */, nullptr);
+    while (pending_requests_.size() > 0) {
+      linked_ptr<GuestViewRequest> pending_request = pending_requests_.front();
+      pending_requests_.pop_front();
+      // Call the JavaScript callbacks with no arguments which implies an error.
+      pending_request->ExecuteCallbackIfAvailable(0 /* argc */, nullptr);
+    }
   }
 
   delete this;
@@ -154,7 +155,7 @@ void GuestViewContainer::HandlePendingResponseCallback(
 void GuestViewContainer::RunDestructionCallback(bool embedder_frame_destroyed) {
   // Do not attempt to run |destruction_callback_| if the embedder frame was
   // destroyed. Trying to invoke callback on RenderFrame destruction results in
-  // assertion failure when calling WebScopedMicrotaskSuppression.
+  // assertion failure when calling v8::MicrotasksScope.
   if (embedder_frame_destroyed)
     return;
 
@@ -168,7 +169,8 @@ void GuestViewContainer::RunDestructionCallback(bool embedder_frame_destroyed) {
       return;
 
     v8::Context::Scope context_scope(context);
-    blink::WebScopedMicrotaskSuppression suppression;
+    v8::MicrotasksScope microtasks(
+        destruction_isolate_, v8::MicrotasksScope::kDoNotRunMicrotasks);
 
     callback->Call(context->Global(), 0 /* argc */, nullptr);
   }

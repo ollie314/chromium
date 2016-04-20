@@ -41,6 +41,7 @@
 #include "modules/serviceworkers/ServiceWorker.h"
 #include "modules/serviceworkers/ServiceWorkerRegistration.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/modules/serviceworker/WebServiceWorkerProvider.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProviderClient.h"
 #include "wtf/Forward.h"
 
@@ -52,13 +53,14 @@ class WebServiceWorkerProvider;
 class WebServiceWorkerRegistration;
 
 class MODULES_EXPORT ServiceWorkerContainer final
-    : public RefCountedGarbageCollectedEventTargetWithInlineData<ServiceWorkerContainer>
+    : public EventTargetWithInlineData
     , public ContextLifecycleObserver
     , public WebServiceWorkerProviderClient {
     DEFINE_WRAPPERTYPEINFO();
-    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(ServiceWorkerContainer);
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerContainer);
+    USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerContainer);
 public:
+    using RegistrationCallbacks = WebServiceWorkerProvider::WebServiceWorkerRegistrationCallbacks;
+
     static ServiceWorkerContainer* create(ExecutionContext*);
     ~ServiceWorkerContainer();
 
@@ -70,16 +72,18 @@ public:
     ScriptPromise ready(ScriptState*);
     WebServiceWorkerProvider* provider() { return m_provider; }
 
+    void registerServiceWorkerImpl(ExecutionContext*, const KURL& scriptURL, const KURL& scope, PassOwnPtr<RegistrationCallbacks>);
+
     ScriptPromise registerServiceWorker(ScriptState*, const String& pattern, const RegistrationOptions&);
     ScriptPromise getRegistration(ScriptState*, const String& documentURL);
     ScriptPromise getRegistrations(ScriptState*);
 
     // WebServiceWorkerProviderClient overrides.
-    void setController(WebPassOwnPtr<WebServiceWorker::Handle>, bool shouldNotifyControllerChange) override;
-    void dispatchMessageEvent(WebPassOwnPtr<WebServiceWorker::Handle>, const WebString& message, const WebMessagePortChannelArray&) override;
+    void setController(std::unique_ptr<WebServiceWorker::Handle>, bool shouldNotifyControllerChange) override;
+    void dispatchMessageEvent(std::unique_ptr<WebServiceWorker::Handle>, const WebString& message, const WebMessagePortChannelArray&) override;
 
     // EventTarget overrides.
-    ExecutionContext* executionContext() const override { return ContextLifecycleObserver::executionContext(); }
+    ExecutionContext* getExecutionContext() const override { return ContextLifecycleObserver::getExecutionContext(); }
     const AtomicString& interfaceName() const override;
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(controllerchange);

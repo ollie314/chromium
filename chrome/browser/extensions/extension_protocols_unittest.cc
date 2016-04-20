@@ -4,11 +4,11 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 
 #include "base/files/file_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -21,6 +21,7 @@
 #include "extensions/browser/info_map.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/file_util.h"
 #include "net/base/request_priority.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job_factory_impl.h"
@@ -33,6 +34,12 @@ using content::ResourceType;
 namespace extensions {
 namespace {
 
+base::FilePath GetTestPath(const std::string& name) {
+  base::FilePath path;
+  EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &path));
+  return path.AppendASCII("extensions").AppendASCII(name);
+}
+
 scoped_refptr<Extension> CreateTestExtension(const std::string& name,
                                              bool incognito_split_mode) {
   base::DictionaryValue manifest;
@@ -41,9 +48,7 @@ scoped_refptr<Extension> CreateTestExtension(const std::string& name,
   manifest.SetInteger("manifest_version", 2);
   manifest.SetString("incognito", incognito_split_mode ? "split" : "spanning");
 
-  base::FilePath path;
-  EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &path));
-  path = path.AppendASCII("extensions").AppendASCII("response_headers");
+  base::FilePath path = GetTestPath("response_headers");
 
   std::string error;
   scoped_refptr<Extension> extension(
@@ -80,9 +85,7 @@ scoped_refptr<Extension> CreateTestResponseHeaderExtension() {
   web_accessible_list->AppendString("test.dat");
   manifest.Set("web_accessible_resources", web_accessible_list);
 
-  base::FilePath path;
-  EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &path));
-  path = path.AppendASCII("extensions").AppendASCII("response_headers");
+  base::FilePath path = GetTestPath("response_headers");
 
   std::string error;
   scoped_refptr<Extension> extension(
@@ -146,6 +149,25 @@ class ExtensionProtocolTest : public testing::Test {
     base::MessageLoop::current()->Run();
   }
 
+  // Helper method to create a URLRequest, call StartRequest on it, and return
+  // the result. If |extension| hasn't already been added to
+  // |extension_info_map_|, this will add it.
+  net::URLRequestStatus::Status DoRequest(const Extension& extension,
+                                          const std::string& relative_path) {
+    if (!extension_info_map_->extensions().Contains(extension.id())) {
+      extension_info_map_->AddExtension(&extension,
+                                        base::Time::Now(),
+                                        false,   // incognito_enabled
+                                        false);  // notifications_disabled
+    }
+    std::unique_ptr<net::URLRequest> request(
+        resource_context_.GetRequestContext()->CreateRequest(
+            extension.GetResourceURL(relative_path), net::DEFAULT_PRIORITY,
+            &test_delegate_));
+    StartRequest(request.get(), content::RESOURCE_TYPE_MAIN_FRAME);
+    return request->status().status();
+  }
+
  protected:
   content::TestBrowserThreadBundle thread_bundle_;
   scoped_refptr<InfoMap> extension_info_map_;
@@ -191,10 +213,9 @@ TEST_F(ExtensionProtocolTest, IncognitoRequest) {
       // It doesn't matter that the resource doesn't exist. If the resource
       // is blocked, we should see ADDRESS_UNREACHABLE. Otherwise, the request
       // should just fail because the file doesn't exist.
-      scoped_ptr<net::URLRequest> request(
+      std::unique_ptr<net::URLRequest> request(
           resource_context_.GetRequestContext()->CreateRequest(
-              extension->GetResourceURL("404.html"),
-              net::DEFAULT_PRIORITY,
+              extension->GetResourceURL("404.html"), net::DEFAULT_PRIORITY,
               &test_delegate_));
       StartRequest(request.get(), content::RESOURCE_TYPE_MAIN_FRAME);
       EXPECT_EQ(net::URLRequestStatus::FAILED, request->status().status());
@@ -210,10 +231,9 @@ TEST_F(ExtensionProtocolTest, IncognitoRequest) {
 
     // Now do a subframe request.
     {
-      scoped_ptr<net::URLRequest> request(
+      std::unique_ptr<net::URLRequest> request(
           resource_context_.GetRequestContext()->CreateRequest(
-              extension->GetResourceURL("404.html"),
-              net::DEFAULT_PRIORITY,
+              extension->GetResourceURL("404.html"), net::DEFAULT_PRIORITY,
               &test_delegate_));
       StartRequest(request.get(), content::RESOURCE_TYPE_SUB_FRAME);
       EXPECT_EQ(net::URLRequestStatus::FAILED, request->status().status());
@@ -253,11 +273,10 @@ TEST_F(ExtensionProtocolTest, ComponentResourceRequest) {
 
   // First test it with the extension enabled.
   {
-    scoped_ptr<net::URLRequest> request(
+    std::unique_ptr<net::URLRequest> request(
         resource_context_.GetRequestContext()->CreateRequest(
             extension->GetResourceURL("webstore_icon_16.png"),
-            net::DEFAULT_PRIORITY,
-            &test_delegate_));
+            net::DEFAULT_PRIORITY, &test_delegate_));
     StartRequest(request.get(), content::RESOURCE_TYPE_MEDIA);
     EXPECT_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
     CheckForContentLengthHeader(request.get());
@@ -267,11 +286,10 @@ TEST_F(ExtensionProtocolTest, ComponentResourceRequest) {
   extension_info_map_->RemoveExtension(extension->id(),
                                        UnloadedExtensionInfo::REASON_DISABLE);
   {
-    scoped_ptr<net::URLRequest> request(
+    std::unique_ptr<net::URLRequest> request(
         resource_context_.GetRequestContext()->CreateRequest(
             extension->GetResourceURL("webstore_icon_16.png"),
-            net::DEFAULT_PRIORITY,
-            &test_delegate_));
+            net::DEFAULT_PRIORITY, &test_delegate_));
     StartRequest(request.get(), content::RESOURCE_TYPE_MEDIA);
     EXPECT_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
     CheckForContentLengthHeader(request.get());
@@ -291,10 +309,9 @@ TEST_F(ExtensionProtocolTest, ResourceRequestResponseHeaders) {
                                     false);
 
   {
-    scoped_ptr<net::URLRequest> request(
+    std::unique_ptr<net::URLRequest> request(
         resource_context_.GetRequestContext()->CreateRequest(
-            extension->GetResourceURL("test.dat"),
-            net::DEFAULT_PRIORITY,
+            extension->GetResourceURL("test.dat"), net::DEFAULT_PRIORITY,
             &test_delegate_));
     StartRequest(request.get(), content::RESOURCE_TYPE_MEDIA);
     EXPECT_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
@@ -331,19 +348,17 @@ TEST_F(ExtensionProtocolTest, AllowFrameRequests) {
 
   // All MAIN_FRAME and SUB_FRAME requests should succeed.
   {
-    scoped_ptr<net::URLRequest> request(
+    std::unique_ptr<net::URLRequest> request(
         resource_context_.GetRequestContext()->CreateRequest(
-            extension->GetResourceURL("test.dat"),
-            net::DEFAULT_PRIORITY,
+            extension->GetResourceURL("test.dat"), net::DEFAULT_PRIORITY,
             &test_delegate_));
     StartRequest(request.get(), content::RESOURCE_TYPE_MAIN_FRAME);
     EXPECT_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
   }
   {
-    scoped_ptr<net::URLRequest> request(
+    std::unique_ptr<net::URLRequest> request(
         resource_context_.GetRequestContext()->CreateRequest(
-            extension->GetResourceURL("test.dat"),
-            net::DEFAULT_PRIORITY,
+            extension->GetResourceURL("test.dat"), net::DEFAULT_PRIORITY,
             &test_delegate_));
     StartRequest(request.get(), content::RESOURCE_TYPE_SUB_FRAME);
     EXPECT_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
@@ -351,14 +366,41 @@ TEST_F(ExtensionProtocolTest, AllowFrameRequests) {
 
   // And subresource types, such as media, should fail.
   {
-    scoped_ptr<net::URLRequest> request(
+    std::unique_ptr<net::URLRequest> request(
         resource_context_.GetRequestContext()->CreateRequest(
-            extension->GetResourceURL("test.dat"),
-            net::DEFAULT_PRIORITY,
+            extension->GetResourceURL("test.dat"), net::DEFAULT_PRIORITY,
             &test_delegate_));
     StartRequest(request.get(), content::RESOURCE_TYPE_MEDIA);
     EXPECT_EQ(net::URLRequestStatus::FAILED, request->status().status());
   }
+}
+
+
+TEST_F(ExtensionProtocolTest, MetadataFolder) {
+  SetProtocolHandler(false);
+
+  base::FilePath extension_dir = GetTestPath("metadata_folder");
+  std::string error;
+  scoped_refptr<Extension> extension =
+      file_util::LoadExtension(extension_dir, Manifest::INTERNAL,
+                               Extension::NO_FLAGS, &error);
+  ASSERT_NE(extension.get(), nullptr) << "error: " << error;
+
+  // Loading "/test.html" should succeed.
+  EXPECT_EQ(net::URLRequestStatus::SUCCESS, DoRequest(*extension, "test.html"));
+
+  // Loading "/_metadata/verified_contents.json" should fail.
+  base::FilePath relative_path =
+      base::FilePath(kMetadataFolder).Append(kVerifiedContentsFilename);
+  EXPECT_TRUE(base::PathExists(extension_dir.Append(relative_path)));
+  EXPECT_EQ(net::URLRequestStatus::FAILED,
+            DoRequest(*extension, relative_path.AsUTF8Unsafe()));
+
+  // Loading "/_metadata/a.txt" should also fail.
+  relative_path = base::FilePath(kMetadataFolder).AppendASCII("a.txt");
+  EXPECT_TRUE(base::PathExists(extension_dir.Append(relative_path)));
+  EXPECT_EQ(net::URLRequestStatus::FAILED,
+            DoRequest(*extension, relative_path.AsUTF8Unsafe()));
 }
 
 }  // namespace extensions

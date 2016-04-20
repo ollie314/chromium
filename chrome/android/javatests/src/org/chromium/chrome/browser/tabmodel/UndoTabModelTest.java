@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.tabmodel;
 import android.test.suitebuilder.annotation.MediumTest;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.FlakyTest;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
@@ -67,7 +68,7 @@ public class UndoTabModelTest extends ChromeTabbedActivityTestBase {
             @Override
             public void run() {
                 tabCreator.createNewTab(new LoadUrlParams("about:blank"),
-                        TabLaunchType.FROM_MENU_OR_OVERVIEW, null);
+                        TabLaunchType.FROM_CHROME_UI, null);
             }
         });
     }
@@ -996,6 +997,7 @@ public class UndoTabModelTest extends ChromeTabbedActivityTestBase {
      * @throws InterruptedException
      */
     @MediumTest
+    @FlakyTest(message = "crbug.com/592969")
     public void testOutOfOrder2() throws InterruptedException {
         TabModel model = getActivity().getTabModelSelector().getModel(false);
         ChromeTabCreator tabCreator = getActivity().getTabCreator(false);

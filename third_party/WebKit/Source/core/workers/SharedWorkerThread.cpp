@@ -31,17 +31,19 @@
 #include "core/workers/SharedWorkerThread.h"
 
 #include "core/workers/SharedWorkerGlobalScope.h"
+#include "core/workers/WorkerBackingThread.h"
 #include "core/workers/WorkerThreadStartupData.h"
 
 namespace blink {
 
-PassRefPtr<SharedWorkerThread> SharedWorkerThread::create(const String& name, PassRefPtr<WorkerLoaderProxy> workerLoaderProxy, WorkerReportingProxy& workerReportingProxy)
+PassOwnPtr<SharedWorkerThread> SharedWorkerThread::create(const String& name, PassRefPtr<WorkerLoaderProxy> workerLoaderProxy, WorkerReportingProxy& workerReportingProxy)
 {
-    return adoptRef(new SharedWorkerThread(name, workerLoaderProxy, workerReportingProxy));
+    return adoptPtr(new SharedWorkerThread(name, workerLoaderProxy, workerReportingProxy));
 }
 
 SharedWorkerThread::SharedWorkerThread(const String& name, PassRefPtr<WorkerLoaderProxy> workerLoaderProxy, WorkerReportingProxy& workerReportingProxy)
     : WorkerThread(workerLoaderProxy, workerReportingProxy)
+    , m_workerBackingThread(WorkerBackingThread::create("SharedWorker Thread"))
     , m_name(name.isolatedCopy())
 {
 }
@@ -50,16 +52,9 @@ SharedWorkerThread::~SharedWorkerThread()
 {
 }
 
-PassRefPtrWillBeRawPtr<WorkerGlobalScope> SharedWorkerThread::createWorkerGlobalScope(PassOwnPtr<WorkerThreadStartupData> startupData)
+WorkerGlobalScope* SharedWorkerThread::createWorkerGlobalScope(PassOwnPtr<WorkerThreadStartupData> startupData)
 {
     return SharedWorkerGlobalScope::create(m_name, this, startupData);
-}
-
-WebThreadSupportingGC& SharedWorkerThread::backingThread()
-{
-    if (!m_thread)
-        m_thread = WebThreadSupportingGC::create("SharedWorker Thread");
-    return *m_thread.get();
 }
 
 } // namespace blink

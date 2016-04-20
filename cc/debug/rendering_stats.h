@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/time/time.h"
@@ -22,6 +23,7 @@ struct CC_EXPORT RenderingStats {
   class CC_EXPORT TimeDeltaList {
    public:
     TimeDeltaList();
+    TimeDeltaList(const TimeDeltaList& other);
     ~TimeDeltaList();
 
     void Append(base::TimeDelta value);
@@ -37,6 +39,7 @@ struct CC_EXPORT RenderingStats {
   };
 
   RenderingStats();
+  RenderingStats(const RenderingStats& other);
   ~RenderingStats();
 
   // Note: when adding new members, please remember to update Add in
@@ -56,7 +59,7 @@ struct CC_EXPORT RenderingStats {
   TimeDeltaList commit_to_activate_duration;
   TimeDeltaList commit_to_activate_duration_estimate;
 
-  scoped_refptr<base::trace_event::ConvertableToTraceFormat> AsTraceableData()
+  std::unique_ptr<base::trace_event::ConvertableToTraceFormat> AsTraceableData()
       const;
   void Add(const RenderingStats& other);
 };

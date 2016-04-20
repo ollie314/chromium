@@ -10,12 +10,14 @@
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "sync/internal_api/public/http_post_provider_factory.h"
 #include "sync/internal_api/public/internal_components_factory.h"
+#include "sync/internal_api/public/test/fake_model_type_connector.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/syncable/directory.h"
 #include "sync/test/fake_sync_encryption_handler.h"
@@ -200,8 +202,9 @@ UserShare* FakeSyncManager::GetUserShare() {
   return test_user_share_.user_share();
 }
 
-syncer_v2::SyncContextProxy* FakeSyncManager::GetSyncContextProxy() {
-  return &null_sync_context_proxy_;
+std::unique_ptr<syncer_v2::ModelTypeConnector>
+FakeSyncManager::GetModelTypeConnectorProxy() {
+  return base::WrapUnique(new syncer_v2::FakeModelTypeConnector());
 }
 
 const std::string FakeSyncManager::cache_guid() {
@@ -226,9 +229,9 @@ FakeSyncManager::GetBufferedProtocolEvents() {
   return ScopedVector<syncer::ProtocolEvent>();
 }
 
-scoped_ptr<base::ListValue> FakeSyncManager::GetAllNodesForType(
+std::unique_ptr<base::ListValue> FakeSyncManager::GetAllNodesForType(
     syncer::ModelType type) {
-  return scoped_ptr<base::ListValue>(new base::ListValue());
+  return std::unique_ptr<base::ListValue>(new base::ListValue());
 }
 
 void FakeSyncManager::RefreshTypes(ModelTypeSet types) {
@@ -250,7 +253,7 @@ void FakeSyncManager::RequestEmitDebugInfo() {}
 
 void FakeSyncManager::OnIncomingInvalidation(
     syncer::ModelType type,
-    scoped_ptr<InvalidationInterface> invalidation) {
+    std::unique_ptr<InvalidationInterface> invalidation) {
   num_invalidations_received_++;
 }
 
@@ -265,5 +268,7 @@ void FakeSyncManager::SetInvalidatorEnabled(bool invalidator_enabled) {
 void FakeSyncManager::ClearServerData(const ClearServerDataCallback& callback) {
   callback.Run();
 }
+
+void FakeSyncManager::OnCookieJarChanged(bool account_mismatch) {}
 
 }  // namespace syncer

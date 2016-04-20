@@ -12,7 +12,6 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/scoped_hdc.h"
 #include "base/win/scoped_select_object.h"
@@ -24,13 +23,14 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkColorPriv.h"
 #include "third_party/skia/include/core/SkShader.h"
-#include "ui/base/resource/material_design/material_design_controller.h"
+#include "ui/base/material_design/material_design_controller.h"
+#include "ui/display/win/dpi.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/gdi_util.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
-#include "ui/gfx/win/dpi.h"
+#include "ui/gfx/skia_util.h"
 #include "ui/native_theme/common_theme.h"
 
 // This was removed from Winvers.h but is still used.
@@ -76,12 +76,9 @@ void SetCheckerboardShader(SkPaint* paint, const RECT& align_rect) {
   SkMatrix local_matrix;
   local_matrix.setTranslate(SkIntToScalar(align_rect.left),
                             SkIntToScalar(align_rect.top));
-  skia::RefPtr<SkShader> shader =
-      skia::AdoptRef(SkShader::CreateBitmapShader(bitmap,
-                                                  SkShader::kRepeat_TileMode,
-                                                  SkShader::kRepeat_TileMode,
-                                                  &local_matrix));
-  paint->setShader(shader.get());
+  paint->setShader(
+      SkShader::MakeBitmapShader(bitmap, SkShader::kRepeat_TileMode,
+                                 SkShader::kRepeat_TileMode, &local_matrix));
 }
 
 //    <-a->
@@ -195,10 +192,6 @@ NativeThemeWin* NativeThemeWin::instance() {
 gfx::Size NativeThemeWin::GetPartSize(Part part,
                                       State state,
                                       const ExtraParams& extra) const {
-  gfx::Size part_size = CommonThemeGetPartSize(part, state, extra);
-  if (!part_size.IsEmpty())
-    return part_size;
-
   // The GetThemePartSize call below returns the default size without
   // accounting for user customization (crbug/218291).
   switch (part) {
@@ -210,7 +203,7 @@ gfx::Size NativeThemeWin::GetPartSize(Part part,
     case kScrollbarVerticalThumb:
     case kScrollbarHorizontalTrack:
     case kScrollbarVerticalTrack: {
-      int size = gfx::win::GetSystemMetricsInDIP(SM_CXVSCROLL);
+      int size = display::win::GetSystemMetricsInDIP(SM_CXVSCROLL);
       if (size == 0)
         size = 17;
       return gfx::Size(size, size);
@@ -244,20 +237,18 @@ void NativeThemeWin::Paint(SkCanvas* canvas,
     return;
 
   switch (part) {
-    case kComboboxArrow:
-      CommonThemePaintComboboxArrow(canvas, rect);
-      return;
     case kMenuPopupGutter:
-      CommonThemePaintMenuGutter(canvas, rect);
+      PaintMenuGutter(canvas, rect);
       return;
     case kMenuPopupSeparator:
-      CommonThemePaintMenuSeparator(canvas, rect);
+      PaintMenuSeparator(canvas, rect);
       return;
     case kMenuPopupBackground:
-      CommonThemePaintMenuBackground(canvas, rect);
+      PaintMenuBackground(canvas, rect);
       return;
     case kMenuItemBackground:
-      CommonThemePaintMenuItemBackground(canvas, state, rect);
+      CommonThemePaintMenuItemBackground(this, canvas, state, rect,
+                                         extra.menu_item);
       return;
     default:
       break;
@@ -361,6 +352,29 @@ void NativeThemeWin::UpdateSystemColors() {
     system_colors_[kSystemColor] = color_utils::GetSysSkColor(kSystemColor);
 }
 
+void NativeThemeWin::PaintMenuSeparator(SkCanvas* canvas,
+                                        const gfx::Rect& rect) const {
+  SkPaint paint;
+  paint.setColor(GetSystemColor(NativeTheme::kColorId_MenuSeparatorColor));
+  int position_y = rect.y() + rect.height() / 2;
+  canvas->drawLine(rect.x(), position_y, rect.right(), position_y, paint);
+}
+
+void NativeThemeWin::PaintMenuGutter(SkCanvas* canvas,
+                                     const gfx::Rect& rect) const {
+  SkPaint paint;
+  paint.setColor(GetSystemColor(NativeTheme::kColorId_MenuSeparatorColor));
+  int position_x = rect.x() + rect.width() / 2;
+  canvas->drawLine(position_x, rect.y(), position_x, rect.bottom(), paint);
+}
+
+void NativeThemeWin::PaintMenuBackground(SkCanvas* canvas,
+                                         const gfx::Rect& rect) const {
+  SkPaint paint;
+  paint.setColor(GetSystemColor(NativeTheme::kColorId_MenuBackgroundColor));
+  canvas->drawRect(gfx::RectToSkRect(rect), paint);
+}
+
 void NativeThemeWin::PaintDirect(SkCanvas* canvas,
                                  Part part,
                                  State state,
@@ -442,7 +456,6 @@ void NativeThemeWin::PaintDirect(SkCanvas* canvas,
     case kWindowResizeGripper:
       PaintWindowResizeGripper(hdc, rect);
       return;
-    case kComboboxArrow:
     case kSliderTrack:
     case kSliderThumb:
     case kMaxPart:
@@ -698,12 +711,7 @@ void NativeThemeWin::PaintIndirect(SkCanvas* canvas,
   // Draw the theme controls using existing HDC-drawing code.
   PaintDirect(&offscreen_canvas, part, state, adjusted_rect, adjusted_extra);
 
-  // Copy the pixels to a bitmap that has ref-counted pixel storage, which is
-  // necessary to have when drawing to a SkPicture.
-  const SkBitmap& hdc_bitmap =
-      offscreen_canvas.getDevice()->accessBitmap(false);
-  SkBitmap bitmap;
-  hdc_bitmap.copyTo(&bitmap, kN32_SkColorType);
+  SkBitmap bitmap = skia::ReadPixels(&offscreen_canvas);
 
   // Post-process the pixels to fix up the alpha values (see big comment above).
   const SkPMColor placeholder_value = SkPreMultiplyColor(placeholder);
@@ -1691,7 +1699,6 @@ NativeThemeWin::ThemeName NativeThemeWin::GetThemeName(Part part) {
       return TEXTFIELD;
     case kWindowResizeGripper:
       return STATUS;
-    case kComboboxArrow:
     case kMenuCheckBackground:
     case kMenuPopupBackground:
     case kMenuItemBackground:
@@ -1737,7 +1744,6 @@ int NativeThemeWin::GetWindowsPart(Part part,
       return SBP_THUMBBTNVERT;
     case kWindowResizeGripper:
       return SP_GRIPPER;
-    case kComboboxArrow:
     case kInnerSpinButton:
     case kMenuList:
     case kMenuCheckBackground:
@@ -1931,7 +1937,6 @@ int NativeThemeWin::GetWindowsState(Part part,
           NOTREACHED();
           return 0;
       }
-    case kComboboxArrow:
     case kInnerSpinButton:
     case kMenuList:
     case kMenuCheckBackground:

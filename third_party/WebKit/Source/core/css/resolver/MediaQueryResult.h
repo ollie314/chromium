@@ -25,19 +25,14 @@
 
 #include "core/css/MediaQueryExp.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
-class MediaQueryResult : public RefCountedWillBeGarbageCollectedFinalized<MediaQueryResult> {
-    WTF_MAKE_NONCOPYABLE(MediaQueryResult); USING_FAST_MALLOC_WILL_BE_REMOVED(MediaQueryResult);
+class MediaQueryResult : public GarbageCollectedFinalized<MediaQueryResult> {
+    WTF_MAKE_NONCOPYABLE(MediaQueryResult);
 public:
     MediaQueryResult(const MediaQueryExp& expr, bool result)
-#if ENABLE(OILPAN)
         : m_expression(&expr)
-#else
-        : m_expression(expr)
-#endif
         , m_result(result)
     {
     }
@@ -46,24 +41,16 @@ public:
 
     const MediaQueryExp* expression() const
     {
-#if ENABLE(OILPAN)
         return m_expression;
-#else
-        return &m_expression;
-#endif
     }
 
     bool result() const { return m_result; }
 
 private:
-#if ENABLE(OILPAN)
     Member<const MediaQueryExp> m_expression;
-#else
-    MediaQueryExp m_expression;
-#endif
     bool m_result;
 };
 
-}
+} // namespace blink
 
 #endif

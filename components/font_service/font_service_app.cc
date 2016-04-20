@@ -9,21 +9,14 @@
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "mojo/platform_handle/platform_handle_functions.h"
-#include "mojo/shell/public/cpp/application_connection.h"
+#include "services/shell/public/cpp/connection.h"
 
-static_assert(static_cast<uint32_t>(SkTypeface::kNormal) ==
-                  static_cast<uint32_t>(font_service::TYPEFACE_STYLE_NORMAL),
+static_assert(static_cast<uint32_t>(SkFontStyle::kUpright_Slant) ==
+                  static_cast<uint32_t>(font_service::TypefaceSlant::ROMAN),
               "Skia and font service flags must match");
-static_assert(static_cast<uint32_t>(SkTypeface::kBold) ==
-                  static_cast<uint32_t>(font_service::TYPEFACE_STYLE_BOLD),
+static_assert(static_cast<uint32_t>(SkFontStyle::kItalic_Slant) ==
+                  static_cast<uint32_t>(font_service::TypefaceSlant::ITALIC),
               "Skia and font service flags must match");
-static_assert(static_cast<uint32_t>(SkTypeface::kItalic) ==
-                  static_cast<uint32_t>(font_service::TYPEFACE_STYLE_ITALIC),
-              "Skia and font service flags must match");
-static_assert(
-    static_cast<uint32_t>(SkTypeface::kBoldItalic) ==
-        static_cast<uint32_t>(font_service::TYPEFACE_STYLE_BOLD_ITALIC),
-    "Skia and font service flags must match");
 
 namespace {
 
@@ -58,35 +51,43 @@ FontServiceApp::FontServiceApp() {}
 
 FontServiceApp::~FontServiceApp() {}
 
-void FontServiceApp::Initialize(mojo::ApplicationImpl* app) {
-  tracing_.Initialize(app);
+void FontServiceApp::Initialize(shell::Connector* connector,
+                                const shell::Identity& identity,
+                                uint32_t id) {
+  tracing_.Initialize(connector, identity.name());
 }
 
-bool FontServiceApp::ConfigureIncomingConnection(
-    mojo::ApplicationConnection* connection) {
-  connection->AddService(this);
+bool FontServiceApp::AcceptConnection(shell::Connection* connection) {
+  connection->AddInterface(this);
   return true;
 }
 
-void FontServiceApp::Create(mojo::ApplicationConnection* connection,
+void FontServiceApp::Create(shell::Connection* connection,
                             mojo::InterfaceRequest<FontService> request) {
   bindings_.AddBinding(this, std::move(request));
 }
 
 void FontServiceApp::MatchFamilyName(const mojo::String& family_name,
-                                     TypefaceStyle requested_style,
+                                     TypefaceStylePtr requested_style,
                                      const MatchFamilyNameCallback& callback) {
   SkFontConfigInterface::FontIdentity result_identity;
   SkString result_family;
-  SkTypeface::Style result_style;
+  SkFontStyle result_style;
   SkFontConfigInterface* fc =
       SkFontConfigInterface::GetSingletonDirectInterface();
   const bool r = fc->matchFamilyName(
-      family_name.data(), static_cast<SkTypeface::Style>(requested_style),
+      family_name.data(),
+      SkFontStyle(requested_style->weight,
+                  requested_style->width,
+                  static_cast<SkFontStyle::Slant>(requested_style->slant)),
       &result_identity, &result_family, &result_style);
 
   if (!r) {
-    callback.Run(nullptr, "", TYPEFACE_STYLE_NORMAL);
+    TypefaceStylePtr style(TypefaceStyle::New());
+    style->weight = SkFontStyle().weight();
+    style->width = SkFontStyle().width();
+    style->slant = static_cast<TypefaceSlant>(SkFontStyle().slant());
+    callback.Run(nullptr, "", std::move(style));
     return;
   }
 
@@ -99,27 +100,31 @@ void FontServiceApp::MatchFamilyName(const mojo::String& family_name,
   identity->ttc_index = result_identity.fTTCIndex;
   identity->str_representation = result_identity.fString.c_str();
 
-  callback.Run(std::move(identity), result_family.c_str(),
-               static_cast<TypefaceStyle>(result_style));
+  TypefaceStylePtr style(TypefaceStyle::New());
+  style->weight = result_style.weight();
+  style->width = result_style.width();
+  style->slant = static_cast<TypefaceSlant>(result_style.slant());
+
+  callback.Run(std::move(identity), result_family.c_str(), std::move(style));
 }
 
 void FontServiceApp::OpenStream(uint32_t id_number,
                                 const OpenStreamCallback& callback) {
   mojo::ScopedHandle handle;
-  if (id_number < static_cast<uint32_t>(paths_.count())) {
-    handle = GetHandleForPath(base::FilePath(paths_[id_number]->c_str()));
+  if (id_number < static_cast<uint32_t>(paths_.size())) {
+    handle = GetHandleForPath(base::FilePath(paths_[id_number].c_str()));
   }
 
   callback.Run(std::move(handle));
 }
 
 int FontServiceApp::FindOrAddPath(const SkString& path) {
-  int count = paths_.count();
+  int count = paths_.size();
   for (int i = 0; i < count; ++i) {
-    if (path == *paths_[i])
+    if (path == paths_[i])
       return i;
   }
-  *paths_.append() = new SkString(path);
+  paths_.emplace_back(path);
   return count;
 }
 

@@ -97,6 +97,7 @@ class ShellUtil {
     };
 
     explicit ShortcutProperties(ShellChange level_in);
+    ShortcutProperties(const ShortcutProperties& other);
     ~ShortcutProperties();
 
     // Sets the target executable to launch from this shortcut.
@@ -426,7 +427,7 @@ class ShellUtil {
   // browsing, e.g. http, https, .html etc., and requesting to become the
   // default handler for each. If any of these fails the operation will return
   // false to indicate failure, which is consistent with the return value of
-  // ShellIntegration::GetDefaultBrowser.
+  // shell_integration::GetDefaultBrowser.
   //
   // In the case of failure any successful changes will be left, however no
   // more changes will be attempted.

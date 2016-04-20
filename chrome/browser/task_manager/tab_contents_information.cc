@@ -20,7 +20,6 @@
 #include "chrome/browser/task_manager/task_manager_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "components/favicon/content/content_favicon_driver.h"
 #include "content/public/browser/render_process_host.h"
@@ -174,9 +173,10 @@ void TabContentsInformation::GetAll(const NewWebContentsCallback& callback) {
   }
 }
 
-scoped_ptr<RendererResource> TabContentsInformation::MakeResource(
+std::unique_ptr<RendererResource> TabContentsInformation::MakeResource(
     content::WebContents* web_contents) {
-  return scoped_ptr<RendererResource>(new TabContentsResource(web_contents));
+  return std::unique_ptr<RendererResource>(
+      new TabContentsResource(web_contents));
 }
 
 }  // namespace task_manager

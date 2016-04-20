@@ -7,7 +7,7 @@
 #include "core/css/parser/CSSParserTokenRange.h"
 #include "core/css/parser/MediaQueryBlockWatcher.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "wtf/Partitions.h"
+#include "wtf/allocator/Partitions.h"
 
 namespace blink {
 
@@ -49,7 +49,7 @@ void compareTokens(const CSSParserToken& expected, const CSSParserToken& actual)
         break;
     case HashToken:
         ASSERT_EQ(String(expected.value()), String(actual.value()));
-        ASSERT_EQ(expected.hashTokenType(), actual.hashTokenType());
+        ASSERT_EQ(expected.getHashTokenType(), actual.getHashTokenType());
         break;
     default:
         break;
@@ -499,4 +499,4 @@ TEST(CSSTokenizerBlockTest, Basic)
     }
 }
 
-} // namespace
+} // namespace blink

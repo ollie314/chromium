@@ -61,7 +61,7 @@ class WebSocketHandshakeResponseInfo;
 // This class is a WebSocketChannel subclass that works with a Document in a
 // DOMWindow (i.e. works in the main thread).
 class MODULES_EXPORT DocumentWebSocketChannel final : public WebSocketChannel, public WebSocketHandleClient, public ContextLifecycleObserver {
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(DocumentWebSocketChannel);
+    USING_GARBAGE_COLLECTED_MIXIN(DocumentWebSocketChannel);
 public:
     // You can specify the source file and the line number information
     // explicitly by passing the last parameter.
@@ -90,6 +90,9 @@ public:
     DECLARE_VIRTUAL_TRACE();
 
 private:
+    class BlobLoader;
+    class Message;
+
     enum MessageType {
         MessageTypeText,
         MessageTypeBlob,
@@ -99,31 +102,10 @@ private:
         MessageTypeClose,
     };
 
-    struct Message {
-        explicit Message(const CString&);
-        explicit Message(PassRefPtr<BlobDataHandle>);
-        explicit Message(PassRefPtr<DOMArrayBuffer>);
-        // For WorkerWebSocketChannel
-        explicit Message(PassOwnPtr<Vector<char>>, MessageType);
-        // Close message
-        Message(unsigned short code, const String& reason);
-
-        MessageType type;
-
-        CString text;
-        RefPtr<BlobDataHandle> blobDataHandle;
-        RefPtr<DOMArrayBuffer> arrayBuffer;
-        OwnPtr<Vector<char>> vectorData;
-        unsigned short code;
-        String reason;
-    };
-
     struct ReceivedMessage {
         bool isMessageText;
         Vector<char> data;
     };
-
-    class BlobLoader;
 
     DocumentWebSocketChannel(Document*, WebSocketChannelClient*, const String&, unsigned, WebSocketHandle*);
     void sendInternal(WebSocketHandle::MessageType, const char* data, size_t totalSize, uint64_t* consumedBufferedAmount);
@@ -145,7 +127,7 @@ private:
     void didStartClosingHandshake(WebSocketHandle*) override;
 
     // Methods for BlobLoader.
-    void didFinishLoadingBlob(PassRefPtr<DOMArrayBuffer>);
+    void didFinishLoadingBlob(DOMArrayBuffer*);
     void didFailLoadingBlob(FileError::ErrorCode);
 
     // m_handle is a handle of the connection.
@@ -159,7 +141,7 @@ private:
     // m_identifier > 0 means calling scriptContextExecution() returns a Document.
     unsigned long m_identifier;
     Member<BlobLoader> m_blobLoader;
-    Deque<OwnPtr<Message>> m_messages;
+    HeapDeque<Member<Message>> m_messages;
     Vector<char> m_receivingMessageData;
 
     bool m_receivingMessageTypeIsText;

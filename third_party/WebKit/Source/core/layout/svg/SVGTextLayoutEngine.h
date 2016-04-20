@@ -25,7 +25,6 @@
 #include "core/layout/svg/SVGTextFragment.h"
 #include "core/layout/svg/SVGTextLayoutAttributes.h"
 #include "core/layout/svg/SVGTextMetrics.h"
-#include "platform/graphics/Path.h"
 #include "wtf/Allocator.h"
 #include "wtf/Vector.h"
 
@@ -34,6 +33,7 @@ namespace blink {
 class ComputedStyle;
 class InlineFlowBox;
 class LayoutObject;
+class PathPositionMapper;
 class SVGInlineFlowBox;
 class SVGInlineTextBox;
 
@@ -50,6 +50,7 @@ class SVGTextLayoutEngine {
     WTF_MAKE_NONCOPYABLE(SVGTextLayoutEngine);
 public:
     SVGTextLayoutEngine(Vector<SVGTextLayoutAttributes*>&);
+    ~SVGTextLayoutEngine();
 
     Vector<SVGTextLayoutAttributes*>& layoutAttributes() { return m_layoutAttributes; }
 
@@ -57,10 +58,11 @@ public:
     void finishLayout();
 
 private:
-    void updateCharacterPositionIfNeeded(float& x, float& y);
-    void updateCurrentTextPosition(float x, float y, float glyphAdvance);
-    void updateRelativePositionAdjustmentsIfNeeded(float dx, float dy);
+    bool setCurrentTextPosition(const SVGCharacterData&);
+    void advanceCurrentTextPosition(float glyphAdvance);
+    bool applyRelativePositionAdjustmentsIfNeeded(const SVGCharacterData&);
 
+    void computeCurrentFragmentMetrics(SVGInlineTextBox*);
     void recordTextFragment(SVGInlineTextBox*);
 
     void beginTextPathLayout(SVGInlineFlowBox*);
@@ -83,19 +85,16 @@ private:
     unsigned m_logicalCharacterOffset;
     unsigned m_logicalMetricsListOffset;
     SVGInlineTextMetricsIterator m_visualMetricsIterator;
-    float m_x;
-    float m_y;
-    float m_dx;
-    float m_dy;
+    FloatPoint m_textPosition;
     bool m_isVerticalText;
     bool m_inPathLayout;
     bool m_textLengthSpacingInEffect;
 
     // Text on path layout
-    Path::PositionCalculator* m_textPathCalculator;
-    float m_textPathLength;
+    OwnPtr<PathPositionMapper> m_textPath;
     float m_textPathStartOffset;
     float m_textPathCurrentOffset;
+    float m_textPathDisplacement;
     float m_textPathSpacing;
     float m_textPathScaling;
 };

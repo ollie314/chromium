@@ -2,10 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/printing/print_preview_dialog_controller.h"
+
+#include <memory>
+
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
@@ -13,7 +16,6 @@
 #include "build/build_config.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
-#include "chrome/browser/printing/print_preview_dialog_controller.h"
 #include "chrome/browser/task_management/task_management_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -55,8 +57,8 @@ class RequestPrintPreviewObserver : public WebContentsObserver {
     IPC_BEGIN_MESSAGE_MAP(RequestPrintPreviewObserver, message)
       IPC_MESSAGE_HANDLER(PrintHostMsg_RequestPrintPreview,
                           OnRequestPrintPreview)
-      IPC_MESSAGE_UNHANDLED(break;)
-    IPC_END_MESSAGE_MAP();
+      IPC_MESSAGE_UNHANDLED(break)
+    IPC_END_MESSAGE_MAP()
     return false;  // Report not handled so the real handler receives it.
   }
 
@@ -89,7 +91,7 @@ class PrintPreviewDialogClonedObserver : public WebContentsObserver {
         new RequestPrintPreviewObserver(new_web_contents));
   }
 
-  scoped_ptr<RequestPrintPreviewObserver> request_preview_dialog_observer_;
+  std::unique_ptr<RequestPrintPreviewObserver> request_preview_dialog_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintPreviewDialogClonedObserver);
 };
@@ -190,7 +192,6 @@ class PrintPreviewDialogControllerBrowserTest : public InProcessBrowserTest {
     ASSERT_NE(first_tab, initiator_);
 
     content::PluginService::GetInstance()->Init();
-    content::PluginService::GetInstance()->DisablePluginsDiscoveryForTesting();
   }
 
   void TearDownOnMainThread() override {
@@ -202,7 +203,7 @@ class PrintPreviewDialogControllerBrowserTest : public InProcessBrowserTest {
     return cloned_tab_observer_->request_preview_dialog_observer();
   }
 
-  scoped_ptr<PrintPreviewDialogClonedObserver> cloned_tab_observer_;
+  std::unique_ptr<PrintPreviewDialogClonedObserver> cloned_tab_observer_;
   WebContents* initiator_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintPreviewDialogControllerBrowserTest);
@@ -210,14 +211,8 @@ class PrintPreviewDialogControllerBrowserTest : public InProcessBrowserTest {
 
 // Test to verify that when a initiator navigates, we can create a new preview
 // dialog for the new tab contents.
-// http://crbug.com/377337
-#if defined(OS_WIN)
-#define MAYBE_NavigateFromInitiatorTab DISABLED_NavigateFromInitiatorTab
-#else
-#define MAYBE_NavigateFromInitiatorTab NavigateFromInitiatorTab
-#endif
 IN_PROC_BROWSER_TEST_F(PrintPreviewDialogControllerBrowserTest,
-                       MAYBE_NavigateFromInitiatorTab) {
+                       NavigateFromInitiatorTab) {
   // Print for the first time.
   PrintPreview();
 
@@ -246,14 +241,8 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewDialogControllerBrowserTest,
 
 // Test to verify that after reloading the initiator, it creates a new print
 // preview dialog.
-// http://crbug.com/377337
-#if defined(OS_WIN)
-#define MAYBE_ReloadInitiatorTab DISABLED_ReloadInitiatorTab
-#else
-#define MAYBE_ReloadInitiatorTab ReloadInitiatorTab
-#endif
 IN_PROC_BROWSER_TEST_F(PrintPreviewDialogControllerBrowserTest,
-                       MAYBE_ReloadInitiatorTab) {
+                       ReloadInitiatorTab) {
   // Print for the first time.
   PrintPreview();
 
@@ -363,7 +352,7 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewDialogControllerBrowserTest,
   task_management::MockWebContentsTaskManager task_manager;
   EXPECT_TRUE(task_manager.tasks().empty());
   task_manager.StartObserving();
-  EXPECT_EQ(3U, task_manager.tasks().size());
+  ASSERT_EQ(3U, task_manager.tasks().size());
   const task_management::Task* pre_existing_task = task_manager.tasks().back();
   EXPECT_EQ(task_management::Task::RENDERER, pre_existing_task->GetType());
   const base::string16 pre_existing_title = pre_existing_task->title();
@@ -383,7 +372,7 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewDialogControllerBrowserTest,
   // validated that a corresponding task is reported.
   PrintPreview();
   EXPECT_EQ(3U, GetTrackedTags().size());
-  EXPECT_EQ(3U, task_manager.tasks().size());
+  ASSERT_EQ(3U, task_manager.tasks().size());
   const task_management::Task* task = task_manager.tasks().back();
   EXPECT_EQ(task_management::Task::RENDERER, task->GetType());
   const base::string16 title = task->title();

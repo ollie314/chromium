@@ -4,14 +4,15 @@
 
 #include "chrome/browser/search/local_files_ntp_source.h"
 
-#if !defined(GOOGLE_CHROME_BUILD) && !defined(OS_IOS)
+#include <memory>
+
+#if !defined(GOOGLE_CHROME_BUILD)
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_restrictions.h"
@@ -122,4 +123,4 @@ void SendLocalFileResourceWithOrigin(
 
 }  // namespace local_ntp
 
-#endif  //  !defined(GOOGLE_CHROME_BUILD) && !defined(OS_IOS)
+#endif  //  !defined(GOOGLE_CHROME_BUILD)

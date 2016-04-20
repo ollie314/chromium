@@ -13,6 +13,7 @@ import android.test.InstrumentationTestCase;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.FileUtils;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
@@ -20,6 +21,7 @@ import org.chromium.content.browser.test.util.CriteriaHelper;
 import java.io.File;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.Callable;
 
 /**
  * Tests that directories for WebappActivities are managed correctly.
@@ -72,6 +74,7 @@ public class WebappDirectoryManagerTest extends InstrumentationTestCase {
     @Override
     public void setUp() throws Exception {
         super.setUp();
+        RecordHistogram.disableForTests();
         mMockContext = new WebappMockContext();
         mWebappDirectoryManager = new TestWebappDirectoryManager();
 
@@ -79,7 +82,6 @@ public class WebappDirectoryManagerTest extends InstrumentationTestCase {
         File baseDirectory = new File(mMockContext.getBaseDirectory());
         FileUtils.recursivelyDeleteFile(baseDirectory);
         assertTrue(baseDirectory.mkdirs());
-
     }
 
     @Override
@@ -156,11 +158,12 @@ public class WebappDirectoryManagerTest extends InstrumentationTestCase {
     private void runCleanup() throws Exception {
         final AsyncTask task =
                 mWebappDirectoryManager.cleanUpDirectories(mMockContext, WEBAPP_ID_1);
-        CriteriaHelper.pollForCriteria(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return task.getStatus() == AsyncTask.Status.FINISHED;
-            }
-        });
+        CriteriaHelper.pollInstrumentationThread(
+                Criteria.equals(AsyncTask.Status.FINISHED, new Callable<AsyncTask.Status>() {
+                    @Override
+                    public AsyncTask.Status call() {
+                        return task.getStatus();
+                    }
+                }));
     }
 }

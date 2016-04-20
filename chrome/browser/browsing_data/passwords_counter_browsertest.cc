@@ -4,7 +4,6 @@
 
 #include "chrome/browser/browsing_data/passwords_counter.h"
 
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
@@ -13,6 +12,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/prefs/pref_service.h"
 
 namespace {
 
@@ -87,7 +87,7 @@ class PasswordsCounterTest : public InProcessBrowserTest,
     return result_;
   }
 
-  void Callback(scoped_ptr<BrowsingDataCounter::Result> result) {
+  void Callback(std::unique_ptr<BrowsingDataCounter::Result> result) {
     finished_ = result->Finished();
 
     if (finished_) {
@@ -115,7 +115,7 @@ class PasswordsCounterTest : public InProcessBrowserTest,
 
   scoped_refptr<password_manager::PasswordStore> store_;
 
-  scoped_ptr<base::RunLoop> run_loop_;
+  std::unique_ptr<base::RunLoop> run_loop_;
   base::Time time_;
 
   bool finished_;

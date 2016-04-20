@@ -14,9 +14,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/sys_info.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -35,6 +32,9 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/proximity_auth/cryptauth/cryptauth_client_impl.h"
 #include "components/proximity_auth/cryptauth/cryptauth_device_manager.h"
 #include "components/proximity_auth/cryptauth/cryptauth_enrollment_manager.h"
@@ -364,7 +364,7 @@ std::string EasyUnlockService::GetDeviceId() {
 }
 
 void EasyUnlockService::Initialize(
-    scoped_ptr<EasyUnlockAppManager> app_manager) {
+    std::unique_ptr<EasyUnlockAppManager> app_manager) {
   app_manager_ = std::move(app_manager);
   app_manager_->EnsureReady(
       base::Bind(&EasyUnlockService::InitializeOnAppManagerReady,

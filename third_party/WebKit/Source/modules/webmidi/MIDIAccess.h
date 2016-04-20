@@ -31,6 +31,7 @@
 #ifndef MIDIAccess_h
 #define MIDIAccess_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "modules/EventTargetModules.h"
@@ -48,10 +49,10 @@ class MIDIInputMap;
 class MIDIOutput;
 class MIDIOutputMap;
 
-class MIDIAccess final : public RefCountedGarbageCollectedEventTargetWithInlineData<MIDIAccess>, public ActiveDOMObject, public MIDIAccessorClient {
-    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(MIDIAccess);
+class MIDIAccess final : public EventTargetWithInlineData, public ActiveScriptWrappable, public ActiveDOMObject, public MIDIAccessorClient {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(MIDIAccess);
+    USING_GARBAGE_COLLECTED_MIXIN(MIDIAccess);
+    USING_PRE_FINALIZER(MIDIAccess, dispose);
 public:
     static MIDIAccess* create(PassOwnPtr<MIDIAccessor> accessor, bool sysexEnabled, const Vector<MIDIAccessInitializer::PortDescriptor>& ports, ExecutionContext* executionContext)
     {
@@ -65,16 +66,18 @@ public:
     MIDIOutputMap* outputs() const;
 
     EventListener* onstatechange();
-    void setOnstatechange(PassRefPtrWillBeRawPtr<EventListener>);
+    void setOnstatechange(EventListener*);
 
     bool sysexEnabled() const { return m_sysexEnabled; }
 
     // EventTarget
     const AtomicString& interfaceName() const override { return EventTargetNames::MIDIAccess; }
-    ExecutionContext* executionContext() const override { return ActiveDOMObject::executionContext(); }
+    ExecutionContext* getExecutionContext() const override { return ActiveDOMObject::getExecutionContext(); }
+
+    // ActiveScriptWrappable
+    bool hasPendingActivity() const final;
 
     // ActiveDOMObject
-    bool hasPendingActivity() const override;
     void stop() override;
 
     // MIDIAccessorClient
@@ -96,11 +99,11 @@ public:
     // Eager finalization needed to promptly release m_accessor. Otherwise
     // its client back reference could end up being unsafely used during
     // the lazy sweeping phase.
-    EAGERLY_FINALIZE();
     DECLARE_VIRTUAL_TRACE();
 
 private:
     MIDIAccess(PassOwnPtr<MIDIAccessor>, bool sysexEnabled, const Vector<MIDIAccessInitializer::PortDescriptor>&, ExecutionContext*);
+    void dispose();
 
     OwnPtr<MIDIAccessor> m_accessor;
     bool m_sysexEnabled;

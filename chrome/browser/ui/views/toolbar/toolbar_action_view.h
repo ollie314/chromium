@@ -11,6 +11,7 @@
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
+#include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/drag_controller.h"
 #include "ui/views/view.h"
 
@@ -26,6 +27,7 @@ class Image;
 
 namespace views {
 class MenuItemView;
+class MenuModelAdapter;
 class MenuRunner;
 }
 
@@ -55,9 +57,6 @@ class ToolbarActionView : public views::MenuButton,
     // reference point for a popup when this view isn't visible.
     virtual views::MenuButton* GetOverflowReferenceView() = 0;
 
-    // Notifies the delegate that the mouse entered the view.
-    virtual void OnMouseEnteredToolbarActionView() = 0;
-
    protected:
     ~Delegate() override {}
   };
@@ -71,19 +70,20 @@ class ToolbarActionView : public views::MenuButton,
 
   // views::MenuButton:
   void GetAccessibleState(ui::AXViewState* state) override;
-  scoped_ptr<views::LabelButtonBorder> CreateDefaultBorder() const override;
-  void OnMouseEntered(const ui::MouseEvent& event) override;
-  bool ShouldEnterPushedState(const ui::Event& event) override;
-  void AddInkDropLayer(ui::Layer* ink_drop_layer) override;
-  void RemoveInkDropLayer(ui::Layer* ink_drop_layer) override;
+  std::unique_ptr<views::LabelButtonBorder> CreateDefaultBorder()
+      const override;
+  bool IsTriggerableEvent(const ui::Event& event) override;
+  SkColor GetInkDropBaseColor() const override;
+  bool ShouldShowInkDropHover() const override;
 
   // ToolbarActionViewDelegateViews:
   content::WebContents* GetCurrentWebContents() const override;
   void UpdateState() override;
 
   // views::MenuButtonListener:
-  void OnMenuButtonClicked(views::View* sender,
-                           const gfx::Point& point) override;
+  void OnMenuButtonClicked(views::MenuButton* source,
+                           const gfx::Point& point,
+                           const ui::Event* event) override;
 
   ToolbarActionViewController* view_controller() {
     return view_controller_;
@@ -132,8 +132,11 @@ class ToolbarActionView : public views::MenuButton,
   // Returns true if a menu was closed, false otherwise.
   bool CloseActiveMenuIfNeeded();
 
+  // Callback for MenuModelAdapter.
+  void OnMenuClosed();
+
   // A lock to keep the MenuButton pressed when a menu or popup is visible.
-  scoped_ptr<views::MenuButton::PressedLock> pressed_lock_;
+  std::unique_ptr<views::MenuButton::PressedLock> pressed_lock_;
 
   // The controller for this toolbar action view.
   ToolbarActionViewController* view_controller_;
@@ -148,21 +151,20 @@ class ToolbarActionView : public views::MenuButton,
   // tab.
   bool wants_to_run_;
 
+  // Responsible for converting the context menu model into |menu_|.
+  std::unique_ptr<views::MenuModelAdapter> menu_adapter_;
+
   // Responsible for running the menu.
-  scoped_ptr<views::MenuRunner> menu_runner_;
+  std::unique_ptr<views::MenuRunner> menu_runner_;
 
   // The root MenuItemView for the context menu, or null if no menu is being
   // shown.
   views::MenuItemView* menu_;
 
-  // If non-null, this is the next toolbar action context menu that wants to run
-  // once the current owner (this one) is done.
-  base::Closure followup_context_menu_task_;
-
   // The time the popup was last closed.
   base::TimeTicks popup_closed_time_;
 
-  scoped_ptr<views::InkDropDelegate> ink_drop_delegate_;
+  std::unique_ptr<views::InkDropDelegate> ink_drop_delegate_;
 
   base::WeakPtrFactory<ToolbarActionView> weak_factory_;
 

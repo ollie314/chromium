@@ -9,18 +9,17 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/values.h"
-#include "net/base/net_util.h"
 #include "net/base/sys_addrinfo.h"
 
 namespace net {
 
 namespace {
 
-scoped_ptr<base::Value> NetLogAddressListCallback(
+std::unique_ptr<base::Value> NetLogAddressListCallback(
     const AddressList* address_list,
     NetLogCaptureMode capture_mode) {
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
-  scoped_ptr<base::ListValue> list(new base::ListValue());
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+  std::unique_ptr<base::ListValue> list(new base::ListValue());
 
   for (AddressList::const_iterator it = address_list->begin();
        it != address_list->end(); ++it) {
@@ -39,12 +38,6 @@ AddressList::~AddressList() {}
 
 AddressList::AddressList(const IPEndPoint& endpoint) {
   push_back(endpoint);
-}
-
-// static
-AddressList AddressList::CreateFromIPAddress(const IPAddressNumber& address,
-                                             uint16_t port) {
-  return AddressList(IPEndPoint(address, port));
 }
 
 // static

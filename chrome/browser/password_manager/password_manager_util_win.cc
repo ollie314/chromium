@@ -9,6 +9,8 @@
 #include <stdint.h>
 #include <wincred.h>
 
+#include <memory>
+
 // SECURITY_WIN32 must be defined in order to get
 // EXTENDED_NAME_FORMAT enumeration.
 #define SECURITY_WIN32 1
@@ -19,9 +21,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/time.h"
@@ -30,6 +30,7 @@
 #include "chrome/grit/chromium_strings.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -188,8 +189,8 @@ void GetOsPasswordStatusInternal(PasswordCheckPrefs* prefs,
   }
 }
 
-void ReplyOsPasswordStatus(scoped_ptr<PasswordCheckPrefs> prefs,
-                           scoped_ptr<OsPasswordStatus> status) {
+void ReplyOsPasswordStatus(std::unique_ptr<PasswordCheckPrefs> prefs,
+                           std::unique_ptr<OsPasswordStatus> status) {
   PrefService* local_state = g_browser_process->local_state();
   prefs->Write(local_state);
   UMA_HISTOGRAM_ENUMERATION("PasswordManager.OsPasswordStatus", *status,
@@ -200,9 +201,9 @@ void GetOsPasswordStatus() {
   // Preferences can be accessed on the UI thread only.
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   PrefService* local_state = g_browser_process->local_state();
-  scoped_ptr<PasswordCheckPrefs> prefs(new PasswordCheckPrefs);
+  std::unique_ptr<PasswordCheckPrefs> prefs(new PasswordCheckPrefs);
   prefs->Read(local_state);
-  scoped_ptr<OsPasswordStatus> status(
+  std::unique_ptr<OsPasswordStatus> status(
       new OsPasswordStatus(PASSWORD_STATUS_UNKNOWN));
   PasswordCheckPrefs* prefs_weak = prefs.get();
   OsPasswordStatus* status_weak = status.get();

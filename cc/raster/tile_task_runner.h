@@ -10,33 +10,28 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "cc/raster/task_graph_runner.h"
+#include "cc/raster/raster_buffer.h"
+#include "cc/raster/task.h"
 #include "cc/resources/resource_format.h"
 
 namespace cc {
-class ImageDecodeTask;
-class RasterTask;
-class Resource;
-class RasterBuffer;
-
-class CC_EXPORT TileTaskClient {
- public:
-  virtual scoped_ptr<RasterBuffer> AcquireBufferForRaster(
-      const Resource* resource,
-      uint64_t resource_content_id,
-      uint64_t previous_content_id) = 0;
-  virtual void ReleaseBufferForRaster(scoped_ptr<RasterBuffer> buffer) = 0;
-
- protected:
-  virtual ~TileTaskClient() {}
-};
 
 class CC_EXPORT TileTask : public Task {
  public:
   typedef std::vector<scoped_refptr<TileTask>> Vector;
 
-  virtual void ScheduleOnOriginThread(TileTaskClient* client) = 0;
-  virtual void CompleteOnOriginThread(TileTaskClient* client) = 0;
+  const TileTask::Vector& dependencies() const { return dependencies_; }
+
+  // Indicates whether this TileTask can be run at the same time as other tasks
+  // in the task graph. If false, this task will be scheduled with
+  // TASK_CATEGORY_NONCONCURRENT_FOREGROUND. The base implementation always
+  // returns true.
+  bool SupportsConcurrentExecution() const {
+    return supports_concurrent_execution_;
+  }
+
+  virtual void ScheduleOnOriginThread(RasterBufferProvider* provider) = 0;
+  virtual void CompleteOnOriginThread(RasterBufferProvider* provider) = 0;
 
   void WillSchedule();
   void DidSchedule();
@@ -47,34 +42,14 @@ class CC_EXPORT TileTask : public Task {
   bool HasCompleted() const;
 
  protected:
-  TileTask();
+  explicit TileTask(bool supports_concurrent_execution);
+  TileTask(bool supports_concurrent_execution, TileTask::Vector* dependencies);
   ~TileTask() override;
 
+  const bool supports_concurrent_execution_;
+  TileTask::Vector dependencies_;
   bool did_schedule_;
   bool did_complete_;
-};
-
-class CC_EXPORT ImageDecodeTask : public TileTask {
- public:
-  typedef std::vector<scoped_refptr<ImageDecodeTask>> Vector;
-
- protected:
-  ImageDecodeTask();
-  ~ImageDecodeTask() override;
-};
-
-class CC_EXPORT RasterTask : public TileTask {
- public:
-  typedef std::vector<scoped_refptr<RasterTask>> Vector;
-
-  const ImageDecodeTask::Vector& dependencies() const { return dependencies_; }
-
- protected:
-  explicit RasterTask(ImageDecodeTask::Vector* dependencies);
-  ~RasterTask() override;
-
- private:
-  ImageDecodeTask::Vector dependencies_;
 };
 
 // This interface can be used to schedule and run tile tasks.
@@ -103,7 +78,13 @@ class CC_EXPORT TileTaskRunner {
   // Determine if the resource requires swizzling.
   virtual bool GetResourceRequiresSwizzle(bool must_support_alpha) const = 0;
 
+  // Downcasting routine for RasterBufferProvider interface.
+  virtual RasterBufferProvider* AsRasterBufferProvider() = 0;
+
  protected:
+  // Check if resource format matches output format.
+  static bool ResourceFormatRequiresSwizzle(ResourceFormat format);
+
   virtual ~TileTaskRunner() {}
 };
 

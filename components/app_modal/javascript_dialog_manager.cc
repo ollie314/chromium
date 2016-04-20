@@ -4,15 +4,16 @@
 
 #include "components/app_modal/javascript_dialog_manager.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/app_modal/app_modal_dialog.h"
 #include "components/app_modal/app_modal_dialog_queue.h"
-#include "components/app_modal/javascript_app_modal_dialog.h"
 #include "components/app_modal/javascript_dialog_extensions_client.h"
 #include "components/app_modal/javascript_native_dialog_factory.h"
 #include "components/app_modal/native_app_modal_dialog.h"
@@ -20,11 +21,18 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/javascript_message_type.h"
 #include "grit/components_strings.h"
-#include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/font_list.h"
 
 namespace app_modal {
+
 namespace {
+
+#if !defined(OS_ANDROID)
+// Keep in sync with kDefaultMessageWidth, but allow some space for the rest of
+// the text.
+const int kUrlElideWidth = 350;
+#endif
 
 class DefaultExtensionsClient : public JavaScriptDialogExtensionsClient {
  public:
@@ -47,6 +55,17 @@ class DefaultExtensionsClient : public JavaScriptDialogExtensionsClient {
 bool ShouldDisplaySuppressCheckbox(
     ChromeJavaScriptDialogExtraData* extra_data) {
   return extra_data->has_already_shown_a_dialog_;
+}
+
+void LogUMAMessageLengthStats(const base::string16& message) {
+  UMA_HISTOGRAM_COUNTS("JSDialogs.CountOfJSDialogMessageCharacters",
+                       static_cast<int32_t>(message.length()));
+
+  int32_t newline_count =
+      std::count_if(message.begin(), message.end(),
+                    [](const base::char16& c) { return c == '\n'; });
+  UMA_HISTOGRAM_COUNTS("JSDialogs.CountOfJSDialogMessageNewlines",
+                       newline_count);
 }
 
 }  // namespace
@@ -82,7 +101,6 @@ JavaScriptDialogManager::~JavaScriptDialogManager() {
 void JavaScriptDialogManager::RunJavaScriptDialog(
     content::WebContents* web_contents,
     const GURL& origin_url,
-    const std::string& accept_lang,
     content::JavaScriptMessageType message_type,
     const base::string16& message_text,
     const base::string16& default_prompt_text,
@@ -91,21 +109,53 @@ void JavaScriptDialogManager::RunJavaScriptDialog(
   *did_suppress_message = false;
 
   ChromeJavaScriptDialogExtraData* extra_data =
-      &javascript_dialog_extra_data_
-          [JavaScriptAppModalDialog::GetSerializedOriginForWebContents(
-              web_contents)];
+      &javascript_dialog_extra_data_[web_contents];
 
   if (extra_data->suppress_javascript_messages_) {
+    // If a page tries to open dialogs in a tight loop, the number of
+    // suppressions logged can grow out of control. Arbitrarily cap the number
+    // logged at 100. That many suppressed dialogs is enough to indicate the
+    // page is doing something very hinky.
+    if (extra_data->suppressed_dialog_count_ < 100) {
+      // Log a suppressed dialog as one that opens and then closes immediately.
+      UMA_HISTOGRAM_MEDIUM_TIMES(
+          "JSDialogs.FineTiming.TimeBetweenDialogCreatedAndSameDialogClosed",
+          base::TimeDelta());
+
+      // Only increment the count if it's not already at the limit, to prevent
+      // overflow.
+      extra_data->suppressed_dialog_count_++;
+    }
+
     *did_suppress_message = true;
     return;
   }
 
+  base::TimeTicks now = base::TimeTicks::Now();
+  if (!last_creation_time_.is_null()) {
+    // A new dialog has been created: log the time since the last one was
+    // created.
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "JSDialogs.FineTiming.TimeBetweenDialogCreatedAndNextDialogCreated",
+        now - last_creation_time_);
+  }
+  last_creation_time_ = now;
+
+  // Also log the time since a dialog was closed, but only if this is the first
+  // dialog that was opened since the closing.
+  if (!last_close_time_.is_null()) {
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "JSDialogs.FineTiming.TimeBetweenDialogClosedAndNextDialogCreated",
+        now - last_close_time_);
+    last_close_time_ = base::TimeTicks();
+  }
+
   bool is_alert = message_type == content::JAVASCRIPT_MESSAGE_TYPE_ALERT;
-  base::string16 dialog_title =
-      GetTitle(web_contents, origin_url, accept_lang, is_alert);
+  base::string16 dialog_title = GetTitle(web_contents, origin_url, is_alert);
 
   extensions_client_->OnDialogOpened(web_contents);
 
+  LogUMAMessageLengthStats(message_text);
   AppModalDialogQueue::GetInstance()->AddDialog(new JavaScriptAppModalDialog(
       web_contents,
       &javascript_dialog_extra_data_,
@@ -122,13 +172,10 @@ void JavaScriptDialogManager::RunJavaScriptDialog(
 
 void JavaScriptDialogManager::RunBeforeUnloadDialog(
     content::WebContents* web_contents,
-    const base::string16& message_text,
     bool is_reload,
     const DialogClosedCallback& callback) {
   ChromeJavaScriptDialogExtraData* extra_data =
-      &javascript_dialog_extra_data_
-          [JavaScriptAppModalDialog::GetSerializedOriginForWebContents(
-              web_contents)];
+      &javascript_dialog_extra_data_[web_contents];
 
   if (extra_data->suppress_javascript_messages_) {
     // If a site harassed the user enough for them to put it on mute, then it
@@ -137,13 +184,24 @@ void JavaScriptDialogManager::RunBeforeUnloadDialog(
     return;
   }
 
+  // Build the dialog message. We explicitly do _not_ allow the webpage to
+  // specify the contents of this dialog, because most of the time nowadays it's
+  // used for scams.
+  //
+  // This does not violate the spec. Per
+  // https://html.spec.whatwg.org/#prompt-to-unload-a-document, step 7:
+  //
+  // "The prompt shown by the user agent may include the string of the
+  // returnValue attribute, or some leading subset thereof."
+  //
+  // The prompt MAY include the string. It doesn't any more. Scam web page
+  // authors have abused this, so we're taking away the toys from everyone. This
+  // is why we can't have nice things.
+
   const base::string16 title = l10n_util::GetStringUTF16(is_reload ?
       IDS_BEFORERELOAD_MESSAGEBOX_TITLE : IDS_BEFOREUNLOAD_MESSAGEBOX_TITLE);
-  const base::string16 footer = l10n_util::GetStringUTF16(is_reload ?
-      IDS_BEFORERELOAD_MESSAGEBOX_FOOTER : IDS_BEFOREUNLOAD_MESSAGEBOX_FOOTER);
-
-  base::string16 full_message =
-      message_text + base::ASCIIToUTF16("\n\n") + footer;
+  const base::string16 message =
+      l10n_util::GetStringUTF16(IDS_BEFOREUNLOAD_MESSAGEBOX_MESSAGE);
 
   extensions_client_->OnDialogOpened(web_contents);
 
@@ -152,12 +210,12 @@ void JavaScriptDialogManager::RunBeforeUnloadDialog(
       &javascript_dialog_extra_data_,
       title,
       content::JAVASCRIPT_MESSAGE_TYPE_CONFIRM,
-      full_message,
+      message,
       base::string16(),  // default_prompt_text
       ShouldDisplaySuppressCheckbox(extra_data),
       true,        // is_before_unload_dialog
       is_reload,
-      base::Bind(&JavaScriptDialogManager::OnDialogClosed,
+      base::Bind(&JavaScriptDialogManager::OnBeforeUnloadDialogClosed,
                  base::Unretained(this), web_contents, callback)));
 }
 
@@ -186,15 +244,12 @@ bool JavaScriptDialogManager::HandleJavaScriptDialog(
 void JavaScriptDialogManager::ResetDialogState(
     content::WebContents* web_contents) {
   CancelActiveAndPendingDialogs(web_contents);
-  javascript_dialog_extra_data_.erase(
-      JavaScriptAppModalDialog::GetSerializedOriginForWebContents(
-          web_contents));
+  javascript_dialog_extra_data_.erase(web_contents);
 }
 
 base::string16 JavaScriptDialogManager::GetTitle(
     content::WebContents* web_contents,
     const GURL& origin_url,
-    const std::string& accept_lang,
     bool is_alert) {
   // For extensions, show the extension name, but only if the origin of
   // the alert matches the top-level WebContents.
@@ -208,9 +263,13 @@ base::string16 JavaScriptDialogManager::GetTitle(
       (web_contents->GetURL().GetOrigin() == origin_url.GetOrigin());
   if (origin_url.IsStandard() && !origin_url.SchemeIsFile() &&
       !origin_url.SchemeIsFileSystem()) {
+#if !defined(OS_ANDROID)
     base::string16 url_string =
-        url_formatter::FormatUrlForSecurityDisplayOmitScheme(origin_url,
-                                                             accept_lang);
+        url_formatter::ElideHost(origin_url, gfx::FontList(), kUrlElideWidth);
+#else
+    base::string16 url_string = url_formatter::FormatUrlForSecurityDisplay(
+        origin_url, url_formatter::SchemeDisplay::OMIT_HTTP_AND_HTTPS);
+#endif
     return l10n_util::GetStringFUTF16(
         is_same_origin_as_main_frame ? IDS_JAVASCRIPT_MESSAGEBOX_TITLE
                                      : IDS_JAVASCRIPT_MESSAGEBOX_TITLE_IFRAME,
@@ -239,6 +298,24 @@ void JavaScriptDialogManager::CancelActiveAndPendingDialogs(
     active_dialog->Invalidate();
 }
 
+void JavaScriptDialogManager::OnBeforeUnloadDialogClosed(
+    content::WebContents* web_contents,
+    DialogClosedCallback callback,
+    bool success,
+    const base::string16& user_input) {
+  enum class StayVsLeave {
+    STAY = 0,
+    LEAVE = 1,
+    MAX,
+  };
+  UMA_HISTOGRAM_ENUMERATION(
+      "JSDialogs.OnBeforeUnloadStayVsLeave",
+      static_cast<int>(success ? StayVsLeave::LEAVE : StayVsLeave::STAY),
+      static_cast<int>(StayVsLeave::MAX));
+
+  OnDialogClosed(web_contents, callback, success, user_input);
+}
+
 void JavaScriptDialogManager::OnDialogClosed(
     content::WebContents* web_contents,
     DialogClosedCallback callback,
@@ -248,6 +325,8 @@ void JavaScriptDialogManager::OnDialogClosed(
   // lazy background page after the dialog closes. (Dialogs are closed before
   // their WebContents is destroyed so |web_contents| is still valid here.)
   extensions_client_->OnDialogClosed(web_contents);
+
+  last_close_time_ = base::TimeTicks::Now();
 
   callback.Run(success, user_input);
 }

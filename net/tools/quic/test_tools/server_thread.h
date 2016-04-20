@@ -12,7 +12,6 @@
 #include "net/tools/quic/quic_server.h"
 
 namespace net {
-namespace tools {
 namespace test {
 
 // Simple wrapper class to run QuicServer in a dedicated thread.
@@ -64,7 +63,7 @@ class ServerThread : public base::SimpleThread {
   base::WaitableEvent resume_;     // Notified when the server should resume.
   base::WaitableEvent quit_;       // Notified when the server should quit.
 
-  scoped_ptr<QuicServer> server_;
+  std::unique_ptr<QuicServer> server_;
   IPEndPoint address_;
   base::Lock port_lock_;
   int port_;
@@ -75,7 +74,6 @@ class ServerThread : public base::SimpleThread {
 };
 
 }  // namespace test
-}  // namespace tools
 }  // namespace net
 
 #endif  // NET_TOOLS_QUIC_TEST_TOOLS_SERVER_THREAD_H_

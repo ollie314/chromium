@@ -4,6 +4,8 @@
 
 #include "components/page_load_metrics/browser/metrics_web_contents_observer.h"
 
+#include <algorithm>
+#include <string>
 #include <utility>
 
 #include "base/location.h"
@@ -29,6 +31,22 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(
 
 namespace page_load_metrics {
 
+namespace internal {
+
+const char kErrorEvents[] = "PageLoad.Events.InternalError";
+const char kAbortChainSizeReload[] =
+    "PageLoad.Internal.ProvisionalAbortChainSize.Reload";
+const char kAbortChainSizeForwardBack[] =
+    "PageLoad.Internal.ProvisionalAbortChainSize.ForwardBack";
+const char kAbortChainSizeNewNavigation[] =
+    "PageLoad.Internal.ProvisionalAbortChainSize.NewNavigation";
+const char kAbortChainSizeSameURL[] =
+    "PageLoad.Internal.ProvisionalAbortChainSize.SameURL";
+const char kAbortChainSizeNoCommit[] =
+    "PageLoad.Internal.ProvisionalAbortChainSize.NoCommit";
+
+}  // namespace internal
+
 namespace {
 
 // The url we see from the renderer side is not always the same as what
@@ -46,31 +64,114 @@ bool IsRelevantNavigation(content::NavigationHandle* navigation_handle,
          (mime_type == "text/html" || mime_type == "application/xhtml+xml");
 }
 
+// If second is non-zero, first must also be non-zero and less than or equal to
+// second.
+bool EventsInOrder(base::TimeDelta first, base::TimeDelta second) {
+  if (second.is_zero()) {
+    return true;
+  }
+  return !first.is_zero() && first <= second;
+}
+
 bool IsValidPageLoadTiming(const PageLoadTiming& timing) {
   if (timing.IsEmpty())
     return false;
 
   // If we have a non-empty timing, it should always have a navigation start.
   if (timing.navigation_start.is_null()) {
-    NOTREACHED();
+    NOTREACHED() << "Received null navigation_start.";
     return false;
   }
 
-  // If we have a DOM content loaded event, we should have a response start.
-  if (!timing.dom_content_loaded_event_start.is_zero() &&
-      timing.response_start > timing.dom_content_loaded_event_start) {
-    NOTREACHED();
+  // Verify proper ordering between the various timings.
+
+  if (!EventsInOrder(timing.response_start, timing.dom_loading)) {
+    // We sometimes get a zero response_start with a non-zero DOM loading. See
+    // crbug.com/590212.
+    DLOG(ERROR) << "Invalid response_start " << timing.response_start
+                << " for dom_loading " << timing.dom_loading;
     return false;
   }
 
-  // If we have a load event, we should have both a response start and a DCL.
-  // TODO(csharrison) crbug.com/536203 shows that sometimes we can get a load
-  // event without a DCL. Figure out if we can change this condition to use a
-  // NOTREACHED in the condition.
-  if (!timing.load_event_start.is_zero() &&
-      (timing.dom_content_loaded_event_start.is_zero() ||
-       timing.response_start > timing.load_event_start ||
-       timing.dom_content_loaded_event_start > timing.load_event_start)) {
+  if (!EventsInOrder(timing.response_start, timing.parse_start)) {
+    // We sometimes get a zero response_start with a non-zero parse start. See
+    // crbug.com/590212.
+    DLOG(ERROR) << "Invalid response_start " << timing.response_start
+                << " for parse_start " << timing.parse_start;
+    return false;
+  }
+
+  if (!EventsInOrder(timing.parse_start, timing.parse_stop)) {
+    NOTREACHED() << "Invalid parse_start " << timing.parse_start
+                 << " for parse_stop " << timing.parse_stop;
+    return false;
+  }
+
+  if (!timing.parse_stop.is_zero()) {
+    const base::TimeDelta parse_duration =
+        timing.parse_stop - timing.parse_start;
+    if (timing.parse_blocked_on_script_load_duration > parse_duration) {
+      NOTREACHED() << "Invalid parse_blocked_on_script_load_duration "
+                   << timing.parse_blocked_on_script_load_duration
+                   << " for parse duration " << parse_duration;
+      return false;
+    }
+  }
+
+  if (timing.parse_blocked_on_script_load_from_document_write_duration >
+      timing.parse_blocked_on_script_load_duration) {
+    NOTREACHED()
+        << "Invalid parse_blocked_on_script_load_from_document_write_duration "
+        << timing.parse_blocked_on_script_load_from_document_write_duration
+        << " for parse_blocked_on_script_load_duration "
+        << timing.parse_blocked_on_script_load_duration;
+    return false;
+  }
+
+  if (!EventsInOrder(timing.dom_loading,
+                     timing.dom_content_loaded_event_start)) {
+    NOTREACHED() << "Invalid dom_loading " << timing.dom_loading
+                 << " for dom_content_loaded_event_start "
+                 << timing.dom_content_loaded_event_start;
+    return false;
+  }
+
+  if (!EventsInOrder(timing.dom_content_loaded_event_start,
+                     timing.load_event_start)) {
+    NOTREACHED() << "Invalid dom_content_loaded_event_start "
+                 << timing.dom_content_loaded_event_start
+                 << " for load_event_start " << timing.load_event_start;
+    return false;
+  }
+
+  if (!EventsInOrder(timing.dom_loading, timing.first_layout)) {
+    NOTREACHED() << "Invalid dom_loading " << timing.dom_loading
+                 << " for first_layout " << timing.first_layout;
+    return false;
+  }
+
+  if (!EventsInOrder(timing.first_layout, timing.first_paint)) {
+    NOTREACHED() << "Invalid first_layout " << timing.first_layout
+                 << " for first_paint " << timing.first_paint;
+    return false;
+  }
+
+  if (!EventsInOrder(timing.first_paint, timing.first_text_paint)) {
+    NOTREACHED() << "Invalid first_paint " << timing.first_paint
+                 << " for first_text_paint " << timing.first_text_paint;
+    return false;
+  }
+
+  if (!EventsInOrder(timing.first_paint, timing.first_image_paint)) {
+    NOTREACHED() << "Invalid first_paint " << timing.first_paint
+                 << " for first_image_paint " << timing.first_image_paint;
+    return false;
+  }
+
+  if (!EventsInOrder(timing.first_paint, timing.first_contentful_paint)) {
+    NOTREACHED() << "Invalid first_paint " << timing.first_paint
+                 << " for first_contentful_paint "
+                 << timing.first_contentful_paint;
     return false;
   }
 
@@ -88,33 +189,44 @@ UserAbortType AbortTypeForPageTransition(ui::PageTransition transition) {
     return ABORT_FORWARD_BACK;
   if (ui::PageTransitionIsNewNavigation(transition))
     return ABORT_NEW_NAVIGATION;
-  NOTREACHED();
+  NOTREACHED()
+      << "AbortTypeForPageTransition received unexpected ui::PageTransition: "
+      << transition;
   return ABORT_OTHER;
+}
+
+void LogAbortChainSameURLHistogram(int aborted_chain_size_same_url) {
+  if (aborted_chain_size_same_url > 0) {
+    UMA_HISTOGRAM_COUNTS(internal::kAbortChainSizeSameURL,
+                         aborted_chain_size_same_url);
+  }
 }
 
 }  // namespace
 
-namespace internal {
-
-const char kProvisionalEvents[] = "PageLoad.Events.Provisional";
-const char kBackgroundProvisionalEvents[] =
-    "PageLoad.Events.Provisional.Background";
-const char kErrorEvents[] = "PageLoad.Events.InternalError";
-
-}  // namespace internal
-
 PageLoadTracker::PageLoadTracker(
     bool in_foreground,
     PageLoadMetricsEmbedderInterface* embedder_interface,
-    content::NavigationHandle* navigation_handle)
+    PageLoadTracker* const currently_committed_load_or_null,
+    content::NavigationHandle* navigation_handle,
+    int aborted_chain_size,
+    int aborted_chain_size_same_url)
     : renderer_tracked_(false),
       navigation_start_(navigation_handle->NavigationStart()),
+      url_(navigation_handle->GetURL()),
       abort_type_(ABORT_NONE),
       started_in_foreground_(in_foreground),
+      aborted_chain_size_(aborted_chain_size),
+      aborted_chain_size_same_url_(aborted_chain_size_same_url),
       embedder_interface_(embedder_interface) {
+  DCHECK(!navigation_handle->HasCommitted());
   embedder_interface_->RegisterObservers(this);
+  const GURL& currently_committed_url =
+      currently_committed_load_or_null
+          ? currently_committed_load_or_null->committed_url()
+          : GURL::EmptyGURL();
   for (const auto& observer : observers_) {
-    observer->OnStart(navigation_handle);
+    observer->OnStart(navigation_handle, currently_committed_url);
   }
 }
 
@@ -124,31 +236,99 @@ PageLoadTracker::~PageLoadTracker() {
       timing_.IsEmpty()) {
     RecordInternalError(ERR_NO_IPCS_RECEIVED);
   }
+  // Recall that trackers that are given ABORT_UNKNOWN_NAVIGATION have their
+  // chain length added to the next navigation. Take care not to double count
+  // them. Also do not double count committed loads, which call this already.
+  if (commit_time_.is_null() && abort_type_ != ABORT_UNKNOWN_NAVIGATION)
+    LogAbortChainHistograms(nullptr);
+
   for (const auto& observer : observers_) {
     observer->OnComplete(timing_, info);
   }
 }
 
+void PageLoadTracker::LogAbortChainHistograms(
+    content::NavigationHandle* final_navigation) {
+  if (aborted_chain_size_ == 0)
+    return;
+  // Note that this could be broken out by this navigation's abort type, if more
+  // granularity is needed. Add one to the chain size to count the current
+  // navigation. In the other cases, the current navigation is the final
+  // navigation (which commits).
+  if (!final_navigation) {
+    UMA_HISTOGRAM_COUNTS(internal::kAbortChainSizeNoCommit,
+                         aborted_chain_size_ + 1);
+    LogAbortChainSameURLHistogram(aborted_chain_size_same_url_ + 1);
+    return;
+  }
+
+  // The following is only executed for committing trackers.
+  DCHECK(!commit_time_.is_null());
+
+  // Note that histograms could be separated out by this commit's transition
+  // type, but for simplicity they will all be bucketed together.
+  LogAbortChainSameURLHistogram(aborted_chain_size_same_url_);
+
+  ui::PageTransition committed_transition =
+      final_navigation->GetPageTransition();
+  switch (AbortTypeForPageTransition(committed_transition)) {
+    case ABORT_RELOAD:
+      UMA_HISTOGRAM_COUNTS(internal::kAbortChainSizeReload,
+                           aborted_chain_size_);
+      return;
+    case ABORT_FORWARD_BACK:
+      UMA_HISTOGRAM_COUNTS(internal::kAbortChainSizeForwardBack,
+                           aborted_chain_size_);
+      return;
+    case ABORT_NEW_NAVIGATION:
+      UMA_HISTOGRAM_COUNTS(internal::kAbortChainSizeNewNavigation,
+                           aborted_chain_size_);
+      return;
+    default:
+      NOTREACHED()
+          << "LogAbortChainHistograms received unexpected ui::PageTransition: "
+          << committed_transition;
+      return;
+  }
+}
+
 void PageLoadTracker::WebContentsHidden() {
   // Only log the first time we background in a given page load.
-  if (started_in_foreground_ && background_time_.is_null())
+  if (background_time_.is_null()) {
+    // Make sure we either started in the foreground and haven't been
+    // foregrounded yet, or started in the background and have already been
+    // foregrounded.
+    DCHECK_EQ(started_in_foreground_, foreground_time_.is_null());
     background_time_ = base::TimeTicks::Now();
+  }
 }
 
 void PageLoadTracker::WebContentsShown() {
   // Only log the first time we foreground in a given page load.
-  // Don't log foreground time if we started foregrounded.
-  if (!started_in_foreground_ && foreground_time_.is_null())
+  if (foreground_time_.is_null()) {
+    // Make sure we either started in the background and haven't been
+    // backgrounded yet, or started in the foreground and have already been
+    // backgrounded.
+    DCHECK_NE(started_in_foreground_, background_time_.is_null());
     foreground_time_ = base::TimeTicks::Now();
+  }
 }
 
 void PageLoadTracker::Commit(content::NavigationHandle* navigation_handle) {
   // TODO(bmcquade): To improve accuracy, consider adding commit time to
   // NavigationHandle. Taking a timestamp here should be close enough for now.
   commit_time_ = base::TimeTicks::Now();
-  committed_url_ = navigation_handle->GetURL();
+  url_ = navigation_handle->GetURL();
   for (const auto& observer : observers_) {
     observer->OnCommit(navigation_handle);
+  }
+  LogAbortChainHistograms(navigation_handle);
+}
+
+void PageLoadTracker::FailedProvisionalLoad(
+    content::NavigationHandle* navigation_handle) {
+  for (const auto& observer : observers_) {
+    observer->OnFailedProvisionalLoad(navigation_handle);
   }
 }
 
@@ -158,7 +338,8 @@ void PageLoadTracker::Redirect(content::NavigationHandle* navigation_handle) {
   }
 }
 
-bool PageLoadTracker::UpdateTiming(const PageLoadTiming& new_timing) {
+bool PageLoadTracker::UpdateTiming(const PageLoadTiming& new_timing,
+                                   const PageLoadMetadata& new_metadata) {
   // Throw away IPCs that are not relevant to the current navigation.
   // Two timing structures cannot refer to the same navigation if they indicate
   // that a navigation started at different times, so a new timing struct with a
@@ -166,15 +347,17 @@ bool PageLoadTracker::UpdateTiming(const PageLoadTiming& new_timing) {
   bool valid_timing_descendent =
       timing_.navigation_start.is_null() ||
       timing_.navigation_start == new_timing.navigation_start;
-  if (IsValidPageLoadTiming(new_timing) && valid_timing_descendent) {
+  // Ensure flags sent previously are still present in the new metadata fields.
+  bool valid_behavior_descendent =
+      (metadata_.behavior_flags & new_metadata.behavior_flags) ==
+      metadata_.behavior_flags;
+  if (IsValidPageLoadTiming(new_timing) && valid_timing_descendent &&
+      valid_behavior_descendent) {
     timing_ = new_timing;
+    metadata_ = new_metadata;
     return true;
   }
   return false;
-}
-
-bool PageLoadTracker::HasBackgrounded() {
-  return !started_in_foreground_ || !background_time_.is_null();
 }
 
 void PageLoadTracker::set_renderer_tracked(bool renderer_tracked) {
@@ -191,9 +374,9 @@ PageLoadExtraInfo PageLoadTracker::GetPageLoadMetricsInfo() {
   base::TimeDelta first_foreground_time;
   base::TimeDelta time_to_abort;
   base::TimeDelta time_to_commit;
-  if (!background_time_.is_null() && started_in_foreground_)
+  if (!background_time_.is_null())
     first_background_time = background_time_ - navigation_start_;
-  if (!foreground_time_.is_null() && !started_in_foreground_)
+  if (!foreground_time_.is_null())
     first_foreground_time = foreground_time_ - navigation_start_;
   if (abort_type_ != ABORT_NONE) {
     DCHECK_GT(abort_time_, navigation_start_);
@@ -201,19 +384,21 @@ PageLoadExtraInfo PageLoadTracker::GetPageLoadMetricsInfo() {
   } else {
     DCHECK(abort_time_.is_null());
   }
-  if (!committed_url_.is_empty()) {
+
+  if (!commit_time_.is_null()) {
     DCHECK_GT(commit_time_, navigation_start_);
     time_to_commit = commit_time_ - navigation_start_;
   } else {
     DCHECK(commit_time_.is_null());
   }
-  return PageLoadExtraInfo(first_background_time, first_foreground_time,
-                           started_in_foreground_, committed_url_,
-                           time_to_commit, abort_type_, time_to_abort);
+  return PageLoadExtraInfo(
+      first_background_time, first_foreground_time, started_in_foreground_,
+      commit_time_.is_null() ? GURL() : url_, time_to_commit, abort_type_,
+      time_to_abort, metadata_);
 }
 
 void PageLoadTracker::NotifyAbort(UserAbortType abort_type,
-                                  const base::TimeTicks& timestamp) {
+                                  base::TimeTicks timestamp) {
   DCHECK_NE(abort_type, ABORT_NONE);
   // Use UpdateAbort to update an already notified PageLoadTracker.
   if (abort_type_ != ABORT_NONE)
@@ -223,7 +408,7 @@ void PageLoadTracker::NotifyAbort(UserAbortType abort_type,
 }
 
 void PageLoadTracker::UpdateAbort(UserAbortType abort_type,
-                                  const base::TimeTicks& timestamp) {
+                                  base::TimeTicks timestamp) {
   DCHECK_NE(abort_type, ABORT_NONE);
   DCHECK_NE(abort_type, ABORT_OTHER);
   DCHECK_EQ(abort_type_, ABORT_OTHER);
@@ -234,8 +419,23 @@ void PageLoadTracker::UpdateAbort(UserAbortType abort_type,
   UpdateAbortInternal(abort_type, std::min(abort_time_, timestamp));
 }
 
+bool PageLoadTracker::IsLikelyProvisionalAbort(
+    base::TimeTicks abort_cause_time) {
+  // Note that |abort_cause_time - abort_time| can be negative.
+  return abort_type_ == ABORT_OTHER &&
+         (abort_cause_time - abort_time_).InMilliseconds() < 100;
+}
+
+bool PageLoadTracker::MatchesOriginalNavigation(
+    content::NavigationHandle* navigation_handle) {
+  // Neither navigation should have committed.
+  DCHECK(!navigation_handle->HasCommitted());
+  DCHECK(commit_time_.is_null());
+  return navigation_handle->GetURL() == url_;
+}
+
 void PageLoadTracker::UpdateAbortInternal(UserAbortType abort_type,
-                                          const base::TimeTicks& timestamp) {
+                                          base::TimeTicks timestamp) {
   // When a provisional navigation commits, that navigation's start time is
   // interpreted as the abort time for other provisional loads in the tab.
   // However, this only makes sense if the committed load started after the
@@ -253,16 +453,6 @@ void PageLoadTracker::UpdateAbortInternal(UserAbortType abort_type,
   }
   abort_type_ = abort_type;
   abort_time_ = timestamp;
-}
-
-void PageLoadTracker::RecordProvisionalEvent(ProvisionalLoadEvent event) {
-  if (HasBackgrounded()) {
-    UMA_HISTOGRAM_ENUMERATION(internal::kBackgroundProvisionalEvents, event,
-                              PROVISIONAL_LOAD_LAST_ENTRY);
-  } else {
-    UMA_HISTOGRAM_ENUMERATION(internal::kProvisionalEvents, event,
-                              PROVISIONAL_LOAD_LAST_ENTRY);
-  }
 }
 
 // static
@@ -310,17 +500,35 @@ void MetricsWebContentsObserver::DidStartNavigation(
     return;
   if (embedder_interface_->IsPrerendering(web_contents()))
     return;
+
+  scoped_ptr<PageLoadTracker> last_aborted =
+      NotifyAbortedProvisionalLoadsNewNavigation(navigation_handle);
+
+  int chain_size_same_url = 0;
+  int chain_size = 0;
+  if (last_aborted) {
+    if (last_aborted->MatchesOriginalNavigation(navigation_handle)) {
+      chain_size_same_url = last_aborted->aborted_chain_size_same_url() + 1;
+    } else if (last_aborted->aborted_chain_size_same_url() > 0) {
+      LogAbortChainSameURLHistogram(
+          last_aborted->aborted_chain_size_same_url());
+    }
+    chain_size = last_aborted->aborted_chain_size() + 1;
+  }
+
   // We can have two provisional loads in some cases. E.g. a same-site
   // navigation can have a concurrent cross-process navigation started
   // from the omnibox.
   DCHECK_GT(2ul, provisional_loads_.size());
   // Passing raw pointers to observers_ and embedder_interface_ is safe because
   // the MetricsWebContentsObserver owns them both list and they are torn down
-  // after the PageLoadTracker.
+  // after the PageLoadTracker. The PageLoadTracker does not hold on to
+  // committed_load_ or navigation_handle beyond the scope of the constructor.
   provisional_loads_.insert(std::make_pair(
       navigation_handle,
       make_scoped_ptr(new PageLoadTracker(
-          in_foreground_, embedder_interface_.get(), navigation_handle))));
+          in_foreground_, embedder_interface_.get(), committed_load_.get(),
+          navigation_handle, chain_size, chain_size_same_url))));
 }
 
 void MetricsWebContentsObserver::DidFinishNavigation(
@@ -343,27 +551,24 @@ void MetricsWebContentsObserver::DidFinishNavigation(
   // TODO(csharrison): Track changes to NavigationHandle for signals when this
   // is the case (HTTP response headers).
   if (!navigation_handle->HasCommitted()) {
-    const ProvisionalLoadEvent event = [](net::Error error) {
-      switch (error) {
-        case net::OK:
-          // When a finished navigation that didn't commit has a net error code
-          // of OK, it indicates that the provisional load was stopped by the
-          // user.
-          return PROVISIONAL_LOAD_STOPPED;
-        case net::ERR_ABORTED:
-          return PROVISIONAL_LOAD_ERR_ABORTED;
-        default:
-          return PROVISIONAL_LOAD_ERR_FAILED_NON_ABORT;
-      }
-    }(navigation_handle->GetNetErrorCode());
-    finished_nav->RecordProvisionalEvent(event);
-    if (event != PROVISIONAL_LOAD_ERR_FAILED_NON_ABORT) {
+    finished_nav->FailedProvisionalLoad(navigation_handle);
+
+    net::Error error = navigation_handle->GetNetErrorCode();
+
+    // net::OK: This case occurs when the NavigationHandle finishes and reports
+    // !HasCommitted(), but reports no net::Error. This should not occur
+    // pre-PlzNavigate, but afterwards it should represent the navigation
+    // stopped by the user before it was ready to commit.
+    // net::ERR_ABORTED: An aborted provisional load has error net::ERR_ABORTED.
+    // Note that this can come from some non user-initiated errors, such as
+    // downloads, or 204 responses. See crbug.com/542369.
+    if ((error == net::OK) || (error == net::ERR_ABORTED)) {
       finished_nav->NotifyAbort(ABORT_OTHER, base::TimeTicks::Now());
       aborted_provisional_loads_.push_back(std::move(finished_nav));
     }
+
     return;
   }
-  finished_nav->RecordProvisionalEvent(PROVISIONAL_LOAD_COMMITTED);
 
   // Don't treat a same-page nav as a new page load.
   if (navigation_handle->IsSamePage())
@@ -406,6 +611,8 @@ void MetricsWebContentsObserver::DidRedirectNavigation(
 }
 
 void MetricsWebContentsObserver::WasShown() {
+  if (in_foreground_)
+    return;
   in_foreground_ = true;
   if (committed_load_)
     committed_load_->WebContentsShown();
@@ -415,6 +622,8 @@ void MetricsWebContentsObserver::WasShown() {
 }
 
 void MetricsWebContentsObserver::WasHidden() {
+  if (!in_foreground_)
+    return;
   in_foreground_ = false;
   if (committed_load_)
     committed_load_->WebContentsHidden();
@@ -456,23 +665,40 @@ void MetricsWebContentsObserver::NotifyAbortAllLoadsWithTimestamp(
   for (const auto& kv : provisional_loads_) {
     kv.second->NotifyAbort(abort_type, timestamp);
   }
-  // If a better signal than ABORT_OTHER came in the last 100ms, treat it as the
-  // cause of the abort (some ABORT_OTHER signals occur before the true signal).
-  // Note that |abort_type| can only be ABORT_OTHER for provisional loads. While
-  // this  heuristic is coarse, it works better and is simpler than other
-  // feasible methods. See https://goo.gl/WKRG98.
   for (const auto& tracker : aborted_provisional_loads_) {
-    // Note that |timestamp - abort_time| can be negative.
-    if (tracker->abort_type() == ABORT_OTHER &&
-        (timestamp - tracker->abort_time()).InMilliseconds() < 100) {
+    if (tracker->IsLikelyProvisionalAbort(timestamp))
       tracker->UpdateAbort(abort_type, timestamp);
-    }
   }
+  aborted_provisional_loads_.clear();
+}
+
+scoped_ptr<PageLoadTracker>
+MetricsWebContentsObserver::NotifyAbortedProvisionalLoadsNewNavigation(
+    content::NavigationHandle* new_navigation) {
+  // If there are multiple aborted loads that can be attributed to this one,
+  // just count the latest one for simplicity. Other loads will fall into the
+  // OTHER bucket, though there shouldn't be very many.
+  if (aborted_provisional_loads_.size() == 0)
+    return nullptr;
+  if (aborted_provisional_loads_.size() > 1)
+    RecordInternalError(ERR_NAVIGATION_SIGNALS_MULIPLE_ABORTED_LOADS);
+
+  scoped_ptr<PageLoadTracker> last_aborted_load =
+      std::move(aborted_provisional_loads_.back());
+  aborted_provisional_loads_.pop_back();
+
+  base::TimeTicks timestamp = new_navigation->NavigationStart();
+  if (last_aborted_load->IsLikelyProvisionalAbort(timestamp))
+    last_aborted_load->UpdateAbort(ABORT_UNKNOWN_NAVIGATION, timestamp);
+
+  aborted_provisional_loads_.clear();
+  return last_aborted_load;
 }
 
 void MetricsWebContentsObserver::OnTimingUpdated(
     content::RenderFrameHost* render_frame_host,
-    const PageLoadTiming& timing) {
+    const PageLoadTiming& timing,
+    const PageLoadMetadata& metadata) {
   bool error = false;
   if (!committed_load_ || !committed_load_->renderer_tracked()) {
     RecordInternalError(ERR_IPC_WITH_NO_RELEVANT_LOAD);
@@ -497,7 +723,7 @@ void MetricsWebContentsObserver::OnTimingUpdated(
   if (error)
     return;
 
-  if (!committed_load_->UpdateTiming(timing)) {
+  if (!committed_load_->UpdateTiming(timing, metadata)) {
     // If the page load tracker cannot update its timing, something is wrong
     // with the IPC (it's from another load, or it's invalid in some other way).
     // We expect this to be a rare occurrence.

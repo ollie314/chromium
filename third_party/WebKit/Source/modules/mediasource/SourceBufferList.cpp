@@ -45,9 +45,6 @@ SourceBufferList::SourceBufferList(ExecutionContext* context, GenericEventQueue*
 
 SourceBufferList::~SourceBufferList()
 {
-#if !ENABLE(OILPAN)
-    ASSERT(m_list.isEmpty());
-#endif
 }
 
 void SourceBufferList::add(SourceBuffer* buffer)
@@ -81,10 +78,10 @@ void SourceBufferList::scheduleEvent(const AtomicString& eventName)
 {
     ASSERT(m_asyncEventQueue);
 
-    RefPtrWillBeRawPtr<Event> event = Event::create(eventName);
+    Event* event = Event::create(eventName);
     event->setTarget(this);
 
-    m_asyncEventQueue->enqueueEvent(event.release());
+    m_asyncEventQueue->enqueueEvent(event);
 }
 
 const AtomicString& SourceBufferList::interfaceName() const
@@ -92,7 +89,7 @@ const AtomicString& SourceBufferList::interfaceName() const
     return EventTargetNames::SourceBufferList;
 }
 
-ExecutionContext* SourceBufferList::executionContext() const
+ExecutionContext* SourceBufferList::getExecutionContext() const
 {
     return m_executionContext;
 }
@@ -102,7 +99,7 @@ DEFINE_TRACE(SourceBufferList)
     visitor->trace(m_executionContext);
     visitor->trace(m_asyncEventQueue);
     visitor->trace(m_list);
-    RefCountedGarbageCollectedEventTargetWithInlineData<SourceBufferList>::trace(visitor);
+    EventTargetWithInlineData::trace(visitor);
 }
 
 } // namespace blink

@@ -10,12 +10,12 @@
 #ifndef NET_URL_REQUEST_URL_REQUEST_CONTEXT_H_
 #define NET_URL_REQUEST_URL_REQUEST_CONTEXT_H_
 
+#include <memory>
 #include <set>
 #include <string>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "net/base/net_export.h"
@@ -62,9 +62,10 @@ class NET_EXPORT URLRequestContext
   // session.
   const HttpNetworkSession::Params* GetNetworkSessionParams() const;
 
-  scoped_ptr<URLRequest> CreateRequest(const GURL& url,
-                                       RequestPriority priority,
-                                       URLRequest::Delegate* delegate) const;
+  std::unique_ptr<URLRequest> CreateRequest(
+      const GURL& url,
+      RequestPriority priority,
+      URLRequest::Delegate* delegate) const;
 
   NetLog* net_log() const {
     return net_log_;
@@ -145,7 +146,7 @@ class NET_EXPORT URLRequestContext
 
   // Gets the cookie store for this context (may be null, in which case
   // cookies are not stored).
-  CookieStore* cookie_store() const { return cookie_store_.get(); }
+  CookieStore* cookie_store() const { return cookie_store_; }
   void set_cookie_store(CookieStore* cookie_store);
 
   TransportSecurityState* transport_security_state() const {
@@ -219,6 +220,21 @@ class NET_EXPORT URLRequestContext
     network_quality_estimator_ = network_quality_estimator;
   }
 
+  // This is a temporary flag to aid in debugging crbug.com/548423. A
+  // CookieStore that is persisted shouldn't be used with a ChannelIDStore that
+  // is ephemeral, but there are occasional cases where that is ok. This method
+  // returns whether this URLRequestContext is in a situation where the
+  // ephemerality of the stores don't match and it has been determined that it
+  // is ok to do that. This helps in logging to filter legitimate cases of this
+  // mismatch from other cases.
+  bool has_known_mismatched_cookie_store() const {
+    return has_known_mismatched_cookie_store_;
+  }
+
+  void set_has_known_mismatched_cookie_store() {
+    has_known_mismatched_cookie_store_ = true;
+  }
+
  private:
   // ---------------------------------------------------------------------------
   // Important: When adding any new members below, consider whether they need to
@@ -237,7 +253,7 @@ class NET_EXPORT URLRequestContext
   NetworkDelegate* network_delegate_;
   base::WeakPtr<HttpServerProperties> http_server_properties_;
   HttpUserAgentSettings* http_user_agent_settings_;
-  scoped_refptr<CookieStore> cookie_store_;
+  CookieStore* cookie_store_;
   TransportSecurityState* transport_security_state_;
   CTVerifier* cert_transparency_verifier_;
   HttpTransactionFactory* http_transaction_factory_;
@@ -252,7 +268,8 @@ class NET_EXPORT URLRequestContext
   // be added to CopyFrom.
   // ---------------------------------------------------------------------------
 
-  scoped_ptr<std::set<const URLRequest*> > url_requests_;
+  std::unique_ptr<std::set<const URLRequest*>> url_requests_;
+  bool has_known_mismatched_cookie_store_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestContext);
 };

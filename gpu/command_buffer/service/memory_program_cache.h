@@ -8,24 +8,27 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/containers/hash_tables.h"
 #include "base/containers/mru_cache.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/program_cache.h"
 
 namespace gpu {
+
+struct GpuPreferences;
+
 namespace gles2 {
 
 // Program cache that stores binaries completely in-memory
 class GPU_EXPORT MemoryProgramCache : public ProgramCache {
  public:
-  MemoryProgramCache();
-  explicit MemoryProgramCache(const size_t max_cache_size_bytes);
+  MemoryProgramCache(size_t max_cache_size_bytes,
+                     bool disable_gpu_shader_disk_cache);
   ~MemoryProgramCache() override;
 
   ProgramLoadResult LoadLinkedProgram(
@@ -127,7 +130,7 @@ class GPU_EXPORT MemoryProgramCache : public ProgramCache {
 
     const GLsizei length_;
     const GLenum format_;
-    const scoped_ptr<const char[]> data_;
+    const std::unique_ptr<const char[]> data_;
     const std::string program_hash_;
     const std::string shader_0_hash_;
     const AttributeMap attrib_map_0_;
@@ -150,6 +153,7 @@ class GPU_EXPORT MemoryProgramCache : public ProgramCache {
                          scoped_refptr<ProgramCacheValue> > ProgramMRUCache;
 
   const size_t max_size_bytes_;
+  const bool disable_gpu_shader_disk_cache_;
   size_t curr_size_bytes_;
   ProgramMRUCache store_;
 

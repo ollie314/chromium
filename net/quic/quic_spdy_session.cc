@@ -7,6 +7,8 @@
 #include "net/quic/quic_bug_tracker.h"
 #include "net/quic/quic_headers_stream.h"
 
+using std::string;
+
 namespace net {
 
 QuicSpdySession::QuicSpdySession(QuicConnection* connection,
@@ -61,6 +63,18 @@ void QuicSpdySession::OnStreamHeadersComplete(QuicStreamId stream_id,
   stream->OnStreamHeadersComplete(fin, frame_len);
 }
 
+void QuicSpdySession::OnStreamHeaderList(QuicStreamId stream_id,
+                                         bool fin,
+                                         size_t frame_len,
+                                         const QuicHeaderList& header_list) {
+  QuicSpdyStream* stream = GetSpdyDataStream(stream_id);
+  if (!stream) {
+    // It's quite possible to receive headers after a stream has been reset.
+    return;
+  }
+  stream->OnStreamHeaderList(fin, frame_len, header_list);
+}
+
 size_t QuicSpdySession::WriteHeaders(
     QuicStreamId id,
     const SpdyHeaderBlock& headers,
@@ -96,15 +110,37 @@ QuicSpdyStream* QuicSpdySession::GetSpdyDataStream(
 
 void QuicSpdySession::OnPromiseHeaders(QuicStreamId stream_id,
                                        StringPiece headers_data) {
-  QUIC_BUG << "OnPromiseHeaders should be overriden in client code.";
-  connection()->CloseConnection(QUIC_INTERNAL_ERROR, false);
+  string error = "OnPromiseHeaders should be overriden in client code.";
+  QUIC_BUG << error;
+  connection()->CloseConnection(QUIC_INTERNAL_ERROR, error,
+                                ConnectionCloseBehavior::SILENT_CLOSE);
 }
 
 void QuicSpdySession::OnPromiseHeadersComplete(QuicStreamId stream_id,
                                                QuicStreamId promised_stream_id,
                                                size_t frame_len) {
-  QUIC_BUG << "OnPromiseHeadersComplete shoule be overriden in client code.";
-  connection()->CloseConnection(QUIC_INTERNAL_ERROR, false);
+  string error = "OnPromiseHeadersComplete should be overriden in client code.";
+  QUIC_BUG << error;
+  connection()->CloseConnection(QUIC_INTERNAL_ERROR, error,
+                                ConnectionCloseBehavior::SILENT_CLOSE);
+}
+
+void QuicSpdySession::OnPromiseHeaderList(QuicStreamId stream_id,
+                                          QuicStreamId promised_stream_id,
+                                          size_t frame_len,
+                                          const QuicHeaderList& header_list) {
+  string error = "OnPromiseHeaderList should be overriden in client code.";
+  QUIC_BUG << error;
+  connection()->CloseConnection(QUIC_INTERNAL_ERROR, error,
+                                ConnectionCloseBehavior::SILENT_CLOSE);
+}
+
+void QuicSpdySession::OnConfigNegotiated() {
+  QuicSession::OnConfigNegotiated();
+  if (FLAGS_quic_disable_hpack_dynamic_table &&
+      config()->HasClientSentConnectionOption(kDHDT, perspective())) {
+    headers_stream_->DisableHpackDynamicTable();
+  }
 }
 
 }  // namespace net

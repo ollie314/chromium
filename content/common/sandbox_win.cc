@@ -32,7 +32,6 @@
 #include "content/common/content_switches_internal.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/dwrite_font_platform_win.h"
 #include "content/public/common/sandbox_init.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "sandbox/win/src/process_mitigations.h"
@@ -78,6 +77,7 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"esspd.dll",                   // Samsung Smart Security ESCORT.
   L"googledesktopnetwork3.dll",   // Google Desktop Search v5.
   L"fwhook.dll",                  // PC Tools Firewall Plus.
+  L"guard64.dll",                 // Comodo Internet Security x64.
   L"hookprocesscreation.dll",     // Blumentals Program protector.
   L"hookterminateapis.dll",       // Blumentals and Cyberprinter.
   L"hookprintapis.dll",           // Cyberprinter.
@@ -284,14 +284,6 @@ bool ShouldSetJobLevel(const base::CommandLine& cmd_line) {
 bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
   sandbox::ResultCode result;
 
-  // Renderers need to copy sections for plugin DIBs and GPU.
-  // GPU needs to copy sections to renderers.
-  result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
-                           sandbox::TargetPolicy::HANDLES_DUP_ANY,
-                           L"Section");
-  if (result != sandbox::SBOX_ALL_OK)
-    return false;
-
   // Add the policy for the client side of a pipe. It is just a file
   // in the \pipe\ namespace. We restrict it to pipes that start with
   // "chrome." so the sandboxed process cannot connect to system services.
@@ -381,13 +373,7 @@ bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
 }
 
 bool AddPolicyForSandboxedProcess(sandbox::TargetPolicy* policy) {
-  sandbox::ResultCode result;
-  // Renderers need to share events with plugins.
-  result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
-                           sandbox::TargetPolicy::HANDLES_DUP_ANY,
-                           L"Event");
-  if (result != sandbox::SBOX_ALL_OK)
-    return false;
+  sandbox::ResultCode result = sandbox::SBOX_ALL_OK;
 
   // Win8+ adds a device DeviceApi that we don't need.
   if (base::win::GetVersion() > base::win::VERSION_WIN7)
@@ -403,7 +389,6 @@ bool AddPolicyForSandboxedProcess(sandbox::TargetPolicy* policy) {
   if (result != sandbox::SBOX_ALL_OK)
     return false;
 
-
   sandbox::TokenLevel initial_token = sandbox::USER_UNPROTECTED;
   if (base::win::GetVersion() > base::win::VERSION_XP) {
     // On 2003/Vista the initial token has to be restricted if the main
@@ -415,6 +400,7 @@ bool AddPolicyForSandboxedProcess(sandbox::TargetPolicy* policy) {
   // Prevents the renderers from manipulating low-integrity processes.
   policy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_UNTRUSTED);
   policy->SetIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
+  policy->SetLockdownDefaultDacl();
 
   if (sandbox::SBOX_ALL_OK !=  policy->SetAlternateDesktop(true)) {
     DLOG(WARNING) << "Failed to apply desktop security to the renderer";
@@ -460,8 +446,7 @@ NtQueryObject g_QueryObject = NULL;
 
 static const char* kDuplicateHandleWarning =
     "You are attempting to duplicate a privileged handle into a sandboxed"
-    " process.\n Please use the sandbox::BrokerDuplicateHandle API or"
-    " contact security@chromium.org for assistance.";
+    " process.\n Please contact security@chromium.org for assistance.";
 
 void CheckDuplicateHandle(HANDLE handle) {
   // Get the object type (32 characters is safe; current max is 14).
@@ -665,7 +650,8 @@ bool InitTargetServices(sandbox::TargetServices* target_services) {
 
 base::Process StartSandboxedProcess(
     SandboxedProcessLauncherDelegate* delegate,
-    base::CommandLine* cmd_line) {
+    base::CommandLine* cmd_line,
+    const base::HandlesToInheritVector& handles_to_inherit) {
   DCHECK(delegate);
   const base::CommandLine& browser_command_line =
       *base::CommandLine::ForCurrentProcess();
@@ -681,28 +667,44 @@ base::Process StartSandboxedProcess(
 
   ProcessDebugFlags(cmd_line);
 
-  // Prefetch hints on windows:
-  // Using a different prefetch profile per process type will allow Windows
-  // to create separate pretetch settings for browser, renderer etc.
-  cmd_line->AppendArg(base::StringPrintf("/prefetch:%d", base::Hash(type_str)));
-
   if ((!delegate->ShouldSandbox()) ||
       browser_command_line.HasSwitch(switches::kNoSandbox) ||
       cmd_line->HasSwitch(switches::kNoSandbox)) {
-    base::Process process =
-        base::LaunchProcess(*cmd_line, base::LaunchOptions());
+    base::LaunchOptions options;
+
+    base::HandlesToInheritVector handles = handles_to_inherit;
+    if (!handles_to_inherit.empty()) {
+      options.inherit_handles = true;
+      options.handles_to_inherit = &handles;
+    }
+    base::Process process = base::LaunchProcess(*cmd_line, options);
+
     // TODO(rvargas) crbug.com/417532: Don't share a raw handle.
     g_broker_services->AddTargetPeer(process.Handle());
-    return process.Pass();
+    return process;
   }
 
   sandbox::TargetPolicy* policy = g_broker_services->CreatePolicy();
 
-  sandbox::MitigationFlags mitigations = sandbox::MITIGATION_HEAP_TERMINATE |
-                                         sandbox::MITIGATION_BOTTOM_UP_ASLR |
-                                         sandbox::MITIGATION_DEP |
-                                         sandbox::MITIGATION_DEP_NO_ATL_THUNK |
-                                         sandbox::MITIGATION_SEHOP;
+  // Add any handles to be inherited to the policy.
+  for (HANDLE handle : handles_to_inherit)
+    policy->AddHandleToShare(handle);
+
+  // Pre-startup mitigations.
+  sandbox::MitigationFlags mitigations =
+      sandbox::MITIGATION_HEAP_TERMINATE |
+      sandbox::MITIGATION_BOTTOM_UP_ASLR |
+      sandbox::MITIGATION_DEP |
+      sandbox::MITIGATION_DEP_NO_ATL_THUNK |
+      sandbox::MITIGATION_SEHOP |
+      sandbox::MITIGATION_NONSYSTEM_FONT_DISABLE |
+      sandbox::MITIGATION_IMAGE_LOAD_NO_REMOTE |
+      sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL;
+#if !defined(NACL_WIN64)
+  // Don't block font loading with GDI.
+  if (!gfx::win::ShouldUseDirectWrite())
+    mitigations ^= sandbox::MITIGATION_NONSYSTEM_FONT_DISABLE;
+#endif
 
   if (policy->SetProcessMitigations(mitigations) != sandbox::SBOX_ALL_OK)
     return base::Process();
@@ -715,6 +717,7 @@ base::Process StartSandboxedProcess(
   }
 #endif
 
+  // Post-startup mitigations.
   mitigations = sandbox::MITIGATION_STRICT_HANDLE_CHECKS |
                 sandbox::MITIGATION_DLL_SEARCH_ORDER;
 
@@ -729,6 +732,9 @@ base::Process StartSandboxedProcess(
   }
 
 #if !defined(NACL_WIN64)
+  // NOTE: This is placed at function scope so that it stays alive through
+  // process launch.
+  base::SharedMemory direct_write_font_cache_section;
   if (type_str == switches::kRendererProcess ||
       type_str == switches::kPpapiPluginProcess) {
     if (gfx::win::ShouldUseDirectWrite()) {
@@ -737,25 +743,6 @@ base::Process StartSandboxedProcess(
                   true,
                   sandbox::TargetPolicy::FILES_ALLOW_READONLY,
                   policy);
-
-      if (!ShouldUseDirectWriteFontProxyFieldTrial()) {
-        // If DirectWrite is enabled for font rendering then open the font
-        // cache section which is created by the browser and pass the handle to
-        // the renderer process. This is needed because renderer processes on
-        // Windows 8+ may be running in an AppContainer sandbox and hence their
-        // kernel object namespace may be partitioned.
-        std::string name(content::kFontCacheSharedSectionName);
-        name.append(base::UintToString(base::GetCurrentProcId()));
-
-        base::SharedMemory direct_write_font_cache_section;
-        if (direct_write_font_cache_section.Open(name, true)) {
-          void* shared_handle = policy->AddHandleToShare(
-              direct_write_font_cache_section.handle().GetHandle());
-          cmd_line->AppendSwitchASCII(
-              switches::kFontCacheSharedHandle,
-              base::UintToString(base::win::HandleToUint32(shared_handle)));
-        }
-      }
     }
   }
 #endif
@@ -826,39 +813,6 @@ base::Process StartSandboxedProcess(
 
   CHECK(ResumeThread(target.thread_handle()) != static_cast<DWORD>(-1));
   return base::Process(target.TakeProcessHandle());
-}
-
-bool BrokerDuplicateHandle(HANDLE source_handle,
-                           DWORD target_process_id,
-                           HANDLE* target_handle,
-                           DWORD desired_access,
-                           DWORD options) {
-  // If our process is the target just duplicate the handle.
-  if (::GetCurrentProcessId() == target_process_id) {
-    return !!::DuplicateHandle(::GetCurrentProcess(), source_handle,
-                               ::GetCurrentProcess(), target_handle,
-                               desired_access, FALSE, options);
-  }
-
-  // Try the broker next
-  if (g_target_services &&
-      g_target_services->DuplicateHandle(source_handle, target_process_id,
-                                         target_handle, desired_access,
-                                         options) == sandbox::SBOX_ALL_OK) {
-    return true;
-  }
-
-  // Finally, see if we already have access to the process.
-  base::win::ScopedHandle target_process;
-  target_process.Set(::OpenProcess(PROCESS_DUP_HANDLE, FALSE,
-                                    target_process_id));
-  if (target_process.IsValid()) {
-    return !!::DuplicateHandle(::GetCurrentProcess(), source_handle,
-                                target_process.Get(), target_handle,
-                                desired_access, FALSE, options);
-  }
-
-  return false;
 }
 
 bool BrokerAddTargetPeer(HANDLE peer_process) {

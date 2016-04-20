@@ -15,8 +15,6 @@
 #include "base/files/file_util.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread.h"
@@ -33,6 +31,8 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/switch_utils.h"
 #include "components/metrics/metrics_service.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
 #include "components/tracing/tracing_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -68,11 +68,6 @@ namespace {
 
 // Whether the browser is trying to quit (e.g., Quit chosen from menu).
 bool g_trying_to_quit = false;
-
-#if defined(OS_WIN)
-upgrade_util::RelaunchMode g_relaunch_mode =
-    upgrade_util::RELAUNCH_MODE_DEFAULT;
-#endif
 
 Time* g_shutdown_started = nullptr;
 ShutdownType g_shutdown_type = NOT_VALID;
@@ -186,15 +181,6 @@ bool ShutdownPreThreadsStop() {
     restart_last_session =
         prefs->GetBoolean(prefs::kRestartLastSessionOnShutdown);
     prefs->ClearPref(prefs::kRestartLastSessionOnShutdown);
-#if defined(OS_WIN)
-    if (restart_last_session) {
-      if (prefs->HasPrefPath(prefs::kRelaunchMode)) {
-        g_relaunch_mode = upgrade_util::RelaunchModeStringToEnum(
-            prefs->GetString(prefs::kRelaunchMode));
-        prefs->ClearPref(prefs::kRelaunchMode);
-      }
-    }
-#endif
   }
 
   prefs->CommitPendingWrite();
@@ -238,7 +224,7 @@ void ShutdownPostThreadsStop(bool restart_last_session) {
     // 46182). We therefore use GetSwitches to copy the command line (it stops
     // at the switch argument terminator).
     base::CommandLine old_cl(*base::CommandLine::ForCurrentProcess());
-    scoped_ptr<base::CommandLine> new_cl(
+    std::unique_ptr<base::CommandLine> new_cl(
         new base::CommandLine(old_cl.GetProgram()));
     std::map<std::string, base::CommandLine::StringType> switches =
         old_cl.GetSwitches();
@@ -254,9 +240,7 @@ void ShutdownPostThreadsStop(bool restart_last_session) {
         new_cl->AppendSwitch(it.first);
     }
 
-#if defined(OS_WIN)
-    upgrade_util::RelaunchChromeWithMode(*new_cl.get(), g_relaunch_mode);
-#elif defined(OS_POSIX)
+#if defined(OS_POSIX) || defined(OS_WIN)
     upgrade_util::RelaunchChromeBrowser(*new_cl.get());
 #endif  // defined(OS_WIN)
 

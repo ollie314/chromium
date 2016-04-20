@@ -7,6 +7,7 @@
 
 #include <IOKit/IOReturn.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
                        const base::Closure& callback,
                        const ErrorCallback& error_callback) override;
   bool IsDiscovering() const override;
+  UUIDList GetUUIDs() const override;
   void CreateRfcommService(
       const BluetoothUUID& uuid,
       const ServiceOptions& options,
@@ -80,7 +82,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
       const AcquiredCallback& callback,
       const BluetoothAudioSink::ErrorCallback& error_callback) override;
   void RegisterAdvertisement(
-      scoped_ptr<BluetoothAdvertisement::Data> advertisement_data,
+      std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
       const CreateAdvertisementCallback& callback,
       const CreateAdvertisementErrorCallback& error_callback) override;
 
@@ -97,10 +99,16 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
   // (crbug.com/506287).
   static bool IsLowEnergyAvailable();
 
-  // Resets |low_energy_central_manager_| to |central_manager| and sets
-  // |low_energy_central_manager_delegate_| as the manager's delegate. Should
-  // be called only when |IsLowEnergyAvailable()|.
-  void SetCentralManagerForTesting(CBCentralManager* central_manager);
+  // Creates a GATT connection by calling CoreBluetooth APIs.
+  void CreateGattConnection(BluetoothLowEnergyDeviceMac* device_mac);
+
+  // Closes the GATT connection by calling CoreBluetooth APIs.
+  void DisconnectGatt(BluetoothLowEnergyDeviceMac* device_mac);
+
+  // Methods called from CBCentralManager delegate.
+  void DidConnectPeripheral(CBPeripheral* peripheral);
+  void DidFailToConnectPeripheral(CBPeripheral* peripheral, NSError* error);
+  void DidDisconnectPeripheral(CBPeripheral* peripheral, NSError* error);
 
  protected:
   // BluetoothAdapter override:
@@ -108,6 +116,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
       device::BluetoothDevice::PairingDelegate* pairing_delegate) override;
 
  private:
+  // Resets |low_energy_central_manager_| to |central_manager| and sets
+  // |low_energy_central_manager_delegate_| as the manager's delegate. Should
+  // be called only when |IsLowEnergyAvailable()|.
+  void SetCentralManagerForTesting(CBCentralManager* central_manager);
+  CBCentralManager* GetCentralManagerForTesting();
+
   // The length of time that must elapse since the last Inquiry response (on
   // Classic devices) or call to BluetoothLowEnergyDevice::Update() (on Low
   // Energy) before a discovered device is considered to be no longer available.
@@ -130,7 +144,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
       const base::Closure& callback,
       const DiscoverySessionErrorCallback& error_callback) override;
   void SetDiscoveryFilter(
-      scoped_ptr<BluetoothDiscoveryFilter> discovery_filter,
+      std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter,
       const base::Closure& callback,
       const DiscoverySessionErrorCallback& error_callback) override;
 
@@ -162,16 +176,20 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
   // observers.
   void AddPairedDevices();
 
+  // Returns the BLE device associated with the CoreBluetooth peripheral.
+  BluetoothLowEnergyDeviceMac* GetBluetoothLowEnergyDeviceMac(
+      CBPeripheral* peripheral);
+
   std::string address_;
   std::string name_;
   bool classic_powered_;
   int num_discovery_sessions_;
 
   // Discovery manager for Bluetooth Classic.
-  scoped_ptr<BluetoothDiscoveryManagerMac> classic_discovery_manager_;
+  std::unique_ptr<BluetoothDiscoveryManagerMac> classic_discovery_manager_;
 
   // Discovery manager for Bluetooth Low Energy.
-  scoped_ptr<BluetoothLowEnergyDiscoveryManagerMac>
+  std::unique_ptr<BluetoothLowEnergyDiscoveryManagerMac>
       low_energy_discovery_manager_;
 
   // Underlying CoreBluetooth CBCentralManager and its delegate.

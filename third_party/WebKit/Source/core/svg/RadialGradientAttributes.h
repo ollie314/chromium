@@ -53,12 +53,12 @@ public:
     SVGLength* fy() const { return m_fy.get(); }
     SVGLength* fr() const { return m_fr.get(); }
 
-    void setCx(PassRefPtrWillBeRawPtr<SVGLength> value) { m_cx = value; m_cxSet = true; }
-    void setCy(PassRefPtrWillBeRawPtr<SVGLength> value) { m_cy = value; m_cySet = true; }
-    void setR(PassRefPtrWillBeRawPtr<SVGLength> value) { m_r = value; m_rSet = true; }
-    void setFx(PassRefPtrWillBeRawPtr<SVGLength> value) { m_fx = value; m_fxSet = true; }
-    void setFy(PassRefPtrWillBeRawPtr<SVGLength> value) { m_fy = value; m_fySet = true; }
-    void setFr(PassRefPtrWillBeRawPtr<SVGLength> value) { m_fr = value; m_frSet = true; }
+    void setCx(SVGLength* value) { m_cx = value; m_cxSet = true; }
+    void setCy(SVGLength* value) { m_cy = value; m_cySet = true; }
+    void setR(SVGLength* value) { m_r = value; m_rSet = true; }
+    void setFx(SVGLength* value) { m_fx = value; m_fxSet = true; }
+    void setFy(SVGLength* value) { m_fy = value; m_fySet = true; }
+    void setFr(SVGLength* value) { m_fr = value; m_frSet = true; }
 
     bool hasCx() const { return m_cxSet; }
     bool hasCy() const { return m_cySet; }
@@ -79,12 +79,12 @@ public:
 
 private:
     // Properties
-    RefPtrWillBeMember<SVGLength> m_cx;
-    RefPtrWillBeMember<SVGLength> m_cy;
-    RefPtrWillBeMember<SVGLength> m_r;
-    RefPtrWillBeMember<SVGLength> m_fx;
-    RefPtrWillBeMember<SVGLength> m_fy;
-    RefPtrWillBeMember<SVGLength> m_fr;
+    Member<SVGLength> m_cx;
+    Member<SVGLength> m_cy;
+    Member<SVGLength> m_r;
+    Member<SVGLength> m_fx;
+    Member<SVGLength> m_fy;
+    Member<SVGLength> m_fr;
 
     // Property states
     bool m_cxSet : 1;
@@ -95,7 +95,6 @@ private:
     bool m_frSet : 1;
 };
 
-#if ENABLE(OILPAN)
 // Wrapper object for the RadialGradientAttributes part object.
 class RadialGradientAttributesWrapper : public GarbageCollectedFinalized<RadialGradientAttributesWrapper> {
 public:
@@ -115,7 +114,6 @@ private:
 
     RadialGradientAttributes m_attributes;
 };
-#endif
 
 } // namespace blink
 

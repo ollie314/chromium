@@ -34,6 +34,7 @@ class ChromeScreenshotGrabber : public ash::ScreenshotDelegate,
   void HandleTakeScreenshotForAllRootWindows() override;
   void HandleTakePartialScreenshot(aura::Window* window,
                                    const gfx::Rect& rect) override;
+  void HandleTakeWindowScreenshot(aura::Window* window) override;
   bool CanTakeScreenshot() override;
 
   // ui::ScreenshotGrabberDelegate:
@@ -58,7 +59,7 @@ class ChromeScreenshotGrabber : public ash::ScreenshotDelegate,
   void SetProfileForTest(Profile* profile);
   Profile* GetProfile();
 
-  scoped_ptr<ui::ScreenshotGrabber> screenshot_grabber_;
+  std::unique_ptr<ui::ScreenshotGrabber> screenshot_grabber_;
   Profile* profile_for_test_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeScreenshotGrabber);

@@ -7,8 +7,9 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/base/load_timing_info.h"
 #include "net/http/http_stream.h"
 
@@ -57,6 +58,8 @@ class ProxyConnectRedirectHttpStream : public HttpStream {
   void GetSSLInfo(SSLInfo* ssl_info) override;
   void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) override;
   bool GetRemoteEndpoint(IPEndPoint* endpoint) override;
+  Error GetSignedEKMForTokenBinding(crypto::ECPrivateKey* key,
+                                    std::vector<uint8_t>* out) override;
   void Drain(HttpNetworkSession* session) override;
   void PopulateNetErrorDetails(NetErrorDetails* details) override;
 

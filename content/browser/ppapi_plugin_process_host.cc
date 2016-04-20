@@ -35,15 +35,23 @@
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ui/base/ui_base_switches.h"
 
+#if defined(OS_POSIX)
+#include "content/public/browser/zygote_handle_linux.h"
+#endif  // defined(OS_POSIX)
+
 #if defined(OS_WIN)
 #include "content/browser/renderer_host/dwrite_font_proxy_message_filter_win.h"
 #include "content/common/sandbox_win.h"
 #include "sandbox/win/src/process_mitigations.h"
 #include "sandbox/win/src/sandbox_policy.h"
-#include "ui/gfx/win/dpi.h"
+#include "ui/display/win/dpi.h"
 #endif
 
 namespace content {
+
+#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
+ZygoteHandle g_ppapi_zygote;
+#endif  // defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
 
 // NOTE: changes to this class need to be reviewed by the security team.
 class PpapiPluginSandboxedProcessLauncherDelegate
@@ -81,18 +89,23 @@ class PpapiPluginSandboxedProcessLauncherDelegate
     if (result != sandbox::SBOX_ALL_OK)
       return false;
 
+    content::ContentBrowserClient* browser_client =
+        GetContentClient()->browser();
+
 #if !defined(NACL_WIN64)
-    for (const auto& mime_type : info_.mime_types) {
-      if (IsWin32kLockdownEnabledForMimeType(mime_type.mime_type)) {
-        if (!AddWin32kLockdownPolicy(policy))
-          return false;
-        break;
+    if (IsWin32kRendererLockdownEnabled()) {
+      for (const auto& mime_type : info_.mime_types) {
+        if (browser_client->IsWin32kLockdownEnabledForMimeType(
+                mime_type.mime_type)) {
+          if (!AddWin32kLockdownPolicy(policy))
+            return false;
+          break;
+        }
       }
     }
 #endif
     const base::string16& sid =
-        GetContentClient()->browser()->GetAppContainerSidForSandboxType(
-            GetSandboxType());
+        browser_client->GetAppContainerSidForSandboxType(GetSandboxType());
     if (!sid.empty())
       AddAppContainerPolicy(policy, sid.c_str());
 
@@ -100,13 +113,18 @@ class PpapiPluginSandboxedProcessLauncherDelegate
   }
 
 #elif defined(OS_POSIX)
-  bool ShouldUseZygote() override {
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
+  ZygoteHandle* GetZygote() override {
     const base::CommandLine& browser_command_line =
         *base::CommandLine::ForCurrentProcess();
     base::CommandLine::StringType plugin_launcher = browser_command_line
         .GetSwitchValueNative(switches::kPpapiPluginLauncher);
-    return !is_broker_ && plugin_launcher.empty();
+    if (is_broker_ || !plugin_launcher.empty())
+      return nullptr;
+    return GetGenericZygote();
   }
+#endif  // !defined(OS_MACOSX) && !defined(OS_ANDROID)
+
   base::ScopedFD TakeIpcFd() override { return std::move(ipc_fd_); }
 #endif  // OS_WIN
 
@@ -194,6 +212,14 @@ PpapiPluginProcessHost* PpapiPluginProcessHost::CreateBrokerHost(
   NOTREACHED();  // Init is not expected to fail.
   return NULL;
 }
+
+#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
+// static
+void PpapiPluginProcessHost::EarlyZygoteLaunch() {
+  DCHECK(!g_ppapi_zygote);
+  g_ppapi_zygote = CreateZygote();
+}
+#endif  // defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
 
 // static
 void PpapiPluginProcessHost::DidCreateOutOfProcessInstance(
@@ -368,15 +394,22 @@ bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
                                          : switches::kPpapiPluginProcess);
   cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id);
 
+#if defined(OS_WIN)
+  if (GetContentClient()->browser()->ShouldUseWindowsPrefetchArgument()) {
+    cmd_line->AppendArg(is_broker_ ? switches::kPrefetchArgumentPpapiBroker
+                                   : switches::kPrefetchArgumentPpapi);
+  }
+#endif  // defined(OS_WIN)
+
   // These switches are forwarded to both plugin and broker pocesses.
-  static const char* kCommonForwardSwitches[] = {
+  static const char* const kCommonForwardSwitches[] = {
     switches::kVModule
   };
   cmd_line->CopySwitchesFrom(browser_command_line, kCommonForwardSwitches,
                              arraysize(kCommonForwardSwitches));
 
   if (!is_broker_) {
-    static const char* kPluginForwardSwitches[] = {
+    static const char* const kPluginForwardSwitches[] = {
       switches::kDisableSeccompFilterSandbox,
 #if defined(OS_MACOSX)
       switches::kEnableSandboxLogging,
@@ -402,8 +435,9 @@ bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
   }
 
 #if defined(OS_WIN)
-  cmd_line->AppendSwitchASCII(switches::kDeviceScaleFactor,
-                              base::DoubleToString(gfx::GetDPIScale()));
+  cmd_line->AppendSwitchASCII(
+      switches::kDeviceScaleFactor,
+      base::DoubleToString(display::win::GetDPIScale()));
 #endif
 
   if (!plugin_launcher.empty())

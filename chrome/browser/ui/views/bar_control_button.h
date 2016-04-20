@@ -5,9 +5,10 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_BAR_CONTROL_BUTTON_H_
 #define CHROME_BROWSER_UI_VIEWS_BAR_CONTROL_BUTTON_H_
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "ui/views/controls/button/image_button.h"
 
 namespace gfx {
@@ -33,14 +34,13 @@ class BarControlButton : public views::ImageButton {
   // views::ImageButton:
   void OnThemeChanged() override;
   void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
-  bool OnMousePressed(const ui::MouseEvent& event) override;
 
  private:
   gfx::VectorIconId id_;
   base::Callback<SkColor(void)> get_text_color_callback_;
 
   // Controls the visual feedback for the button state.
-  scoped_ptr<views::InkDropDelegate> ink_drop_delegate_;
+  std::unique_ptr<views::InkDropDelegate> ink_drop_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(BarControlButton);
 };

@@ -8,10 +8,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <utility>
 
 #include "base/callback.h"
 #include "base/containers/hash_tables.h"
+#include "base/hash.h"
 #include "base/macros.h"
 #include "base/trace_event/memory_dump_provider.h"
 #include "content/common/content_export.h"
@@ -31,7 +33,7 @@ namespace BASE_HASH_NAMESPACE {
 template <>
 struct hash<content::GpuMemoryBufferConfigurationKey> {
   size_t operator()(const content::GpuMemoryBufferConfigurationKey& key) const {
-    return base::HashPair(static_cast<int>(key.first),
+    return base::HashInts(static_cast<int>(key.first),
                           static_cast<int>(key.second));
   }
 };
@@ -61,11 +63,12 @@ class CONTENT_EXPORT BrowserGpuMemoryBufferManager
                                         gfx::BufferUsage usage);
 
   // Overridden from gpu::GpuMemoryBufferManager:
-  scoped_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBuffer(
+  std::unique_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBuffer(
       const gfx::Size& size,
       gfx::BufferFormat format,
-      gfx::BufferUsage usage) override;
-  scoped_ptr<gfx::GpuMemoryBuffer> CreateGpuMemoryBufferFromHandle(
+      gfx::BufferUsage usage,
+      int32_t surface_id) override;
+  std::unique_ptr<gfx::GpuMemoryBuffer> CreateGpuMemoryBufferFromHandle(
       const gfx::GpuMemoryBufferHandle& handle,
       const gfx::Size& size,
       gfx::BufferFormat format) override;
@@ -77,12 +80,6 @@ class CONTENT_EXPORT BrowserGpuMemoryBufferManager
   // Overridden from base::trace_event::MemoryDumpProvider:
   bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
                     base::trace_event::ProcessMemoryDump* pmd) override;
-
-  // Virtual for testing.
-  virtual scoped_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBufferForScanout(
-      const gfx::Size& size,
-      gfx::BufferFormat format,
-      int32_t surface_id);
 
   void AllocateGpuMemoryBufferForChildProcess(
       gfx::GpuMemoryBufferId id,
@@ -138,7 +135,7 @@ class CONTENT_EXPORT BrowserGpuMemoryBufferManager
                                              int client_id,
                                              const CreateCallback& callback)>;
 
-  scoped_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBufferForSurface(
+  std::unique_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBufferForSurface(
       const gfx::Size& size,
       gfx::BufferFormat format,
       gfx::BufferUsage usage,

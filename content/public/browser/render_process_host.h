@@ -22,6 +22,7 @@
 class GURL;
 
 namespace base {
+class SharedPersistentMemoryAllocator;
 class TimeDelta;
 }
 
@@ -32,6 +33,10 @@ union ValueState;
 namespace media {
 class AudioOutputController;
 class MediaKeys;
+}
+
+namespace shell {
+class Connection;
 }
 
 namespace content {
@@ -111,10 +116,6 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   virtual bool IsForGuestsOnly() const = 0;
 
   // Returns the storage partition associated with this process.
-  //
-  // TODO(nasko): Remove this function from the public API once
-  // URLRequestContextGetter's creation is moved into StoragePartition.
-  // http://crbug.com/158595
   virtual StoragePartition* GetStoragePartition() const = 0;
 
   // Try to shut down the associated renderer process without running unload
@@ -213,10 +214,6 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // 10 milliseconds.
   virtual base::TimeDelta GetChildProcessIdleTime() const = 0;
 
-  // Called to resume the requests for a view created through window.open that
-  // were initially blocked.
-  virtual void ResumeRequestsForView(int route_id) = 0;
-
   // Checks that the given renderer can request |url|, if not it sets it to
   // about:blank.
   // |empty_allowed| must be set to false for navigations for security reasons.
@@ -234,11 +231,13 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // process associated with this RenderProcessHost.
   virtual void SetWebRtcLogMessageCallback(
       base::Callback<void(const std::string&)> callback) = 0;
+  virtual void ClearWebRtcLogMessageCallback() = 0;
 
-  typedef base::Callback<void(scoped_ptr<uint8_t[]> packet_header,
+  typedef base::Callback<void(std::unique_ptr<uint8_t[]> packet_header,
                               size_t header_length,
                               size_t packet_length,
-                              bool incoming)> WebRtcRtpPacketCallback;
+                              bool incoming)>
+      WebRtcRtpPacketCallback;
 
   typedef base::Callback<void(bool incoming, bool outgoing)>
       WebRtcStopRtpDumpCallback;
@@ -261,6 +260,17 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
 
   // Returns the ServiceRegistry for this process.
   virtual ServiceRegistry* GetServiceRegistry() = 0;
+
+  // Returns the shell connection for this process.
+  virtual shell::Connection* GetChildConnection() = 0;
+
+  // Extracts any persistent-memory-allocator used for renderer metrics.
+  // Ownership is passed to the caller. To support sharing of histogram data
+  // between the Renderer and the Browser, the allocator is created when the
+  // process is created and later retrieved by the SubprocessMetricsProvider
+  // for management.
+  virtual std::unique_ptr<base::SharedPersistentMemoryAllocator>
+  TakeMetricsAllocator() = 0;
 
   // PlzNavigate
   // Returns the time the first call to Init completed successfully (after a new

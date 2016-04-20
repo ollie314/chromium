@@ -16,7 +16,7 @@ GeolocationServiceContext::~GeolocationServiceContext() {
 
 void GeolocationServiceContext::CreateService(
     const base::Closure& update_callback,
-    mojo::InterfaceRequest<GeolocationService> request) {
+    mojo::InterfaceRequest<blink::mojom::GeolocationService> request) {
   GeolocationServiceImpl* service =
       new GeolocationServiceImpl(std::move(request), this, update_callback);
   services_.push_back(service);
@@ -48,7 +48,7 @@ void GeolocationServiceContext::ResumeUpdates() {
 }
 
 void GeolocationServiceContext::SetOverride(
-    scoped_ptr<Geoposition> geoposition) {
+    std::unique_ptr<Geoposition> geoposition) {
   geoposition_override_.swap(geoposition);
   for (auto* service : services_) {
     service->SetOverride(*geoposition_override_.get());

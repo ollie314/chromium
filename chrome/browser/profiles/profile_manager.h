@@ -10,6 +10,7 @@
 #include <stddef.h>
 
 #include <list>
+#include <memory>
 #include <vector>
 
 #include "base/containers/hash_tables.h"
@@ -17,7 +18,6 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/threading/non_thread_safe.h"
 #include "build/build_config.h"
@@ -35,6 +35,7 @@ class ProfileManager : public base::NonThreadSafe,
                        public Profile::Delegate {
  public:
   typedef base::Callback<void(Profile*, Profile::CreateStatus)> CreateCallback;
+  typedef base::Callback<void(Profile*)> ProfileLoadedCallback;
 
   explicit ProfileManager(const base::FilePath& user_data_dir);
   ~ProfileManager() override;
@@ -87,6 +88,18 @@ class ProfileManager : public base::NonThreadSafe,
   // Returns total number of profiles available on this machine.
   size_t GetNumberOfProfiles();
 
+  // Asynchronously loads an existing profile given its |profile_name| within
+  // the user data directory, optionally in |incognito| mode. The |callback|
+  // will be called with the Profile when it has been loaded, or with a nullptr
+  // otherwise. Should be called on the UI thread.
+  // Unlike CreateProfileAsync this will not create a profile if one doesn't
+  // already exist on disk
+  // Returns true if the profile exists, but the final loaded profile will come
+  // as part of the callback.
+  bool LoadProfile(const std::string& profile_name,
+                   bool incognito,
+                   const ProfileLoadedCallback& callback);
+
   // Explicit asynchronous creation of a profile located at |profile_path|.
   // If the profile has already been created then callback is called
   // immediately. Should be called on the UI thread.
@@ -98,7 +111,7 @@ class ProfileManager : public base::NonThreadSafe,
 
   // Returns true if the profile pointer is known to point to an existing
   // profile.
-  bool IsValidProfile(void* profile);
+  bool IsValidProfile(const void* profile);
 
   // Returns the directory where the first created profile is stored,
   // relative to the user data directory currently in use.
@@ -163,13 +176,18 @@ class ProfileManager : public base::NonThreadSafe,
 
   // Returns a ProfileInfoCache object which can be used to get information
   // about profiles without having to load them from disk.
+  // Deprecated, use GetProfileAttributesStorage() instead.
   ProfileInfoCache& GetProfileInfoCache();
+
+  // Returns a ProfileAttributesStorage object which can be used to get
+  // information about profiles without having to load them from disk.
+  ProfileAttributesStorage& GetProfileAttributesStorage();
 
   // Returns a ProfileShortcut Manager that enables the caller to create
   // profile specfic desktop shortcuts.
   ProfileShortcutManager* profile_shortcut_manager();
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
   // Schedules the profile at the given path to be deleted on shutdown. If we're
   // deleting the last profile, a new one will be created in its place, and in
   // that case the callback will be called when profile creation is complete.
@@ -241,7 +259,7 @@ class ProfileManager : public base::NonThreadSafe,
 
     ~ProfileInfo();
 
-    scoped_ptr<Profile> profile;
+    std::unique_ptr<Profile> profile;
     // Whether profile has been fully loaded (created and initialized).
     bool created;
     // List of callbacks to run when profile initialization is done. Note, when
@@ -270,7 +288,7 @@ class ProfileManager : public base::NonThreadSafe,
   // creation and adds it to the set managed by this ProfileManager.
   Profile* CreateAndInitializeProfile(const base::FilePath& profile_dir);
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
   // Schedules the profile at the given path to be deleted on shutdown,
   // and marks the new profile as active.
   void FinishDeletingProfile(const base::FilePath& profile_dir,
@@ -304,7 +322,7 @@ class ProfileManager : public base::NonThreadSafe,
                     Profile* profile,
                     Profile::CreateStatus status);
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
   // Updates the last active user of the current session.
   // On Chrome OS updating this user will have no effect since when browser is
   // restored after crash there's another preference that is taken into account.
@@ -337,14 +355,14 @@ class ProfileManager : public base::NonThreadSafe,
       const CreateCallback& original_callback,
       Profile* loaded_profile,
       Profile::CreateStatus status);
-#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
+#endif  // !defined(OS_ANDROID)
 
   // Object to cache various information about profiles. Contains information
   // about every profile which has been created for this instance of Chrome,
   // if it has not been explicitly deleted. It must be destroyed after
   // |profiles_info_| because ~ProfileInfo can trigger a chain of events leading
   // to an access to this member.
-  scoped_ptr<ProfileInfoCache> profile_info_cache_;
+  std::unique_ptr<ProfileInfoCache> profile_info_cache_;
 
   content::NotificationRegistrar registrar_;
 
@@ -356,9 +374,9 @@ class ProfileManager : public base::NonThreadSafe,
   // default.
   bool logged_in_;
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
   BrowserListObserver browser_list_observer_;
-#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
+#endif  // !defined(OS_ANDROID)
 
   // Maps profile path to ProfileInfo (if profile has been created). Use
   // RegisterProfile() to add into this map. This map owns all loaded profile
@@ -367,7 +385,7 @@ class ProfileManager : public base::NonThreadSafe,
   ProfilesInfoMap profiles_info_;
 
   // Manages the process of creating, deleteing and updating Desktop shortcuts.
-  scoped_ptr<ProfileShortcutManager> profile_shortcut_manager_;
+  std::unique_ptr<ProfileShortcutManager> profile_shortcut_manager_;
 
   // For keeping track of the last active profiles.
   std::map<Profile*, int> browser_counts_;

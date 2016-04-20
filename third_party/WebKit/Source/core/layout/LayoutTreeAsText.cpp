@@ -67,34 +67,34 @@ using namespace HTMLNames;
 static void printBorderStyle(TextStream& ts, const EBorderStyle borderStyle)
 {
     switch (borderStyle) {
-    case BNONE:
+    case BorderStyleNone:
         ts << "none";
         break;
-    case BHIDDEN:
+    case BorderStyleHidden:
         ts << "hidden";
         break;
-    case INSET:
+    case BorderStyleInset:
         ts << "inset";
         break;
-    case GROOVE:
+    case BorderStyleGroove:
         ts << "groove";
         break;
-    case RIDGE:
+    case BorderStyleRidge:
         ts << "ridge";
         break;
-    case OUTSET:
+    case BorderStyleOutset:
         ts << "outset";
         break;
-    case DOTTED:
+    case BorderStyleDotted:
         ts << "dotted";
         break;
-    case DASHED:
+    case BorderStyleDashed:
         ts << "dashed";
         break;
-    case SOLID:
+    case BorderStyleSolid:
         ts << "solid";
         break;
-    case DOUBLE:
+    case BorderStyleDouble:
         ts << "double";
         break;
     }
@@ -106,7 +106,7 @@ static String getTagName(Node* n)
 {
     if (n->isDocumentNode())
         return "";
-    if (n->nodeType() == Node::COMMENT_NODE)
+    if (n->getNodeType() == Node::COMMENT_NODE)
         return "COMMENT";
     return n->nodeName();
 }
@@ -215,8 +215,8 @@ void LayoutTreeAsText::writeLayoutObject(TextStream& ts, const LayoutObject& o, 
         r.move(0, -toLayoutTableCell(o.containingBlock())->intrinsicPaddingBefore());
 
     if (o.isLayoutView()) {
-        r.setWidth(toLayoutView(o).viewWidth(IncludeScrollbars));
-        r.setHeight(toLayoutView(o).viewHeight(IncludeScrollbars));
+        r.setWidth(LayoutUnit(toLayoutView(o).viewWidth(IncludeScrollbars)));
+        r.setHeight(LayoutUnit(toLayoutView(o).viewHeight(IncludeScrollbars)));
     }
 
     ts << " " << r;
@@ -305,12 +305,12 @@ void LayoutTreeAsText::writeLayoutObject(TextStream& ts, const LayoutObject& o, 
 
     if (o.isTableCell()) {
         const LayoutTableCell& c = toLayoutTableCell(o);
-        ts << " [r=" << c.rowIndex() << " c=" << c.col() << " rs=" << c.rowSpan() << " cs=" << c.colSpan() << "]";
+        ts << " [r=" << c.rowIndex() << " c=" << c.absoluteColumnIndex() << " rs=" << c.rowSpan() << " cs=" << c.colSpan() << "]";
     }
 
     if (o.isDetailsMarker()) {
         ts << ": ";
-        switch (toLayoutDetailsMarker(&o)->orientation()) {
+        switch (toLayoutDetailsMarker(&o)->getOrientation()) {
         case LayoutDetailsMarker::Left:
             ts << "left";
             break;
@@ -409,7 +409,7 @@ static void writeInlineBox(TextStream& ts, const InlineBox& box, int indent)
 {
     writeIndent(ts, indent);
     ts << "+ ";
-    ts << box.boxName() << " {" << box.lineLayoutItem().debugName() << "}"
+    ts << box.boxName() << " {" << box.getLineLayoutItem().debugName() << "}"
         << " pos=(" << box.x() << "," << box.y() << ")"
         << " size=(" << box.width() << "," << box.height() << ")"
         << " baseline=" << box.baselinePosition(AlphabeticBaseline)
@@ -420,9 +420,9 @@ static void writeInlineTextBox(TextStream& ts, const InlineTextBox& textBox, int
 {
     writeInlineBox(ts, textBox, indent);
     String value = textBox.text();
-    value.replaceWithLiteral('\\', "\\\\");
-    value.replaceWithLiteral('\n', "\\n");
-    value.replaceWithLiteral('"', "\\\"");
+    value.replace('\\', "\\\\");
+    value.replace('\n', "\\n");
+    value.replace('"', "\\\"");
     ts << " range=(" << textBox.start() << "," << (textBox.start() + textBox.len()) << ")"
         << " \"" << value << "\"";
 }
@@ -557,7 +557,8 @@ enum LayerPaintPhase {
 
 static void write(TextStream& ts, PaintLayer& layer,
     const LayoutRect& layerBounds, const LayoutRect& backgroundClipRect, const LayoutRect& clipRect,
-    LayerPaintPhase paintPhase = LayerPaintPhaseAll, int indent = 0, LayoutAsTextBehavior behavior = LayoutAsTextBehaviorNormal)
+    LayerPaintPhase paintPhase = LayerPaintPhaseAll, int indent = 0, LayoutAsTextBehavior behavior = LayoutAsTextBehaviorNormal,
+    const PaintLayer* markedLayer = nullptr)
 {
     IntRect adjustedLayoutBounds = pixelSnappedIntRect(layerBounds);
     IntRect adjustedLayoutBoundsWithScrollbars = adjustedLayoutBounds;
@@ -573,6 +574,9 @@ static void write(TextStream& ts, PaintLayer& layer,
         adjustedLayoutBoundsWithScrollbars.setWidth(layoutView->viewWidth(IncludeScrollbars));
         adjustedLayoutBoundsWithScrollbars.setHeight(layoutView->viewHeight(IncludeScrollbars));
     }
+
+    if (markedLayer)
+        ts << (markedLayer == &layer ? "*" : " ");
 
     writeIndent(ts, indent);
 
@@ -600,7 +604,7 @@ static void write(TextStream& ts, PaintLayer& layer,
         if (reportFrameScrollInfo)
             scrollableArea = toLayoutView(layer.layoutObject())->frameView();
         else
-            scrollableArea = layer.scrollableArea();
+            scrollableArea = layer.getScrollableArea();
 
         DoublePoint adjustedScrollOffset = scrollableArea->scrollPositionDouble() + toDoubleSize(scrollableArea->scrollOrigin());
         if (adjustedScrollOffset.x())
@@ -648,7 +652,7 @@ static Vector<PaintLayerStackingNode*> normalFlowListFor(PaintLayerStackingNode*
 }
 
 void LayoutTreeAsText::writeLayers(TextStream& ts, const PaintLayer* rootLayer, PaintLayer* layer,
-    const LayoutRect& paintRect, int indent, LayoutAsTextBehavior behavior)
+    const LayoutRect& paintRect, int indent, LayoutAsTextBehavior behavior, const PaintLayer* markedLayer)
 {
     // Calculate the clip rects we should use.
     LayoutRect layerBounds;
@@ -668,7 +672,7 @@ void LayoutTreeAsText::writeLayers(TextStream& ts, const PaintLayer* rootLayer, 
     Vector<PaintLayerStackingNode*>* negList = layer->stackingNode()->negZOrderList();
     bool paintsBackgroundSeparately = negList && negList->size() > 0;
     if (shouldPaint && paintsBackgroundSeparately)
-        write(ts, *layer, layerBounds, damageRect.rect(), clipRectToApply.rect(), LayerPaintPhaseBackground, indent, behavior);
+        write(ts, *layer, layerBounds, damageRect.rect(), clipRectToApply.rect(), LayerPaintPhaseBackground, indent, behavior, markedLayer);
 
     if (negList) {
         int currIndent = indent;
@@ -678,11 +682,11 @@ void LayoutTreeAsText::writeLayers(TextStream& ts, const PaintLayer* rootLayer, 
             ++currIndent;
         }
         for (unsigned i = 0; i != negList->size(); ++i)
-            writeLayers(ts, rootLayer, negList->at(i)->layer(), paintRect, currIndent, behavior);
+            writeLayers(ts, rootLayer, negList->at(i)->layer(), paintRect, currIndent, behavior, markedLayer);
     }
 
     if (shouldPaint)
-        write(ts, *layer, layerBounds, damageRect.rect(), clipRectToApply.rect(), paintsBackgroundSeparately ? LayerPaintPhaseForeground : LayerPaintPhaseAll, indent, behavior);
+        write(ts, *layer, layerBounds, damageRect.rect(), clipRectToApply.rect(), paintsBackgroundSeparately ? LayerPaintPhaseForeground : LayerPaintPhaseAll, indent, behavior, markedLayer);
 
     Vector<PaintLayerStackingNode*> normalFlowList = normalFlowListFor(layer->stackingNode());
     if (!normalFlowList.isEmpty()) {
@@ -693,7 +697,7 @@ void LayoutTreeAsText::writeLayers(TextStream& ts, const PaintLayer* rootLayer, 
             ++currIndent;
         }
         for (unsigned i = 0; i != normalFlowList.size(); ++i)
-            writeLayers(ts, rootLayer, normalFlowList.at(i)->layer(), paintRect, currIndent, behavior);
+            writeLayers(ts, rootLayer, normalFlowList.at(i)->layer(), paintRect, currIndent, behavior, markedLayer);
     }
 
     if (Vector<PaintLayerStackingNode*>* posList = layer->stackingNode()->posZOrderList()) {
@@ -704,7 +708,7 @@ void LayoutTreeAsText::writeLayers(TextStream& ts, const PaintLayer* rootLayer, 
             ++currIndent;
         }
         for (unsigned i = 0; i != posList->size(); ++i)
-            writeLayers(ts, rootLayer, posList->at(i)->layer(), paintRect, currIndent, behavior);
+            writeLayers(ts, rootLayer, posList->at(i)->layer(), paintRect, currIndent, behavior, markedLayer);
     }
 }
 
@@ -766,19 +770,19 @@ static void writeSelection(TextStream& ts, const LayoutObject* o)
     }
 }
 
-static String externalRepresentation(LayoutBox* layoutObject, LayoutAsTextBehavior behavior)
+static String externalRepresentation(LayoutBox* layoutObject, LayoutAsTextBehavior behavior, const PaintLayer* markedLayer = nullptr)
 {
     TextStream ts;
     if (!layoutObject->hasLayer())
         return ts.release();
 
     PaintLayer* layer = layoutObject->layer();
-    LayoutTreeAsText::writeLayers(ts, layer, layer, layer->rect(), 0, behavior);
+    LayoutTreeAsText::writeLayers(ts, layer, layer, layer->rect(), 0, behavior, markedLayer);
     writeSelection(ts, layoutObject);
     return ts.release();
 }
 
-String externalRepresentation(LocalFrame* frame, LayoutAsTextBehavior behavior)
+String externalRepresentation(LocalFrame* frame, LayoutAsTextBehavior behavior, const PaintLayer* markedLayer)
 {
     if (!(behavior & LayoutAsTextDontUpdateLayout))
         frame->document()->updateLayout();
@@ -793,7 +797,7 @@ String externalRepresentation(LocalFrame* frame, LayoutAsTextBehavior behavior)
         printContext.begin(size.width(), size.height());
     }
 
-    return externalRepresentation(toLayoutBox(layoutObject), behavior);
+    return externalRepresentation(toLayoutBox(layoutObject), behavior, markedLayer);
 }
 
 String externalRepresentation(Element* element, LayoutAsTextBehavior behavior)
@@ -825,23 +829,19 @@ static void writeCounterValuesFromChildren(TextStream& stream, LayoutObject* par
 
 String counterValueForElement(Element* element)
 {
-    // Make sure the element is not freed during the layout.
-    RefPtrWillBeRawPtr<Element> protector(element);
     element->document().updateLayout();
     TextStream stream;
     bool isFirstCounter = true;
     // The counter layoutObjects should be children of :before or :after pseudo-elements.
-    if (LayoutObject* before = element->pseudoElementLayoutObject(BEFORE))
+    if (LayoutObject* before = element->pseudoElementLayoutObject(PseudoIdBefore))
         writeCounterValuesFromChildren(stream, before, isFirstCounter);
-    if (LayoutObject* after = element->pseudoElementLayoutObject(AFTER))
+    if (LayoutObject* after = element->pseudoElementLayoutObject(PseudoIdAfter))
         writeCounterValuesFromChildren(stream, after, isFirstCounter);
     return stream.release();
 }
 
 String markerTextForListItem(Element* element)
 {
-    // Make sure the element is not freed during the layout.
-    RefPtrWillBeRawPtr<Element> protector(element);
     element->document().updateLayout();
 
     LayoutObject* layoutObject = element->layoutObject();

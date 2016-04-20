@@ -80,7 +80,7 @@ class ServerWindow {
   void SetClientArea(const gfx::Insets& insets,
                      const std::vector<gfx::Rect>& additional_client_areas);
 
-  int32_t cursor() const { return cursor_id_; }
+  int32_t cursor() const { return static_cast<int32_t>(cursor_id_); }
 
   const ServerWindow* parent() const { return parent_; }
   ServerWindow* parent() { return parent_; }
@@ -107,6 +107,20 @@ class ServerWindow {
   const ServerWindow* transient_parent() const { return transient_parent_; }
 
   const Windows& transient_children() const { return transient_children_; }
+
+  bool is_modal() const { return is_modal_; }
+  void SetModal();
+
+  bool IsBlockedByModalWindow() const;
+
+  // Returns the window that events targeted to this window should be retargeted
+  // to; according to modal windows. If any modal window is blocking this
+  // window, returns the topmost one; otherwise, returns this window.
+  const ServerWindow* GetModalTarget() const;
+  ServerWindow* GetModalTarget() {
+    return const_cast<ServerWindow*>(
+        static_cast<const ServerWindow*>(this)->GetModalTarget());
+  }
 
   // Returns true if this contains |window| or is |window|.
   bool Contains(const ServerWindow* window) const;
@@ -197,6 +211,7 @@ class ServerWindow {
   ServerWindow* transient_parent_;
   Windows transient_children_;
 
+  bool is_modal_;
   bool visible_;
   gfx::Rect bounds_;
   gfx::Insets client_area_;

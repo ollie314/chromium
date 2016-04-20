@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.test.suitebuilder.annotation.MediumTest;
 
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.FlakyTest;
 import org.chromium.chrome.test.ChromeTabbedActivityTestBase;
 import org.chromium.chrome.test.util.ApplicationTestUtils;
 import org.chromium.content.browser.test.util.CallbackHelper;
@@ -114,6 +115,7 @@ public class PowerBroadcastReceiverTest extends ChromeTabbedActivityTestBase {
     /**
      * Check that the runnable gets posted and canceled when Main is sent to the background.
      */
+    @FlakyTest(message = "https://crbug.com/579363")
     @MediumTest
     @Feature({"Omaha", "Sync"})
     public void testRunnableGetsCanceled() throws Exception {
@@ -138,6 +140,7 @@ public class PowerBroadcastReceiverTest extends ChromeTabbedActivityTestBase {
      */
     @MediumTest
     @Feature({"Omaha", "Sync"})
+    @FlakyTest(message = "https://crbug.com/587138")
     public void testRunnableGetsRunWhenScreenIsOn() throws Exception {
         // Claim the screen is off.
         mReceiver.setPowerManagerHelperForTests(sScreenOff);

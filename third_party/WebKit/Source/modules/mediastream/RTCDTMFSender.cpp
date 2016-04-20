@@ -65,11 +65,20 @@ RTCDTMFSender::RTCDTMFSender(ExecutionContext* context, MediaStreamTrack* track,
     , m_stopped(false)
     , m_scheduledEventTimer(this, &RTCDTMFSender::scheduledEventTimerFired)
 {
+    ThreadState::current()->registerPreFinalizer(this);
     m_handler->setClient(this);
 }
 
 RTCDTMFSender::~RTCDTMFSender()
 {
+}
+
+void RTCDTMFSender::dispose()
+{
+    // Promptly clears a raw reference from content/ to an on-heap object
+    // so that content/ doesn't access it in a lazy sweeping phase.
+    m_handler->setClient(nullptr);
+    m_handler.clear();
 }
 
 bool RTCDTMFSender::canInsertDTMF() const
@@ -131,18 +140,18 @@ const AtomicString& RTCDTMFSender::interfaceName() const
     return EventTargetNames::RTCDTMFSender;
 }
 
-ExecutionContext* RTCDTMFSender::executionContext() const
+ExecutionContext* RTCDTMFSender::getExecutionContext() const
 {
-    return ActiveDOMObject::executionContext();
+    return ActiveDOMObject::getExecutionContext();
 }
 
 void RTCDTMFSender::stop()
 {
     m_stopped = true;
-    m_handler->setClient(0);
+    m_handler->setClient(nullptr);
 }
 
-void RTCDTMFSender::scheduleDispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
+void RTCDTMFSender::scheduleDispatchEvent(Event* event)
 {
     m_scheduledEvents.append(event);
 
@@ -155,10 +164,10 @@ void RTCDTMFSender::scheduledEventTimerFired(Timer<RTCDTMFSender>*)
     if (m_stopped)
         return;
 
-    WillBeHeapVector<RefPtrWillBeMember<Event>> events;
+    HeapVector<Member<Event>> events;
     events.swap(m_scheduledEvents);
 
-    WillBeHeapVector<RefPtrWillBeMember<Event>>::iterator it = events.begin();
+    HeapVector<Member<Event>>::iterator it = events.begin();
     for (; it != events.end(); ++it)
         dispatchEvent((*it).release());
 }
@@ -167,7 +176,7 @@ DEFINE_TRACE(RTCDTMFSender)
 {
     visitor->trace(m_track);
     visitor->trace(m_scheduledEvents);
-    RefCountedGarbageCollectedEventTargetWithInlineData<RTCDTMFSender>::trace(visitor);
+    EventTargetWithInlineData::trace(visitor);
     ActiveDOMObject::trace(visitor);
 }
 

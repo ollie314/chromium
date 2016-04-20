@@ -6,6 +6,7 @@
 #define DEVICE_BLUETOOTH_BLUETOOTH_REMOTE_GATT_SERVICE_ANDROID_H_
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -33,7 +34,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattServiceAndroid
   //
   // The ChromeBluetoothRemoteGattService instance will hold a Java reference
   // to |bluetooth_gatt_service_wrapper|.
-  static scoped_ptr<BluetoothRemoteGattServiceAndroid> Create(
+  static std::unique_ptr<BluetoothRemoteGattServiceAndroid> Create(
       BluetoothAdapterAndroid* adapter,
       BluetoothDeviceAndroid* device,
       jobject /* BluetoothGattServiceWrapper */ bluetooth_gatt_service_wrapper,
@@ -113,8 +114,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattServiceAndroid
   std::string instance_id_;
 
   // Map of characteristics, keyed by characteristic identifier.
-  base::ScopedPtrHashMap<std::string,
-                         scoped_ptr<BluetoothRemoteGattCharacteristicAndroid>>
+  base::ScopedPtrHashMap<
+      std::string,
+      std::unique_ptr<BluetoothRemoteGattCharacteristicAndroid>>
       characteristics_;
 
   DISALLOW_COPY_AND_ASSIGN(BluetoothRemoteGattServiceAndroid);

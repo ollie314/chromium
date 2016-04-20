@@ -30,7 +30,7 @@ LogoutConfirmationController::~LogoutConfirmationController() {
   if (Shell::HasInstance())
     Shell::GetInstance()->RemoveShellObserver(this);
   if (dialog_)
-    dialog_->GetWidget()->Close();
+    dialog_->ControllerGone();
 }
 
 void LogoutConfirmationController::ConfirmLogout(
@@ -57,7 +57,7 @@ void LogoutConfirmationController::ConfirmLogout(
 }
 
 void LogoutConfirmationController::SetClockForTesting(
-    scoped_ptr<base::TickClock> clock) {
+    std::unique_ptr<base::TickClock> clock) {
   clock_ = std::move(clock);
 }
 

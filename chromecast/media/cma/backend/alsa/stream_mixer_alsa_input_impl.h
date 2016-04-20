@@ -6,10 +6,11 @@
 #define CHROMECAST_MEDIA_CMA_BACKEND_ALSA_STREAM_MIXER_ALSA_INPUT_IMPL_H_
 
 #include <deque>
+#include <memory>
 
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "chromecast/media/cma/backend/alsa/media_pipeline_backend_alsa.h"
@@ -121,7 +122,7 @@ class StreamMixerAlsaInputImpl : public StreamMixerAlsa::InputQueue {
   void GetResampledData(::media::AudioBus* dest, int frames) override;
   void AfterWriteFrames(const MediaPipelineBackendAlsa::RenderingDelay&
                             mixer_rendering_delay) override;
-  void SignalError() override;
+  void SignalError(StreamMixerAlsaInput::MixerError error) override;
   void PrepareToDelete(const OnReadyToDeleteCb& delete_cb) override;
 
   // Tells the mixer to delete |this|. Makes sure not to call |delete_cb_| more
@@ -136,7 +137,7 @@ class StreamMixerAlsaInputImpl : public StreamMixerAlsa::InputQueue {
   int NormalFadeFrames();
   void FadeIn(::media::AudioBus* dest, int frames);
   void FadeOut(::media::AudioBus* dest, int frames);
-  void PostError();
+  void PostError(StreamMixerAlsaInput::MixerError error);
 
   StreamMixerAlsaInput::Delegate* const delegate_;
   const int input_samples_per_second_;
@@ -152,7 +153,7 @@ class StreamMixerAlsaInputImpl : public StreamMixerAlsa::InputQueue {
   scoped_refptr<DecoderBufferBase> pending_data_;
   std::deque<scoped_refptr<DecoderBufferBase>> queue_;
   int queued_frames_;
-  int queued_frames_including_resampler_;
+  double queued_frames_including_resampler_;
   MediaPipelineBackendAlsa::RenderingDelay mixer_rendering_delay_;
   // End of members that queue_lock_ controls access for.
 
@@ -160,10 +161,11 @@ class StreamMixerAlsaInputImpl : public StreamMixerAlsa::InputQueue {
   int max_queued_frames_;
   int fade_frames_remaining_;
   int fade_out_frames_total_;
+  int zeroed_frames_;  // current count of consecutive 0-filled frames
 
   OnReadyToDeleteCb delete_cb_;
 
-  scoped_ptr<::media::MultiChannelResampler> resampler_;
+  std::unique_ptr<::media::MultiChannelResampler> resampler_;
 
   base::WeakPtr<StreamMixerAlsaInputImpl> weak_this_;
   base::WeakPtrFactory<StreamMixerAlsaInputImpl> weak_factory_;

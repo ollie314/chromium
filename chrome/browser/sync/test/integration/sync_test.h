@@ -5,12 +5,12 @@
 #ifndef CHROME_BROWSER_SYNC_TEST_INTEGRATION_SYNC_TEST_H_
 #define CHROME_BROWSER_SYNC_TEST_INTEGRATION_SYNC_TEST_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/process/process.h"
 #include "chrome/browser/profiles/profile.h"
@@ -129,6 +129,10 @@ class SyncTest : public InProcessBrowserTest {
   // Returns a pointer to a particular sync profile. Callee owns the object
   // and manages its lifetime.
   Profile* GetProfile(int index) WARN_UNUSED_RESULT;
+
+  // Returns a list of all profiles including the verifier if available. Callee
+  // owns the objects and manages its lifetime.
+  std::vector<Profile*> GetAllProfiles();
 
   // Returns a pointer to a particular browser. Callee owns the object
   // and manages its lifetime.
@@ -257,10 +261,6 @@ class SyncTest : public InProcessBrowserTest {
   // behavior.
   void TearDownInProcessBrowserTestFixture() override;
 
-  // Creates Profile, Browser and ProfileSyncServiceHarness instances for
-  // |index|. Used by SetupClients().
-  virtual void InitializeInstance(int index);
-
   // Implementations of the EnableNotifications() and DisableNotifications()
   // functions defined above.
   void DisableNotificationsImpl();
@@ -284,7 +284,7 @@ class SyncTest : public InProcessBrowserTest {
   base::FilePath password_file_;
 
   // The FakeServer used in tests with server type IN_PROCESS_FAKE_SERVER.
-  scoped_ptr<fake_server::FakeServer> fake_server_;
+  std::unique_ptr<fake_server::FakeServer> fake_server_;
 
  private:
   // Handles Profile creation for given index. Profile's path and type is
@@ -299,7 +299,7 @@ class SyncTest : public InProcessBrowserTest {
 
   // Helper to Profile::CreateProfile that handles path creation. It creates
   // a profile then registers it as a testing profile.
-  Profile* MakeTestProfile(base::FilePath profile_path);
+  Profile* MakeTestProfile(base::FilePath profile_path, int index);
 
   // Helper method used to create a Gaia account at runtime.
   // This function should only be called when running against external servers
@@ -307,6 +307,10 @@ class SyncTest : public InProcessBrowserTest {
   // Returns true if account creation was successful, false otherwise.
   bool CreateGaiaAccount(const std::string& username,
                          const std::string& password);
+
+  // Helper to block the current thread while the data models sync depends on
+  // finish loading.
+  void WaitForDataModels(Profile* profile);
 
   // Helper method used to read GAIA credentials from a local password file
   // specified via the "--password-file-for-test" command line switch.
@@ -343,8 +347,6 @@ class SyncTest : public InProcessBrowserTest {
   // Helper method used to check if the test server is up and running.
   bool IsTestServerRunning();
 
-  void SetupNetwork(net::URLRequestContextGetter* context);
-
   // Helper method used to set up fake responses for kClientLoginUrl,
   // kIssueAuthTokenUrl, kGetUserInfoUrl and kSearchDomainCheckUrl in order to
   // mock out calls to GAIA servers.
@@ -359,6 +361,9 @@ class SyncTest : public InProcessBrowserTest {
   // of test being run and command line args passed in.
   void DecideServerType();
 
+  // Initializes any custom services needed for the |profile| at |index|.
+  void InitializeProfile(int index, Profile* profile);
+
   // Sets up the client-side invalidations infrastructure depending on the
   // value of |server_type_|.
   void InitializeInvalidations(int index);
@@ -367,7 +372,7 @@ class SyncTest : public InProcessBrowserTest {
   syncer::LocalSyncTestServer sync_server_;
 
   // Helper class to whitelist the notification port.
-  scoped_ptr<net::ScopedPortException> xmpp_port_;
+  std::unique_ptr<net::ScopedPortException> xmpp_port_;
 
   // Used to differentiate between single-client and two-client tests as well
   // as wher the in-process FakeServer is used.
@@ -384,6 +389,11 @@ class SyncTest : public InProcessBrowserTest {
   // data contained within its own subdirectory under the chrome user data
   // directory. Profiles are owned by the ProfileManager.
   std::vector<Profile*> profiles_;
+
+  // Collection of profile delegates. Only used for test profiles, which require
+  // a custom profile delegate to ensure initialization happens at the right
+  // time.
+  std::vector<std::unique_ptr<Profile::Delegate>> profile_delegates_;
 
   // Collection of profile paths used by a test. Each profile has a unique path
   // which should be cleaned up at test shutdown. Profile paths inside the
@@ -433,16 +443,17 @@ class SyncTest : public InProcessBrowserTest {
   // Sync integration tests need to make live DNS requests for access to
   // GAIA and sync server URLs under google.com. We use a scoped version
   // to override the default resolver while the test is active.
-  scoped_ptr<net::ScopedDefaultHostResolverProc> mock_host_resolver_override_;
+  std::unique_ptr<net::ScopedDefaultHostResolverProc>
+      mock_host_resolver_override_;
 
   // Used to start and stop the local test server.
   base::Process test_server_;
 
   // Fake URLFetcher factory used to mock out GAIA signin.
-  scoped_ptr<net::FakeURLFetcherFactory> fake_factory_;
+  std::unique_ptr<net::FakeURLFetcherFactory> fake_factory_;
 
   // The URLFetcherImplFactory instance used to instantiate |fake_factory_|.
-  scoped_ptr<net::URLFetcherImplFactory> factory_;
+  std::unique_ptr<net::URLFetcherImplFactory> factory_;
 
   // The contents to be written to a profile's Preferences file before the
   // Profile object is created. If empty, no preexisting file will be written.

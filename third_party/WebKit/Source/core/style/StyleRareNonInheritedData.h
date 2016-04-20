@@ -43,6 +43,7 @@
 #include "platform/LengthPoint.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
+#include "wtf/RefCounted.h"
 #include "wtf/Vector.h"
 
 namespace blink {
@@ -122,7 +123,7 @@ public:
     DataRef<StyleGridItemData> m_gridItem;
     DataRef<StyleScrollSnapData> m_scrollSnap;
 
-    OwnPtrWillBePersistent<ContentData> m_content;
+    Persistent<ContentData> m_content;
     OwnPtr<CounterDirectiveMap> m_counterDirectives;
     OwnPtr<CSSAnimationData> m_animations;
     OwnPtr<CSSTransitionData> m_transitions;
@@ -131,7 +132,7 @@ public:
 
     RefPtr<StyleReflection> m_boxReflect;
 
-    RefPtrWillBePersistent<ShapeValue> m_shapeOutside;
+    Persistent<ShapeValue> m_shapeOutside;
     RefPtr<ClipPathOperation> m_clipPath;
 
     FillLayer m_mask;

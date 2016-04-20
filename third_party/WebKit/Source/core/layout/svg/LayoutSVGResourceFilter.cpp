@@ -29,10 +29,8 @@ namespace blink {
 
 DEFINE_TRACE(FilterData)
 {
-#if ENABLE(OILPAN)
     visitor->trace(filter);
     visitor->trace(nodeMap);
-#endif
 }
 
 void FilterData::dispose()
@@ -52,10 +50,8 @@ LayoutSVGResourceFilter::~LayoutSVGResourceFilter()
 
 void LayoutSVGResourceFilter::disposeFilterMap()
 {
-#if ENABLE(OILPAN)
     for (auto& filter : m_filter)
         filter.value->dispose();
-#endif
     m_filter.clear();
 }
 
@@ -124,7 +120,7 @@ void LayoutSVGResourceFilter::primitiveAttributeChanged(LayoutObject* object, co
         // Issue paint invalidations for the image on the screen.
         markClientForInvalidation(filter.key, PaintInvalidation);
     }
-    markAllClientLayersForInvalidation();
+    markAllResourceClientsForInvalidation();
 }
 
 } // namespace blink

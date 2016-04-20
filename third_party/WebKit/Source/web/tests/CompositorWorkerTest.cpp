@@ -3,17 +3,19 @@
 // found in the LICENSE file.
 
 #include "core/frame/FrameView.h"
-#include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "core/layout/compositing/CompositedLayerMapping.h"
 #include "core/layout/compositing/PaintLayerCompositor.h"
 #include "core/page/Page.h"
+#include "platform/graphics/CompositorMutableProperties.h"
+#include "platform/graphics/CompositorMutation.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/testing/URLTestHelpers.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebCompositorMutableProperties.h"
 #include "public/platform/WebLayer.h"
 #include "public/platform/WebLayerTreeView.h"
-#include "public/platform/WebUnitTestSupport.h"
+#include "public/platform/WebURLLoaderMockFactory.h"
+#include "public/web/WebCache.h"
 #include "public/web/WebSettings.h"
 #include "public/web/WebViewClient.h"
 #include "web/WebLocalFrameImpl.h"
@@ -35,7 +37,8 @@ public:
 
     ~CompositorWorkerTest() override
     {
-        Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
+        Platform::current()->getURLLoaderMockFactory()->unregisterAllURLs();
+        WebCache::clear();
     }
 
     void navigateTo(const String& url)
@@ -55,9 +58,9 @@ public:
 
     WebLayer* getRootScrollLayer()
     {
-        PaintLayerCompositor* compositor = frame()->contentLayoutObject()->compositor();
-        ASSERT(compositor);
-        ASSERT(compositor->scrollLayer());
+        PaintLayerCompositor* compositor = frame()->contentLayoutItem().compositor();
+        DCHECK(compositor);
+        DCHECK(compositor->scrollLayer());
 
         WebLayer* webScrollLayer = compositor->scrollLayer()->platformLayer();
         return webScrollLayer;
@@ -133,21 +136,21 @@ TEST_F(CompositorWorkerTest, plumbingElementIdAndMutableProperties)
     WebLayer* tallLayer = webLayerFromElement(tallElement);
     EXPECT_TRUE(!tallLayer);
 
-    Element* proxiedElement = document->getElementById("proxied");
+    Element* proxiedElement = document->getElementById("proxied-transform");
     WebLayer* proxiedLayer = webLayerFromElement(proxiedElement);
-    EXPECT_TRUE(proxiedLayer->compositorMutableProperties() & WebCompositorMutablePropertyTransform);
-    EXPECT_FALSE(proxiedLayer->compositorMutableProperties() & (WebCompositorMutablePropertyScrollLeft | WebCompositorMutablePropertyScrollTop | WebCompositorMutablePropertyOpacity));
+    EXPECT_TRUE(proxiedLayer->compositorMutableProperties() & CompositorMutableProperty::kTransform);
+    EXPECT_FALSE(proxiedLayer->compositorMutableProperties() & (CompositorMutableProperty::kScrollLeft | CompositorMutableProperty::kScrollTop | CompositorMutableProperty::kOpacity));
     EXPECT_NE(0UL, proxiedLayer->elementId());
 
     Element* scrollElement = document->getElementById("proxied-scroller");
     WebLayer* scrollLayer = scrollingWebLayerFromElement(scrollElement);
-    EXPECT_TRUE(scrollLayer->compositorMutableProperties() & (WebCompositorMutablePropertyScrollLeft | WebCompositorMutablePropertyScrollTop));
-    EXPECT_FALSE(scrollLayer->compositorMutableProperties() & (WebCompositorMutablePropertyTransform | WebCompositorMutablePropertyOpacity));
+    EXPECT_TRUE(scrollLayer->compositorMutableProperties() & (CompositorMutableProperty::kScrollLeft | CompositorMutableProperty::kScrollTop));
+    EXPECT_FALSE(scrollLayer->compositorMutableProperties() & (CompositorMutableProperty::kTransform | CompositorMutableProperty::kOpacity));
     EXPECT_NE(0UL, scrollLayer->elementId());
 
     WebLayer* rootScrollLayer = getRootScrollLayer();
-    EXPECT_TRUE(rootScrollLayer->compositorMutableProperties() & (WebCompositorMutablePropertyScrollLeft | WebCompositorMutablePropertyScrollTop));
-    EXPECT_FALSE(rootScrollLayer->compositorMutableProperties() & (WebCompositorMutablePropertyTransform | WebCompositorMutablePropertyOpacity));
+    EXPECT_TRUE(rootScrollLayer->compositorMutableProperties() & (CompositorMutableProperty::kScrollLeft | CompositorMutableProperty::kScrollTop));
+    EXPECT_FALSE(rootScrollLayer->compositorMutableProperties() & (CompositorMutableProperty::kTransform | CompositorMutableProperty::kOpacity));
 
     EXPECT_NE(0UL, rootScrollLayer->elementId());
 }
@@ -208,6 +211,97 @@ TEST_F(CompositorWorkerTest, disconnectedProxies)
     WebLayer* rootScrollLayer = getRootScrollLayer();
     EXPECT_FALSE(!!rootScrollLayer->compositorMutableProperties());
     EXPECT_EQ(0UL, rootScrollLayer->elementId());
+}
+
+TEST_F(CompositorWorkerTest, applyingMutationsMultipleElements)
+{
+    registerMockedHttpURLLoad("compositor-proxy-basic.html");
+    navigateTo(m_baseURL + "compositor-proxy-basic.html");
+
+    Document* document = frame()->document();
+
+    {
+        forceFullCompositingUpdate();
+
+        Element* proxiedElement = document->getElementById("proxied-transform");
+        WebLayer* proxiedLayer = webLayerFromElement(proxiedElement);
+        EXPECT_TRUE(proxiedLayer->compositorMutableProperties() & CompositorMutableProperty::kTransform);
+        EXPECT_FALSE(proxiedLayer->compositorMutableProperties() & (CompositorMutableProperty::kScrollLeft | CompositorMutableProperty::kScrollTop | CompositorMutableProperty::kOpacity));
+        uint64_t elementId = proxiedLayer->elementId();
+        EXPECT_NE(0UL, elementId);
+
+        TransformationMatrix transformMatrix(11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44);
+        CompositorMutation mutation;
+        mutation.setTransform(TransformationMatrix::toSkMatrix44(transformMatrix));
+
+        proxiedElement->updateFromCompositorMutation(mutation);
+
+        forceFullCompositingUpdate();
+        const String& cssValue = document->domWindow()->getComputedStyle(proxiedElement, String())->getPropertyValueInternal(CSSPropertyTransform);
+        EXPECT_EQ("matrix3d(11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44)", cssValue);
+    }
+    {
+        Element* proxiedElement = document->getElementById("proxied-opacity");
+        WebLayer* proxiedLayer = webLayerFromElement(proxiedElement);
+        EXPECT_TRUE(proxiedLayer->compositorMutableProperties() & CompositorMutableProperty::kOpacity);
+        EXPECT_FALSE(proxiedLayer->compositorMutableProperties() & (CompositorMutableProperty::kScrollLeft | CompositorMutableProperty::kScrollTop | CompositorMutableProperty::kTransform));
+        uint64_t elementId = proxiedLayer->elementId();
+        EXPECT_NE(0UL, elementId);
+
+        CompositorMutation mutation;
+        mutation.setOpacity(0.5);
+
+        proxiedElement->updateFromCompositorMutation(mutation);
+
+        forceFullCompositingUpdate();
+        const String& cssValue = document->domWindow()->getComputedStyle(proxiedElement, String())->getPropertyValueInternal(CSSPropertyOpacity);
+        EXPECT_EQ("0.5", cssValue);
+    }
+}
+
+TEST_F(CompositorWorkerTest, applyingMutationsMultipleProperties)
+{
+    registerMockedHttpURLLoad("compositor-proxy-basic.html");
+    navigateTo(m_baseURL + "compositor-proxy-basic.html");
+
+    Document* document = frame()->document();
+
+    forceFullCompositingUpdate();
+
+    Element* proxiedElement = document->getElementById("proxied-transform-and-opacity");
+    WebLayer* proxiedLayer = webLayerFromElement(proxiedElement);
+    EXPECT_TRUE(proxiedLayer->compositorMutableProperties() & CompositorMutableProperty::kTransform);
+    EXPECT_TRUE(proxiedLayer->compositorMutableProperties() & CompositorMutableProperty::kOpacity);
+    EXPECT_FALSE(proxiedLayer->compositorMutableProperties() & (CompositorMutableProperty::kScrollLeft | CompositorMutableProperty::kScrollTop));
+    uint64_t elementId = proxiedLayer->elementId();
+    EXPECT_NE(0UL, elementId);
+
+    TransformationMatrix transformMatrix(11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44);
+    OwnPtr<CompositorMutation> mutation = adoptPtr(new CompositorMutation);
+    mutation->setTransform(TransformationMatrix::toSkMatrix44(transformMatrix));
+    mutation->setOpacity(0.5);
+
+    proxiedElement->updateFromCompositorMutation(*mutation);
+    {
+        const String& transformValue =  document->domWindow()->getComputedStyle(proxiedElement, String())->getPropertyValueInternal(CSSPropertyTransform);
+        EXPECT_EQ("matrix3d(11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44)", transformValue);
+
+        const String& opacityValue = document->domWindow()->getComputedStyle(proxiedElement, String())->getPropertyValueInternal(CSSPropertyOpacity);
+        EXPECT_EQ("0.5", opacityValue);
+    }
+
+    // Verify that updating one property does not impact others
+    mutation = adoptPtr(new CompositorMutation);
+    mutation->setOpacity(0.8);
+
+    proxiedElement->updateFromCompositorMutation(*mutation);
+    {
+        const String& transformValue =  document->domWindow()->getComputedStyle(proxiedElement, String())->getPropertyValueInternal(CSSPropertyTransform);
+        EXPECT_EQ("matrix3d(11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44)", transformValue);
+
+        const String& opacityValue = document->domWindow()->getComputedStyle(proxiedElement, String())->getPropertyValueInternal(CSSPropertyOpacity);
+        EXPECT_EQ("0.8", opacityValue);
+    }
 }
 
 } // namespace blink

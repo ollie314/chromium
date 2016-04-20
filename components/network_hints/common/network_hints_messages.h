@@ -7,9 +7,9 @@
 #include <vector>
 
 #include "components/network_hints/common/network_hints_common.h"
-#include "content/public/common/common_param_traits.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_utils.h"
+#include "url/ipc/url_param_traits.h"
 
 // Singly-included section for custom IPC traits.
 #ifndef COMPONENTS_NETWORK_HINTS_COMMON_NETWORK_HINTS_MESSAGES_H_
@@ -20,8 +20,10 @@ namespace IPC {
 template <>
 struct ParamTraits<network_hints::LookupRequest> {
   typedef network_hints::LookupRequest param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, base::PickleIterator* iter, param_type* r);
+  static void Write(base::Pickle* m, const param_type& p);
+  static bool Read(const base::Pickle* m,
+                   base::PickleIterator* iter,
+                   param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 

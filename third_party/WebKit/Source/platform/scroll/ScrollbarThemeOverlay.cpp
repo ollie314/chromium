@@ -73,13 +73,13 @@ bool ScrollbarThemeOverlay::usesOverlayScrollbars() const
     return true;
 }
 
-int ScrollbarThemeOverlay::thumbPosition(const ScrollbarThemeClient& scrollbar)
+int ScrollbarThemeOverlay::thumbPosition(const ScrollbarThemeClient& scrollbar, float scrollPosition)
 {
     if (!scrollbar.totalSize())
         return 0;
 
     int trackLen = trackLength(scrollbar);
-    float proportion = static_cast<float>(scrollbar.currentPos()) / scrollbar.totalSize();
+    float proportion = static_cast<float>(scrollPosition) / scrollbar.totalSize();
     return round(proportion * trackLen);
 }
 
@@ -173,8 +173,15 @@ ScrollbarPart ScrollbarThemeOverlay::hitTest(const ScrollbarThemeClient& scrollb
 
 ScrollbarThemeOverlay& ScrollbarThemeOverlay::mobileTheme()
 {
-    DEFINE_STATIC_LOCAL(ScrollbarThemeOverlay, theme, (3, 3, ScrollbarThemeOverlay::DisallowHitTest, Color(128, 128, 128, 128)));
-    return theme;
+    static ScrollbarThemeOverlay* theme;
+    if (!theme) {
+        WebThemeEngine::ScrollbarStyle style = { 3, 3, 0x80808080 }; // default style
+        if (Platform::current()->themeEngine()) {
+            Platform::current()->themeEngine()->getOverlayScrollbarStyle(&style);
+        }
+        theme = new ScrollbarThemeOverlay(style.thumbThickness, style.scrollbarMargin, ScrollbarThemeOverlay::DisallowHitTest, Color(style.color));
+    }
+    return *theme;
 }
 
 } // namespace blink

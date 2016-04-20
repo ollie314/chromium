@@ -11,9 +11,9 @@
 #include "ash/sticky_keys/sticky_keys_overlay.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/prefs/pref_member.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/mock_input_method_manager.h"
@@ -21,6 +21,7 @@
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/prefs/pref_member.h"
 #include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "components/user_manager/fake_user_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -78,11 +79,10 @@ std::string GetRewrittenEventAsString(chromeos::EventRewriter* rewriter,
                                       ui::DomKey key) {
   const ui::KeyEvent event(ui_type, ui_keycode, code, ui_flags, key,
                            ui::EventTimeForNow());
-  scoped_ptr<ui::Event> new_event;
+  std::unique_ptr<ui::Event> new_event;
   rewriter->RewriteEvent(event, &new_event);
   if (new_event)
-    return GetKeyEventAsString(
-        static_cast<const ui::KeyEvent&>(*new_event.get()));
+    return GetKeyEventAsString(*new_event->AsKeyEvent());
   return GetKeyEventAsString(event);
 }
 
@@ -147,10 +147,9 @@ class EventRewriterTest : public ash::test::AshTestBase {
   const ui::MouseEvent* RewriteMouseButtonEvent(
       chromeos::EventRewriter* rewriter,
       const ui::MouseEvent& event,
-      scoped_ptr<ui::Event>* new_event) {
+      std::unique_ptr<ui::Event>* new_event) {
     rewriter->RewriteMouseButtonEventForTesting(event, new_event);
-    return *new_event ? static_cast<const ui::MouseEvent*>(new_event->get())
-                      : &event;
+    return *new_event ? new_event->get()->AsMouseEvent() : &event;
   }
 
   user_manager::FakeUserManager* fake_user_manager_;  // Not owned.
@@ -191,16 +190,16 @@ TEST_F(EventRewriterTest, TestRewriteCommandToControl) {
       // VKEY_LWIN (left Windows key), Alt modifier.
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
-        ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN, ui::DomKey::OS},
+        ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN, ui::DomKey::META},
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
-        ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN, ui::DomKey::OS}},
+        ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN, ui::DomKey::META}},
 
       // VKEY_RWIN (right Windows key), Alt modifier.
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_RWIN, ui::DomCode::OS_RIGHT,
-        ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN, ui::DomKey::OS},
+        ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN, ui::DomKey::META},
        {ui::VKEY_RWIN, ui::DomCode::OS_RIGHT,
-        ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN, ui::DomKey::OS}},
+        ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN, ui::DomKey::META}},
   };
 
   for (const auto& test : pc_keyboard_tests) {
@@ -236,14 +235,14 @@ TEST_F(EventRewriterTest, TestRewriteCommandToControl) {
       // VKEY_LWIN (left Windows key), Alt modifier.
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
-        ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, ui::DomKey::OS},
+        ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, ui::DomKey::META},
        {ui::VKEY_CONTROL, ui::DomCode::CONTROL_LEFT,
         ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN, ui::DomKey::CONTROL}},
 
       // VKEY_RWIN (right Windows key), Alt modifier.
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_RWIN, ui::DomCode::OS_RIGHT,
-        ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, ui::DomKey::OS},
+        ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, ui::DomKey::META},
        {ui::VKEY_CONTROL, ui::DomCode::CONTROL_RIGHT,
         ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN, ui::DomKey::CONTROL}},
   };
@@ -289,7 +288,7 @@ TEST_F(EventRewriterTest, TestRewriteCommandToControlWithControlRemapped) {
       // key should never be re-remapped to Alt.
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
-        ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, ui::DomKey::OS},
+        ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, ui::DomKey::META},
        {ui::VKEY_CONTROL, ui::DomCode::CONTROL_LEFT,
         ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN, ui::DomKey::CONTROL}},
 
@@ -297,7 +296,7 @@ TEST_F(EventRewriterTest, TestRewriteCommandToControlWithControlRemapped) {
       // key should never be re-remapped to Alt.
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_RWIN, ui::DomCode::OS_RIGHT,
-        ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, ui::DomKey::OS},
+        ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, ui::DomKey::META},
        {ui::VKEY_CONTROL, ui::DomCode::CONTROL_RIGHT,
         ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN, ui::DomKey::CONTROL}},
   };
@@ -553,9 +552,9 @@ TEST_F(EventRewriterTest, TestRewriteModifiersNoRemap) {
   KeyTestCase tests[] = {
       // Press Search. Confirm the event is not rewritten.
       {ui::ET_KEY_PRESSED,
-       {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_NONE, ui::DomKey::OS},
+       {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_NONE, ui::DomKey::META},
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_COMMAND_DOWN,
-        ui::DomKey::OS}},
+        ui::DomKey::META}},
 
       // Press left Control. Confirm the event is not rewritten.
       {ui::ET_KEY_PRESSED,
@@ -586,8 +585,8 @@ TEST_F(EventRewriterTest, TestRewriteModifiersNoRemap) {
       // Test KeyRelease event, just in case.
       // Release Search. Confirm the release event is not rewritten.
       {ui::ET_KEY_RELEASED,
-       {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_NONE, ui::DomKey::OS},
-       {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_NONE, ui::DomKey::OS}},
+       {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_NONE, ui::DomKey::META},
+       {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_NONE, ui::DomKey::META}},
   };
 
   for (const auto& test : tests) {
@@ -612,16 +611,16 @@ TEST_F(EventRewriterTest, TestRewriteModifiersNoRemapMultipleKeys) {
       // Press Search with Caps Lock mask. Confirm the event is not rewritten.
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
-        ui::EF_CAPS_LOCK_ON | ui::EF_COMMAND_DOWN, ui::DomKey::OS},
+        ui::EF_CAPS_LOCK_ON | ui::EF_COMMAND_DOWN, ui::DomKey::META},
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
-        ui::EF_CAPS_LOCK_ON | ui::EF_COMMAND_DOWN, ui::DomKey::OS}},
+        ui::EF_CAPS_LOCK_ON | ui::EF_COMMAND_DOWN, ui::DomKey::META}},
 
       // Release Search with Caps Lock mask. Confirm the event is not rewritten.
       {ui::ET_KEY_RELEASED,
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_CAPS_LOCK_ON,
-        ui::DomKey::OS},
+        ui::DomKey::META},
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_CAPS_LOCK_ON,
-        ui::DomKey::OS}},
+        ui::DomKey::META}},
 
       // Press Shift+Ctrl+Alt+Search+A. Confirm the event is not rewritten.
       {ui::ET_KEY_PRESSED,
@@ -666,7 +665,7 @@ TEST_F(EventRewriterTest, TestRewriteModifiersDisableSome) {
 
       // Press Search. Confirm the event is now VKEY_UNKNOWN.
       {ui::ET_KEY_PRESSED,
-       {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_NONE, ui::DomKey::OS},
+       {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_NONE, ui::DomKey::META},
        {ui::VKEY_UNKNOWN, ui::DomCode::NONE, ui::EF_NONE,
         ui::DomKey::UNIDENTIFIED}},
 
@@ -681,7 +680,7 @@ TEST_F(EventRewriterTest, TestRewriteModifiersDisableSome) {
       // without any modifiers.
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_CONTROL_DOWN,
-        ui::DomKey::OS},
+        ui::DomKey::META},
        {ui::VKEY_UNKNOWN, ui::DomCode::NONE, ui::EF_NONE,
         ui::DomKey::UNIDENTIFIED}},
 
@@ -749,7 +748,7 @@ TEST_F(EventRewriterTest, TestRewriteModifiersRemapToControl) {
       // Press Search. Confirm the event is now VKEY_CONTROL.
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_COMMAND_DOWN,
-        ui::DomKey::OS},
+        ui::DomKey::META},
        {ui::VKEY_CONTROL, ui::DomCode::CONTROL_LEFT, ui::EF_CONTROL_DOWN,
         ui::DomKey::CONTROL}},
   };
@@ -773,7 +772,7 @@ TEST_F(EventRewriterTest, TestRewriteModifiersRemapToControl) {
       // Press Alt+Search. Confirm the event is now VKEY_CONTROL.
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
-        ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN, ui::DomKey::OS},
+        ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN, ui::DomKey::META},
        {ui::VKEY_CONTROL, ui::DomCode::CONTROL_LEFT, ui::EF_CONTROL_DOWN,
         ui::DomKey::CONTROL}},
 
@@ -781,7 +780,7 @@ TEST_F(EventRewriterTest, TestRewriteModifiersRemapToControl) {
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
         ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN,
-        ui::DomKey::OS},
+        ui::DomKey::META},
        {ui::VKEY_CONTROL, ui::DomCode::CONTROL_LEFT, ui::EF_CONTROL_DOWN,
         ui::DomKey::CONTROL}},
 
@@ -791,7 +790,7 @@ TEST_F(EventRewriterTest, TestRewriteModifiersRemapToControl) {
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
         ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN |
             ui::EF_COMMAND_DOWN,
-        ui::DomKey::OS},
+        ui::DomKey::META},
        {ui::VKEY_CONTROL, ui::DomCode::CONTROL_LEFT,
         ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, ui::DomKey::CONTROL}},
 
@@ -827,7 +826,7 @@ TEST_F(EventRewriterTest, TestRewriteModifiersRemapToEscape) {
       // Press Search. Confirm the event is now VKEY_ESCAPE.
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_COMMAND_DOWN,
-        ui::DomKey::OS},
+        ui::DomKey::META},
        {ui::VKEY_ESCAPE, ui::DomCode::ESCAPE, ui::EF_NONE, ui::DomKey::ESCAPE}},
   };
 
@@ -852,7 +851,7 @@ TEST_F(EventRewriterTest, TestRewriteModifiersRemapMany) {
       // Press Search. Confirm the event is now VKEY_MENU.
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_COMMAND_DOWN,
-        ui::DomKey::OS},
+        ui::DomKey::META},
        {ui::VKEY_MENU, ui::DomCode::ALT_LEFT, ui::EF_ALT_DOWN,
         ui::DomKey::ALT}},
   };
@@ -903,13 +902,13 @@ TEST_F(EventRewriterTest, TestRewriteModifiersRemapMany) {
        {ui::VKEY_CONTROL, ui::DomCode::CONTROL_LEFT, ui::EF_CONTROL_DOWN,
         ui::DomKey::CONTROL},
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT, ui::EF_COMMAND_DOWN,
-        ui::DomKey::OS}},
+        ui::DomKey::META}},
 
       // Then, press all of the three, Control+Alt+Search.
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
         ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN,
-        ui::DomKey::OS},
+        ui::DomKey::META},
        {ui::VKEY_MENU, ui::DomCode::ALT_LEFT,
         ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN,
         ui::DomKey::ALT}},
@@ -919,7 +918,7 @@ TEST_F(EventRewriterTest, TestRewriteModifiersRemapMany) {
        {ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
         ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN |
             ui::EF_COMMAND_DOWN,
-        ui::DomKey::OS},
+        ui::DomKey::META},
        {ui::VKEY_MENU, ui::DomCode::ALT_LEFT,
         ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN |
             ui::EF_COMMAND_DOWN,
@@ -963,7 +962,7 @@ TEST_F(EventRewriterTest, TestRewriteModifiersRemapToCapsLock) {
                 ui::EF_MOD3_DOWN | ui::EF_CAPS_LOCK_ON, ui::DomKey::CAPS_LOCK),
             GetRewrittenEventAsString(&rewriter, ui::ET_KEY_PRESSED,
                                       ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
-                                      ui::EF_COMMAND_DOWN, ui::DomKey::OS));
+                                      ui::EF_COMMAND_DOWN, ui::DomKey::META));
   // Confirm that the Caps Lock status is changed.
   EXPECT_TRUE(ime_keyboard.caps_lock_is_enabled_);
 
@@ -973,7 +972,7 @@ TEST_F(EventRewriterTest, TestRewriteModifiersRemapToCapsLock) {
                                       ui::DomKey::CAPS_LOCK),
             GetRewrittenEventAsString(&rewriter, ui::ET_KEY_RELEASED,
                                       ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
-                                      ui::EF_NONE, ui::DomKey::OS));
+                                      ui::EF_NONE, ui::DomKey::META));
   // Confirm that the Caps Lock status is not changed.
   EXPECT_TRUE(ime_keyboard.caps_lock_is_enabled_);
 
@@ -984,7 +983,7 @@ TEST_F(EventRewriterTest, TestRewriteModifiersRemapToCapsLock) {
             GetRewrittenEventAsString(&rewriter, ui::ET_KEY_PRESSED,
                                       ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
                                       ui::EF_COMMAND_DOWN | ui::EF_CAPS_LOCK_ON,
-                                      ui::DomKey::OS));
+                                      ui::DomKey::META));
   // Confirm that the Caps Lock status is changed.
   EXPECT_FALSE(ime_keyboard.caps_lock_is_enabled_);
 
@@ -994,7 +993,7 @@ TEST_F(EventRewriterTest, TestRewriteModifiersRemapToCapsLock) {
                                       ui::DomKey::CAPS_LOCK),
             GetRewrittenEventAsString(&rewriter, ui::ET_KEY_RELEASED,
                                       ui::VKEY_LWIN, ui::DomCode::OS_LEFT,
-                                      ui::EF_NONE, ui::DomKey::OS));
+                                      ui::EF_NONE, ui::DomKey::META));
   // Confirm that the Caps Lock status is not changed.
   EXPECT_FALSE(ime_keyboard.caps_lock_is_enabled_);
 
@@ -1563,41 +1562,41 @@ TEST_F(EventRewriterTest, TestRewriteFunctionKeys) {
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_F8, ui::DomCode::F8, ui::EF_NONE, ui::DomKey::F8},
        {ui::VKEY_VOLUME_MUTE, ui::DomCode::VOLUME_MUTE, ui::EF_NONE,
-        ui::DomKey::VOLUME_MUTE}},
+        ui::DomKey::AUDIO_VOLUME_MUTE}},
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_F8, ui::DomCode::F8, ui::EF_CONTROL_DOWN, ui::DomKey::F8},
        {ui::VKEY_VOLUME_MUTE, ui::DomCode::VOLUME_MUTE, ui::EF_CONTROL_DOWN,
-        ui::DomKey::VOLUME_MUTE}},
+        ui::DomKey::AUDIO_VOLUME_MUTE}},
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_F8, ui::DomCode::F8, ui::EF_ALT_DOWN, ui::DomKey::F8},
        {ui::VKEY_VOLUME_MUTE, ui::DomCode::VOLUME_MUTE, ui::EF_ALT_DOWN,
-        ui::DomKey::VOLUME_MUTE}},
+        ui::DomKey::AUDIO_VOLUME_MUTE}},
       // F9 -> Volume Down
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_F9, ui::DomCode::F9, ui::EF_NONE, ui::DomKey::F9},
        {ui::VKEY_VOLUME_DOWN, ui::DomCode::VOLUME_DOWN, ui::EF_NONE,
-        ui::DomKey::VOLUME_DOWN}},
+        ui::DomKey::AUDIO_VOLUME_DOWN}},
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_F9, ui::DomCode::F9, ui::EF_CONTROL_DOWN, ui::DomKey::F9},
        {ui::VKEY_VOLUME_DOWN, ui::DomCode::VOLUME_DOWN, ui::EF_CONTROL_DOWN,
-        ui::DomKey::VOLUME_DOWN}},
+        ui::DomKey::AUDIO_VOLUME_DOWN}},
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_F9, ui::DomCode::F9, ui::EF_ALT_DOWN, ui::DomKey::F9},
        {ui::VKEY_VOLUME_DOWN, ui::DomCode::VOLUME_DOWN, ui::EF_ALT_DOWN,
-        ui::DomKey::VOLUME_DOWN}},
+        ui::DomKey::AUDIO_VOLUME_DOWN}},
       // F10 -> Volume Up
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_F10, ui::DomCode::F10, ui::EF_NONE, ui::DomKey::F10},
        {ui::VKEY_VOLUME_UP, ui::DomCode::VOLUME_UP, ui::EF_NONE,
-        ui::DomKey::VOLUME_UP}},
+        ui::DomKey::AUDIO_VOLUME_UP}},
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_F10, ui::DomCode::F10, ui::EF_CONTROL_DOWN, ui::DomKey::F10},
        {ui::VKEY_VOLUME_UP, ui::DomCode::VOLUME_UP, ui::EF_CONTROL_DOWN,
-        ui::DomKey::VOLUME_UP}},
+        ui::DomKey::AUDIO_VOLUME_UP}},
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_F10, ui::DomCode::F10, ui::EF_ALT_DOWN, ui::DomKey::F10},
        {ui::VKEY_VOLUME_UP, ui::DomCode::VOLUME_UP, ui::EF_ALT_DOWN,
-        ui::DomKey::VOLUME_UP}},
+        ui::DomKey::AUDIO_VOLUME_UP}},
       // F11 -> F11
       {ui::ET_KEY_PRESSED,
        {ui::VKEY_F11, ui::DomCode::F11, ui::EF_NONE, ui::DomKey::F11},
@@ -1824,7 +1823,7 @@ TEST_F(EventRewriterTest, TestRewriteKeyEventSentByXSendEvent) {
     ui::KeyEvent keyevent(ui::ET_KEY_PRESSED, ui::VKEY_CONTROL,
                           ui::DomCode::CONTROL_LEFT, ui::EF_FINAL,
                           ui::DomKey::CONTROL, ui::EventTimeForNow());
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     // Control should NOT be remapped to Alt if EF_FINAL is set.
     EXPECT_EQ(ui::EVENT_REWRITE_CONTINUE,
               rewriter.RewriteEvent(keyevent, &new_event));
@@ -1839,7 +1838,7 @@ TEST_F(EventRewriterTest, TestRewriteKeyEventSentByXSendEvent) {
     xevent->xkey.keycode = XKeysymToKeycode(gfx::GetXDisplay(), XK_Control_L);
     xevent->xkey.send_event = True;  // XSendEvent() always does this.
     ui::KeyEvent keyevent(xev);
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     // Control should NOT be remapped to Alt if send_event
     // flag in the event is True.
     EXPECT_EQ(ui::EVENT_REWRITE_CONTINUE,
@@ -1870,7 +1869,7 @@ TEST_F(EventRewriterTest, TestRewriteNonNativeEvent) {
   ui::UpdateX11EventForFlags(&press);
 #endif
 
-  scoped_ptr<ui::Event> new_event;
+  std::unique_ptr<ui::Event> new_event;
   rewriter.RewriteEvent(press, &new_event);
   EXPECT_TRUE(new_event);
   // Control should be remapped to Alt.
@@ -1892,15 +1891,7 @@ class EventBuffer : public ui::test::TestEventProcessor {
  private:
   // ui::EventProcessor overrides:
   ui::EventDispatchDetails OnEventFromSource(ui::Event* event) override {
-    if (event->IsKeyEvent()) {
-      events_.push_back(new ui::KeyEvent(*static_cast<ui::KeyEvent*>(event)));
-    } else if (event->IsMouseWheelEvent()) {
-      events_.push_back(
-          new ui::MouseWheelEvent(*static_cast<ui::MouseWheelEvent*>(event)));
-    } else if (event->IsMouseEvent()) {
-      events_.push_back(
-          new ui::MouseEvent(*static_cast<ui::MouseEvent*>(event)));
-    }
+    events_.push_back(ui::Event::Clone(*event));
     return ui::EventDispatchDetails();
   }
 
@@ -1933,7 +1924,7 @@ class EventRewriterAshTest : public ash::test::AshTestBase {
   ~EventRewriterAshTest() override {}
 
   bool RewriteFunctionKeys(const ui::Event& event,
-                           scoped_ptr<ui::Event>* rewritten_event) {
+                           std::unique_ptr<ui::Event>* rewritten_event) {
     return rewriter_->RewriteEvent(event, rewritten_event);
   }
 
@@ -1986,7 +1977,7 @@ class EventRewriterAshTest : public ash::test::AshTestBase {
   ash::StickyKeysController* sticky_keys_controller_;
 
  private:
-  scoped_ptr<EventRewriter> rewriter_;
+  std::unique_ptr<EventRewriter> rewriter_;
 
   EventBuffer buffer_;
   TestEventSource source_;
@@ -1999,7 +1990,7 @@ class EventRewriterAshTest : public ash::test::AshTestBase {
 };
 
 TEST_F(EventRewriterAshTest, TopRowKeysAreFunctionKeys) {
-  scoped_ptr<aura::Window> window(CreateTestWindowInShellWithId(1));
+  std::unique_ptr<aura::Window> window(CreateTestWindowInShellWithId(1));
   ash::wm::WindowState* window_state = ash::wm::GetWindowState(window.get());
   window_state->Activate();
   ScopedVector<ui::Event> events;
@@ -2074,7 +2065,7 @@ TEST_F(EventRewriterTest, TestRewrittenModifierClick) {
   // Sanity check.
   EXPECT_EQ(ui::ET_MOUSE_PRESSED, press.type());
   EXPECT_EQ(ui::EF_LEFT_MOUSE_BUTTON | ui::EF_CONTROL_DOWN, press.flags());
-  scoped_ptr<ui::Event> new_event;
+  std::unique_ptr<ui::Event> new_event;
   const ui::MouseEvent* result =
       RewriteMouseButtonEvent(&rewriter, press, &new_event);
   EXPECT_TRUE(ui::EF_RIGHT_MOUSE_BUTTON & result->flags());
@@ -2109,7 +2100,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
     // Sanity check.
     EXPECT_EQ(ui::ET_MOUSE_PRESSED, press.type());
     EXPECT_EQ(kLeftAndAltFlag, press.flags());
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, press, &new_event);
     EXPECT_TRUE(ui::EF_RIGHT_MOUSE_BUTTON & result->flags());
@@ -2122,7 +2113,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
                            ui::EF_LEFT_MOUSE_BUTTON);
     ui::EventTestApi test_release(&release);
     test_release.set_source_device_id(10);
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, release, &new_event);
     EXPECT_TRUE(ui::EF_RIGHT_MOUSE_BUTTON & result->flags());
@@ -2139,7 +2130,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
     // Sanity check.
     EXPECT_EQ(ui::ET_MOUSE_PRESSED, press.type());
     EXPECT_EQ(kLeftAndAltFlag, press.flags());
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, press, &new_event);
     EXPECT_TRUE(ui::EF_RIGHT_MOUSE_BUTTON & result->flags());
@@ -2151,7 +2142,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
     xev.InitGenericButtonEvent(10, ui::ET_MOUSE_RELEASED, gfx::Point(),
                                kLeftAndAltFlag);
     ui::MouseEvent release(xev);
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, release, &new_event);
     EXPECT_TRUE(ui::EF_RIGHT_MOUSE_BUTTON & result->flags());
@@ -2167,7 +2158,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
                          ui::EF_LEFT_MOUSE_BUTTON);
     ui::EventTestApi test_press(&press);
     test_press.set_source_device_id(10);
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, press, &new_event);
     EXPECT_TRUE(ui::EF_LEFT_MOUSE_BUTTON & result->flags());
@@ -2179,7 +2170,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
                            ui::EF_LEFT_MOUSE_BUTTON);
     ui::EventTestApi test_release(&release);
     test_release.set_source_device_id(10);
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, release, &new_event);
     EXPECT_TRUE((ui::EF_LEFT_MOUSE_BUTTON | ui::EF_ALT_DOWN) & result->flags());
@@ -2192,7 +2183,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
     xev.InitGenericButtonEvent(10, ui::ET_MOUSE_PRESSED, gfx::Point(),
                                ui::EF_LEFT_MOUSE_BUTTON);
     ui::MouseEvent press(xev);
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, press, &new_event);
     EXPECT_TRUE(ui::EF_LEFT_MOUSE_BUTTON & result->flags());
@@ -2203,7 +2194,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
     xev.InitGenericButtonEvent(10, ui::ET_MOUSE_RELEASED, gfx::Point(),
                                kLeftAndAltFlag);
     ui::MouseEvent release(xev);
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, release, &new_event);
     EXPECT_TRUE((ui::EF_LEFT_MOUSE_BUTTON | ui::EF_ALT_DOWN) & result->flags());
@@ -2218,7 +2209,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
                          ui::EF_LEFT_MOUSE_BUTTON);
     ui::EventTestApi test_press(&press);
     test_press.set_source_device_id(11);
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, press, &new_event);
     EXPECT_TRUE(ui::EF_RIGHT_MOUSE_BUTTON & result->flags());
@@ -2231,7 +2222,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
                            ui::EF_LEFT_MOUSE_BUTTON);
     ui::EventTestApi test_release(&release);
     test_release.set_source_device_id(10);
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, release, &new_event);
     EXPECT_TRUE((ui::EF_LEFT_MOUSE_BUTTON | ui::EF_ALT_DOWN) & result->flags());
@@ -2243,7 +2234,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
                            ui::EF_LEFT_MOUSE_BUTTON);
     ui::EventTestApi test_release(&release);
     test_release.set_source_device_id(11);
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, release, &new_event);
     EXPECT_TRUE(ui::EF_RIGHT_MOUSE_BUTTON & result->flags());
@@ -2257,7 +2248,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
     xev.InitGenericButtonEvent(11, ui::ET_MOUSE_PRESSED, gfx::Point(),
                                kLeftAndAltFlag);
     ui::MouseEvent press(xev);
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, press, &new_event);
     EXPECT_TRUE(ui::EF_RIGHT_MOUSE_BUTTON & result->flags());
@@ -2269,7 +2260,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
     xev.InitGenericButtonEvent(10, ui::ET_MOUSE_RELEASED, gfx::Point(),
                                kLeftAndAltFlag);
     ui::MouseEvent release(xev);
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, release, &new_event);
     EXPECT_TRUE((ui::EF_LEFT_MOUSE_BUTTON | ui::EF_ALT_DOWN) & result->flags());
@@ -2280,7 +2271,7 @@ TEST_F(EventRewriterTest, DontRewriteIfNotRewritten) {
     xev.InitGenericButtonEvent(11, ui::ET_MOUSE_RELEASED, gfx::Point(),
                                kLeftAndAltFlag);
     ui::MouseEvent release(xev);
-    scoped_ptr<ui::Event> new_event;
+    std::unique_ptr<ui::Event> new_event;
     const ui::MouseEvent* result =
         RewriteMouseButtonEvent(&rewriter, release, &new_event);
     EXPECT_TRUE(ui::EF_RIGHT_MOUSE_BUTTON & result->flags());
@@ -2403,6 +2394,31 @@ TEST_F(EventRewriterAshTest, MouseWheelEventDispatchImpl) {
   EXPECT_EQ(ui::ET_KEY_RELEASED, events[1]->type());
   EXPECT_EQ(ui::VKEY_CONTROL,
             static_cast<ui::KeyEvent*>(events[1])->key_code());
+}
+
+// Tests that if modifier keys are remapped, the flags of a mouse wheel event
+// will be rewritten properly.
+TEST_F(EventRewriterAshTest, MouseWheelEventModifiersRewritten) {
+  // Remap Control to Alt.
+  IntegerPrefMember control;
+  control.Init(prefs::kLanguageRemapControlKeyTo, prefs());
+  control.SetValue(chromeos::input_method::kAltKey);
+
+  // Generate a mouse wheel event that has a CONTROL_DOWN modifier flag and
+  // expect that it will be rewritten to ALT_DOWN.
+  ScopedVector<ui::Event> events;
+  gfx::Point location(0, 0);
+  ui::MouseEvent mev(
+      ui::ET_MOUSEWHEEL, location, location, ui::EventTimeForNow(),
+      ui::EF_LEFT_MOUSE_BUTTON | ui::EF_CONTROL_DOWN, ui::EF_LEFT_MOUSE_BUTTON);
+  ui::MouseWheelEvent positive(mev, 0, ui::MouseWheelEvent::kWheelDelta);
+  ui::EventDispatchDetails details = Send(&positive);
+  ASSERT_FALSE(details.dispatcher_destroyed);
+  PopEvents(&events);
+  EXPECT_EQ(1u, events.size());
+  EXPECT_TRUE(events[0]->IsMouseWheelEvent());
+  EXPECT_FALSE(events[0]->flags() & ui::EF_CONTROL_DOWN);
+  EXPECT_TRUE(events[0]->flags() & ui::EF_ALT_DOWN);
 }
 
 class StickyKeysOverlayTest : public EventRewriterAshTest {
@@ -2546,9 +2562,9 @@ TEST_F(StickyKeysOverlayTest, ModifiersDisabled) {
   SendActivateStickyKeyPattern(ui::VKEY_LMENU, ui::DomCode::ALT_LEFT,
                                ui::DomKey::ALT);
   SendActivateStickyKeyPattern(ui::VKEY_COMMAND, ui::DomCode::OS_LEFT,
-                               ui::DomKey::OS);
+                               ui::DomKey::META);
   SendActivateStickyKeyPattern(ui::VKEY_COMMAND, ui::DomCode::OS_LEFT,
-                               ui::DomKey::OS);
+                               ui::DomKey::META);
 
   EXPECT_TRUE(overlay_->is_visible());
   EXPECT_EQ(ash::STICKY_KEY_STATE_ENABLED,
@@ -2572,7 +2588,7 @@ TEST_F(StickyKeysOverlayTest, ModifiersDisabled) {
   SendActivateStickyKeyPattern(ui::VKEY_LMENU, ui::DomCode::ALT_LEFT,
                                ui::DomKey::ALT);
   SendActivateStickyKeyPattern(ui::VKEY_COMMAND, ui::DomCode::OS_LEFT,
-                               ui::DomKey::OS);
+                               ui::DomKey::META);
 
   EXPECT_FALSE(overlay_->is_visible());
   EXPECT_EQ(ash::STICKY_KEY_STATE_DISABLED,

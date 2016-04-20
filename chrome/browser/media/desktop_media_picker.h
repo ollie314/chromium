@@ -5,9 +5,10 @@
 #ifndef CHROME_BROWSER_MEDIA_DESKTOP_MEDIA_PICKER_H_
 #define CHROME_BROWSER_MEDIA_DESKTOP_MEDIA_PICKER_H_
 
+#include <memory>
+
 #include "base/callback_forward.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "content/public/browser/desktop_media_id.h"
 #include "ui/gfx/native_widget_types.h"
@@ -26,20 +27,24 @@ class DesktopMediaPicker {
 
   // Creates default implementation of DesktopMediaPicker for the current
   // platform.
-  static scoped_ptr<DesktopMediaPicker> Create();
+  static std::unique_ptr<DesktopMediaPicker> Create();
 
   DesktopMediaPicker() {}
   virtual ~DesktopMediaPicker() {}
 
   // Shows dialog with list of desktop media sources (screens, windows, tabs)
-  // provided by |list| and calls |done_callback| when user chooses one of the
+  // provided by |screen_list|, |window_list| and |tab_list|.
+  // Dialog window will call |done_callback| when user chooses one of the
   // sources or closes the dialog.
   virtual void Show(content::WebContents* web_contents,
                     gfx::NativeWindow context,
                     gfx::NativeWindow parent,
                     const base::string16& app_name,
                     const base::string16& target_name,
-                    scoped_ptr<DesktopMediaList> list,
+                    std::unique_ptr<DesktopMediaList> screen_list,
+                    std::unique_ptr<DesktopMediaList> window_list,
+                    std::unique_ptr<DesktopMediaList> tab_list,
+                    bool request_audio,
                     const DoneCallback& done_callback) = 0;
 
  private:

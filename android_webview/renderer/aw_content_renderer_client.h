@@ -9,7 +9,7 @@
 
 #include <stddef.h>
 
-#include "android_webview/renderer/aw_render_process_observer.h"
+#include "android_webview/renderer/aw_render_thread_observer.h"
 #include "base/compiler_specific.h"
 
 namespace visitedlink {
@@ -46,13 +46,14 @@ class AwContentRendererClient : public content::ContentRendererClient {
                         blink::WebNavigationType type,
                         blink::WebNavigationPolicy default_policy,
                         bool is_redirect) override;
+  bool ShouldUseMediaPlayerForURL(const GURL& url) override;
   bool ShouldOverridePageVisibilityState(
       const content::RenderFrame* render_frame,
       blink::WebPageVisibilityState* override_state) override;
 
  private:
-  scoped_ptr<AwRenderProcessObserver> aw_render_process_observer_;
-  scoped_ptr<visitedlink::VisitedLinkSlave> visited_link_slave_;
+  std::unique_ptr<AwRenderThreadObserver> aw_render_thread_observer_;
+  std::unique_ptr<visitedlink::VisitedLinkSlave> visited_link_slave_;
   const bool disable_page_visibility_;
 };
 

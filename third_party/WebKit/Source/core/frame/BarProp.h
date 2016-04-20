@@ -32,22 +32,20 @@
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/frame/DOMWindowProperty.h"
 #include "platform/heap/Handle.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
 class LocalFrame;
 
-class BarProp final : public RefCountedWillBeGarbageCollected<BarProp>, public ScriptWrappable, public DOMWindowProperty {
+class BarProp final : public GarbageCollected<BarProp>, public ScriptWrappable, public DOMWindowProperty {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(BarProp);
+    USING_GARBAGE_COLLECTED_MIXIN(BarProp);
 public:
     enum Type { Locationbar, Menubar, Personalbar, Scrollbars, Statusbar, Toolbar };
 
-    static PassRefPtrWillBeRawPtr<BarProp> create(LocalFrame* frame, Type type)
+    static BarProp* create(LocalFrame* frame, Type type)
     {
-        return adoptRefWillBeNoop(new BarProp(frame, type));
+        return new BarProp(frame, type);
     }
 
     bool visible() const;

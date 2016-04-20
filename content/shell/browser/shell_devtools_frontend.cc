@@ -18,9 +18,9 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
-#include "content/shell/browser/blink_test_controller.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_browser_main_parts.h"
@@ -77,15 +77,18 @@ int ResponseWriter::Initialize(const net::CompletionCallback& callback) {
 int ResponseWriter::Write(net::IOBuffer* buffer,
                           int num_bytes,
                           const net::CompletionCallback& callback) {
+  std::string chunk = std::string(buffer->data(), num_bytes);
+  if (!base::IsStringUTF8(chunk))
+    return num_bytes;
+
   base::FundamentalValue* id = new base::FundamentalValue(stream_id_);
-  base::StringValue* chunk =
-      new base::StringValue(std::string(buffer->data(), num_bytes));
+  base::StringValue* chunkValue = new base::StringValue(chunk);
 
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
       base::Bind(&ShellDevToolsFrontend::CallClientFunction,
                  shell_devtools_, "DevToolsAPI.streamWrite",
-                 base::Owned(id), base::Owned(chunk), nullptr));
+                 base::Owned(id), base::Owned(chunkValue), nullptr));
   return num_bytes;
 }
 
@@ -184,7 +187,7 @@ void ShellDevToolsFrontend::HandleMessageFromDevToolsFrontend(
   std::string method;
   base::ListValue* params = NULL;
   base::DictionaryValue* dict = NULL;
-  scoped_ptr<base::Value> parsed_message = base::JSONReader::Read(message);
+  std::unique_ptr<base::Value> parsed_message = base::JSONReader::Read(message);
   if (!parsed_message ||
       !parsed_message->GetAsDictionary(&dict) ||
       !dict->GetString("method", &method)) {
@@ -225,11 +228,14 @@ void ShellDevToolsFrontend::HandleMessageFromDevToolsFrontend(
     net::URLFetcher* fetcher =
         net::URLFetcher::Create(gurl, net::URLFetcher::GET, this).release();
     pending_requests_[fetcher] = request_id;
-    fetcher->SetRequestContext(web_contents()->GetBrowserContext()->
-        GetRequestContext());
+    fetcher->SetRequestContext(
+        BrowserContext::GetDefaultStoragePartition(
+            web_contents()->GetBrowserContext())->
+                GetURLRequestContext());
     fetcher->SetExtraRequestHeaders(headers);
-    fetcher->SaveResponseWithWriter(scoped_ptr<net::URLFetcherResponseWriter>(
-        new ResponseWriter(weak_factory_.GetWeakPtr(), stream_id)));
+    fetcher->SaveResponseWithWriter(
+        std::unique_ptr<net::URLFetcherResponseWriter>(
+            new ResponseWriter(weak_factory_.GetWeakPtr(), stream_id)));
     fetcher->Start();
     return;
   } else if (method == "getPreferences") {
@@ -293,7 +299,7 @@ void ShellDevToolsFrontend::OnURLFetchComplete(const net::URLFetcher* source) {
   response.SetInteger("statusCode", rh ? rh->response_code() : 200);
   response.Set("headers", headers);
 
-  void* iterator = NULL;
+  size_t iterator = 0;
   std::string name;
   std::string value;
   while (rh && rh->EnumerateHeaderLines(&iterator, &name, &value))

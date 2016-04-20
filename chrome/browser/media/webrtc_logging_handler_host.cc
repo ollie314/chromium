@@ -12,7 +12,6 @@
 #include "base/cpu.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/time/time.h"
@@ -28,15 +27,14 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/media/webrtc_logging_messages.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/render_process_host.h"
 #include "gpu/config/gpu_info.h"
-#include "net/base/address_family.h"
-#include "net/base/ip_address_number.h"
-#include "net/base/net_util.h"
+#include "net/base/ip_address.h"
 #include "net/url_request/url_request_context_getter.h"
 
 #if defined(OS_LINUX)
@@ -54,6 +52,10 @@
 using base::IntToString;
 using content::BrowserThread;
 
+// Key used to attach the handler to the RenderProcessHost.
+const char WebRtcLoggingHandlerHost::kWebRtcLoggingHandlerHostKey[] =
+    "kWebRtcLoggingHandlerHostKey";
+
 namespace {
 
 const char kLogNotStoppedOrNoLogOpen[] =
@@ -64,12 +66,12 @@ const char kLogNotStoppedOrNoLogOpen[] =
 // octet for IPv4 and last 80 bits (5 groups) for IPv6. String will be
 // "1.2.3.x" and "1.2.3::" respectively. For debug builds, the string is
 // not stripped.
-std::string IPAddressToSensitiveString(const net::IPAddressNumber& address) {
+std::string IPAddressToSensitiveString(const net::IPAddress& address) {
 #if defined(NDEBUG)
   std::string sensitive_address;
-  switch (net::GetAddressFamily(address)) {
-    case net::ADDRESS_FAMILY_IPV4: {
-      sensitive_address = net::IPAddressToString(address);
+  switch (address.size()) {
+    case net::IPAddress::kIPv4AddressSize: {
+      sensitive_address = address.ToString();
       size_t find_pos = sensitive_address.rfind('.');
       if (find_pos == std::string::npos)
         return std::string();
@@ -77,22 +79,20 @@ std::string IPAddressToSensitiveString(const net::IPAddressNumber& address) {
       sensitive_address += ".x";
       break;
     }
-    case net::ADDRESS_FAMILY_IPV6: {
+    case net::IPAddress::kIPv6AddressSize: {
       // TODO(grunell): Create a string of format "1:2:3:x:x:x:x:x" to clarify
       // that the end has been stripped out.
-      net::IPAddressNumber sensitive_address_number = address;
-      sensitive_address_number.resize(net::kIPv6AddressSize - 10);
-      sensitive_address_number.resize(net::kIPv6AddressSize, 0);
-      sensitive_address = net::IPAddressToString(sensitive_address_number);
+      std::vector<uint8_t> bytes = address.bytes();
+      std::fill(bytes.begin() + 6, bytes.end(), 0);
+      net::IPAddress stripped_address(bytes);
+      sensitive_address = stripped_address.ToString();
       break;
     }
-    case net::ADDRESS_FAMILY_UNSPECIFIED: {
-      break;
-    }
+    default: { break; }
   }
   return sensitive_address;
 #else
-  return net::IPAddressToString(address);
+  return address.ToString();
 #endif
 }
 
@@ -105,15 +105,6 @@ void FormatMetaDataAsLogMessage(
   }
   // Remove last '\n'.
   message->resize(message->size() - 1);
-}
-
-// Returns a path name to be used as prefix for audio debug recordings files.
-base::FilePath GetAudioDebugRecordingsPrefixPath(
-    const base::FilePath& directory,
-    uint64_t audio_debug_recordings_id) {
-  static const char kAudioDebugRecordingsFilePrefix[] = "AudioDebugRecordings.";
-  return directory.AppendASCII(kAudioDebugRecordingsFilePrefix +
-                               base::Int64ToString(audio_debug_recordings_id));
 }
 
 }  // namespace
@@ -152,6 +143,7 @@ void WebRtcLogBuffer::SetComplete() {
 }
 
 WebRtcLoggingHandlerHost::WebRtcLoggingHandlerHost(
+    int render_process_id,
     Profile* profile,
     WebRtcLogUploader* log_uploader)
     : BrowserMessageFilter(WebRtcLoggingMsgStart),
@@ -159,8 +151,7 @@ WebRtcLoggingHandlerHost::WebRtcLoggingHandlerHost(
       logging_state_(CLOSED),
       upload_log_on_render_close_(false),
       log_uploader_(log_uploader),
-      is_audio_debug_recordings_in_progress_(false),
-      current_audio_debug_recordings_id_(0) {
+      render_process_id_(render_process_id) {
   DCHECK(profile_);
   DCHECK(log_uploader_);
 }
@@ -172,7 +163,7 @@ WebRtcLoggingHandlerHost::~WebRtcLoggingHandlerHost() {
 }
 
 void WebRtcLoggingHandlerHost::SetMetaData(
-    scoped_ptr<MetaDataMap> meta_data,
+    std::unique_ptr<MetaDataMap> meta_data,
     const GenericDoneCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!callback.is_null());
@@ -238,7 +229,14 @@ void WebRtcLoggingHandlerHost::StopLogging(
 
   stop_callback_ = callback;
   logging_state_ = STOPPING;
+
   Send(new WebRtcLoggingMsg_StopLogging());
+
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(
+          &WebRtcLoggingHandlerHost::DisableBrowserProcessLoggingOnUIThread,
+          this));
 }
 
 void WebRtcLoggingHandlerHost::UploadLog(const UploadDoneCallback& callback) {
@@ -342,7 +340,7 @@ void WebRtcLoggingHandlerHost::StoreLogContinue(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!callback.is_null());
 
-  scoped_ptr<WebRtcLogPaths> log_paths(new WebRtcLogPaths());
+  std::unique_ptr<WebRtcLogPaths> log_paths(new WebRtcLogPaths());
   ReleaseRtpDumps(log_paths.get());
 
   content::BrowserThread::PostTaskAndReplyWithResult(
@@ -411,10 +409,11 @@ void WebRtcLoggingHandlerHost::StopRtpDump(
   rtp_dump_handler_->StopDump(type, callback);
 }
 
-void WebRtcLoggingHandlerHost::OnRtpPacket(scoped_ptr<uint8_t[]> packet_header,
-                                           size_t header_length,
-                                           size_t packet_length,
-                                           bool incoming) {
+void WebRtcLoggingHandlerHost::OnRtpPacket(
+    std::unique_ptr<uint8_t[]> packet_header,
+    size_t header_length,
+    size_t packet_length,
+    bool incoming) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   BrowserThread::PostTask(
@@ -429,7 +428,7 @@ void WebRtcLoggingHandlerHost::OnRtpPacket(scoped_ptr<uint8_t[]> packet_header,
 }
 
 void WebRtcLoggingHandlerHost::DumpRtpPacketOnIOThread(
-    scoped_ptr<uint8_t[]> packet_header,
+    std::unique_ptr<uint8_t[]> packet_header,
     size_t header_length,
     size_t packet_length,
     bool incoming) {
@@ -441,35 +440,6 @@ void WebRtcLoggingHandlerHost::DumpRtpPacketOnIOThread(
     rtp_dump_handler_->OnRtpPacket(
         packet_header.get(), header_length, packet_length, incoming);
   }
-}
-
-void WebRtcLoggingHandlerHost::StartAudioDebugRecordings(
-    content::RenderProcessHost* host,
-    base::TimeDelta delay,
-    const AudioDebugRecordingsCallback& callback,
-    const AudioDebugRecordingsErrorCallback& error_callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  BrowserThread::PostTaskAndReplyWithResult(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&WebRtcLoggingHandlerHost::GetLogDirectoryAndEnsureExists,
-                 this),
-      base::Bind(&WebRtcLoggingHandlerHost::DoStartAudioDebugRecordings, this,
-                 host, delay, callback, error_callback));
-}
-
-void WebRtcLoggingHandlerHost::StopAudioDebugRecordings(
-    content::RenderProcessHost* host,
-    const AudioDebugRecordingsCallback& callback,
-    const AudioDebugRecordingsErrorCallback& error_callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  BrowserThread::PostTaskAndReplyWithResult(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&WebRtcLoggingHandlerHost::GetLogDirectoryAndEnsureExists,
-                 this),
-      base::Bind(&WebRtcLoggingHandlerHost::DoStopAudioDebugRecordings, this,
-                 host, true /* manual stop */,
-                 current_audio_debug_recordings_id_, callback, error_callback));
 }
 
 void WebRtcLoggingHandlerHost::OnChannelClosing() {
@@ -559,6 +529,16 @@ void WebRtcLoggingHandlerHost::LogInitialInfoOnIOThread(
     return;
   }
 
+  // Tell the renderer and the browser to enable logging. Log messages are
+  // recevied on the IO thread, so the initial info will finish to be written
+  // first.
+  Send(new WebRtcLoggingMsg_StartLogging());
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(
+          &WebRtcLoggingHandlerHost::EnableBrowserProcessLoggingOnUIThread,
+          this));
+
   // Log start time (current time). We don't use base/i18n/time_formatting.h
   // here because we don't want the format of the current locale.
   base::Time::Exploded now = {0};
@@ -636,10 +616,27 @@ void WebRtcLoggingHandlerHost::LogInitialInfoOnIOThread(
         net::NetworkChangeNotifier::ConnectionTypeToString(it->type));
   }
 
-  Send(new WebRtcLoggingMsg_StartLogging());
   logging_started_time_ = base::Time::Now();
   logging_state_ = STARTED;
   FireGenericDoneCallback(callback, true, "");
+}
+
+void WebRtcLoggingHandlerHost::EnableBrowserProcessLoggingOnUIThread() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  content::RenderProcessHost* host =
+      content::RenderProcessHost::FromID(render_process_id_);
+  if (host) {
+    host->SetWebRtcLogMessageCallback(
+        base::Bind(&WebRtcLoggingHandlerHost::LogMessage, this));
+  }
+}
+
+void WebRtcLoggingHandlerHost::DisableBrowserProcessLoggingOnUIThread() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  content::RenderProcessHost* host =
+      content::RenderProcessHost::FromID(render_process_id_);
+  if (host)
+    host->ClearWebRtcLogMessageCallback();
 }
 
 void WebRtcLoggingHandlerHost::LogToCircularBuffer(const std::string& message) {
@@ -684,7 +681,7 @@ void WebRtcLoggingHandlerHost::TriggerUpload(
 
 void WebRtcLoggingHandlerHost::StoreLogInDirectory(
     const std::string& log_id,
-    scoped_ptr<WebRtcLogPaths> log_paths,
+    std::unique_ptr<WebRtcLogPaths> log_paths,
     const GenericDoneCallback& done_callback,
     const base::FilePath& directory) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -807,70 +804,4 @@ void WebRtcLoggingHandlerHost::FireGenericDoneCallback(
       content::BrowserThread::UI,
       FROM_HERE,
       base::Bind(callback, success, error_message_with_state));
-}
-
-void WebRtcLoggingHandlerHost::DoStartAudioDebugRecordings(
-    content::RenderProcessHost* host,
-    base::TimeDelta delay,
-    const AudioDebugRecordingsCallback& callback,
-    const AudioDebugRecordingsErrorCallback& error_callback,
-    const base::FilePath& log_directory) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  if (is_audio_debug_recordings_in_progress_) {
-    error_callback.Run("Audio debug recordings already in progress");
-    return;
-  }
-
-  is_audio_debug_recordings_in_progress_ = true;
-  base::FilePath prefix_path = GetAudioDebugRecordingsPrefixPath(
-      log_directory, ++current_audio_debug_recordings_id_);
-  host->EnableAudioDebugRecordings(prefix_path);
-
-  if (delay.is_zero()) {
-    callback.Run(prefix_path.AsUTF8Unsafe(), false /* not stopped */,
-                 false /* not manually stopped */);
-    return;
-  }
-
-  BrowserThread::PostDelayedTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&WebRtcLoggingHandlerHost::DoStopAudioDebugRecordings, this,
-                 host, false /* no manual stop */,
-                 current_audio_debug_recordings_id_, callback, error_callback,
-                 prefix_path),
-      delay);
-}
-
-void WebRtcLoggingHandlerHost::DoStopAudioDebugRecordings(
-    content::RenderProcessHost* host,
-    bool is_manual_stop,
-    uint64_t audio_debug_recordings_id,
-    const AudioDebugRecordingsCallback& callback,
-    const AudioDebugRecordingsErrorCallback& error_callback,
-    const base::FilePath& log_directory) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK_LE(audio_debug_recordings_id, current_audio_debug_recordings_id_);
-
-  base::FilePath prefix_path = GetAudioDebugRecordingsPrefixPath(
-      log_directory, audio_debug_recordings_id);
-  // Prevent an old posted StopAudioDebugRecordings() call to stop a newer dump.
-  // This could happen in a sequence like:
-  //   Start(10);  //Start dump 1. Post Stop() to run after 10 seconds.
-  //   Stop();  // Manually stop dump 1 before 10 seconds;
-  //   Start(20);  // Start dump 2. Posted Stop() for 1 should not stop dump 2.
-  if (audio_debug_recordings_id < current_audio_debug_recordings_id_) {
-    callback.Run(prefix_path.AsUTF8Unsafe(), false /* not stopped */,
-                 is_manual_stop);
-    return;
-  }
-
-  if (!is_audio_debug_recordings_in_progress_) {
-    error_callback.Run("No audio debug recording in progress");
-    return;
-  }
-
-  host->DisableAudioDebugRecordings();
-  is_audio_debug_recordings_in_progress_ = false;
-  callback.Run(prefix_path.AsUTF8Unsafe(), true /* stopped */, is_manual_stop);
 }

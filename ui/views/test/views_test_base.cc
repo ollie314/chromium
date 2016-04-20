@@ -8,6 +8,8 @@
 
 #include "base/run_loop.h"
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/base/material_design/material_design_controller.h"
+#include "ui/base/test/material_design_controller_test_api.h"
 
 namespace views {
 
@@ -25,6 +27,10 @@ ViewsTestBase::~ViewsTestBase() {
 
 void ViewsTestBase::SetUp() {
   testing::Test::SetUp();
+  // ContentTestSuiteBase might have already initialized
+  // MaterialDesignController in unit_tests suite.
+  ui::test::MaterialDesignControllerTestAPI::Uninitialize();
+  ui::MaterialDesignController::Initialize();
   setup_called_ = true;
   if (!views_delegate_for_setup_)
     views_delegate_for_setup_.reset(new TestViewsDelegate());
@@ -56,8 +62,17 @@ Widget::InitParams ViewsTestBase::CreateParams(
   return params;
 }
 
+void ViewsTestBase::DisableNativeWidgetMus() {
+  ViewsDelegate::GetInstance()->set_native_widget_factory(
+      ViewsDelegate::NativeWidgetFactory());
+}
+
 gfx::NativeWindow ViewsTestBase::GetContext() {
   return test_helper_->GetContext();
+}
+
+bool ViewsTestBase::IsMus() const {
+  return test_helper_->IsMus();
 }
 
 }  // namespace views

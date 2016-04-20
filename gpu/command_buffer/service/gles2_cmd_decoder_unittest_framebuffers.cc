@@ -8,6 +8,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
@@ -572,8 +574,8 @@ void GLES2DecoderTest::CheckReadPixelsOutOfRange(GLint in_read_x,
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
 
   GLint unpadded_row_size = emu.ComputeImageDataSize(in_read_width, 1);
-  scoped_ptr<int8_t[]> zero(new int8_t[unpadded_row_size]);
-  scoped_ptr<int8_t[]> pack(new int8_t[kPackAlignment]);
+  std::unique_ptr<int8_t[]> zero(new int8_t[unpadded_row_size]);
+  std::unique_ptr<int8_t[]> pack(new int8_t[kPackAlignment]);
   memset(zero.get(), kInitialMemoryValue, unpadded_row_size);
   memset(pack.get(), kInitialMemoryValue, kPackAlignment);
   for (GLint yy = 0; yy < in_read_height; ++yy) {
@@ -848,10 +850,20 @@ TEST_P(GLES2DecoderManualInitTest, ReadPixels2RowLengthWorkaround) {
       .WillOnce(Return(GL_NO_ERROR))
       .RetiresOnSaturation();
   for (GLint ii = 0; ii < kHeight; ++ii) {
+    if (ii + 1 == kHeight) {
+      EXPECT_CALL(*gl_, PixelStorei(GL_PACK_ROW_LENGTH, kWidth))
+          .Times(1)
+          .RetiresOnSaturation();
+    }
     void* offset = reinterpret_cast<void*>(ii * kRowLength * kBytesPerPixel);
     EXPECT_CALL(*gl_, ReadPixels(0, ii, kWidth, 1, kFormat, kType, offset))
         .Times(1)
         .RetiresOnSaturation();
+    if (ii + 1 == kHeight) {
+      EXPECT_CALL(*gl_, PixelStorei(GL_PACK_ROW_LENGTH, kRowLength))
+          .Times(1)
+          .RetiresOnSaturation();
+    }
   }
 
   ReadPixels cmd;
@@ -961,12 +973,18 @@ TEST_P(GLES2DecoderManualInitTest,
   EXPECT_CALL(*gl_, PixelStorei(GL_PACK_ALIGNMENT, 1))
       .Times(1)
       .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, PixelStorei(GL_PACK_ROW_LENGTH, kWidth))
+      .Times(1)
+      .RetiresOnSaturation();
   void* offset = reinterpret_cast<void*>((kHeight - 1) * padded_row_size);
   EXPECT_CALL(*gl_,
               ReadPixels(0, kHeight - 1, kWidth, 1, kFormat, kType, offset))
       .Times(1)
       .RetiresOnSaturation();
   EXPECT_CALL(*gl_, PixelStorei(GL_PACK_ALIGNMENT, kAlignment))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, PixelStorei(GL_PACK_ROW_LENGTH, kRowLength))
       .Times(1)
       .RetiresOnSaturation();
 
@@ -2442,8 +2460,8 @@ TEST_P(GLES3DecoderTest, CopyTexImage2DInvalidInternalFormat_Float) {
   GLenum target = GL_TEXTURE_2D;
   GLint level = 0;
   GLenum internal_format = GL_RG16F;
-  GLenum format = GL_RG;
-  GLenum type = GL_HALF_FLOAT;
+  GLenum format = GL_RGBA;
+  GLenum type = GL_UNSIGNED_BYTE;
   GLsizei width = 16;
   GLsizei height = 8;
   GLint border = 0;
@@ -2456,7 +2474,7 @@ TEST_P(GLES3DecoderTest, CopyTexImage2DInvalidInternalFormat_Float) {
   DoBindTexture(GL_TEXTURE_2D, kFBOClientTextureId, kFBOServiceTextureId);
   DoTexImage2D(GL_TEXTURE_2D,
                level,
-               internal_format,
+               GL_RGBA8,
                width,
                height,
                0,
@@ -2477,6 +2495,9 @@ TEST_P(GLES3DecoderTest, CopyTexImage2DInvalidInternalFormat_Float) {
               CopyTexImage2D(
                   target, level, internal_format, 0, 0, width, height, border))
       .Times(0);
+  EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(GL_READ_FRAMEBUFFER))
+      .WillOnce(Return(GL_FRAMEBUFFER_COMPLETE))
+      .RetiresOnSaturation();
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
   CopyTexImage2D cmd;
   cmd.Init(target, level, internal_format, 0, 0, width, height);
@@ -2526,6 +2547,9 @@ TEST_P(GLES3DecoderTest, CopyTexImage2DInvalidInternalFormat_Integer) {
               CopyTexImage2D(
                   target, level, internal_format, 0, 0, width, height, border))
       .Times(0);
+  EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(GL_READ_FRAMEBUFFER))
+      .WillOnce(Return(GL_FRAMEBUFFER_COMPLETE))
+      .RetiresOnSaturation();
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
   CopyTexImage2D cmd;
   cmd.Init(target, level, internal_format, 0, 0, width, height);
@@ -2575,6 +2599,9 @@ TEST_P(GLES3DecoderTest, CopyTexImage2DInvalidInternalFormat_sRGB) {
               CopyTexImage2D(
                   target, level, internal_format, 0, 0, width, height, border))
       .Times(0);
+  EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(GL_READ_FRAMEBUFFER))
+      .WillOnce(Return(GL_FRAMEBUFFER_COMPLETE))
+      .RetiresOnSaturation();
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
   CopyTexImage2D cmd;
   cmd.Init(target, level, internal_format, 0, 0, width, height);

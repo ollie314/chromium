@@ -63,23 +63,27 @@ public class WebsitePermissionsFetcher {
         queue.add(new CookieInfoFetcher());
         // Fullscreen are stored per-origin.
         queue.add(new FullscreenInfoFetcher());
+        // Keygen permissions are per-origin.
+        queue.add(new KeygenInfoFetcher());
         // Local storage info is per-origin.
         queue.add(new LocalStorageInfoFetcher());
         // Website storage is per-host.
         queue.add(new WebStorageInfoFetcher());
         // Popup exceptions are host-based patterns (unless we start
-        // synchronizing popup exceptions with desktop Chrome.)
+        // synchronizing popup exceptions with desktop Chrome).
         queue.add(new PopupExceptionInfoFetcher());
         // JavaScript exceptions are host-based patterns.
         queue.add(new JavaScriptExceptionInfoFetcher());
         // Protected media identifier permission is per-origin and per-embedder.
         queue.add(new ProtectedMediaIdentifierInfoFetcher());
-        // Push notification permission is per-origin and per-embedder.
-        queue.add(new PushNotificationInfoFetcher());
+        // Notification permission is per-origin.
+        queue.add(new NotificationInfoFetcher());
         // Camera capture permission is per-origin and per-embedder.
         queue.add(new CameraCaptureInfoFetcher());
         // Micropohone capture permission is per-origin and per-embedder.
         queue.add(new MicrophoneCaptureInfoFetcher());
+        // Background sync permission is per-origin.
+        queue.add(new BackgroundSyncExceptionInfoFetcher());
         queue.add(new PermissionsAvailableCallbackRunner());
         queue.next();
     }
@@ -125,8 +129,11 @@ public class WebsitePermissionsFetcher {
             // JavaScript exceptions are host-based patterns.
             queue.add(new JavaScriptExceptionInfoFetcher());
         } else if (category.showNotificationsSites()) {
-            // Push notification permission is per-origin and per-embedder.
-            queue.add(new PushNotificationInfoFetcher());
+            // Push notification permission is per-origin.
+            queue.add(new NotificationInfoFetcher());
+        } else if (category.showBackgroundSyncSites()) {
+            // Background sync info is per-origin.
+            queue.add(new BackgroundSyncExceptionInfoFetcher());
         } else if (category.showProtectedMediaSites()) {
             // Protected media identifier permission is per-origin and per-embedder.
             queue.add(new ProtectedMediaIdentifierInfoFetcher());
@@ -248,6 +255,17 @@ public class WebsitePermissionsFetcher {
         }
     }
 
+    private class KeygenInfoFetcher extends Task {
+        @Override
+        public void run() {
+            for (KeygenInfo info : WebsitePreferenceBridge.getKeygenInfo()) {
+                WebsiteAddress address = WebsiteAddress.create(info.getOrigin());
+                if (address == null) continue;
+                createSiteByOriginAndHost(address).setKeygenInfo(info);
+            }
+        }
+    }
+
     private class CookieInfoFetcher extends Task {
         @Override
         public void run() {
@@ -332,13 +350,13 @@ public class WebsitePermissionsFetcher {
         }
     }
 
-    private class PushNotificationInfoFetcher extends Task {
+    private class NotificationInfoFetcher extends Task {
         @Override
         public void run() {
-            for (PushNotificationInfo info : WebsitePreferenceBridge.getPushNotificationInfo()) {
+            for (NotificationInfo info : WebsitePreferenceBridge.getNotificationInfo()) {
                 WebsiteAddress address = WebsiteAddress.create(info.getOrigin());
                 if (address == null) continue;
-                createSiteByOriginAndHost(address).setPushNotificationInfo(info);
+                createSiteByOriginAndHost(address).setNotificationInfo(info);
             }
         }
     }
@@ -361,6 +379,24 @@ public class WebsitePermissionsFetcher {
                 WebsiteAddress address = WebsiteAddress.create(info.getOrigin());
                 if (address == null) continue;
                 createSiteByOriginAndHost(address).setMicrophoneInfo(info);
+            }
+        }
+    }
+
+    private class BackgroundSyncExceptionInfoFetcher extends Task {
+        @Override
+        public void run() {
+            for (ContentSettingException exception :
+                    WebsitePreferenceBridge.getContentSettingsExceptions(
+                            ContentSettingsType.CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC)) {
+                // The pattern "*" represents the default setting, not a specific website.
+                if (exception.getPattern().equals("*")) continue;
+                WebsiteAddress address = WebsiteAddress.create(exception.getPattern());
+                if (address == null) continue;
+                Set<Website> sites = findOrCreateSitesByHost(address);
+                for (Website site : sites) {
+                    site.setBackgroundSyncException(exception);
+                }
             }
         }
     }

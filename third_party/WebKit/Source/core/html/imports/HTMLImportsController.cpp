@@ -48,9 +48,9 @@ const char* HTMLImportsController::supplementName()
 
 void HTMLImportsController::provideTo(Document& master)
 {
-    OwnPtrWillBeRawPtr<HTMLImportsController> controller = adoptPtrWillBeNoop(new HTMLImportsController(master));
-    master.setImportsController(controller.get());
-    WillBeHeapSupplement<Document>::provideTo(master, supplementName(), controller.release());
+    HTMLImportsController* controller = new HTMLImportsController(master);
+    master.setImportsController(controller);
+    Supplement<Document>::provideTo(master, supplementName(), controller);
 }
 
 void HTMLImportsController::removeFrom(Document& master)
@@ -58,7 +58,7 @@ void HTMLImportsController::removeFrom(Document& master)
     HTMLImportsController* controller = master.importsController();
     ASSERT(controller);
     controller->dispose();
-    static_cast<WillBeHeapSupplementable<Document>&>(master).removeSupplement(supplementName());
+    static_cast<Supplementable<Document>&>(master).removeSupplement(supplementName());
     master.setImportsController(nullptr);
 }
 
@@ -70,10 +70,6 @@ HTMLImportsController::HTMLImportsController(Document& master)
 
 HTMLImportsController::~HTMLImportsController()
 {
-#if !ENABLE(OILPAN)
-    // Verify that dispose() has been called.
-    ASSERT(!m_root);
-#endif
 }
 
 void HTMLImportsController::dispose()
@@ -104,11 +100,11 @@ HTMLImportChild* HTMLImportsController::createChild(const KURL& url, HTMLImportL
     if (mode == HTMLImport::Async)
         UseCounter::count(root()->document(), UseCounter::HTMLImportsAsyncAttribute);
 
-    OwnPtrWillBeRawPtr<HTMLImportChild> child = adoptPtrWillBeNoop(new HTMLImportChild(url, loader, mode));
+    HTMLImportChild* child = new HTMLImportChild(url, loader, mode);
     child->setClient(client);
-    parent->appendImport(child.get());
-    loader->addImport(child.get());
-    return root()->add(child.release());
+    parent->appendImport(child);
+    loader->addImport(child);
+    return root()->add(child);
 }
 
 HTMLImportChild* HTMLImportsController::load(HTMLImport* parent, HTMLImportChildClient* client, FetchRequest request)
@@ -124,8 +120,8 @@ HTMLImportChild* HTMLImportsController::load(HTMLImport* parent, HTMLImportChild
         return child;
     }
 
-    request.setCrossOriginAccessControl(master()->securityOrigin(), CrossOriginAttributeAnonymous);
-    ResourcePtr<RawResource> resource = RawResource::fetchImport(request, parent->document()->fetcher());
+    request.setCrossOriginAccessControl(master()->getSecurityOrigin(), CrossOriginAttributeAnonymous);
+    RawResource* resource = RawResource::fetchImport(request, parent->document()->fetcher());
     if (!resource)
         return nullptr;
 
@@ -176,7 +172,7 @@ DEFINE_TRACE(HTMLImportsController)
 {
     visitor->trace(m_root);
     visitor->trace(m_loaders);
-    WillBeHeapSupplement<Document>::trace(visitor);
+    Supplement<Document>::trace(visitor);
 }
 
 } // namespace blink

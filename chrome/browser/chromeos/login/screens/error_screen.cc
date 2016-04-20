@@ -11,12 +11,13 @@
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/certificate_manager_dialog.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/login/auth/chrome_login_performer.h"
 #include "chrome/browser/chromeos/login/chrome_restart_request.h"
 #include "chrome/browser/chromeos/login/screens/network_error_view.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/ui/captive_portal_window_proxy.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -58,9 +59,6 @@ ErrorScreen::ErrorScreen(BaseScreenDelegate* base_screen_delegate,
                          NetworkErrorView* view)
     : NetworkErrorModel(base_screen_delegate),
       view_(view),
-      ui_state_(NetworkError::UI_STATE_UNKNOWN),
-      error_state_(NetworkError::ERROR_STATE_UNKNOWN),
-      parent_screen_(OobeUI::SCREEN_UNKNOWN),
       weak_factory_(this) {
   network_state_informer_ = new NetworkStateInformer();
   network_state_informer_->Init();
@@ -146,9 +144,8 @@ void ErrorScreen::AllowOfflineLogin(bool allowed) {
 
 void ErrorScreen::FixCaptivePortal() {
   if (!captive_portal_window_proxy_.get()) {
-    content::WebContents* web_contents = LoginDisplayHostImpl::default_host()
-                                             ->GetWebUILoginView()
-                                             ->GetWebContents();
+    content::WebContents* web_contents =
+        LoginDisplayHost::default_host()->GetWebUILoginView()->GetWebContents();
     captive_portal_window_proxy_.reset(new CaptivePortalWindowProxy(
         network_state_informer_.get(), web_contents));
   }
@@ -163,7 +160,7 @@ NetworkError::ErrorState ErrorScreen::GetErrorState() const {
   return error_state_;
 }
 
-OobeUI::Screen ErrorScreen::GetParentScreen() const {
+OobeScreen ErrorScreen::GetParentScreen() const {
   return parent_screen_;
 }
 
@@ -191,7 +188,7 @@ void ErrorScreen::SetErrorState(NetworkError::ErrorState error_state,
       .SetString(kContextKeyErrorStateNetwork, network);
 }
 
-void ErrorScreen::SetParentScreen(OobeUI::Screen parent_screen) {
+void ErrorScreen::SetParentScreen(OobeScreen parent_screen) {
   parent_screen_ = parent_screen;
   // Not really used on JS side yet so no need to propagate to screen context.
 }
@@ -245,14 +242,18 @@ void ErrorScreen::PolicyLoadFailed() {
   LOG(FATAL);
 }
 
+void ErrorScreen::SetAuthFlowOffline(bool offline) {
+  LOG(FATAL);
+}
+
 ErrorScreen::ConnectRequestCallbackSubscription
 ErrorScreen::RegisterConnectRequestCallback(const base::Closure& callback) {
   return connect_request_callbacks_.Add(callback);
 }
 
 void ErrorScreen::DefaultHideCallback() {
-  if (parent_screen_ != OobeUI::SCREEN_UNKNOWN && view_)
-    view_->ShowScreen(parent_screen_);
+  if (parent_screen_ != OobeScreen::SCREEN_UNKNOWN && view_)
+    view_->ShowOobeScreen(parent_screen_);
 
   // TODO(antrim): Due to potential race with GAIA reload and hiding network
   // error UI we can't just reset parent screen to SCREEN_UNKNOWN here.
@@ -260,7 +261,7 @@ void ErrorScreen::DefaultHideCallback() {
 
 void ErrorScreen::OnConfigureCerts() {
   gfx::NativeWindow native_window =
-      LoginDisplayHostImpl::default_host()->GetNativeWindow();
+      LoginDisplayHost::default_host()->GetNativeWindow();
   CertificateManagerDialog* dialog = new CertificateManagerDialog(
       GetAppProfile(), NULL, native_window);
   dialog->Show();
@@ -284,7 +285,7 @@ void ErrorScreen::OnDiagnoseButtonClicked() {
 
   user_manager::UserManager::Get()->SessionStarted();
 
-  LoginDisplayHostImpl::default_host()->Finalize();
+  LoginDisplayHost::default_host()->Finalize();
 }
 
 void ErrorScreen::OnLaunchOobeGuestSession() {

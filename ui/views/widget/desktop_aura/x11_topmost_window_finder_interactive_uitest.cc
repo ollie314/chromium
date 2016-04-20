@@ -4,11 +4,13 @@
 
 #include "ui/views/widget/desktop_aura/x11_topmost_window_finder.h"
 
-#include <stddef.h>
-#include <X11/extensions/shape.h>
 #include <X11/Xlib.h>
 #include <X11/Xregion.h>
+#include <X11/extensions/shape.h>
+#include <stddef.h>
+
 #include <algorithm>
+#include <memory>
 #include <vector>
 
 // Get rid of X11 macros which conflict with gtest.
@@ -16,7 +18,6 @@
 #undef None
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "third_party/skia/include/core/SkRegion.h"
@@ -55,16 +56,14 @@ class MinimizeWaiter : public X11PropertyChangeWaiter {
   bool ShouldKeepOnWaiting(const ui::PlatformEvent& event) override {
     std::vector<Atom> wm_states;
     if (ui::GetAtomArrayProperty(xwindow(), "_NET_WM_STATE", &wm_states)) {
-      std::vector<Atom>::iterator it = std::find(
-          wm_states.begin(),
-          wm_states.end(),
-          atom_cache_->GetAtom("_NET_WM_STATE_HIDDEN"));
-      return it == wm_states.end();
+      auto it = std::find(wm_states.cbegin(), wm_states.cend(),
+                          atom_cache_->GetAtom("_NET_WM_STATE_HIDDEN"));
+      return it == wm_states.cend();
     }
     return true;
   }
 
-  scoped_ptr<ui::X11AtomCache> atom_cache_;
+  std::unique_ptr<ui::X11AtomCache> atom_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(MinimizeWaiter);
 };
@@ -97,9 +96,8 @@ class StackingClientListWaiter : public X11PropertyChangeWaiter {
     std::vector<XID> stack;
     ui::GetXWindowStack(ui::GetX11RootWindow(), &stack);
     for (size_t i = 0; i < expected_windows_.size(); ++i) {
-      std::vector<XID>::iterator it = std::find(
-          stack.begin(), stack.end(), expected_windows_[i]);
-      if (it == stack.end())
+      auto it = std::find(stack.cbegin(), stack.cend(), expected_windows_[i]);
+      if (it == stack.cend())
         return true;
     }
     return false;
@@ -121,8 +119,8 @@ class X11TopmostWindowFinderTest : public ViewsTestBase {
 
   // Creates and shows a Widget with |bounds|. The caller takes ownership of
   // the returned widget.
-  scoped_ptr<Widget> CreateAndShowWidget(const gfx::Rect& bounds) {
-    scoped_ptr<Widget> toplevel(new Widget);
+  std::unique_ptr<Widget> CreateAndShowWidget(const gfx::Rect& bounds) {
+    std::unique_ptr<Widget> toplevel(new Widget);
     Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
     params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
     params.native_widget = new DesktopNativeWidgetAura(toplevel.get());
@@ -229,14 +227,14 @@ TEST_F(X11TopmostWindowFinderTest, Basic) {
   // Avoid positioning test windows at 0x0 because window managers often have a
   // panel/launcher along one of the screen edges and do not allow windows to
   // position themselves to overlap the panel/launcher.
-  scoped_ptr<Widget> widget1(
+  std::unique_ptr<Widget> widget1(
       CreateAndShowWidget(gfx::Rect(100, 100, 200, 100)));
   aura::Window* window1 = widget1->GetNativeWindow();
   XID xid1 = window1->GetHost()->GetAcceleratedWidget();
 
   XID xid2 = CreateAndShowXWindow(gfx::Rect(200, 100, 100, 200));
 
-  scoped_ptr<Widget> widget3(
+  std::unique_ptr<Widget> widget3(
       CreateAndShowWidget(gfx::Rect(100, 190, 200, 110)));
   aura::Window* window3 = widget3->GetNativeWindow();
   XID xid3 = window3->GetHost()->GetAcceleratedWidget();
@@ -280,7 +278,7 @@ TEST_F(X11TopmostWindowFinderTest, Basic) {
 
 // Test that the minimized state is properly handled.
 TEST_F(X11TopmostWindowFinderTest, Minimized) {
-  scoped_ptr<Widget> widget1(
+  std::unique_ptr<Widget> widget1(
       CreateAndShowWidget(gfx::Rect(100, 100, 100, 100)));
   aura::Window* window1 = widget1->GetNativeWindow();
   XID xid1 = window1->GetHost()->GetAcceleratedWidget();
@@ -319,7 +317,7 @@ TEST_F(X11TopmostWindowFinderTest, NonRectangular) {
   if (!ui::IsShapeExtensionAvailable())
     return;
 
-  scoped_ptr<Widget> widget1(
+  std::unique_ptr<Widget> widget1(
       CreateAndShowWidget(gfx::Rect(100, 100, 100, 100)));
   XID xid1 = widget1->GetNativeWindow()->GetHost()->GetAcceleratedWidget();
   SkRegion* skregion1 = new SkRegion;
@@ -359,7 +357,7 @@ TEST_F(X11TopmostWindowFinderTest, NonRectangularEmptyShape) {
   if (!ui::IsShapeExtensionAvailable())
     return;
 
-  scoped_ptr<Widget> widget1(
+  std::unique_ptr<Widget> widget1(
       CreateAndShowWidget(gfx::Rect(100, 100, 100, 100)));
   XID xid1 = widget1->GetNativeWindow()->GetHost()->GetAcceleratedWidget();
   SkRegion* skregion1 = new SkRegion;
@@ -380,7 +378,7 @@ TEST_F(X11TopmostWindowFinderTest, NonRectangularNullShape) {
   if (!ui::IsShapeExtensionAvailable())
     return;
 
-  scoped_ptr<Widget> widget1(
+  std::unique_ptr<Widget> widget1(
       CreateAndShowWidget(gfx::Rect(100, 100, 100, 100)));
   XID xid1 = widget1->GetNativeWindow()->GetHost()->GetAcceleratedWidget();
   SkRegion* skregion1 = new SkRegion;

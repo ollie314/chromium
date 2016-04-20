@@ -8,6 +8,9 @@ bear-320x240-audio-only.webm - The audio track of bear-320x240.webm.
 bear-vp9.webm - VP9 video only WebM file.
 bear-vp9-opus.webm - VP9 Video with Opus Audio.
 bear-vp8-webvtt.webm - WebM VP8 video with WebVTT subtitle track.
+bear-1280x720_avt_subt_frag.mp4 - Fragmented bear_1280x720.mp4 with text track
+                                  containing srt from bear-vp8-webvtt.webm as
+                                  a 'subt' handler type.
 bear-vp8a.webm - WebM VP8 video with alpha channel.
 bear-vp8a-odd-dimensions.webm - WebM VP8 video with alpha channel and odd dimensions.
 bear-opus.webm - Opus Audio only WebM file.
@@ -43,6 +46,9 @@ vorbis-packet-1  - timestamp: 0ms, duration: 0ms
 vorbis-packet-2  - timestamp: 0ms, duration: 0ms
 vorbis-packet-3  - timestamp: 2902ms, duration: 0ms
 
+// 10-bit test file(s)
+bear-320x180-hi10p.mp4
+
 // Encrypted Files
 bear-1280x720-a_frag-cenc.mp4 - A fragmented MP4 version of the audio track of bear-1280x720.mp4 encrypted (ISO CENC) using key ID [1] and key [2].
 bear-1280x720-a_frag-cenc-key_rotation.mp4 - A fragmented MP4 version of the audio track of bear-1280x720.mp4 encrypted (ISO CENC) using key ID [1] and key [2] with key rotation [3].
@@ -51,6 +57,10 @@ bear-1280x720-v_frag-cenc.mp4 - A fragmented MP4 version of the video track of b
 bear-1280x720-v_frag-cenc-key_rotation.mp4 - A fragmented MP4 version of the video track of bear-1280x720.mp4 encrypted (ISO CENC) using key ID [1] and key [2] with key rotation [3].
 bear-1280x720-v_frag-cenc_clear-all.mp4 - Same as bear-1280x720-v_frag-cenc.mp4 but no fragments are encrypted.
 bear-1280x720-a_frag-cenc_missing-saiz-saio.mp4 - An invalid file similar to bear-1280x720-a_frag-cenc.mp4 but has no saiz and saio boxes. To save space, it has only one encrypted sample.
+bear-320x240-v_frag-vp9.mp4 - Bear video with VP9 codec in MP4 container. Generated with edash-packager (https://github.com/google/edash-packager):
+                              packager in=bear-vp9.webm,stream=video,out=bear-320x240-v_frag-vp9.mp4
+bear-320x240-v_frag-vp9-cenc.mp4 - Same as above, with video encrypted using key ID [1] and key [2]. Generated with edash-packager (https://github.com/google/edash-packager):
+                                   packager in=bear-vp9.webm,stream=video,out=bear-320x240-v_frag-vp9.mp4 --enable_fixed_key_encryption --key_id 30313233343536373839303132333435 --key ebdd62f16814d27b68ef122afce4ae3c
 bear-320x240-16x9-aspect-av_enc-av.webm - bear-320x240-16x9-aspect.webm with audio & video encrypted using key ID [1] and key [2]
 bear-320x240-av_enc-av.webm - bear-320x240.webm with audio & video encrypted using key ID [1] and key [2].
 bear-320x240-av_enc-av_clear-1s.webm - Same as bear-320x240-av_enc-av.webm but with no frames in the first second encrypted.
@@ -65,7 +75,8 @@ bear-320x240-opus-av_enc-av.webm - bear-vp9-opus.webm with audio & video encrypt
 bear-320x240-opus-av_enc-v.webm - bear-vp9-opus.webm with video track encrypted using key ID [1] and key[2].
 bear-640x360-a_frag-cenc.mp4 - A fragmented MP4 version of the audio track of bear-640x360.mp4 encrypted (ISO CENC) using key ID [1] and key [2].
 bear-640x360-a_frag-cenc-key_rotation.mp4 - A fragmented MP4 version of the audio track of bear-640x360.mp4 encrypted (ISO CENC) using key ID [1] and key [2] with key rotation [3].
-bear-640x360-v_frag-cenc.mp4 - A fragmented MP4 version of the video track of bear-640x360.mp4 encrypted (ISO CENC) using key ID [1] and key [2].
+bear-640x360-v_frag-cenc.mp4 - A fragmented MP4 version of the video track of bear-640x360.mp4 encrypted (ISO CENC) using key ID [1] and key [2]  and with sample encryption auxiliary information in the beginning of mdat box.
+bear-640x360-v_frag-cenc-senc.mp4 - Same as above, but with sample encryption information stored in SampleEncryption ('senc') box.
 bear-640x360-v_frag-cenc-key_rotation.mp4 - A fragmented MP4 version of the video track of bear-640x360.mp4 encrypted (ISO CENC) using key ID [1] and key [2] with key rotation [3].
 bear-a_enc-a.webm - bear-320x240-audio-only.webm encrypted using key ID [1] and key [2].
 frame_size_change-av_enc-v.webm - third_party/WebKit/LayoutTests/media/resources/frame_size_change.webm encrypted using key ID [1] and key [2].

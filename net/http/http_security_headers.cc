@@ -5,10 +5,10 @@
 #include <limits>
 
 #include "base/base64.h"
-#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
+#include "net/base/parse_number.h"
 #include "net/http/http_security_headers.h"
 #include "net/http/http_util.h"
 #include "url/gurl.h"
@@ -19,36 +19,28 @@ namespace {
 
 enum MaxAgeParsing { REQUIRE_MAX_AGE, DO_NOT_REQUIRE_MAX_AGE };
 
-static_assert(kMaxHSTSAgeSecs <= UINT32_MAX, "kMaxHSTSAgeSecs too large");
-
-// MaxAgeToInt converts a string representation of a "whole number" of
+// MaxAgeToLimitedInt converts a string representation of a "whole number" of
 // seconds into a uint32_t. The string may contain an arbitrarily large number,
-// which will be clipped to kMaxHSTSAgeSecs and which is guaranteed to fit
+// which will be clipped to a supplied limit and which is guaranteed to fit
 // within a 32-bit unsigned integer. False is returned on any parse error.
-bool MaxAgeToInt(std::string::const_iterator begin,
-                 std::string::const_iterator end,
-                 uint32_t* result) {
+bool MaxAgeToLimitedInt(std::string::const_iterator begin,
+                        std::string::const_iterator end,
+                        uint32_t limit,
+                        uint32_t* result) {
   const base::StringPiece s(begin, end);
-  if (s.empty())
-    return false;
 
-  int64_t i = 0;
+  ParseIntError error;
+  if (!ParseUint32(s, result, &error)) {
+    if (error == ParseIntError::FAILED_OVERFLOW) {
+      *result = limit;
+    } else {
+      return false;
+    }
+  }
 
-  // Return false on any StringToInt64 parse errors *except* for int64_t
-  // overflow. StringToInt64 is used, rather than StringToUint64, in order to
-  // properly handle and reject negative numbers (StringToUint64 does not return
-  // false on negative numbers). For values too large to be stored in an
-  // int64_t, StringToInt64 will return false with i set to
-  // std::numeric_limits<int64_t>::max(), so this case is detected by the
-  // immediately following if-statement and allowed to fall through so that i
-  // gets clipped to kMaxHSTSAgeSecs.
-  if (!base::StringToInt64(s, &i) && i != std::numeric_limits<int64_t>::max())
-    return false;
-  if (i < 0)
-    return false;
-  if (i > kMaxHSTSAgeSecs)
-    i = kMaxHSTSAgeSecs;
-  *result = (uint32_t)i;
+  if (*result > limit)
+    *result = limit;
+
   return true;
 }
 
@@ -143,8 +135,9 @@ bool ParseHPKPHeaderImpl(const std::string& value,
             base::StringPiece(name_value_pairs.name_begin(),
                               name_value_pairs.name_end()),
             "max-age")) {
-      if (!MaxAgeToInt(name_value_pairs.value_begin(),
-                       name_value_pairs.value_end(), &max_age_candidate)) {
+      if (!MaxAgeToLimitedInt(name_value_pairs.value_begin(),
+                              name_value_pairs.value_end(), kMaxHPKPAgeSecs,
+                              &max_age_candidate)) {
         return false;
       }
       parsed_max_age = true;
@@ -280,7 +273,8 @@ bool ParseHSTSHeader(const std::string& value,
         if (base::IsAsciiWhitespace(*tokenizer.token_begin()))
           continue;
         unquoted = HttpUtil::Unquote(tokenizer.token());
-        if (!MaxAgeToInt(unquoted.begin(), unquoted.end(), &max_age_candidate))
+        if (!MaxAgeToLimitedInt(unquoted.begin(), unquoted.end(),
+                                kMaxHSTSAgeSecs, &max_age_candidate))
           return false;
         state = AFTER_MAX_AGE;
         break;
@@ -304,7 +298,7 @@ bool ParseHSTSHeader(const std::string& value,
     }
   }
 
-  // We've consumed all the input.  Let's see what state we ended up in.
+  // We've consumed all the input. Let's see what state we ended up in.
   if (max_age_observed != 1 ||
       (include_subdomains_observed != 0 && include_subdomains_observed != 1)) {
     return false;

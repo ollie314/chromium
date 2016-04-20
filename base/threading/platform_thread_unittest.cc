@@ -14,6 +14,7 @@
 #if defined(OS_POSIX)
 #include <sys/types.h>
 #include <unistd.h>
+#include "base/threading/platform_thread_internal_posix.h"
 #elif defined(OS_WIN)
 #include <windows.h>
 #endif
@@ -217,7 +218,8 @@ bool IsBumpingPriorityAllowed() {
 
 class ThreadPriorityTestThread : public FunctionTestThread {
  public:
-  ThreadPriorityTestThread() = default;
+  explicit ThreadPriorityTestThread(ThreadPriority priority)
+      : priority_(priority) {}
   ~ThreadPriorityTestThread() override = default;
 
  private:
@@ -226,50 +228,108 @@ class ThreadPriorityTestThread : public FunctionTestThread {
     EXPECT_EQ(ThreadPriority::NORMAL,
               PlatformThread::GetCurrentThreadPriority());
 
-    // Toggle each supported priority on the current thread and confirm it
-    // affects it.
-    const bool bumping_priority_allowed = IsBumpingPriorityAllowed();
-    for (size_t i = 0; i < arraysize(kThreadPriorityTestValues); ++i) {
-      SCOPED_TRACE(i);
-      if (!bumping_priority_allowed &&
-          kThreadPriorityTestValues[i] >
-              PlatformThread::GetCurrentThreadPriority()) {
-        continue;
-      }
-
-      // Alter and verify the current thread's priority.
-      PlatformThread::SetCurrentThreadPriority(kThreadPriorityTestValues[i]);
-      EXPECT_EQ(kThreadPriorityTestValues[i],
-                PlatformThread::GetCurrentThreadPriority());
-    }
+    // Alter and verify the current thread's priority.
+    PlatformThread::SetCurrentThreadPriority(priority_);
+    EXPECT_EQ(priority_, PlatformThread::GetCurrentThreadPriority());
   }
+
+  const ThreadPriority priority_;
 
   DISALLOW_COPY_AND_ASSIGN(ThreadPriorityTestThread);
 };
 
 }  // namespace
 
-#if defined(OS_MACOSX)
-// PlatformThread::GetCurrentThreadPriority() is not implemented on OS X.
-#define MAYBE_ThreadPriorityCurrentThread DISABLED_ThreadPriorityCurrentThread
-#else
-#define MAYBE_ThreadPriorityCurrentThread ThreadPriorityCurrentThread
-#endif
-
 // Test changing a created thread's priority (which has different semantics on
 // some platforms).
-TEST(PlatformThreadTest, MAYBE_ThreadPriorityCurrentThread) {
-  ThreadPriorityTestThread thread;
-  PlatformThreadHandle handle;
+TEST(PlatformThreadTest, ThreadPriorityCurrentThread) {
+  const bool bumping_priority_allowed = IsBumpingPriorityAllowed();
+  if (bumping_priority_allowed) {
+    // Bump the priority in order to verify that new threads are started with
+    // normal priority.
+    PlatformThread::SetCurrentThreadPriority(ThreadPriority::DISPLAY);
+  }
 
-  ASSERT_FALSE(thread.IsRunning());
-  ASSERT_TRUE(PlatformThread::Create(0, &thread, &handle));
-  thread.WaitForTerminationReady();
-  ASSERT_TRUE(thread.IsRunning());
+  // Toggle each supported priority on the thread and confirm it affects it.
+  for (size_t i = 0; i < arraysize(kThreadPriorityTestValues); ++i) {
+    if (!bumping_priority_allowed &&
+        kThreadPriorityTestValues[i] >
+            PlatformThread::GetCurrentThreadPriority()) {
+      continue;
+    }
 
-  thread.MarkForTermination();
-  PlatformThread::Join(handle);
-  ASSERT_FALSE(thread.IsRunning());
+    ThreadPriorityTestThread thread(kThreadPriorityTestValues[i]);
+    PlatformThreadHandle handle;
+
+    ASSERT_FALSE(thread.IsRunning());
+    ASSERT_TRUE(PlatformThread::Create(0, &thread, &handle));
+    thread.WaitForTerminationReady();
+    ASSERT_TRUE(thread.IsRunning());
+
+    thread.MarkForTermination();
+    PlatformThread::Join(handle);
+    ASSERT_FALSE(thread.IsRunning());
+  }
 }
+
+// Test for a function defined in platform_thread_internal_posix.cc. On OSX and
+// iOS, platform_thread_internal_posix.cc is not compiled, so these platforms
+// are excluded here, too.
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS)
+TEST(PlatformThreadTest, GetNiceValueToThreadPriority) {
+  using internal::NiceValueToThreadPriority;
+  using internal::kThreadPriorityToNiceValueMap;
+
+  EXPECT_EQ(ThreadPriority::BACKGROUND,
+            kThreadPriorityToNiceValueMap[0].priority);
+  EXPECT_EQ(ThreadPriority::NORMAL,
+            kThreadPriorityToNiceValueMap[1].priority);
+  EXPECT_EQ(ThreadPriority::DISPLAY,
+            kThreadPriorityToNiceValueMap[2].priority);
+  EXPECT_EQ(ThreadPriority::REALTIME_AUDIO,
+            kThreadPriorityToNiceValueMap[3].priority);
+
+  static const int kBackgroundNiceValue =
+      kThreadPriorityToNiceValueMap[0].nice_value;
+  static const int kNormalNiceValue =
+      kThreadPriorityToNiceValueMap[1].nice_value;
+  static const int kDisplayNiceValue =
+      kThreadPriorityToNiceValueMap[2].nice_value;
+  static const int kRealtimeAudioNiceValue =
+      kThreadPriorityToNiceValueMap[3].nice_value;
+
+  // The tests below assume the nice values specified in the map are within
+  // the range below (both ends exclusive).
+  static const int kHighestNiceValue = 19;
+  static const int kLowestNiceValue = -20;
+
+  EXPECT_GT(kHighestNiceValue, kBackgroundNiceValue);
+  EXPECT_GT(kBackgroundNiceValue, kNormalNiceValue);
+  EXPECT_GT(kNormalNiceValue, kDisplayNiceValue);
+  EXPECT_GT(kDisplayNiceValue, kRealtimeAudioNiceValue);
+  EXPECT_GT(kRealtimeAudioNiceValue, kLowestNiceValue);
+
+  EXPECT_EQ(ThreadPriority::BACKGROUND,
+            NiceValueToThreadPriority(kHighestNiceValue));
+  EXPECT_EQ(ThreadPriority::BACKGROUND,
+            NiceValueToThreadPriority(kBackgroundNiceValue + 1));
+  EXPECT_EQ(ThreadPriority::BACKGROUND,
+            NiceValueToThreadPriority(kBackgroundNiceValue));
+  EXPECT_EQ(ThreadPriority::BACKGROUND,
+            NiceValueToThreadPriority(kNormalNiceValue + 1));
+  EXPECT_EQ(ThreadPriority::NORMAL,
+            NiceValueToThreadPriority(kNormalNiceValue));
+  EXPECT_EQ(ThreadPriority::NORMAL,
+            NiceValueToThreadPriority(kDisplayNiceValue + 1));
+  EXPECT_EQ(ThreadPriority::DISPLAY,
+            NiceValueToThreadPriority(kDisplayNiceValue));
+  EXPECT_EQ(ThreadPriority::DISPLAY,
+            NiceValueToThreadPriority(kRealtimeAudioNiceValue + 1));
+  EXPECT_EQ(ThreadPriority::REALTIME_AUDIO,
+            NiceValueToThreadPriority(kRealtimeAudioNiceValue));
+  EXPECT_EQ(ThreadPriority::REALTIME_AUDIO,
+            NiceValueToThreadPriority(kLowestNiceValue));
+}
+#endif
 
 }  // namespace base

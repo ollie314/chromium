@@ -46,10 +46,9 @@ class AppShimMenuControllerUITest : public extensions::PlatformAppBrowserTest {
     // windows activate, because the test binary has a default activation policy
     // of "prohibited".
     app1_ = GetFirstAppWindow();
-    app2_ = CreateAppWindow(extension);
+    app2_ = CreateAppWindow(browser()->profile(), extension);
     browser1_ = browser()->window();
-    browser2_ = (new Browser(Browser::CreateParams(
-                     profile(), chrome::HOST_DESKTOP_TYPE_NATIVE)))->window();
+    browser2_ = (new Browser(Browser::CreateParams(profile())))->window();
     browser2_->Show();
 
     // Since a pending key status change on any window could cause the test to

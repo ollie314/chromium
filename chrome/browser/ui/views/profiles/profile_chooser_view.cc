@@ -5,13 +5,12 @@
 #include "chrome/browser/ui/views/profiles/profile_chooser_view.h"
 
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
-#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profile_window.h"
@@ -28,7 +27,7 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/user_manager.h"
-#include "chrome/browser/ui/views/profiles/signin_view_controller.h"
+#include "chrome/browser/ui/views/profiles/signin_view_controller_delegate_views.h"
 #include "chrome/browser/ui/views/profiles/user_manager_view.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
@@ -36,12 +35,14 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -221,7 +222,7 @@ class HostView : public views::View {
 
   // The title itself and the overlaped widget that contains it.
   views::View* title_view_ = nullptr;  // Not owned.
-  scoped_ptr<views::Widget> title_widget_;
+  std::unique_ptr<views::Widget> title_widget_;
 
   DISALLOW_COPY_AND_ASSIGN(HostView);
 };
@@ -388,18 +389,24 @@ class EditableProfileName : public views::View,
   EditableProfileName(views::TextfieldController* controller,
                       const base::string16& text,
                       bool is_editing_allowed)
-      : button_(new RightAlignedIconLabelButton(this, text)),
-        profile_name_textfield_(new views::Textfield()) {
+      : button_(nullptr), label_(nullptr), profile_name_textfield_(nullptr) {
+    SetLayoutManager(
+        new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0));
+
     ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
     const gfx::FontList& medium_font_list =
         rb->GetFontList(ui::ResourceBundle::MediumFont);
-    button_->SetFontList(medium_font_list);
 
     if (!is_editing_allowed) {
-      button_->SetBorder(views::Border::CreateEmptyBorder(2, 0, 2, 0));
+      label_ = new views::Label(text);
+      label_->SetBorder(views::Border::CreateEmptyBorder(2, 0, 2, 0));
+      label_->SetFontList(medium_font_list);
+      AddChildView(label_);
       return;
     }
 
+    button_ = new RightAlignedIconLabelButton(this, text);
+    button_->SetFontList(medium_font_list);
     // Show an "edit" pencil icon when hovering over. In the default state,
     // we need to create an empty placeholder of the correct size, so that
     // the text doesn't jump around when the hovered icon appears.
@@ -421,16 +428,14 @@ class EditableProfileName : public views::View,
     const int kIconTextLabelButtonSpacing = 5;
     button_->SetBorder(views::Border::CreateEmptyBorder(
         2, kIconSize + kIconTextLabelButtonSpacing, 2, 0));
+    AddChildView(button_);
 
+    profile_name_textfield_ = new views::Textfield();
     // Textfield that overlaps the button.
     profile_name_textfield_->set_controller(controller);
     profile_name_textfield_->SetFontList(medium_font_list);
     profile_name_textfield_->SetHorizontalAlignment(gfx::ALIGN_CENTER);
     profile_name_textfield_->SetVisible(false);
-
-    SetLayoutManager(
-        new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0));
-    AddChildView(button_);
     AddChildView(profile_name_textfield_);
   }
 
@@ -464,7 +469,14 @@ class EditableProfileName : public views::View,
     return false;
   }
 
+  // The label button which shows the profile name, and can handle the event to
+  // make it editable. Can be NULL if the profile name isn't allowed to be
+  // edited.
   RightAlignedIconLabelButton* button_;
+
+  // The label which shows when the profile name cannot be edited (e.g. for
+  // supervised user). Can be NULL if the profile name is allowed to be edited.
+  views::Label* label_;
 
   // Textfield that is shown when editing the profile name. Can be NULL if
   // the profile name isn't allowed to be edited (e.g. for guest profiles).
@@ -610,8 +622,6 @@ void ProfileChooserView::ShowBubble(
     const signin::ManageAccountsParams& manage_accounts_params,
     signin_metrics::AccessPoint access_point,
     views::View* anchor_view,
-    views::BubbleBorder::Arrow arrow,
-    views::BubbleBorder::BubbleAlignment border_alignment,
     Browser* browser) {
   // Don't start creating the view if it would be an empty fast user switcher.
   // It has to happen here to prevent the view system from creating an empty
@@ -629,14 +639,14 @@ void ProfileChooserView::ShowBubble(
     return;
   }
 
-  profile_bubble_ = new ProfileChooserView(
-      anchor_view, arrow, browser, view_mode, tutorial_mode,
-      manage_accounts_params.service_type, access_point);
-  views::BubbleDelegateView::CreateBubble(profile_bubble_);
-  profile_bubble_->set_close_on_deactivate(close_on_deactivate_for_testing_);
-  profile_bubble_->SetAlignment(border_alignment);
-  profile_bubble_->GetWidget()->Show();
+  profile_bubble_ =
+      new ProfileChooserView(anchor_view, browser, view_mode, tutorial_mode,
+                             manage_accounts_params.service_type, access_point);
+  views::Widget* widget =
+      views::BubbleDialogDelegateView::CreateBubble(profile_bubble_);
+  profile_bubble_->SetAlignment(views::BubbleBorder::ALIGN_EDGE_TO_ANCHOR_EDGE);
   profile_bubble_->SetArrowPaintType(views::BubbleBorder::PAINT_NONE);
+  widget->Show();
 }
 
 // static
@@ -651,33 +661,21 @@ void ProfileChooserView::Hide() {
 }
 
 ProfileChooserView::ProfileChooserView(views::View* anchor_view,
-                                       views::BubbleBorder::Arrow arrow,
                                        Browser* browser,
                                        profiles::BubbleViewMode view_mode,
                                        profiles::TutorialMode tutorial_mode,
                                        signin::GAIAServiceType service_type,
                                        signin_metrics::AccessPoint access_point)
-    : BubbleDelegateView(anchor_view, arrow),
+    : BubbleDialogDelegateView(anchor_view, views::BubbleBorder::TOP_RIGHT),
       browser_(browser),
       view_mode_(view_mode),
       tutorial_mode_(tutorial_mode),
       gaia_service_type_(service_type),
       access_point_(access_point) {
-  // Reset the default margins inherited from the BubbleDelegateView.
-  // Add a small bottom inset so that the bubble's rounded corners show up.
-  set_margins(gfx::Insets(0, 0, 1, 0));
+  // The sign in webview will be clipped on the bottom corners without these
+  // margins, see related bug <http://crbug.com/593203>.
+  set_margins(gfx::Insets(0, 0, 2, 0));
   ResetView();
-
-  avatar_menu_.reset(new AvatarMenu(
-      &g_browser_process->profile_manager()->GetProfileInfoCache(),
-      this,
-      browser_));
-  avatar_menu_->RebuildMenu();
-
-  ProfileOAuth2TokenService* oauth2_token_service =
-      ProfileOAuth2TokenServiceFactory::GetForProfile(browser_->profile());
-  if (oauth2_token_service)
-    oauth2_token_service->AddObserver(this);
 }
 
 ProfileChooserView::~ProfileChooserView() {
@@ -715,6 +713,18 @@ void ProfileChooserView::ResetView() {
 }
 
 void ProfileChooserView::Init() {
+  set_close_on_deactivate(close_on_deactivate_for_testing_);
+
+  avatar_menu_.reset(new AvatarMenu(
+      &g_browser_process->profile_manager()->GetProfileAttributesStorage(),
+      this, browser_));
+  avatar_menu_->RebuildMenu();
+
+  ProfileOAuth2TokenService* oauth2_token_service =
+      ProfileOAuth2TokenServiceFactory::GetForProfile(browser_->profile());
+  if (oauth2_token_service)
+    oauth2_token_service->AddObserver(this);
+
   // If view mode is PROFILE_CHOOSER but there is an auth error, force
   // ACCOUNT_MANAGEMENT mode.
   if (IsProfileChooser(view_mode_) &&
@@ -734,7 +744,7 @@ void ProfileChooserView::Init() {
 
 void ProfileChooserView::OnNativeThemeChanged(
     const ui::NativeTheme* native_theme) {
-  views::BubbleDelegateView::OnNativeThemeChanged(native_theme);
+  views::BubbleDialogDelegateView::OnNativeThemeChanged(native_theme);
   set_background(views::Background::CreateSolidBackground(
       GetNativeTheme()->GetSystemColor(
           ui::NativeTheme::kColorId_DialogBackground)));
@@ -844,17 +854,7 @@ void ProfileChooserView::ShowView(profiles::BubbleViewMode view_to_display,
 
 void ProfileChooserView::ShowViewFromMode(profiles::BubbleViewMode mode) {
   if (SigninViewController::ShouldShowModalSigninForMode(mode)) {
-    BrowserWindow::AvatarBubbleMode converted_mode =
-        BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT;
-    if (mode == profiles::BUBBLE_VIEW_MODE_GAIA_SIGNIN) {
-      converted_mode = BrowserWindow::AVATAR_BUBBLE_MODE_SIGNIN;
-    } else if (mode == profiles::BUBBLE_VIEW_MODE_GAIA_ADD_ACCOUNT) {
-      converted_mode = BrowserWindow::AVATAR_BUBBLE_MODE_ADD_ACCOUNT;
-    } else if (mode == profiles::BUBBLE_VIEW_MODE_GAIA_REAUTH) {
-      converted_mode = BrowserWindow::AVATAR_BUBBLE_MODE_REAUTH;
-    }
-
-    browser_->window()->ShowModalSigninWindow(converted_mode, access_point_);
+    browser_->ShowModalSigninWindow(mode, access_point_);
   } else {
     ShowView(mode, avatar_menu_.get());
   }
@@ -866,7 +866,7 @@ void ProfileChooserView::WindowClosing() {
 
   if (tutorial_mode_ == profiles::TUTORIAL_MODE_CONFIRM_SIGNIN) {
     LoginUIServiceFactory::GetForProfile(browser_->profile())->
-        SyncConfirmationUIClosed(false /* configure_sync_first */);
+        SyncConfirmationUIClosed(LoginUIService::SYNC_WITH_DEFAULT_SETTINGS);
   }
 }
 
@@ -874,7 +874,8 @@ bool ProfileChooserView::AcceleratorPressed(
     const ui::Accelerator& accelerator) {
   if (accelerator.key_code() != ui::VKEY_DOWN &&
       accelerator.key_code() != ui::VKEY_UP)
-    return BubbleDelegateView::AcceleratorPressed(accelerator);
+    return BubbleDialogDelegateView::AcceleratorPressed(accelerator);
+
   // Move the focus up or down.
   GetFocusManager()->AdvanceFocus(accelerator.key_code() != ui::VKEY_DOWN);
   return true;
@@ -882,6 +883,10 @@ bool ProfileChooserView::AcceleratorPressed(
 
 views::View* ProfileChooserView::GetInitiallyFocusedView() {
   return signin_current_profile_link_;
+}
+
+int ProfileChooserView::GetDialogButtons() const {
+  return ui::DIALOG_BUTTON_NONE;
 }
 
 bool ProfileChooserView::HandleContextMenu(
@@ -914,7 +919,7 @@ void ProfileChooserView::ButtonPressed(views::Button* sender,
     ShowViewFromMode(profiles::BUBBLE_VIEW_MODE_GAIA_REAUTH);
   } else if (sender == tutorial_sync_settings_ok_button_) {
     LoginUIServiceFactory::GetForProfile(browser_->profile())->
-        SyncConfirmationUIClosed(false /* configure_sync_first */);
+        SyncConfirmationUIClosed(LoginUIService::SYNC_WITH_DEFAULT_SETTINGS);
     DismissTutorial();
     ProfileMetrics::LogProfileNewAvatarMenuSignin(
         ProfileMetrics::PROFILE_AVATAR_MENU_SIGNIN_OK);
@@ -1015,7 +1020,7 @@ void ProfileChooserView::LinkClicked(views::Link* sender, int event_flags) {
     PostActionPerformed(ProfileMetrics::PROFILE_DESKTOP_MENU_ADD_ACCT);
   } else if (sender == tutorial_sync_settings_link_) {
     LoginUIServiceFactory::GetForProfile(browser_->profile())->
-        SyncConfirmationUIClosed(true /* configure_sync_first */);
+        SyncConfirmationUIClosed(LoginUIService::CONFIGURE_SYNC_FIRST);
     tutorial_mode_ = profiles::TUTORIAL_MODE_NONE;
     ProfileMetrics::LogProfileNewAvatarMenuSignin(
         ProfileMetrics::PROFILE_AVATAR_MENU_SIGNIN_SETTINGS);
@@ -1430,6 +1435,8 @@ views::View* ProfileChooserView::CreateCurrentProfileView(
                                   views::kRelatedControlVerticalSpacing);
       layout->StartRow(1, 0);
       layout->AddView(signin_current_profile_link_);
+      content::RecordAction(
+          base::UserMetricsAction("Signin_Impression_FromAvatarBubbleSignin"));
     }
   }
 
@@ -1440,7 +1447,7 @@ views::View* ProfileChooserView::CreateGuestProfileView() {
   gfx::Image guest_icon =
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           profiles::GetPlaceholderAvatarIconResourceID());
-  AvatarMenu::Item guest_avatar_item(0, 0, guest_icon);
+  AvatarMenu::Item guest_avatar_item(0, base::FilePath(), guest_icon);
   guest_avatar_item.active = true;
   guest_avatar_item.name = l10n_util::GetStringUTF16(
       IDS_PROFILES_GUEST_PROFILE_NAME);
@@ -1647,8 +1654,9 @@ void ProfileChooserView::CreateAccountButton(views::GridLayout* layout,
 
 views::View* ProfileChooserView::CreateGaiaSigninView(
     views::View** signin_content_view) {
-  views::WebView* web_view = SigninViewController::CreateGaiaWebView(
-      this, view_mode_, browser_->profile(), access_point_);
+  views::WebView* web_view =
+      SigninViewControllerDelegateViews::CreateGaiaWebView(
+          this, view_mode_, browser_->profile(), access_point_);
 
   int message_id;
   switch (view_mode_) {

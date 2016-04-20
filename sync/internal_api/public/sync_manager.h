@@ -7,13 +7,13 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/task_runner.h"
 #include "base/threading/thread_checker.h"
@@ -29,8 +29,8 @@
 #include "sync/internal_api/public/events/protocol_event.h"
 #include "sync/internal_api/public/http_post_provider_factory.h"
 #include "sync/internal_api/public/internal_components_factory.h"
+#include "sync/internal_api/public/model_type_connector.h"
 #include "sync/internal_api/public/shutdown_reason.h"
-#include "sync/internal_api/public/sync_context_proxy.h"
 #include "sync/internal_api/public/sync_encryption_handler.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/protocol/sync_protocol_error.h"
@@ -66,6 +66,7 @@ class SyncSessionSnapshot;
 // Contains everything needed to talk to and identify a user account.
 struct SYNC_EXPORT SyncCredentials {
   SyncCredentials();
+  SyncCredentials(const SyncCredentials& other);
   ~SyncCredentials();
 
   // Account_id of signed in account.
@@ -230,7 +231,7 @@ class SYNC_EXPORT SyncManager {
     GURL service_url;
 
     // Used to communicate with the sync server.
-    scoped_ptr<HttpPostProviderFactory> post_factory;
+    std::unique_ptr<HttpPostProviderFactory> post_factory;
 
     std::vector<scoped_refptr<ModelSafeWorker> > workers;
 
@@ -250,7 +251,7 @@ class SYNC_EXPORT SyncManager {
     std::string restored_key_for_bootstrapping;
     std::string restored_keystore_key_for_bootstrapping;
 
-    scoped_ptr<InternalComponentsFactory> internal_components_factory;
+    std::unique_ptr<InternalComponentsFactory> internal_components_factory;
 
     // Must outlive SyncManager.
     Encryptor* encryptor;
@@ -265,7 +266,7 @@ class SYNC_EXPORT SyncManager {
     CancelationSignal* cancelation_signal;
 
     // Optional nigori state to be restored.
-    scoped_ptr<SyncEncryptionHandler::NigoriState> saved_nigori_state;
+    std::unique_ptr<SyncEncryptionHandler::NigoriState> saved_nigori_state;
 
     // Whether sync should clear server data when transitioning to passphrase
     // encryption.
@@ -280,7 +281,7 @@ class SYNC_EXPORT SyncManager {
   // Initialize the sync manager using arguments from |args|.
   //
   // Note, args is passed by non-const pointer because it contains objects like
-  // scoped_ptr.
+  // unique_ptr.
   virtual void Init(InitArgs* args) = 0;
 
   virtual ModelTypeSet InitialSyncEndedTypes() = 0;
@@ -332,7 +333,7 @@ class SYNC_EXPORT SyncManager {
   // Inform the syncer that its cached information about a type is obsolete.
   virtual void OnIncomingInvalidation(
       syncer::ModelType type,
-      scoped_ptr<syncer::InvalidationInterface> invalidation) = 0;
+      std::unique_ptr<syncer::InvalidationInterface> invalidation) = 0;
 
   // Adds a listener to be notified of sync events.
   // NOTE: It is OK (in fact, it's probably a good idea) to call this before
@@ -358,7 +359,8 @@ class SYNC_EXPORT SyncManager {
   virtual UserShare* GetUserShare() = 0;
 
   // Returns an instance of the main interface for non-blocking sync types.
-  virtual syncer_v2::SyncContextProxy* GetSyncContextProxy() = 0;
+  virtual std::unique_ptr<syncer_v2::ModelTypeConnector>
+  GetModelTypeConnectorProxy() = 0;
 
   // Returns the cache_guid of the currently open database.
   // Requires that the SyncManager be initialized.
@@ -376,7 +378,7 @@ class SYNC_EXPORT SyncManager {
   // Returns the SyncManager's encryption handler.
   virtual SyncEncryptionHandler* GetEncryptionHandler() = 0;
 
-  virtual scoped_ptr<base::ListValue> GetAllNodesForType(
+  virtual std::unique_ptr<base::ListValue> GetAllNodesForType(
       syncer::ModelType type) = 0;
 
   // Ask the SyncManager to fetch updates for the given types.
@@ -403,6 +405,11 @@ class SYNC_EXPORT SyncManager {
   // server. The operation will automatically be retried with backoff until it
   // completes successfully or sync is shutdown.
   virtual void ClearServerData(const ClearServerDataCallback& callback) = 0;
+
+  // Updates Sync's tracking of whether the cookie jar has a mismatch with the
+  // chrome account. See ClientConfigParams proto message for more info.
+  // Note: this does not trigger a sync cycle. It just updates the sync context.
+  virtual void OnCookieJarChanged(bool account_mismatch) = 0;
 };
 
 }  // namespace syncer

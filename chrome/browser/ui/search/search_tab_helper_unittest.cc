@@ -6,10 +6,11 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
+#include <tuple>
 
 #include "base/command_line.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -36,6 +37,7 @@
 #include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/omnibox/common/omnibox_focus_state.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
@@ -60,7 +62,7 @@ class MockSearchIPCRouterDelegate : public SearchIPCRouter::Delegate {
 
   MOCK_METHOD1(OnInstantSupportDetermined, void(bool supports_instant));
   MOCK_METHOD1(FocusOmnibox, void(OmniboxFocusState state));
-  MOCK_METHOD3(NavigateToURL, void(const GURL&, WindowOpenDisposition, bool));
+  MOCK_METHOD2(NavigateToURL, void(const GURL&, WindowOpenDisposition));
   MOCK_METHOD1(OnDeleteMostVisitedItem, void(const GURL& url));
   MOCK_METHOD1(OnUndoMostVisitedDeletion, void(const GURL& url));
   MOCK_METHOD0(OnUndoAllMostVisitedDeletions, void());
@@ -151,11 +153,10 @@ TEST_F(SearchTabHelperTest, DetermineIfPageSupportsInstant_NonLocal) {
   search_tab_helper->DetermineIfPageSupportsInstant();
   ASSERT_TRUE(MessageWasSent(ChromeViewMsg_DetermineIfPageSupportsInstant::ID));
 
-  scoped_ptr<IPC::Message> response(
+  std::unique_ptr<IPC::Message> response(
       new ChromeViewHostMsg_InstantSupportDetermined(
           web_contents()->GetRoutingID(),
-          search_tab_helper->ipc_router().page_seq_no_for_testing(),
-          true));
+          search_tab_helper->ipc_router().page_seq_no_for_testing(), true));
   search_tab_helper->ipc_router().OnMessageReceived(*response);
 }
 
@@ -192,8 +193,8 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMatch) {
 
   ChromeViewMsg_ChromeIdentityCheckResult::Param params;
   ChromeViewMsg_ChromeIdentityCheckResult::Read(message, &params);
-  EXPECT_EQ(test_identity, base::get<0>(params));
-  ASSERT_TRUE(base::get<1>(params));
+  EXPECT_EQ(test_identity, std::get<0>(params));
+  ASSERT_TRUE(std::get<1>(params));
 }
 
 TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMatchSlightlyDifferentGmail) {
@@ -215,8 +216,8 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMatchSlightlyDifferentGmail) {
 
   ChromeViewMsg_ChromeIdentityCheckResult::Param params;
   ChromeViewMsg_ChromeIdentityCheckResult::Read(message, &params);
-  EXPECT_EQ(test_identity, base::get<0>(params));
-  ASSERT_TRUE(base::get<1>(params));
+  EXPECT_EQ(test_identity, std::get<0>(params));
+  ASSERT_TRUE(std::get<1>(params));
 }
 
 TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMatchSlightlyDifferentGmail2) {
@@ -239,8 +240,8 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMatchSlightlyDifferentGmail2) {
 
   ChromeViewMsg_ChromeIdentityCheckResult::Param params;
   ChromeViewMsg_ChromeIdentityCheckResult::Read(message, &params);
-  EXPECT_EQ(test_identity, base::get<0>(params));
-  ASSERT_TRUE(base::get<1>(params));
+  EXPECT_EQ(test_identity, std::get<0>(params));
+  ASSERT_TRUE(std::get<1>(params));
 }
 
 TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMismatch) {
@@ -259,8 +260,8 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMismatch) {
 
   ChromeViewMsg_ChromeIdentityCheckResult::Param params;
   ChromeViewMsg_ChromeIdentityCheckResult::Read(message, &params);
-  EXPECT_EQ(test_identity, base::get<0>(params));
-  ASSERT_FALSE(base::get<1>(params));
+  EXPECT_EQ(test_identity, std::get<0>(params));
+  ASSERT_FALSE(std::get<1>(params));
 }
 
 TEST_F(SearchTabHelperTest, OnChromeIdentityCheckSignedOutMismatch) {
@@ -279,8 +280,8 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckSignedOutMismatch) {
 
   ChromeViewMsg_ChromeIdentityCheckResult::Param params;
   ChromeViewMsg_ChromeIdentityCheckResult::Read(message, &params);
-  EXPECT_EQ(test_identity, base::get<0>(params));
-  ASSERT_FALSE(base::get<1>(params));
+  EXPECT_EQ(test_identity, std::get<0>(params));
+  ASSERT_FALSE(std::get<1>(params));
 }
 
 TEST_F(SearchTabHelperTest, OnHistorySyncCheckSyncing) {
@@ -298,7 +299,7 @@ TEST_F(SearchTabHelperTest, OnHistorySyncCheckSyncing) {
 
   ChromeViewMsg_HistorySyncCheckResult::Param params;
   ChromeViewMsg_HistorySyncCheckResult::Read(message, &params);
-  ASSERT_TRUE(base::get<0>(params));
+  ASSERT_TRUE(std::get<0>(params));
 }
 
 TEST_F(SearchTabHelperTest, OnHistorySyncCheckNotSyncing) {
@@ -316,7 +317,7 @@ TEST_F(SearchTabHelperTest, OnHistorySyncCheckNotSyncing) {
 
   ChromeViewMsg_HistorySyncCheckResult::Param params;
   ChromeViewMsg_HistorySyncCheckResult::Read(message, &params);
-  ASSERT_FALSE(base::get<0>(params));
+  ASSERT_FALSE(std::get<0>(params));
 }
 
 TEST_F(SearchTabHelperTest, OnMostVisitedItemsChangedFromServer) {

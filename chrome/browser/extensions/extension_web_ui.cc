@@ -10,8 +10,6 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
@@ -25,6 +23,8 @@
 #include "components/favicon/core/favicon_service.h"
 #include "components/favicon_base/favicon_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -66,7 +66,8 @@ void InitializeOverridesList(base::ListValue* list) {
   base::ListValue migrated;
   std::set<std::string> seen_entries;
   for (base::Value* val : *list) {
-    scoped_ptr<base::DictionaryValue> new_dict(new base::DictionaryValue());
+    std::unique_ptr<base::DictionaryValue> new_dict(
+        new base::DictionaryValue());
     std::string entry_name;
     base::DictionaryValue* existing_dict = nullptr;
     if (val->GetAsDictionary(&existing_dict)) {
@@ -108,7 +109,7 @@ void AddOverridesToList(base::ListValue* list,
     }
   }
 
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString(kEntry, override);
   dict->SetBoolean(kActive, true);
   // Add the entry to the front of the list.
@@ -127,7 +128,8 @@ void ValidateOverridesList(const extensions::ExtensionSet* all_extensions,
       NOTREACHED();
       continue;
     }
-    scoped_ptr<base::DictionaryValue> new_dict(new base::DictionaryValue());
+    std::unique_ptr<base::DictionaryValue> new_dict(
+        new base::DictionaryValue());
     new_dict->Swap(dict);
     GURL override_url(entry);
     if (!override_url.is_valid())
@@ -448,21 +450,25 @@ bool ExtensionWebUI::HandleChromeURLOverrideReverse(
   // internal URL
   // chrome-extension://eemcgdkfndhakfknompkggombfjjjeno/main.html#1 to
   // chrome://bookmarks/#1 for display in the omnibox.
-  for (base::DictionaryValue::Iterator it(*overrides); !it.IsAtEnd();
-       it.Advance()) {
-    const base::ListValue* url_list = NULL;
-    if (!it.value().GetAsList(&url_list))
+  for (base::DictionaryValue::Iterator dict_iter(*overrides);
+       !dict_iter.IsAtEnd(); dict_iter.Advance()) {
+    const base::ListValue* url_list = nullptr;
+    if (!dict_iter.value().GetAsList(&url_list))
       continue;
 
-    for (base::ListValue::const_iterator it2 = url_list->begin();
-         it2 != url_list->end(); ++it2) {
+    for (base::ListValue::const_iterator list_iter = url_list->begin();
+         list_iter != url_list->end(); ++list_iter) {
+      const base::DictionaryValue* dict = nullptr;
+      if (!(*list_iter)->GetAsDictionary(&dict))
+        continue;
       std::string override;
-      if (!(*it2)->GetAsString(&override))
+      if (!dict->GetString(kEntry, &override))
         continue;
       if (base::StartsWith(url->spec(), override,
                            base::CompareCase::SENSITIVE)) {
         GURL original_url(content::kChromeUIScheme + std::string("://") +
-                          it.key() + url->spec().substr(override.length()));
+                          dict_iter.key() +
+                          url->spec().substr(override.length()));
         *url = original_url;
         return true;
       }
@@ -479,9 +485,9 @@ void ExtensionWebUI::InitializeChromeURLOverrides(Profile* profile) {
 
 // static
 void ExtensionWebUI::ValidateChromeURLOverrides(Profile* profile) {
-  scoped_ptr<extensions::ExtensionSet> all_extensions =
-      extensions::ExtensionRegistry::Get(profile)->
-          GenerateInstalledExtensionsSet();
+  std::unique_ptr<extensions::ExtensionSet> all_extensions =
+      extensions::ExtensionRegistry::Get(profile)
+          ->GenerateInstalledExtensionsSet();
 
   ForEachOverrideList(profile,
                       base::Bind(&ValidateOverridesList, all_extensions.get()));

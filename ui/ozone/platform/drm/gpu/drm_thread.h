@@ -7,8 +7,9 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
 #include "ui/gfx/native_widget_types.h"
@@ -58,7 +59,14 @@ class DrmThread : public base::Thread {
                     gfx::BufferFormat format,
                     gfx::BufferUsage usage,
                     scoped_refptr<GbmBuffer>* buffer);
+  void CreateBufferFromFD(const gfx::Size& size,
+                          gfx::BufferFormat format,
+                          base::ScopedFD fd,
+                          int stride,
+                          scoped_refptr<GbmBuffer>* buffer);
 
+  void GetScanoutFormats(gfx::AcceleratedWidget widget,
+                         std::vector<gfx::BufferFormat>* scanout_formats);
   void SchedulePageFlip(gfx::AcceleratedWidget widget,
                         const std::vector<OverlayPlane>& planes,
                         const SwapCompletionCallback& callback);
@@ -102,16 +110,19 @@ class DrmThread : public base::Thread {
   void SetHDCPState(int64_t display_id,
                     HDCPState state,
                     const base::Callback<void(int64_t, bool)>& callback);
-  void SetGammaRamp(int64_t id, const std::vector<GammaRampRGBEntry>& lut);
+  void SetColorCorrection(int64_t display_id,
+                          const std::vector<GammaRampRGBEntry>& degamma_lut,
+                          const std::vector<GammaRampRGBEntry>& gamma_lut,
+                          const std::vector<float>& correction_matrix);
 
   // base::Thread:
   void Init() override;
 
  private:
-  scoped_ptr<DrmDeviceManager> device_manager_;
-  scoped_ptr<ScanoutBufferGenerator> buffer_generator_;
-  scoped_ptr<ScreenManager> screen_manager_;
-  scoped_ptr<DrmGpuDisplayManager> display_manager_;
+  std::unique_ptr<DrmDeviceManager> device_manager_;
+  std::unique_ptr<ScanoutBufferGenerator> buffer_generator_;
+  std::unique_ptr<ScreenManager> screen_manager_;
+  std::unique_ptr<DrmGpuDisplayManager> display_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(DrmThread);
 };

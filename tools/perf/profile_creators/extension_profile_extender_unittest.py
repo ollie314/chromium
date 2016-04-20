@@ -17,13 +17,19 @@ class ExtensionProfileExtenderUnitTest(page_test_test_case.PageTestTestCase):
 
      Creates an extension profile and verifies that it has non-empty contents.
   """
-  @decorators.Enabled('mac')  # Extension generation only works on Mac for now.
+  # Should be enabled on mac, disabled because flaky: https://crbug.com/586362.
+  @decorators.Disabled('all')  # Extension generation only works on Mac for now.
   def testExtensionProfileCreation(self):
     tmp_dir = tempfile.mkdtemp()
     files_in_crx_dir = 0
     try:
       options = options_for_unittests.GetCopy()
-      options.output_profile_path = tmp_dir
+      # TODO(eakuefner): Remove this after crrev.com/1874473006 rolls in.
+      try:
+        getattr(options, 'output_profile_path')
+        options.output_profile_path = tmp_dir
+      except AttributeError:
+        options.browser_options.output_profile_path = tmp_dir
       extender = extension_profile_extender.ExtensionProfileExtender(options)
       extender.Run()
 

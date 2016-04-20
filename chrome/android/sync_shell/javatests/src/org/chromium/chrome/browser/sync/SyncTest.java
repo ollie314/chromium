@@ -11,7 +11,9 @@ import android.test.suitebuilder.annotation.LargeTest;
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.FlakyTest;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.signin.AccountIdProvider;
 import org.chromium.chrome.browser.signin.AccountTrackerService;
@@ -61,8 +63,12 @@ public class SyncTest extends SyncTestBase {
         SyncTestUtil.verifySyncIsActiveForAccount(mContext, account);
     }
 
-    @LargeTest
-    @Feature({"Sync"})
+    /*
+     * @FlakyTest
+     * @LargeTest
+     * @Feature({"Sync"})
+     */
+    @DisabledTest(message = "crbug.com/588050,crbug.com/595893")
     public void testRename() throws InterruptedException {
         // The two accounts object that would represent the account rename.
         final Account oldAccount = setUpTestAccountAndSignInToSync();
@@ -76,7 +82,8 @@ public class SyncTest extends SyncTestBase {
                 // real account rename events instead of the mocks.
                 MockChangeEventChecker eventChecker = new MockChangeEventChecker();
                 eventChecker.insertRenameEvent(oldAccount.name, newAccount.name);
-                SigninHelper.updateAccountRenameData(mContext, eventChecker);
+                SigninHelper.get(mContext).resetAccountRenameEventIndex();
+                SigninHelper.get(mContext).updateAccountRenameData(eventChecker);
 
                 // Tell the fake content resolver that a rename had happen and copy over the sync
                 // settings. This would normally be done by the SystemSyncContentResolver.
@@ -86,8 +93,9 @@ public class SyncTest extends SyncTestBase {
                 // Inform the AccountTracker, these would normally be done by account validation
                 // or signin. We will only be calling the testing versions of it.
                 AccountIdProvider provider = AccountIdProvider.getInstance();
-                String[] accountNames = {newAccount.name};
-                String[] accountIds = {provider.getAccountId(mContext, accountNames[0])};
+                String[] accountNames = {oldAccount.name, newAccount.name};
+                String[] accountIds = {provider.getAccountId(mContext, accountNames[0]),
+                                       provider.getAccountId(mContext, accountNames[1])};
                 AccountTrackerService.get(mContext).syncForceRefreshForTest(
                         accountIds, accountNames);
 
@@ -97,7 +105,7 @@ public class SyncTest extends SyncTestBase {
             }
         });
 
-        CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 return newAccount.equals(ChromeSigninController.get(mContext).getSignedInUser());
@@ -118,8 +126,11 @@ public class SyncTest extends SyncTestBase {
         SyncTestUtil.verifySyncIsActiveForAccount(mContext, account);
     }
 
-    @LargeTest
-    @Feature({"Sync"})
+    /*
+     * @LargeTest
+     * @Feature({"Sync"})
+     */
+    @FlakyTest(message = "crbug.com/594558")
     public void testStopAndStartSyncThroughAndroid() throws InterruptedException {
         Account account = setUpTestAccountAndSignInToSync();
         SyncTestUtil.waitForSyncActive();

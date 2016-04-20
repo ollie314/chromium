@@ -14,7 +14,6 @@
 #include "chrome/browser/ui/webui/quota_internals/quota_internals_types.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_ui.h"
-#include "net/base/net_util.h"
 
 using content::BrowserContext;
 
@@ -39,7 +38,7 @@ void QuotaInternalsHandler::ReportAvailableSpace(int64_t available_space) {
 }
 
 void QuotaInternalsHandler::ReportGlobalInfo(const GlobalStorageInfo& data) {
-  scoped_ptr<base::Value> value(data.NewValue());
+  std::unique_ptr<base::Value> value(data.NewValue());
   SendMessage("GlobalInfoUpdated", *value);
 }
 

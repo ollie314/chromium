@@ -45,6 +45,7 @@ struct GPU_EXPORT Capabilities {
   };
 
   Capabilities();
+  Capabilities(const Capabilities& other);
 
   template <typename T>
   void VisitStagePrecisions(unsigned stage,
@@ -134,12 +135,22 @@ struct GPU_EXPORT Capabilities {
   bool blend_equation_advanced;
   bool blend_equation_advanced_coherent;
   bool texture_rg;
+  bool texture_half_float_linear;
   bool image_ycbcr_422;
+  bool image_ycbcr_420v;
   bool render_buffer_format_bgra8888;
   bool occlusion_query_boolean;
   bool timer_queries;
   bool surfaceless;
   bool flips_vertically;
+  bool msaa_is_slow;
+
+  // When this parameter is true, a CHROMIUM image created with RGB format will
+  // actually have RGBA format. The client is responsible for handling most of
+  // the complexities associated with this. See
+  // gpu/GLES2/extensions/CHROMIUM/CHROMIUM_gpu_memory_buffer_image.txt for more
+  // details.
+  bool chromium_image_rgb_emulation;
 
   int major_version;
   int minor_version;

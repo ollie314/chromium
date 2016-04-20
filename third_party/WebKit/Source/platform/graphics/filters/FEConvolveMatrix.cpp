@@ -27,6 +27,7 @@
 #include "SkMatrixConvolutionImageFilter.h"
 #include "platform/graphics/filters/SkiaImageFilterBuilder.h"
 #include "platform/text/TextStream.h"
+#include "wtf/CheckedNumeric.h"
 #include "wtf/OwnPtr.h"
 
 namespace blink {
@@ -45,15 +46,15 @@ FEConvolveMatrix::FEConvolveMatrix(Filter* filter, const IntSize& kernelSize,
 {
 }
 
-PassRefPtrWillBeRawPtr<FEConvolveMatrix> FEConvolveMatrix::create(Filter* filter, const IntSize& kernelSize,
+FEConvolveMatrix* FEConvolveMatrix::create(Filter* filter, const IntSize& kernelSize,
     float divisor, float bias, const IntPoint& targetOffset, EdgeModeType edgeMode,
     bool preserveAlpha, const Vector<float>& kernelMatrix)
 {
-    return adoptRefWillBeNoop(new FEConvolveMatrix(filter, kernelSize, divisor, bias, targetOffset, edgeMode,
-        preserveAlpha, kernelMatrix));
+    return new FEConvolveMatrix(filter, kernelSize, divisor, bias, targetOffset, edgeMode,
+        preserveAlpha, kernelMatrix);
 }
 
-FloatRect FEConvolveMatrix::mapPaintRect(const FloatRect& rect, bool forward)
+FloatRect FEConvolveMatrix::mapPaintRect(const FloatRect& rect, bool forward) const
 {
     FloatRect result = rect;
     if (parametersValid()) {
@@ -122,7 +123,7 @@ bool FEConvolveMatrix::parametersValid() const
     if (m_kernelSize.isEmpty())
         return false;
     uint64_t kernelArea = m_kernelSize.area();
-    if (!WTF::isInBounds<int>(kernelArea))
+    if (!CheckedNumeric<int>(kernelArea).IsValid())
         return false;
     if (safeCast<size_t>(kernelArea) != m_kernelMatrix.size())
         return false;
@@ -135,12 +136,12 @@ bool FEConvolveMatrix::parametersValid() const
     return true;
 }
 
-PassRefPtr<SkImageFilter> FEConvolveMatrix::createImageFilter(SkiaImageFilterBuilder& builder)
+sk_sp<SkImageFilter> FEConvolveMatrix::createImageFilter()
 {
     if (!parametersValid())
-        return createTransparentBlack(builder);
+        return createTransparentBlack();
 
-    RefPtr<SkImageFilter> input(builder.build(inputEffect(0), operatingColorSpace()));
+    sk_sp<SkImageFilter> input(SkiaImageFilterBuilder::build(inputEffect(0), operatingColorSpace()));
     SkISize kernelSize(SkISize::Make(m_kernelSize.width(), m_kernelSize.height()));
     // parametersValid() above checks that the kernel area fits in int.
     int numElements = safeCast<int>(m_kernelSize.area());
@@ -152,8 +153,8 @@ PassRefPtr<SkImageFilter> FEConvolveMatrix::createImageFilter(SkiaImageFilterBui
     OwnPtr<SkScalar[]> kernel = adoptArrayPtr(new SkScalar[numElements]);
     for (int i = 0; i < numElements; ++i)
         kernel[i] = SkFloatToScalar(m_kernelMatrix[numElements - 1 - i]);
-    SkImageFilter::CropRect cropRect = getCropRect(builder.cropOffset());
-    return adoptRef(SkMatrixConvolutionImageFilter::Create(kernelSize, kernel.get(), gain, bias, target, tileMode, convolveAlpha, input.get(), &cropRect));
+    SkImageFilter::CropRect cropRect = getCropRect();
+    return SkMatrixConvolutionImageFilter::Make(kernelSize, kernel.get(), gain, bias, target, tileMode, convolveAlpha, std::move(input), &cropRect);
 }
 
 static TextStream& operator<<(TextStream& ts, const EdgeModeType& type)

@@ -20,15 +20,16 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/renderer/media/media_stream_audio_track.h"
+#include "content/renderer/media/media_stream_constraints_util.h"
 #include "content/renderer/media/media_stream_track.h"
 #include "content/renderer/media/peer_connection_tracker.h"
 #include "content/renderer/media/remote_media_stream_impl.h"
 #include "content/renderer/media/rtc_certificate.h"
 #include "content/renderer/media/rtc_data_channel_handler.h"
 #include "content/renderer/media/rtc_dtmf_sender_handler.h"
-#include "content/renderer/media/rtc_media_constraints.h"
 #include "content/renderer/media/webrtc/peer_connection_dependency_factory.h"
 #include "content/renderer/media/webrtc/webrtc_media_stream_adapter.h"
 #include "content/renderer/media/webrtc_audio_capturer.h"
@@ -37,6 +38,7 @@
 #include "content/renderer/render_thread_impl.h"
 #include "media/base/media_switches.h"
 #include "third_party/WebKit/public/platform/WebMediaConstraints.h"
+#include "third_party/WebKit/public/platform/WebRTCAnswerOptions.h"
 #include "third_party/WebKit/public/platform/WebRTCConfiguration.h"
 #include "third_party/WebKit/public/platform/WebRTCDataChannelInit.h"
 #include "third_party/WebKit/public/platform/WebRTCICECandidate.h"
@@ -45,7 +47,7 @@
 #include "third_party/WebKit/public/platform/WebRTCSessionDescriptionRequest.h"
 #include "third_party/WebKit/public/platform/WebRTCVoidRequest.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
-#include "third_party/libjingle/source/talk/session/media/mediasession.h"
+#include "third_party/webrtc/pc/mediasession.h"
 
 using webrtc::DataChannelInterface;
 using webrtc::IceCandidateInterface;
@@ -255,6 +257,63 @@ void GetNativeRtcConfiguration(
         static_cast<RTCCertificate*>(
             blink_config.certificate(i))->rtcCertificate());
   }
+}
+
+void CopyConstraintsIntoRtcConfiguration(
+    const blink::WebMediaConstraints constraints,
+    webrtc::PeerConnectionInterface::RTCConfiguration* configuration) {
+  // Copy info from constraints into configuration, if present.
+  if (constraints.isEmpty()) {
+    return;
+  }
+
+  bool the_value;
+  if (GetConstraintValueAsBoolean(
+          constraints, &blink::WebMediaTrackConstraintSet::enableIPv6,
+          &the_value)) {
+    configuration->disable_ipv6 = !the_value;
+  } else {
+    // Note: IPv6 WebRTC value is "disable" while Blink is "enable".
+    configuration->disable_ipv6 = false;
+  }
+
+  if (GetConstraintValueAsBoolean(
+      constraints, &blink::WebMediaTrackConstraintSet::enableDscp,
+      &the_value)) {
+    configuration->set_dscp(the_value);
+  }
+
+  if (GetConstraintValueAsBoolean(
+      constraints, &blink::WebMediaTrackConstraintSet::googCpuOveruseDetection,
+      &the_value)) {
+    configuration->set_cpu_adaptation(the_value);
+  }
+
+  if (GetConstraintValueAsBoolean(
+      constraints,
+      &blink::WebMediaTrackConstraintSet::googEnableVideoSuspendBelowMinBitrate,
+      &the_value)) {
+    configuration->set_suspend_below_min_bitrate(the_value);
+  }
+
+  if (!GetConstraintValueAsBoolean(
+      constraints, &blink::WebMediaTrackConstraintSet::enableRtpDataChannels,
+      &configuration->enable_rtp_data_channel)) {
+    configuration->enable_rtp_data_channel = false;
+  }
+  // TODO: Special treatment for screencast min bitrate, since it's an integer.
+  // if (FindConstraint(constraints,
+  //                   MediaConstraintsInterface::kScreencastMinBitrate,
+  //                   &configuration->screencast_min_bitrate, NULL)) {
+  //  configuration->override_screencast_min_bitrate = true;
+  // }
+  // Note: If an optional is not present, webrtc decides on its own
+  // what the value should be.
+  configuration->combined_audio_video_bwe = ConstraintToOptional(
+      constraints,
+      &blink::WebMediaTrackConstraintSet::googCombinedAudioVideoBwe);
+  configuration->enable_dtls_srtp = ConstraintToOptional(
+      constraints, &blink::WebMediaTrackConstraintSet::enableDtlsSrtp);
 }
 
 class SessionDescriptionRequestTracker {
@@ -616,6 +675,53 @@ class PeerConnectionUMAObserver : public webrtc::UMAObserver {
   }
 };
 
+void ConvertOfferOptionsToWebrtcOfferOptions(
+    const blink::WebRTCOfferOptions& options,
+    webrtc::PeerConnectionInterface::RTCOfferAnswerOptions* output) {
+  output->offer_to_receive_audio = options.offerToReceiveAudio();
+  output->offer_to_receive_video = options.offerToReceiveVideo();
+  output->voice_activity_detection = options.voiceActivityDetection();
+  output->ice_restart = options.iceRestart();
+}
+
+void ConvertAnswerOptionsToWebrtcAnswerOptions(
+    const blink::WebRTCAnswerOptions& options,
+    webrtc::PeerConnectionInterface::RTCOfferAnswerOptions* output) {
+  output->voice_activity_detection = options.voiceActivityDetection();
+}
+
+void ConvertConstraintsToWebrtcOfferOptions(
+    const blink::WebMediaConstraints& constraints,
+    webrtc::PeerConnectionInterface::RTCOfferAnswerOptions* output) {
+  if (constraints.isEmpty()) {
+    return;
+  }
+  std::string failing_name;
+  if (constraints.basic().hasMandatoryOutsideSet(
+          {constraints.basic().offerToReceiveAudio.name(),
+           constraints.basic().offerToReceiveVideo.name(),
+           constraints.basic().voiceActivityDetection.name(),
+           constraints.basic().iceRestart.name()},
+          failing_name)) {
+    // TODO(hta): Reject the calling operation with "constraint error"
+    // https://crbug.com/594894
+    DLOG(ERROR) << "Invalid mandatory constraint to CreateOffer/Answer: "
+                << failing_name;
+  }
+  GetConstraintValueAsInteger(
+      constraints, &blink::WebMediaTrackConstraintSet::offerToReceiveAudio,
+      &output->offer_to_receive_audio);
+  GetConstraintValueAsInteger(
+      constraints, &blink::WebMediaTrackConstraintSet::offerToReceiveVideo,
+      &output->offer_to_receive_video);
+  GetConstraintValueAsBoolean(
+      constraints, &blink::WebMediaTrackConstraintSet::voiceActivityDetection,
+      &output->voice_activity_detection);
+  GetConstraintValueAsBoolean(constraints,
+                              &blink::WebMediaTrackConstraintSet::iceRestart,
+                              &output->ice_restart);
+}
+
 base::LazyInstance<std::set<RTCPeerConnectionHandler*> >::Leaky
     g_peer_connection_handlers = LAZY_INSTANCE_INITIALIZER;
 
@@ -695,7 +801,7 @@ class RTCPeerConnectionHandler::Observer
 
   void OnAddStream(MediaStreamInterface* stream) override {
     DCHECK(stream);
-    scoped_ptr<RemoteMediaStreamImpl> remote_stream(
+    std::unique_ptr<RemoteMediaStreamImpl> remote_stream(
         new RemoteMediaStreamImpl(main_thread_, stream));
 
     // The webkit object owned by RemoteMediaStreamImpl, will be initialized
@@ -713,7 +819,7 @@ class RTCPeerConnectionHandler::Observer
   }
 
   void OnDataChannel(DataChannelInterface* data_channel) override {
-    scoped_ptr<RtcDataChannelHandler> handler(
+    std::unique_ptr<RtcDataChannelHandler> handler(
         new RtcDataChannelHandler(main_thread_, data_channel));
     main_thread_->PostTask(FROM_HERE,
         base::Bind(&RTCPeerConnectionHandler::Observer::OnDataChannelImpl,
@@ -767,8 +873,8 @@ class RTCPeerConnectionHandler::Observer
             candidate->candidate().address().family()));
   }
 
-  void OnAddStreamImpl(scoped_ptr<RemoteMediaStreamImpl> stream) {
-    DCHECK(stream->webkit_stream().extraData()) << "Initialization not done";
+  void OnAddStreamImpl(std::unique_ptr<RemoteMediaStreamImpl> stream) {
+    DCHECK(stream->webkit_stream().getExtraData()) << "Initialization not done";
     if (handler_)
       handler_->OnAddStream(std::move(stream));
   }
@@ -778,7 +884,7 @@ class RTCPeerConnectionHandler::Observer
       handler_->OnRemoveStream(stream);
   }
 
-  void OnDataChannelImpl(scoped_ptr<RtcDataChannelHandler> handler) {
+  void OnDataChannelImpl(std::unique_ptr<RtcDataChannelHandler> handler) {
     if (handler_)
       handler_->OnDataChannel(std::move(handler));
   }
@@ -832,33 +938,6 @@ void RTCPeerConnectionHandler::DestructAllHandlers() {
     handler->client_->releasePeerConnectionHandler();
 }
 
-// static
-void RTCPeerConnectionHandler::ConvertOfferOptionsToConstraints(
-    const blink::WebRTCOfferOptions& options,
-    RTCMediaConstraints* output) {
-  output->AddMandatory(
-      webrtc::MediaConstraintsInterface::kOfferToReceiveAudio,
-      options.offerToReceiveAudio() > 0 ? "true" : "false",
-      true);
-
-  output->AddMandatory(
-      webrtc::MediaConstraintsInterface::kOfferToReceiveVideo,
-      options.offerToReceiveVideo() > 0 ? "true" : "false",
-      true);
-
-  if (!options.voiceActivityDetection()) {
-    output->AddMandatory(
-        webrtc::MediaConstraintsInterface::kVoiceActivityDetection,
-        "false",
-        true);
-  }
-
-  if (options.iceRestart()) {
-    output->AddMandatory(
-        webrtc::MediaConstraintsInterface::kIceRestart, "true", true);
-  }
-}
-
 void RTCPeerConnectionHandler::associateWithFrame(blink::WebFrame* frame) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(frame);
@@ -876,15 +955,27 @@ bool RTCPeerConnectionHandler::initialize(
 
   webrtc::PeerConnectionInterface::RTCConfiguration config;
   GetNativeRtcConfiguration(server_configuration, &config);
-  config.disable_prerenderer_smoothing =
-      !base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableRTCSmoothnessAlgorithm);
 
-  RTCMediaConstraints constraints(options);
+  if (base::FeatureList::IsEnabled(features::kWebRtcEcdsaDefault)) {
+    if (config.certificates.empty()) {
+      rtc::scoped_refptr<rtc::RTCCertificate> certificate =
+          PeerConnectionDependencyFactory::GenerateDefaultCertificate();
+      config.certificates.push_back(certificate);
+    }
+  }
+
+  // Choose between RTC smoothness algorithm and prerenderer smoothing.
+  // Prerenderer smoothing is turned on if RTC smoothness is turned off.
+  config.set_prerenderer_smoothing(
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableRTCSmoothnessAlgorithm));
+
+  // Copy all the relevant constraints into |config|.
+  CopyConstraintsIntoRtcConfiguration(options, &config);
 
   peer_connection_observer_ = new Observer(weak_factory_.GetWeakPtr());
   native_peer_connection_ = dependency_factory_->CreatePeerConnection(
-      config, &constraints, frame_, peer_connection_observer_.get());
+      config, frame_, peer_connection_observer_.get());
 
   if (!native_peer_connection_.get()) {
     LOG(ERROR) << "Failed to initialize native PeerConnection.";
@@ -892,8 +983,8 @@ bool RTCPeerConnectionHandler::initialize(
   }
 
   if (peer_connection_tracker_) {
-    peer_connection_tracker_->RegisterPeerConnection(
-        this, config, constraints, frame_);
+    peer_connection_tracker_->RegisterPeerConnection(this, config, options,
+                                                     frame_);
   }
 
   uma_observer_ = new rtc::RefCountedObject<PeerConnectionUMAObserver>();
@@ -909,10 +1000,19 @@ bool RTCPeerConnectionHandler::InitializeForTest(
   webrtc::PeerConnectionInterface::RTCConfiguration config;
   GetNativeRtcConfiguration(server_configuration, &config);
 
+  if (base::FeatureList::IsEnabled(features::kWebRtcEcdsaDefault)) {
+    if (config.certificates.empty()) {
+      rtc::scoped_refptr<rtc::RTCCertificate> certificate =
+          PeerConnectionDependencyFactory::GenerateDefaultCertificate();
+      config.certificates.push_back(certificate);
+    }
+  }
+
   peer_connection_observer_ = new Observer(weak_factory_.GetWeakPtr());
-  RTCMediaConstraints constraints(options);
+  CopyConstraintsIntoRtcConfiguration(options, &config);
+
   native_peer_connection_ = dependency_factory_->CreatePeerConnection(
-      config, &constraints, NULL, peer_connection_observer_.get());
+      config, nullptr, peer_connection_observer_.get());
   if (!native_peer_connection_.get()) {
     LOG(ERROR) << "Failed to initialize native PeerConnection.";
     return false;
@@ -934,11 +1034,13 @@ void RTCPeerConnectionHandler::createOffer(
           PeerConnectionTracker::ACTION_CREATE_OFFER));
 
   // TODO(tommi): Do this asynchronously via e.g. PostTaskAndReply.
-  RTCMediaConstraints constraints(options);
-  native_peer_connection_->CreateOffer(description_request.get(), &constraints);
+  webrtc::PeerConnectionInterface::RTCOfferAnswerOptions webrtc_options;
+  ConvertConstraintsToWebrtcOfferOptions(options, &webrtc_options);
+  native_peer_connection_->CreateOffer(description_request.get(),
+                                       webrtc_options);
 
   if (peer_connection_tracker_)
-    peer_connection_tracker_->TrackCreateOffer(this, constraints);
+    peer_connection_tracker_->TrackCreateOffer(this, options);
 }
 
 void RTCPeerConnectionHandler::createOffer(
@@ -954,12 +1056,13 @@ void RTCPeerConnectionHandler::createOffer(
           PeerConnectionTracker::ACTION_CREATE_OFFER));
 
   // TODO(tommi): Do this asynchronously via e.g. PostTaskAndReply.
-  RTCMediaConstraints constraints;
-  ConvertOfferOptionsToConstraints(options, &constraints);
-  native_peer_connection_->CreateOffer(description_request.get(), &constraints);
+  webrtc::PeerConnectionInterface::RTCOfferAnswerOptions webrtc_options;
+  ConvertOfferOptionsToWebrtcOfferOptions(options, &webrtc_options);
+  native_peer_connection_->CreateOffer(description_request.get(),
+                                       webrtc_options);
 
   if (peer_connection_tracker_)
-    peer_connection_tracker_->TrackCreateOffer(this, constraints);
+    peer_connection_tracker_->TrackCreateOffer(this, options);
 }
 
 void RTCPeerConnectionHandler::createAnswer(
@@ -972,13 +1075,34 @@ void RTCPeerConnectionHandler::createAnswer(
           base::ThreadTaskRunnerHandle::Get(), request,
           weak_factory_.GetWeakPtr(), peer_connection_tracker_,
           PeerConnectionTracker::ACTION_CREATE_ANSWER));
+  webrtc::PeerConnectionInterface::RTCOfferAnswerOptions webrtc_options;
+  ConvertConstraintsToWebrtcOfferOptions(options, &webrtc_options);
   // TODO(tommi): Do this asynchronously via e.g. PostTaskAndReply.
-  RTCMediaConstraints constraints(options);
   native_peer_connection_->CreateAnswer(description_request.get(),
-                                        &constraints);
+                                        webrtc_options);
 
   if (peer_connection_tracker_)
-    peer_connection_tracker_->TrackCreateAnswer(this, constraints);
+    peer_connection_tracker_->TrackCreateAnswer(this, options);
+}
+
+void RTCPeerConnectionHandler::createAnswer(
+    const blink::WebRTCSessionDescriptionRequest& request,
+    const blink::WebRTCAnswerOptions& options) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  TRACE_EVENT0("webrtc", "RTCPeerConnectionHandler::createAnswer");
+  scoped_refptr<CreateSessionDescriptionRequest> description_request(
+      new rtc::RefCountedObject<CreateSessionDescriptionRequest>(
+          base::ThreadTaskRunnerHandle::Get(), request,
+          weak_factory_.GetWeakPtr(), peer_connection_tracker_,
+          PeerConnectionTracker::ACTION_CREATE_ANSWER));
+  // TODO(tommi): Do this asynchronously via e.g. PostTaskAndReply.
+  webrtc::PeerConnectionInterface::RTCOfferAnswerOptions webrtc_options;
+  ConvertAnswerOptionsToWebrtcAnswerOptions(options, &webrtc_options);
+  native_peer_connection_->CreateAnswer(description_request.get(),
+                                        webrtc_options);
+
+  if (peer_connection_tracker_)
+    peer_connection_tracker_->TrackCreateAnswer(this, options);
 }
 
 bool IsOfferOrAnswer(const webrtc::SessionDescriptionInterface* native_desc) {
@@ -1031,11 +1155,13 @@ void RTCPeerConnectionHandler::setLocalDescription(
           weak_factory_.GetWeakPtr(), peer_connection_tracker_,
           PeerConnectionTracker::ACTION_SET_LOCAL_DESCRIPTION));
 
-  signaling_thread()->PostTask(FROM_HERE,
-      base::Bind(&RunClosureWithTrace,
+  signaling_thread()->PostTask(
+      FROM_HERE,
+      base::Bind(
+          &RunClosureWithTrace,
           base::Bind(&webrtc::PeerConnectionInterface::SetLocalDescription,
-              native_peer_connection_, set_request,
-              base::Unretained(native_desc)),
+                     native_peer_connection_, base::RetainedRef(set_request),
+                     base::Unretained(native_desc)),
           "SetLocalDescription"));
 }
 
@@ -1082,11 +1208,13 @@ void RTCPeerConnectionHandler::setRemoteDescription(
           base::ThreadTaskRunnerHandle::Get(), request,
           weak_factory_.GetWeakPtr(), peer_connection_tracker_,
           PeerConnectionTracker::ACTION_SET_REMOTE_DESCRIPTION));
-  signaling_thread()->PostTask(FROM_HERE,
-      base::Bind(&RunClosureWithTrace,
+  signaling_thread()->PostTask(
+      FROM_HERE,
+      base::Bind(
+          &RunClosureWithTrace,
           base::Bind(&webrtc::PeerConnectionInterface::SetRemoteDescription,
-              native_peer_connection_, set_request,
-              base::Unretained(native_desc)),
+                     native_peer_connection_, base::RetainedRef(set_request),
+                     base::Unretained(native_desc)),
           "SetRemoteDescription"));
 }
 
@@ -1132,18 +1260,16 @@ RTCPeerConnectionHandler::remoteDescription() {
 }
 
 bool RTCPeerConnectionHandler::updateICE(
-    const blink::WebRTCConfiguration& server_configuration,
-    const blink::WebMediaConstraints& options) {
+    const blink::WebRTCConfiguration& server_configuration) {
   DCHECK(thread_checker_.CalledOnValidThread());
   TRACE_EVENT0("webrtc", "RTCPeerConnectionHandler::updateICE");
   webrtc::PeerConnectionInterface::RTCConfiguration config;
   GetNativeRtcConfiguration(server_configuration, &config);
-  RTCMediaConstraints constraints(options);
 
   if (peer_connection_tracker_)
-    peer_connection_tracker_->TrackUpdateIce(this, config, constraints);
+    peer_connection_tracker_->TrackUpdateIce(this, config);
 
-  return native_peer_connection_->UpdateIce(config.servers, &constraints);
+  return native_peer_connection_->UpdateIce(config.servers);
 }
 
 bool RTCPeerConnectionHandler::addICECandidate(
@@ -1168,7 +1294,7 @@ bool RTCPeerConnectionHandler::addICECandidate(
     const blink::WebRTCICECandidate& candidate) {
   DCHECK(thread_checker_.CalledOnValidThread());
   TRACE_EVENT0("webrtc", "RTCPeerConnectionHandler::addICECandidate");
-  scoped_ptr<webrtc::IceCandidateInterface> native_candidate(
+  std::unique_ptr<webrtc::IceCandidateInterface> native_candidate(
       dependency_factory_->CreateIceCandidate(
           base::UTF16ToUTF8(base::StringPiece16(candidate.sdpMid())),
           candidate.sdpMLineIndex(),
@@ -1234,14 +1360,13 @@ bool RTCPeerConnectionHandler::addStream(
   track_metrics_.AddStream(MediaStreamTrackMetrics::SENT_STREAM,
                            webrtc_stream);
 
-  RTCMediaConstraints constraints(options);
-  if (!constraints.GetMandatory().empty() ||
-      !constraints.GetOptional().empty()) {
+  if (!options.isEmpty()) {
     // TODO(perkj): |mediaConstraints| is the name of the optional constraints
     // argument in RTCPeerConnection.idl. It has been removed from the spec and
     // should be removed from blink as well.
     LOG(WARNING)
         << "mediaConstraints is not a supported argument to addStream.";
+    LOG(WARNING) << "mediaConstraints was " << options.toString().utf8();
   }
 
   return native_peer_connection_->AddStream(webrtc_stream);
@@ -1296,7 +1421,7 @@ void RTCPeerConnectionHandler::getStats(
   blink::WebMediaStreamSource::Type track_type =
       blink::WebMediaStreamSource::TypeAudio;
   if (request->hasSelector()) {
-    track_type = request->component().source().type();
+    track_type = request->component().source().getType();
     track_id = request->component().id().utf8();
   }
 
@@ -1364,9 +1489,9 @@ blink::WebRTCDTMFSenderHandler* RTCPeerConnectionHandler::createDTMFSender(
   TRACE_EVENT0("webrtc", "RTCPeerConnectionHandler::createDTMFSender");
   DVLOG(1) << "createDTMFSender.";
 
-  MediaStreamAudioTrack* native_track = MediaStreamAudioTrack::GetTrack(track);
+  MediaStreamAudioTrack* native_track = MediaStreamAudioTrack::From(track);
   if (!native_track || !native_track->is_local_track() ||
-      track.source().type() != blink::WebMediaStreamSource::TypeAudio) {
+      track.source().getType() != blink::WebMediaStreamSource::TypeAudio) {
     DLOG(ERROR) << "The DTMF sender requires a local audio track.";
     return nullptr;
   }
@@ -1480,7 +1605,7 @@ void RTCPeerConnectionHandler::OnIceGatheringChange(
       GetWebKitIceGatheringState(new_state);
   if (peer_connection_tracker_)
     peer_connection_tracker_->TrackIceGatheringStateChange(this, state);
-  if (client_)
+  if (!is_closed_)
     client_->didChangeICEGatheringState(state);
 }
 
@@ -1489,16 +1614,16 @@ void RTCPeerConnectionHandler::OnRenegotiationNeeded() {
   TRACE_EVENT0("webrtc", "RTCPeerConnectionHandler::OnRenegotiationNeeded");
   if (peer_connection_tracker_)
     peer_connection_tracker_->TrackOnRenegotiationNeeded(this);
-  if (client_)
+  if (!is_closed_)
     client_->negotiationNeeded();
 }
 
 void RTCPeerConnectionHandler::OnAddStream(
-    scoped_ptr<RemoteMediaStreamImpl> stream) {
+    std::unique_ptr<RemoteMediaStreamImpl> stream) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(remote_streams_.find(stream->webrtc_stream().get()) ==
          remote_streams_.end());
-  DCHECK(stream->webkit_stream().extraData()) << "Initialization not done";
+  DCHECK(stream->webkit_stream().getExtraData()) << "Initialization not done";
   TRACE_EVENT0("webrtc", "RTCPeerConnectionHandler::OnAddStreamImpl");
 
   // Ownership is with remote_streams_ now.
@@ -1534,7 +1659,7 @@ void RTCPeerConnectionHandler::OnRemoveStream(
                               stream.get());
   PerSessionWebRTCAPIMetrics::GetInstance()->DecrementStreamCounter();
 
-  scoped_ptr<RemoteMediaStreamImpl> remote_stream(it->second);
+  std::unique_ptr<RemoteMediaStreamImpl> remote_stream(it->second);
   const blink::WebMediaStream& webkit_stream = remote_stream->webkit_stream();
   DCHECK(!webkit_stream.isNull());
   remote_streams_.erase(it);
@@ -1549,7 +1674,7 @@ void RTCPeerConnectionHandler::OnRemoveStream(
 }
 
 void RTCPeerConnectionHandler::OnDataChannel(
-    scoped_ptr<RtcDataChannelHandler> handler) {
+    std::unique_ptr<RtcDataChannelHandler> handler) {
   DCHECK(thread_checker_.CalledOnValidThread());
   TRACE_EVENT0("webrtc", "RTCPeerConnectionHandler::OnDataChannelImpl");
 

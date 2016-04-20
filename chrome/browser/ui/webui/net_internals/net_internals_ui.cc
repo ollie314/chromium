@@ -22,7 +22,6 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_member.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -53,18 +52,19 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
 #include "components/net_log/chrome_net_log.h"
 #include "components/onc/onc_constants.h"
+#include "components/prefs/pref_member.h"
 #include "components/url_formatter/url_fixer.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/resource_dispatcher_host.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/net_internals_resources.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/dns/host_cache.h"
 #include "net/dns/host_resolver.h"
@@ -368,7 +368,7 @@ class NetInternalsMessageHandler::IOThreadImpl
   // Log entries that have yet to be passed along to Javascript page.  Non-NULL
   // when and only when there is a pending delayed task to call
   // PostPendingEntries.  Read and written to exclusively on the IO Thread.
-  scoped_ptr<base::ListValue> pending_entries_;
+  std::unique_ptr<base::ListValue> pending_entries_;
 
   // Used for getting current status of URLRequests when net-internals is
   // opened.  |main_context_getter_| is automatically added on construction.
@@ -402,7 +402,9 @@ void NetInternalsMessageHandler::RegisterMessages() {
 
   proxy_ = new IOThreadImpl(this->AsWeakPtr(), g_browser_process->io_thread(),
                             profile->GetRequestContext());
-  proxy_->AddRequestContextGetter(profile->GetMediaRequestContext());
+  proxy_->AddRequestContextGetter(
+      content::BrowserContext::GetDefaultStoragePartition(profile)->
+          GetMediaURLRequestContext());
 #if defined(ENABLE_EXTENSIONS)
   proxy_->AddRequestContextGetter(profile->GetRequestContextForExtensions());
 #endif
@@ -508,8 +510,8 @@ void NetInternalsMessageHandler::RegisterMessages() {
 void NetInternalsMessageHandler::SendJavascriptCommand(
     const std::string& command,
     base::Value* arg) {
-  scoped_ptr<base::Value> command_value(new base::StringValue(command));
-  scoped_ptr<base::Value> value(arg);
+  std::unique_ptr<base::Value> command_value(new base::StringValue(command));
+  std::unique_ptr<base::Value> value(arg);
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (value.get()) {
     web_ui()->CallJavascriptFunction("g_browser.receive",
@@ -581,7 +583,7 @@ void NetInternalsMessageHandler::OnGetExtensionInfo(
   if (extension_system) {
     ExtensionService* extension_service = extension_system->extension_service();
     if (extension_service) {
-      scoped_ptr<const extensions::ExtensionSet> extensions(
+      std::unique_ptr<const extensions::ExtensionSet> extensions(
           extensions::ExtensionRegistry::Get(profile)
               ->GenerateInstalledExtensionsSet());
       for (extensions::ExtensionSet::const_iterator it = extensions->begin();
@@ -868,14 +870,18 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSDelete(
 void NetInternalsMessageHandler::IOThreadImpl::OnGetSessionNetworkStats(
     const base::ListValue* list) {
   DCHECK(!list);
+  net::URLRequestContext* context =
+      main_context_getter_->GetURLRequestContext();
   net::HttpNetworkSession* http_network_session =
-      GetHttpNetworkSession(main_context_getter_->GetURLRequestContext());
+      GetHttpNetworkSession(context);
 
   base::Value* network_info = NULL;
   if (http_network_session) {
+    // TODO(mmenke):  This cast is ugly.  Can we get rid of it, or, better,
+    // remove DRP data from net-internals entirely?
     data_reduction_proxy::DataReductionProxyNetworkDelegate* net_delegate =
         static_cast<data_reduction_proxy::DataReductionProxyNetworkDelegate*>(
-            http_network_session->network_delegate());
+            context->network_delegate());
     if (net_delegate) {
       network_info = net_delegate->SessionNetworkStatsInfoToValue();
     }

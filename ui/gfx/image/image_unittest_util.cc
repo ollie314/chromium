@@ -10,8 +10,8 @@
 #include <stddef.h>
 
 #include <cmath>
+#include <memory>
 
-#include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -211,9 +211,15 @@ bool IsEmpty(const gfx::Image& image) {
 }
 
 PlatformImage CreatePlatformImage() {
-  const SkBitmap bitmap(CreateBitmap(25, 25));
+  SkBitmap bitmap(CreateBitmap(25, 25));
 #if defined(OS_IOS)
   float scale = ImageSkia::GetMaxSupportedScale();
+
+  if (scale > 1.0) {
+    // Always create a 25pt x 25pt image.
+    int size = static_cast<int>(25 * scale);
+    bitmap = CreateBitmap(size, size);
+  }
 
   base::ScopedCFTypeRef<CGColorSpaceRef> color_space(
       CGColorSpaceCreateDeviceRGB());

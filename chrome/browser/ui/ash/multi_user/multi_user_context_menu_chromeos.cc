@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
@@ -20,6 +19,7 @@
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
@@ -65,8 +65,9 @@ void MultiUserContextMenuChromeos::ExecuteCommand(int command_id,
 }  // namespace
 }  // namespace chromeos
 
-scoped_ptr<ui::MenuModel> CreateMultiUserContextMenu(aura::Window* window) {
-  scoped_ptr<ui::MenuModel> model;
+std::unique_ptr<ui::MenuModel> CreateMultiUserContextMenu(
+    aura::Window* window) {
+  std::unique_ptr<ui::MenuModel> model;
   ash::SessionStateDelegate* delegate =
       ash::Shell::GetInstance()->session_state_delegate();
   if (!delegate)

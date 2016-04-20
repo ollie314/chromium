@@ -35,7 +35,7 @@ public:
     FloatRect viewport() const { return m_viewport; }
 
     bool isLayoutSizeChanged() const { return m_isLayoutSizeChanged; }
-    bool didTransformToRootUpdate() override { return m_didTransformToRootUpdate; }
+    bool didTransformToRootUpdate() const override { return m_didTransformToRootUpdate; }
 
     void determineIfLayoutSizeChanged() override;
     void setNeedsTransformUpdate() override { m_needsTransformUpdate = true; }
@@ -48,7 +48,7 @@ private:
     bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectSVGViewportContainer || LayoutSVGContainer::isOfType(type); }
 
     AffineTransform viewportTransform() const;
-    const AffineTransform& localToParentTransform() const override { return m_localToParentTransform; }
+    const AffineTransform& localToSVGParentTransform() const override { return m_localToParentTransform; }
 
     void calcViewport() override;
     bool calculateLocalTransform() override;

@@ -33,12 +33,12 @@ class ScriptWrappable;
     V(condition) \
     V(data) \
     V(detail) \
-    V(document) \
     V(error) \
     V(event) \
     V(idbCursorRequest) \
     V(port1) \
     V(port2) \
+    V(readableStreamReaderInResponse) \
     V(state) \
     V(stringData) \
     V(testInterfaces) \

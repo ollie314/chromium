@@ -129,13 +129,13 @@ public class IntentHandler {
     private static Pair<Integer, String> sPendingReferrer;
     private static int sReferrerId;
 
+    private static final String PACKAGE_GSA = "com.google.android.googlequicksearchbox";
     private static final String PACKAGE_GMAIL = "com.google.android.gm";
     private static final String PACKAGE_PLUS = "com.google.android.apps.plus";
     private static final String PACKAGE_HANGOUTS = "com.google.android.talk";
     private static final String PACKAGE_MESSENGER = "com.google.android.apps.messaging";
     private static final String PACKAGE_LINE = "jp.naver.line.android";
     private static final String PACKAGE_WHATSAPP = "com.whatsapp";
-    private static final String PACKAGE_GSA = "com.google.android.googlequicksearchbox";
     private static final String FACEBOOK_LINK_PREFIX = "http://m.facebook.com/l.php?";
     private static final String TWITTER_LINK_PREFIX = "http://t.co/";
     private static final String NEWS_LINK_PREFIX = "http://news.google.com/news/url?";
@@ -168,9 +168,6 @@ public class IntentHandler {
 
         return sFakeComponentName;
     }
-
-    // Intent extra used by QSB to send extra HTTP headers.
-    private static final String EXTRA_BROWSER_HEADERS = "com.android.browser.headers";
 
     /** Intent extra to open an incognito tab. */
     public static final String EXTRA_OPEN_NEW_INCOGNITO_TAB =
@@ -805,6 +802,7 @@ public class IntentHandler {
 
         String url = getUrlFromVoiceSearchResult(intent);
         if (url == null) url = ActivityDelegate.getInitialUrlForDocument(intent);
+        if (url == null) url = getUrlForCustomTab(intent);
         if (url == null) url = intent.getDataString();
         if (url == null) return null;
 
@@ -813,6 +811,13 @@ public class IntentHandler {
             url = getUrlFromGoogleChromeSchemeUrl(url);
         }
         return TextUtils.isEmpty(url) ? null : url;
+    }
+
+    private static String getUrlForCustomTab(Intent intent) {
+        if (intent == null || intent.getData() == null) return null;
+        Uri data = intent.getData();
+        return TextUtils.equals(data.getScheme(), UrlConstants.CUSTOM_TAB_SCHEME)
+                ? data.getQuery() : null;
     }
 
     /**

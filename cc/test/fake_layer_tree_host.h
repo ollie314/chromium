@@ -15,23 +15,35 @@
 #include "cc/trees/tree_synchronizer.h"
 
 namespace cc {
+class ImageSerializationProcessor;
 class TestTaskGraphRunner;
 
 class FakeLayerTreeHost : public LayerTreeHost {
  public:
-  static scoped_ptr<FakeLayerTreeHost> Create(
+  static std::unique_ptr<FakeLayerTreeHost> Create(
       FakeLayerTreeHostClient* client,
       TestTaskGraphRunner* task_graph_runner);
-  static scoped_ptr<FakeLayerTreeHost> Create(
+  static std::unique_ptr<FakeLayerTreeHost> Create(
       FakeLayerTreeHostClient* client,
       TestTaskGraphRunner* task_graph_runner,
       const LayerTreeSettings& settings);
-  static scoped_ptr<FakeLayerTreeHost> Create(
+  static std::unique_ptr<FakeLayerTreeHost> Create(
       FakeLayerTreeHostClient* client,
       TestTaskGraphRunner* task_graph_runner,
       const LayerTreeSettings& settings,
       CompositorMode mode);
-
+  static std::unique_ptr<FakeLayerTreeHost> Create(
+      FakeLayerTreeHostClient* client,
+      TestTaskGraphRunner* task_graph_runner,
+      const LayerTreeSettings& settings,
+      CompositorMode mode,
+      InitParams params);
+  static std::unique_ptr<FakeLayerTreeHost> Create(
+      FakeLayerTreeHostClient* client,
+      TestTaskGraphRunner* task_graph_runner,
+      const LayerTreeSettings& settings,
+      CompositorMode mode,
+      ImageSerializationProcessor* image_serialization_processor);
   ~FakeLayerTreeHost() override;
 
   const RendererCapabilities& GetRendererCapabilities() const override;
@@ -43,9 +55,11 @@ class FakeLayerTreeHost : public LayerTreeHost {
   using LayerTreeHost::root_layer;
 
   LayerImpl* CommitAndCreateLayerImplTree();
+  LayerImpl* CommitAndCreatePendingTree();
 
   FakeLayerTreeHostImpl* host_impl() { return &host_impl_; }
   LayerTreeImpl* active_tree() { return host_impl_.active_tree(); }
+  LayerTreeImpl* pending_tree() { return host_impl_.pending_tree(); }
 
   using LayerTreeHost::ScheduleMicroBenchmark;
   using LayerTreeHost::SendMessageToMicroBenchmark;

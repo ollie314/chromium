@@ -5,6 +5,7 @@
 #include "ui/wm/core/cursor_manager.h"
 
 #include "base/macros.h"
+#include "base/memory/scoped_ptr.h"
 #include "ui/aura/client/cursor_client_observer.h"
 #include "ui/aura/test/aura_test_base.h"
 #include "ui/wm/core/native_cursor_manager.h"
@@ -45,9 +46,7 @@ class CursorManagerTest : public aura::test::AuraTestBase {
  protected:
   CursorManagerTest()
       : delegate_(new TestingCursorManager),
-        cursor_manager_(scoped_ptr<wm::NativeCursorManager>(
-            delegate_)) {
-  }
+        cursor_manager_(std::unique_ptr<wm::NativeCursorManager>(delegate_)) {}
 
   TestingCursorManager* delegate_;
   wm::CursorManager cursor_manager_;
@@ -324,4 +323,39 @@ TEST_F(CursorManagerTest, TestCursorClientObserver) {
   EXPECT_TRUE(observer_a.did_visibility_change());
   EXPECT_FALSE(observer_b.did_visibility_change());
   EXPECT_TRUE(observer_a.is_cursor_visible());
+}
+
+// This test validates that the cursor visiblity state is restored when a
+// CursorManager instance is destroyed and recreated.
+TEST(CursorManagerCreateDestroyTest, VisibilityTest) {
+  // This block ensures that the cursor is hidden when the CursorManager
+  // instance is destroyed.
+  {
+    wm::CursorManager cursor_manager1(
+        scoped_ptr<wm::NativeCursorManager>(new TestingCursorManager));
+    cursor_manager1.ShowCursor();
+    EXPECT_TRUE(cursor_manager1.IsCursorVisible());
+    cursor_manager1.HideCursor();
+    EXPECT_FALSE(cursor_manager1.IsCursorVisible());
+  }
+
+  // This block validates that the cursor is hidden initially. It ensures that
+  // the cursor is visible when the CursorManager instance is destroyed.
+  {
+    wm::CursorManager cursor_manager2(
+      scoped_ptr<wm::NativeCursorManager>(new TestingCursorManager));
+    EXPECT_FALSE(cursor_manager2.IsCursorVisible());
+    cursor_manager2.ShowCursor();
+    EXPECT_TRUE(cursor_manager2.IsCursorVisible());
+  }
+
+  // This block validates that the cursor is visible initially. It then
+  // performs normal cursor visibility operations.
+  {
+    wm::CursorManager cursor_manager3(
+      scoped_ptr<wm::NativeCursorManager>(new TestingCursorManager));
+    EXPECT_TRUE(cursor_manager3.IsCursorVisible());
+    cursor_manager3.HideCursor();
+    EXPECT_FALSE(cursor_manager3.IsCursorVisible());
+  }
 }

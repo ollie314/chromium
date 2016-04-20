@@ -6,7 +6,6 @@
 
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "extensions/browser/app_sorting.h"
 #include "extensions/browser/extension_system.h"
 #include "ui/gfx/color_utils.h"
@@ -55,7 +54,7 @@ void ChromeAppListItem::UpdateFromSync(
 }
 
 AppListControllerDelegate* ChromeAppListItem::GetController() {
-  return g_controller_for_test != nullptr ?
-      g_controller_for_test :
-      AppListService::Get(chrome::GetActiveDesktop())->GetControllerDelegate();
+  return g_controller_for_test != nullptr
+             ? g_controller_for_test
+             : AppListService::Get()->GetControllerDelegate();
 }

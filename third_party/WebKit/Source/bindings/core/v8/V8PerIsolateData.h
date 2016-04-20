@@ -42,9 +42,8 @@
 namespace blink {
 
 class DOMDataStore;
-class MainThreadDebugger;
+class ThreadDebugger;
 class StringCache;
-class V8Debugger;
 struct WrapperTypeInfo;
 
 typedef WTF::Vector<DOMDataStore*> DOMDataStoreList;
@@ -58,6 +57,31 @@ public:
     public:
         virtual ~EndOfScopeTask() { }
         virtual void run() = 0;
+    };
+
+    // Disables the UseCounter.
+    // UseCounter depends on the current context, but it's not available during
+    // the initialization of v8::Context and the global object.  So we need to
+    // disable the UseCounter while the initialization of the context and global
+    // object.
+    // TODO(yukishiino): Come up with an idea to remove this hack.
+    class UseCounterDisabledScope {
+        STACK_ALLOCATED();
+    public:
+        explicit UseCounterDisabledScope(V8PerIsolateData* perIsolateData)
+            : m_perIsolateData(perIsolateData)
+            , m_originalUseCounterDisabled(m_perIsolateData->m_useCounterDisabled)
+        {
+            m_perIsolateData->m_useCounterDisabled = true;
+        }
+        ~UseCounterDisabledScope()
+        {
+            m_perIsolateData->m_useCounterDisabled = m_originalUseCounterDisabled;
+        }
+
+    private:
+        V8PerIsolateData* m_perIsolateData;
+        const bool m_originalUseCounterDisabled;
     };
 
     static v8::Isolate* initialize();
@@ -75,36 +99,27 @@ public:
 
     static void enableIdleTasks(v8::Isolate*, PassOwnPtr<gin::V8IdleTaskRunner>);
 
-    bool destructionPending() const { return m_destructionPending; }
     v8::Isolate* isolate() { return m_isolateHolder->isolate(); }
 
-    StringCache* stringCache() { return m_stringCache.get(); }
+    StringCache* getStringCache() { return m_stringCache.get(); }
 
     v8::Persistent<v8::Value>& ensureLiveRoot();
 
-    int recursionLevel() const { return m_recursionLevel; }
-    int incrementRecursionLevel() { return ++m_recursionLevel; }
-    int decrementRecursionLevel() { return --m_recursionLevel; }
     bool isHandlingRecursionLevelError() const { return m_isHandlingRecursionLevelError; }
     void setIsHandlingRecursionLevelError(bool value) { m_isHandlingRecursionLevelError = value; }
 
     bool isReportingException() const { return m_isReportingException; }
     void setReportingException(bool value) { m_isReportingException = value; }
 
-    bool performingMicrotaskCheckpoint() const { return m_performingMicrotaskCheckpoint; }
-    void setPerformingMicrotaskCheckpoint(bool performingMicrotaskCheckpoint) { m_performingMicrotaskCheckpoint = performingMicrotaskCheckpoint; }
-
-#if ENABLE(ASSERT)
-    int internalScriptRecursionLevel() const { return m_internalScriptRecursionLevel; }
-    int incrementInternalScriptRecursionLevel() { return ++m_internalScriptRecursionLevel; }
-    int decrementInternalScriptRecursionLevel() { return --m_internalScriptRecursionLevel; }
-#endif
-
     V8HiddenValue* hiddenValue() { return m_hiddenValue.get(); }
 
-    v8::Local<v8::FunctionTemplate> domTemplate(const void* domTemplateKey, v8::FunctionCallback = 0, v8::Local<v8::Value> data = v8::Local<v8::Value>(), v8::Local<v8::Signature> = v8::Local<v8::Signature>(), int length = 0);
-    v8::Local<v8::FunctionTemplate> existingDOMTemplate(const void* domTemplateKey);
-    void setDOMTemplate(const void* domTemplateKey, v8::Local<v8::FunctionTemplate>);
+    // Accessors to the cache of interface templates.
+    v8::Local<v8::FunctionTemplate> findInterfaceTemplate(const DOMWrapperWorld&, const void* key);
+    void setInterfaceTemplate(const DOMWrapperWorld&, const void* key, v8::Local<v8::FunctionTemplate>);
+
+    // Accessor to the cache of cross-origin accessible operation's templates.
+    // Created templates get automatically cached.
+    v8::Local<v8::FunctionTemplate> findOrCreateOperationTemplate(const DOMWrapperWorld&, const void* key, v8::FunctionCallback, v8::Local<v8::Value> data, v8::Local<v8::Signature>, int length);
 
     bool hasInstance(const WrapperTypeInfo* untrusted, v8::Local<v8::Value>);
     v8::Local<v8::Object> findInstanceInPrototypeChain(const WrapperTypeInfo*, v8::Local<v8::Value>);
@@ -112,10 +127,7 @@ public:
     v8::Local<v8::Context> ensureScriptRegexpContext();
     void clearScriptRegexpContext();
 
-    const char* previousSamplingState() const { return m_previousSamplingState; }
-    void setPreviousSamplingState(const char* name) { m_previousSamplingState = name; }
-
-    // EndOfScopeTasks are run by V8RecursionScope when control is returning
+    // EndOfScopeTasks are run when control is returning
     // to C++ from script, after executing a script task (e.g. callback,
     // event) or microtasks (e.g. promise). This is explicitly needed for
     // Indexed DB transactions per spec, but should in general be avoided.
@@ -123,42 +135,48 @@ public:
     void runEndOfScopeTasks();
     void clearEndOfScopeTasks();
 
-    void setScriptDebugger(PassOwnPtr<MainThreadDebugger>);
+    void setThreadDebugger(PassOwnPtr<ThreadDebugger>);
+    ThreadDebugger* threadDebugger();
 
 private:
     V8PerIsolateData();
     ~V8PerIsolateData();
 
-    typedef HashMap<const void*, v8::Eternal<v8::FunctionTemplate>> DOMTemplateMap;
-    DOMTemplateMap& currentDOMTemplateMap();
-    bool hasInstance(const WrapperTypeInfo* untrusted, v8::Local<v8::Value>, DOMTemplateMap&);
-    v8::Local<v8::Object> findInstanceInPrototypeChain(const WrapperTypeInfo*, v8::Local<v8::Value>, DOMTemplateMap&);
+    static void useCounterCallback(v8::Isolate*, v8::Isolate::UseCounterFeature);
 
-    bool m_destructionPending;
+    typedef HashMap<const void*, v8::Eternal<v8::FunctionTemplate>> V8FunctionTemplateMap;
+    V8FunctionTemplateMap& selectInterfaceTemplateMap(const DOMWrapperWorld&);
+    V8FunctionTemplateMap& selectOperationTemplateMap(const DOMWrapperWorld&);
+    bool hasInstance(const WrapperTypeInfo* untrusted, v8::Local<v8::Value>, V8FunctionTemplateMap&);
+    v8::Local<v8::Object> findInstanceInPrototypeChain(const WrapperTypeInfo*, v8::Local<v8::Value>, V8FunctionTemplateMap&);
+
     OwnPtr<gin::IsolateHolder> m_isolateHolder;
-    DOMTemplateMap m_domTemplateMapForMainWorld;
-    DOMTemplateMap m_domTemplateMapForNonMainWorld;
+
+    // m_interfaceTemplateMapFor{,Non}MainWorld holds function templates for
+    // the inerface objects.
+    V8FunctionTemplateMap m_interfaceTemplateMapForMainWorld;
+    V8FunctionTemplateMap m_interfaceTemplateMapForNonMainWorld;
+    // m_operationTemplateMapFor{,Non}MainWorld holds function templates for
+    // the cross-origin accessible DOM operations.
+    V8FunctionTemplateMap m_operationTemplateMapForMainWorld;
+    V8FunctionTemplateMap m_operationTemplateMapForNonMainWorld;
+
     OwnPtr<StringCache> m_stringCache;
     OwnPtr<V8HiddenValue> m_hiddenValue;
     ScopedPersistent<v8::Value> m_liveRoot;
     RefPtr<ScriptState> m_scriptRegexpScriptState;
 
-    const char* m_previousSamplingState;
-
     bool m_constructorMode;
     friend class ConstructorMode;
 
-    int m_recursionLevel;
+    bool m_useCounterDisabled;
+    friend class UseCounterDisabledScope;
+
     bool m_isHandlingRecursionLevelError;
     bool m_isReportingException;
 
-#if ENABLE(ASSERT)
-    int m_internalScriptRecursionLevel;
-#endif
-    bool m_performingMicrotaskCheckpoint;
-
     Vector<OwnPtr<EndOfScopeTask>> m_endOfScopeTasks;
-    OwnPtr<MainThreadDebugger> m_scriptDebugger;
+    OwnPtr<ThreadDebugger> m_threadDebugger;
 };
 
 } // namespace blink

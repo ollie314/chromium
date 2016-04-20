@@ -38,10 +38,10 @@ SimplifyMarkupCommand::SimplifyMarkupCommand(Document& document, Node* firstNode
 {
 }
 
-void SimplifyMarkupCommand::doApply()
+void SimplifyMarkupCommand::doApply(EditingState* editingState)
 {
     ContainerNode* rootNode = m_firstNode->parentNode();
-    WillBeHeapVector<RefPtrWillBeMember<ContainerNode>> nodesToRemove;
+    HeapVector<Member<ContainerNode>> nodesToRemove;
 
     // Walk through the inserted nodes, to see if there are elements that could be removed
     // without affecting the style. The goal is to produce leaner markup even when starting
@@ -88,34 +88,44 @@ void SimplifyMarkupCommand::doApply()
     // we perform all the DOM mutations at once.
     for (size_t i = 0; i < nodesToRemove.size(); ++i) {
         // FIXME: We can do better by directly moving children from nodesToRemove[i].
-        int numPrunedAncestors = pruneSubsequentAncestorsToRemove(nodesToRemove, i);
+        int numPrunedAncestors = pruneSubsequentAncestorsToRemove(nodesToRemove, i, editingState);
+        if (editingState->isAborted())
+            return;
         if (numPrunedAncestors < 0)
             continue;
-        removeNodePreservingChildren(nodesToRemove[i], AssumeContentIsAlwaysEditable);
+        removeNodePreservingChildren(nodesToRemove[i], editingState, AssumeContentIsAlwaysEditable);
+        if (editingState->isAborted())
+            return;
         i += numPrunedAncestors;
     }
 }
 
-int SimplifyMarkupCommand::pruneSubsequentAncestorsToRemove(WillBeHeapVector<RefPtrWillBeMember<ContainerNode>>& nodesToRemove, size_t startNodeIndex)
+int SimplifyMarkupCommand::pruneSubsequentAncestorsToRemove(HeapVector<Member<ContainerNode>>& nodesToRemove, size_t startNodeIndex, EditingState* editingState)
 {
     size_t pastLastNodeToRemove = startNodeIndex + 1;
     for (; pastLastNodeToRemove < nodesToRemove.size(); ++pastLastNodeToRemove) {
         if (nodesToRemove[pastLastNodeToRemove - 1]->parentNode() != nodesToRemove[pastLastNodeToRemove])
             break;
-        ASSERT(nodesToRemove[pastLastNodeToRemove]->firstChild() == nodesToRemove[pastLastNodeToRemove]->lastChild());
+        DCHECK_EQ(nodesToRemove[pastLastNodeToRemove]->firstChild(), nodesToRemove[pastLastNodeToRemove]->lastChild());
     }
 
     ContainerNode* highestAncestorToRemove = nodesToRemove[pastLastNodeToRemove - 1].get();
-    RefPtrWillBeRawPtr<ContainerNode> parent = highestAncestorToRemove->parentNode();
+    ContainerNode* parent = highestAncestorToRemove->parentNode();
     if (!parent) // Parent has already been removed.
         return -1;
 
     if (pastLastNodeToRemove == startNodeIndex + 1)
         return 0;
 
-    removeNode(nodesToRemove[startNodeIndex], AssumeContentIsAlwaysEditable);
-    insertNodeBefore(nodesToRemove[startNodeIndex], highestAncestorToRemove, AssumeContentIsAlwaysEditable);
-    removeNode(highestAncestorToRemove, AssumeContentIsAlwaysEditable);
+    removeNode(nodesToRemove[startNodeIndex], editingState, AssumeContentIsAlwaysEditable);
+    if (editingState->isAborted())
+        return -1;
+    insertNodeBefore(nodesToRemove[startNodeIndex], highestAncestorToRemove, editingState, AssumeContentIsAlwaysEditable);
+    if (editingState->isAborted())
+        return -1;
+    removeNode(highestAncestorToRemove, editingState, AssumeContentIsAlwaysEditable);
+    if (editingState->isAborted())
+        return -1;
 
     return pastLastNodeToRemove - startNodeIndex - 1;
 }

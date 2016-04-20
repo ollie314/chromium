@@ -12,6 +12,7 @@
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
+#include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
 
 // Singly-included section for enums and custom IPC traits.
 #ifndef ANDROID_WEBVIEW_COMMON_RENDER_VIEW_MESSAGES_H_
@@ -81,7 +82,7 @@ IPC_MESSAGE_CONTROL1(AwViewMsg_SetJsOnlineProperty,
 IPC_MESSAGE_ROUTED3(AwViewMsg_SmoothScroll,
                     int /* target_x */,
                     int /* target_y */,
-                    long /* duration_ms */)
+                    int /* duration_ms */)
 
 //-----------------------------------------------------------------------------
 // RenderView messages

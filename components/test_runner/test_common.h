@@ -7,12 +7,16 @@
 
 #include <string>
 
+#include "base/strings/string_util.h"
 #include "components/test_runner/test_runner_export.h"
+#include "third_party/WebKit/public/web/WebNavigationPolicy.h"
+
+class GURL;
 
 namespace test_runner {
 
 inline bool IsASCIIAlpha(char ch) {
-  return (ch | 0x20) >= 'a' && (ch | 0x20) <= 'z';
+  return base::IsAsciiLower(ch | 0x20);
 }
 
 inline bool IsNotASCIIAlpha(char ch) {
@@ -20,6 +24,10 @@ inline bool IsNotASCIIAlpha(char ch) {
 }
 
 TEST_RUNNER_EXPORT std::string NormalizeLayoutTestURL(const std::string& url);
+
+std::string URLDescription(const GURL& url);
+const char* WebNavigationPolicyToString(
+    const blink::WebNavigationPolicy& policy);
 
 // Tests which depend on Blink must call this function on the main thread
 // before creating/calling any Blink objects/APIs.

@@ -2,14 +2,11 @@
 // enough to screw with frame offsets that are measured by the test.  Delay all that
 // jazz until the actual test code is finished.
 setPrintTestResultsLazily();
-var delayDescription = description;
-var descriptionString = "";
-var delayIsSuccessfullyParsed = isSuccessfullyParsed;
-var isSuccessfullyParsed = function() {}
-var description = function(msg) { descriptionString = msg }
+self.jsTestIsAsync = true;
 
-if (window.testRunner)
-  testRunner.waitUntilDone();
+function rectArea(rect) {
+  return (rect.left - rect.right) * (rect.bottom - rect.top);
+}
 
 function rectToString(rect) {
   return "[" + rect.left + ", " + rect.right + ", " + rect.top + ", " + rect.bottom + "]";
@@ -27,11 +24,9 @@ function entryToString(entry) {
       "time=" + entry.time);
 }
 
-function finishTest() {
-  if (descriptionString)
-    delayDescription(descriptionString);
-  delayIsSuccessfullyParsed();
-  finishJSTest();
-  if (window.testRunner)
-    testRunner.notifyDone();
+function intersectionRatio(entry) {
+  var targetArea = rectArea(entry.boundingClientRect);
+  if (!targetArea)
+    return 0;
+  return rectArea(entry.intersectionRect) / targetArea;
 }

@@ -9,7 +9,6 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager_impl.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
@@ -24,6 +23,7 @@
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
 #include "components/feedback/tracing_manager.h"
+#include "components/prefs/pref_service.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -178,7 +178,7 @@ IN_PROC_BROWSER_TEST_F(PreferencesTest, MultiProfiles) {
 
   // Check that changing prefs of the active user doesn't affect prefs of the
   // inactive user.
-  scoped_ptr<base::DictionaryValue> prefs_backup =
+  std::unique_ptr<base::DictionaryValue> prefs_backup =
       prefs1->GetPreferenceValues();
   SetPrefs(prefs2, false);
   CheckSettingsCorrespondToPrefs(prefs2);

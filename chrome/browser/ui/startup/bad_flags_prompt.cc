@@ -54,7 +54,6 @@ void ShowBadFlagsPrompt(Browser* browser) {
     switches::kSingleProcess,
 
     // These flags disable or undermine the Same Origin Policy.
-    switches::kTrustedSpdyProxy,
     translate::switches::kTranslateSecurityOrigin,
 
     // These flags undermine HTTPS / connection security.
@@ -94,6 +93,12 @@ void ShowBadFlagsPrompt(Browser* browser) {
     // the flag is enabled.
     switches::kEnableWebBluetooth,
 
+    // This flag disables WebUSB's CORS-like checks for origin to device
+    // communication, allowing any origin to ask the user for permission to
+    // connect to a device. It is intended for manufacturers testing their
+    // existing devices until https://crbug.com/598766 is implemented.
+    switches::kDisableWebUsbSecurity,
+
     NULL
   };
 
@@ -129,7 +134,7 @@ void MaybeShowInvalidUserDataDirWarningDialog() {
     if (locale.empty())
       locale = kUserDataDirDialogFallbackLocale;
     ui::ResourceBundle::InitSharedInstanceWithLocale(
-        locale, NULL, ui::ResourceBundle::LOAD_COMMON_RESOURCES);
+        locale, NULL, ui::ResourceBundle::DO_NOT_LOAD_COMMON_RESOURCES);
   }
 
   const base::string16& title =
@@ -142,7 +147,7 @@ void MaybeShowInvalidUserDataDirWarningDialog() {
     ResourceBundle::CleanupSharedInstance();
 
   // More complex dialogs cannot be shown before the earliest calls here.
-  ShowMessageBox(NULL, title, message, chrome::MESSAGE_BOX_TYPE_WARNING);
+  ShowWarningMessageBox(NULL, title, message);
 }
 
 }  // namespace chrome

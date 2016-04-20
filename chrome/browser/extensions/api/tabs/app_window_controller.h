@@ -22,7 +22,7 @@ class AppBaseWindow;
 class AppWindowController : public WindowController {
  public:
   AppWindowController(AppWindow* window,
-                      scoped_ptr<AppBaseWindow> base_window,
+                      std::unique_ptr<AppBaseWindow> base_window,
                       Profile* profile);
   ~AppWindowController() override;
 
@@ -33,6 +33,10 @@ class AppWindowController : public WindowController {
       const Extension* extension) const override;
   base::DictionaryValue* CreateTabValue(const Extension* extension,
                                         int tab_index) const override;
+  std::unique_ptr<api::tabs::Tab> CreateTabObject(
+      const extensions::Extension* extension,
+      int tab_index) const override;
+
   bool CanClose(Reason* reason) const override;
   void SetFullscreenMode(bool is_fullscreen,
                          const GURL& extension_url) const override;
@@ -41,7 +45,7 @@ class AppWindowController : public WindowController {
 
  private:
   AppWindow* app_window_;  // Owns us.
-  scoped_ptr<AppBaseWindow> base_window_;
+  std::unique_ptr<AppBaseWindow> base_window_;
 
   DISALLOW_COPY_AND_ASSIGN(AppWindowController);
 };

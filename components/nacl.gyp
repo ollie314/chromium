@@ -139,6 +139,13 @@
                 '../sandbox/sandbox.gyp:sandbox_services',
               ]
             }],
+            ['OS=="win"', {
+              'dependencies': [
+                # TODO(fdoray): Remove this once the PreRead field trial has
+                # expired. crbug.com/577698
+                '../components/components.gyp:startup_metric_utils_common',
+              ]
+            }],
           ],
         },
         {
@@ -252,15 +259,6 @@
                 ['use_glib == 1', {
                   'dependencies': [
                     '../build/linux/system.gyp:glib',
-                  ],
-                }],
-                ['os_posix == 1 and OS != "mac"', {
-                  'conditions': [
-                    ['use_allocator!="none"', {
-                      'dependencies': [
-                        '../base/allocator/allocator.gyp:allocator',
-                      ],
-                    }],
                   ],
                 }],
                 ['use_seccomp_bpf == 0', {
@@ -466,6 +464,7 @@
       ],
       'dependencies': [
         '../content/content.gyp:content_common',
+        '../url/ipc/url_ipc.gyp:url_ipc',
       ],
     },
   ]

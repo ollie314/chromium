@@ -29,6 +29,14 @@ bool IsKnownList(const std::string& name) {
 }
 }  // namespace
 
+// ThreatMetadata ------------------------------------------------------------
+ThreatMetadata::ThreatMetadata()
+    : threat_pattern_type(ThreatPatternType::NONE) {}
+
+ThreatMetadata::ThreatMetadata(const ThreatMetadata& other) = default;
+
+ThreatMetadata::~ThreatMetadata() {}
+
 // SBCachedFullHashResult ------------------------------------------------------
 
 SBCachedFullHashResult::SBCachedFullHashResult() {}
@@ -37,8 +45,10 @@ SBCachedFullHashResult::SBCachedFullHashResult(
     const base::Time& in_expire_after)
     : expire_after(in_expire_after) {}
 
-SBCachedFullHashResult::~SBCachedFullHashResult() {}
+SBCachedFullHashResult::SBCachedFullHashResult(
+    const SBCachedFullHashResult& other) = default;
 
+SBCachedFullHashResult::~SBCachedFullHashResult() {}
 
 // Listnames that browser can process.
 const char kMalwareList[] = "goog-malware-shavar";
@@ -50,17 +60,13 @@ const char kExtensionBlacklist[] = "goog-badcrxids-digestvar";
 const char kIPBlacklist[] = "goog-badip-digest256";
 const char kUnwantedUrlList[] = "goog-unwanted-shavar";
 const char kInclusionWhitelist[] = "goog-csdinclusionwhite-sha256";
+const char kModuleWhitelist[] = "goog-whitemodule-digest256";
+const char kResourceBlacklist[] = "goog-badresource-shavar";
 
-const char* kAllLists[9] = {
-    kMalwareList,
-    kPhishingList,
-    kBinUrlList,
-    kCsdWhiteList,
-    kDownloadWhiteList,
-    kExtensionBlacklist,
-    kIPBlacklist,
-    kUnwantedUrlList,
-    kInclusionWhitelist,
+const char* kAllLists[11] = {
+    kMalwareList,        kPhishingList,       kBinUrlList,  kCsdWhiteList,
+    kDownloadWhiteList,  kExtensionBlacklist, kIPBlacklist, kUnwantedUrlList,
+    kInclusionWhitelist, kModuleWhitelist, kResourceBlacklist,
 };
 
 ListType GetListId(const base::StringPiece& name) {
@@ -83,6 +89,10 @@ ListType GetListId(const base::StringPiece& name) {
     id = UNWANTEDURL;
   } else if (name == kInclusionWhitelist) {
     id = INCLUSIONWHITELIST;
+  } else if (name == kModuleWhitelist) {
+    id = MODULEWHITELIST;
+  } else if (name == kResourceBlacklist) {
+    id = RESOURCEBLACKLIST;
   } else {
     id = INVALID;
   }
@@ -117,6 +127,11 @@ bool GetListName(ListType list_id, std::string* list) {
       break;
     case INCLUSIONWHITELIST:
       *list = kInclusionWhitelist;
+      break;
+    case MODULEWHITELIST:
+      *list = kModuleWhitelist;
+    case RESOURCEBLACKLIST:
+      *list = kResourceBlacklist;
       break;
     default:
       return false;
@@ -153,9 +168,10 @@ std::string Unescape(const std::string& url) {
   do {
     old_size = unescaped_str.size();
     unescaped_str = net::UnescapeURLComponent(
-        unescaped_str, net::UnescapeRule::SPOOFING_AND_CONTROL_CHARS |
-                           net::UnescapeRule::SPACES |
-                           net::UnescapeRule::URL_SPECIAL_CHARS);
+        unescaped_str,
+        net::UnescapeRule::SPOOFING_AND_CONTROL_CHARS |
+            net::UnescapeRule::SPACES | net::UnescapeRule::PATH_SEPARATORS |
+            net::UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS);
   } while (old_size != unescaped_str.size() &&
            ++loop_var <= kMaxLoopIterations);
 

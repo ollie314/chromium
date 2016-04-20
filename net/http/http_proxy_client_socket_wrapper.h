@@ -7,11 +7,11 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "net/base/completion_callback.h"
@@ -55,6 +55,7 @@ class HttpProxyClientSocketWrapper : public ProxyClientSocket {
   HttpProxyClientSocketWrapper(
       const std::string& group_name,
       RequestPriority priority,
+      ClientSocketPool::RespectLimits respect_limits,
       base::TimeDelta connect_timeout_duration,
       base::TimeDelta proxy_negotiation_timeout_duration,
       TransportClientSocketPool* transport_pool,
@@ -77,7 +78,7 @@ class HttpProxyClientSocketWrapper : public ProxyClientSocket {
   // LOAD_STATE_IDLE at other times.
   LoadState GetConnectLoadState() const;
 
-  scoped_ptr<HttpResponseInfo> GetAdditionalErrorState();
+  std::unique_ptr<HttpResponseInfo> GetAdditionalErrorState();
 
   // ProxyClientSocket implementation.
   const HttpResponseInfo* GetConnectResponseInfo() const override;
@@ -96,7 +97,6 @@ class HttpProxyClientSocketWrapper : public ProxyClientSocket {
   void SetSubresourceSpeculation() override;
   void SetOmniboxSpeculation() override;
   bool WasEverUsed() const override;
-  bool UsingTCPFastOpen() const override;
   bool WasNpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
   bool GetSSLInfo(SSLInfo* ssl_info) override;
@@ -168,6 +168,7 @@ class HttpProxyClientSocketWrapper : public ProxyClientSocket {
 
   const std::string group_name_;
   RequestPriority priority_;
+  ClientSocketPool::RespectLimits respect_limits_;
   const base::TimeDelta connect_timeout_duration_;
   const base::TimeDelta proxy_negotiation_timeout_duration_;
 
@@ -188,10 +189,10 @@ class HttpProxyClientSocketWrapper : public ProxyClientSocket {
   bool using_spdy_;
   NextProto protocol_negotiated_;
 
-  scoped_ptr<HttpResponseInfo> error_response_info_;
+  std::unique_ptr<HttpResponseInfo> error_response_info_;
 
-  scoped_ptr<ClientSocketHandle> transport_socket_handle_;
-  scoped_ptr<ProxyClientSocket> transport_socket_;
+  std::unique_ptr<ClientSocketHandle> transport_socket_handle_;
+  std::unique_ptr<ProxyClientSocket> transport_socket_;
 
   // Called when a connection is established. Also used when restarting with
   // AUTH, which will invoke this when ready to restart, after reconnecting

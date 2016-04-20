@@ -95,6 +95,7 @@ class ASH_EXPORT DisplayInfo {
 
   DisplayInfo();
   DisplayInfo(int64_t id, const std::string& name, bool has_overscan);
+  DisplayInfo(const DisplayInfo& other);
   ~DisplayInfo();
 
   int64_t id() const { return id_; }
@@ -160,6 +161,11 @@ class ASH_EXPORT DisplayInfo {
 
   // Returns the currently active rotation for this display.
   gfx::Display::Rotation GetActiveRotation() const;
+
+  // Returns the source which set the active rotation for this display.
+  gfx::Display::RotationSource active_rotation_source() const {
+    return active_rotation_source_;
+  }
 
   // Returns the rotation set by a given |source|.
   gfx::Display::Rotation GetRotation(gfx::Display::RotationSource source) const;
@@ -240,6 +246,12 @@ class ASH_EXPORT DisplayInfo {
     is_aspect_preserving_scaling_ = value;
   }
 
+  // Maximum cursor size in native pixels.
+  const gfx::Size& maximum_cursor_size() const { return maximum_cursor_size_; }
+  void set_maximum_cursor_size(const gfx::Size& size) {
+    maximum_cursor_size_ = size;
+  }
+
   // Returns a string representation of the DisplayInfo, excluding display
   // modes.
   std::string ToString() const;
@@ -258,6 +270,7 @@ class ASH_EXPORT DisplayInfo {
   base::FilePath sys_path_;
   bool has_overscan_;
   std::map<gfx::Display::RotationSource, gfx::Display::Rotation> rotations_;
+  gfx::Display::RotationSource active_rotation_source_;
   gfx::Display::TouchSupport touch_support_;
 
   // The set of input devices associated with this display.
@@ -307,6 +320,9 @@ class ASH_EXPORT DisplayInfo {
 
   // The list of available variations for the color calibration.
   std::vector<ui::ColorCalibrationProfile> available_color_profiles_;
+
+  // Maximum cursor size.
+  gfx::Size maximum_cursor_size_;
 
   // If you add a new member, you need to update Copy().
 };

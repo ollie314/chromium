@@ -10,7 +10,8 @@
 #include <set>
 #include <vector>
 
-#include "cc/playback/display_list_raster_source.h"
+#include "base/memory/ptr_util.h"
+#include "cc/playback/raster_source.h"
 
 namespace cc {
 
@@ -18,8 +19,8 @@ namespace {
 
 class LargestToSmallestScaleFunctor {
  public:
-  bool operator()(const scoped_ptr<PictureLayerTiling>& left,
-                  const scoped_ptr<PictureLayerTiling>& right) {
+  bool operator()(const std::unique_ptr<PictureLayerTiling>& left,
+                  const std::unique_ptr<PictureLayerTiling>& right) {
     return left->contents_scale() > right->contents_scale();
   }
 };
@@ -33,13 +34,13 @@ inline float LargerRatio(float float1, float float2) {
 }  // namespace
 
 // static
-scoped_ptr<PictureLayerTilingSet> PictureLayerTilingSet::Create(
+std::unique_ptr<PictureLayerTilingSet> PictureLayerTilingSet::Create(
     WhichTree tree,
     PictureLayerTilingClient* client,
     size_t tiling_interest_area_padding,
     float skewport_target_time_in_seconds,
     int skewport_extrapolation_limit_in_content_pixels) {
-  return make_scoped_ptr(new PictureLayerTilingSet(
+  return base::WrapUnique(new PictureLayerTilingSet(
       tree, client, tiling_interest_area_padding,
       skewport_target_time_in_seconds,
       skewport_extrapolation_limit_in_content_pixels));
@@ -63,7 +64,7 @@ PictureLayerTilingSet::~PictureLayerTilingSet() {
 
 void PictureLayerTilingSet::CopyTilingsAndPropertiesFromPendingTwin(
     const PictureLayerTilingSet* pending_twin_set,
-    const scoped_refptr<DisplayListRasterSource>& raster_source,
+    scoped_refptr<RasterSource> raster_source,
     const Region& layer_invalidation) {
   if (pending_twin_set->tilings_.empty()) {
     // If the twin (pending) tiling set is empty, it was not updated for the
@@ -78,10 +79,11 @@ void PictureLayerTilingSet::CopyTilingsAndPropertiesFromPendingTwin(
     float contents_scale = pending_twin_tiling->contents_scale();
     PictureLayerTiling* this_tiling = FindTilingWithScale(contents_scale);
     if (!this_tiling) {
-      scoped_ptr<PictureLayerTiling> new_tiling = PictureLayerTiling::Create(
-          tree_, contents_scale, raster_source, client_,
-          tiling_interest_area_padding_, skewport_target_time_in_seconds_,
-          skewport_extrapolation_limit_in_content_pixels_);
+      std::unique_ptr<PictureLayerTiling> new_tiling =
+          PictureLayerTiling::Create(
+              tree_, contents_scale, raster_source, client_,
+              tiling_interest_area_padding_, skewport_target_time_in_seconds_,
+              skewport_extrapolation_limit_in_content_pixels_);
       tilings_.push_back(std::move(new_tiling));
       this_tiling = tilings_.back().get();
       tiling_sort_required = true;
@@ -97,7 +99,7 @@ void PictureLayerTilingSet::CopyTilingsAndPropertiesFromPendingTwin(
 }
 
 void PictureLayerTilingSet::UpdateTilingsToCurrentRasterSourceForActivation(
-    scoped_refptr<DisplayListRasterSource> raster_source,
+    scoped_refptr<RasterSource> raster_source,
     const PictureLayerTilingSet* pending_twin_set,
     const Region& layer_invalidation,
     float minimum_contents_scale,
@@ -136,7 +138,7 @@ void PictureLayerTilingSet::UpdateTilingsToCurrentRasterSourceForActivation(
 }
 
 void PictureLayerTilingSet::UpdateTilingsToCurrentRasterSourceForCommit(
-    scoped_refptr<DisplayListRasterSource> raster_source,
+    scoped_refptr<RasterSource> raster_source,
     const Region& layer_invalidation,
     float minimum_contents_scale,
     float maximum_contents_scale) {
@@ -144,7 +146,7 @@ void PictureLayerTilingSet::UpdateTilingsToCurrentRasterSourceForCommit(
   RemoveTilingsAboveScale(maximum_contents_scale);
 
   // Invalidate tiles and update them to the new raster source.
-  for (const scoped_ptr<PictureLayerTiling>& tiling : tilings_) {
+  for (const std::unique_ptr<PictureLayerTiling>& tiling : tilings_) {
     DCHECK(tree_ != PENDING_TREE || !tiling->has_tiles());
     tiling->SetRasterSourceAndResize(raster_source);
 
@@ -162,7 +164,7 @@ void PictureLayerTilingSet::UpdateTilingsToCurrentRasterSourceForCommit(
 }
 
 void PictureLayerTilingSet::UpdateRasterSourceDueToLCDChange(
-    const scoped_refptr<DisplayListRasterSource>& raster_source,
+    scoped_refptr<RasterSource> raster_source,
     const Region& layer_invalidation) {
   for (const auto& tiling : tilings_) {
     tiling->SetRasterSourceAndResize(raster_source);
@@ -236,7 +238,7 @@ void PictureLayerTilingSet::CleanUpTilings(
 void PictureLayerTilingSet::RemoveNonIdealTilings() {
   auto to_remove =
       std::remove_if(tilings_.begin(), tilings_.end(),
-                     [](const scoped_ptr<PictureLayerTiling>& t) {
+                     [](const std::unique_ptr<PictureLayerTiling>& t) {
                        return t->resolution() == NON_IDEAL_RESOLUTION;
                      });
   tilings_.erase(to_remove, tilings_.end());
@@ -249,7 +251,7 @@ void PictureLayerTilingSet::MarkAllTilingsNonIdeal() {
 
 PictureLayerTiling* PictureLayerTilingSet::AddTiling(
     float contents_scale,
-    scoped_refptr<DisplayListRasterSource> raster_source) {
+    scoped_refptr<RasterSource> raster_source) {
   for (size_t i = 0; i < tilings_.size(); ++i) {
     DCHECK_NE(tilings_[i]->contents_scale(), contents_scale);
     DCHECK_EQ(tilings_[i]->raster_source(), raster_source.get());
@@ -267,7 +269,7 @@ PictureLayerTiling* PictureLayerTilingSet::AddTiling(
 
 int PictureLayerTilingSet::NumHighResTilings() const {
   return std::count_if(tilings_.begin(), tilings_.end(),
-                       [](const scoped_ptr<PictureLayerTiling>& tiling) {
+                       [](const std::unique_ptr<PictureLayerTiling>& tiling) {
                          return tiling->resolution() == HIGH_RESOLUTION;
                        });
 }
@@ -283,11 +285,11 @@ PictureLayerTiling* PictureLayerTilingSet::FindTilingWithScale(
 
 PictureLayerTiling* PictureLayerTilingSet::FindTilingWithResolution(
     TileResolution resolution) const {
-  auto iter =
-      std::find_if(tilings_.begin(), tilings_.end(),
-                   [resolution](const scoped_ptr<PictureLayerTiling>& tiling) {
-                     return tiling->resolution() == resolution;
-                   });
+  auto iter = std::find_if(
+      tilings_.begin(), tilings_.end(),
+      [resolution](const std::unique_ptr<PictureLayerTiling>& tiling) {
+        return tiling->resolution() == resolution;
+      });
   if (iter == tilings_.end())
     return nullptr;
   return iter->get();
@@ -296,7 +298,7 @@ PictureLayerTiling* PictureLayerTilingSet::FindTilingWithResolution(
 void PictureLayerTilingSet::RemoveTilingsBelowScale(float minimum_scale) {
   auto to_remove = std::remove_if(
       tilings_.begin(), tilings_.end(),
-      [minimum_scale](const scoped_ptr<PictureLayerTiling>& tiling) {
+      [minimum_scale](const std::unique_ptr<PictureLayerTiling>& tiling) {
         return tiling->contents_scale() < minimum_scale;
       });
   tilings_.erase(to_remove, tilings_.end());
@@ -305,7 +307,7 @@ void PictureLayerTilingSet::RemoveTilingsBelowScale(float minimum_scale) {
 void PictureLayerTilingSet::RemoveTilingsAboveScale(float maximum_scale) {
   auto to_remove = std::remove_if(
       tilings_.begin(), tilings_.end(),
-      [maximum_scale](const scoped_ptr<PictureLayerTiling>& tiling) {
+      [maximum_scale](const std::unique_ptr<PictureLayerTiling>& tiling) {
         return tiling->contents_scale() > maximum_scale;
       });
   tilings_.erase(to_remove, tilings_.end());
@@ -316,11 +318,11 @@ void PictureLayerTilingSet::RemoveAllTilings() {
 }
 
 void PictureLayerTilingSet::Remove(PictureLayerTiling* tiling) {
-  auto iter =
-      std::find_if(tilings_.begin(), tilings_.end(),
-                   [tiling](const scoped_ptr<PictureLayerTiling>& candidate) {
-                     return candidate.get() == tiling;
-                   });
+  auto iter = std::find_if(
+      tilings_.begin(), tilings_.end(),
+      [tiling](const std::unique_ptr<PictureLayerTiling>& candidate) {
+        return candidate.get() == tiling;
+      });
   if (iter == tilings_.end())
     return;
   tilings_.erase(iter);

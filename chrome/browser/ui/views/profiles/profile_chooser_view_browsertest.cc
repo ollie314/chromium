@@ -8,13 +8,15 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profiles_state.h"
@@ -22,11 +24,11 @@
 #include "chrome/browser/ui/user_manager.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/profiles/avatar_menu_button.h"
-#include "chrome/browser/ui/views/profiles/new_avatar_button.h"
 #include "chrome/browser/ui/views/profiles/user_manager_view.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "content/public/test/test_utils.h"
@@ -69,17 +71,26 @@ Profile* CreateProfileOutsideUserDataDir() {
 // Set up the profiles to enable Lock. Takes as parameter a profile that will be
 // signed in, and also creates a supervised user (necessary for lock).
 void SetupProfilesForLock(Profile* signed_in) {
-  const char* signed_in_email = "me@google.com";
-  Profile* supervised = CreateTestingProfile("supervised");
-  ProfileInfoCache* cache = &g_browser_process->profile_manager()->
-      GetProfileInfoCache();
-  cache->SetAuthInfoOfProfileAtIndex(cache->GetIndexOfProfileWithPath(
-    signed_in->GetPath()), "12345", base::UTF8ToUTF16(signed_in_email));
-  signed_in->GetPrefs()->
-      SetString(prefs::kGoogleServicesHostedDomain, "google.com");
-  cache->SetSupervisedUserIdOfProfileAtIndex(cache->GetIndexOfProfileWithPath(
-    supervised->GetPath()), signed_in_email);
+  const char signed_in_email[] = "me@google.com";
 
+  // Set up the |signed_in| profile.
+  ProfileAttributesStorage* storage =
+      &g_browser_process->profile_manager()->GetProfileAttributesStorage();
+  ProfileAttributesEntry* entry_signed_in;
+  ASSERT_TRUE(storage->GetProfileAttributesWithPath(signed_in->GetPath(),
+                                                    &entry_signed_in));
+  entry_signed_in->SetAuthInfo("12345", base::UTF8ToUTF16(signed_in_email));
+  signed_in->GetPrefs()->SetString(prefs::kGoogleServicesHostedDomain,
+                                   "google.com");
+
+  // Create the |supervised| profile, which is supervised by |signed_in|.
+  ProfileAttributesEntry* entry_supervised;
+  Profile* supervised = CreateTestingProfile("supervised");
+  ASSERT_TRUE(storage->GetProfileAttributesWithPath(supervised->GetPath(),
+                                                    &entry_supervised));
+  entry_supervised->SetSupervisedUserId(signed_in_email);
+
+  // |signed_in| should now be lockable.
   EXPECT_TRUE(profiles::IsLockAvailable(signed_in));
 }
 
@@ -116,9 +127,9 @@ class ProfileChooserViewExtensionsTest : public ExtensionBrowserTest {
     switches::EnableNewProfileManagementForTesting(command_line);
   }
 
-  void OpenProfileChooserView(Browser* browser){
+  void OpenProfileChooserView(Browser* browser) {
     BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
-    NewAvatarButton* button = browser_view->frame()->GetNewAvatarMenuButton();
+    views::View* button = browser_view->frame()->GetNewAvatarMenuButton();
     if (!button)
       NOTREACHED() << "NewAvatarButton not found.";
     if (browser_view->frame()->GetAvatarMenuButton())
@@ -127,8 +138,8 @@ class ProfileChooserViewExtensionsTest : public ExtensionBrowserTest {
     ProfileChooserView::close_on_deactivate_for_testing_ = false;
 
     ui::MouseEvent e(ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(),
-                     ui::EventTimeForNow(), 0, 0);
-    button->NotifyClick(e);
+                     ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON, 0);
+    button->OnMouseReleased(e);
     base::MessageLoop::current()->RunUntilIdle();
     EXPECT_TRUE(ProfileChooserView::IsShowing());
 
@@ -163,15 +174,6 @@ class ProfileChooserViewExtensionsTest : public ExtensionBrowserTest {
     return registry;
   }
 
-  void WaitForUserManager() {
-    // If the User Manager hasn't shown yet, wait for it to show up.
-    // TODO(mlerman): As per crbug.com/450221, we should somehow observe when
-    // the UserManager is created and wait for that event.
-    if (!UserManager::IsShowing())
-      base::MessageLoop::current()->RunUntilIdle();
-    EXPECT_TRUE(UserManager::IsShowing());
-  }
-
   content::WindowedNotificationObserver* window_close_observer() {
     return window_close_observer_.get();
   }
@@ -194,7 +196,7 @@ class ProfileChooserViewExtensionsTest : public ExtensionBrowserTest {
   }
 
  private:
-  scoped_ptr<content::WindowedNotificationObserver> window_close_observer_;
+  std::unique_ptr<content::WindowedNotificationObserver> window_close_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileChooserViewExtensionsTest);
 };
@@ -247,14 +249,16 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, ViewProfileUMA) {
       ProfileMetrics::PROFILE_AVATAR_MENU_UPGRADE_VIEW, 1);
 }
 
-// Flaky: http://crbug.com/450221
-// WaitForUserManager()'s RunUntilIdle isn't always sufficient for the
-// UserManager to be showing.
-IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, DISABLED_LockProfile) {
+IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, LockProfile) {
   ASSERT_TRUE(profiles::IsMultipleProfilesEnabled());
 
+  // Set up the message loop for the user manager.
+  scoped_refptr<content::MessageLoopRunner> runner(
+      new content::MessageLoopRunner);
+  UserManager::AddOnUserManagerShownCallbackForTesting(runner->QuitClosure());
+
   SetupProfilesForLock(browser()->profile());
-  EXPECT_EQ(1U, BrowserList::GetInstance(chrome::GetActiveDesktop())->size());
+  EXPECT_EQ(1U, BrowserList::GetInstance()->size());
 
   ASSERT_NO_FATAL_FAILURE(OpenProfileChooserView(browser()));
   AvatarMenu* menu = GetProfileChooserViewAvatarMenu();
@@ -264,29 +268,36 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, DISABLED_LockProfile) {
   EXPECT_TRUE(menu->GetItemAt(menu->GetActiveProfileIndex()).signin_required);
 
   window_close_observer()->Wait();
-  EXPECT_TRUE(BrowserList::GetInstance(chrome::GetActiveDesktop())->empty());
+  EXPECT_TRUE(BrowserList::GetInstance()->empty());
 
-  WaitForUserManager();
+  // Wait until the user manager is shown.
+  runner->Run();
+
   // We need to hide the User Manager or else the process can't die.
   UserManager::Hide();
 }
 
-// Flaky: http://crbug.com/450221
-// WaitForUserManager()'s RunUntilIdle isn't always sufficient for the
-// UserManager to be showing.
 IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
-                       DISABLED_LockProfileBlockExtensions) {
+                       LockProfileBlockExtensions) {
   ASSERT_TRUE(profiles::IsMultipleProfilesEnabled());
   // Make sure we have at least one enabled extension.
   extensions::ExtensionRegistry* registry =
       GetPreparedRegistry(browser()->profile());
+
+  // Set up the message loop for the user manager.
+  scoped_refptr<content::MessageLoopRunner> runner(
+      new content::MessageLoopRunner);
+  UserManager::AddOnUserManagerShownCallbackForTesting(runner->QuitClosure());
+
   SetupProfilesForLock(browser()->profile());
 
   ASSERT_NO_FATAL_FAILURE(OpenProfileChooserView(browser()));
   ClickProfileChooserViewLockButton();
   window_close_observer()->Wait();
 
-  WaitForUserManager();
+  // Wait until the user manager is shown.
+  runner->Run();
+
   // Assert that the ExtensionService is blocked.
   ASSERT_EQ(1U, registry->blocked_extensions().size());
 
@@ -294,30 +305,34 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
   UserManager::Hide();
 }
 
-// Flaky: http://crbug.com/450221
-// WaitForUserManager()'s RunUntilIdle isn't always sufficient for the
-// UserManager to be showing.
 IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
-                       DISABLED_LockProfileNoBlockOtherProfileExtensions) {
+                       LockProfileNoBlockOtherProfileExtensions) {
   ASSERT_TRUE(profiles::IsMultipleProfilesEnabled());
   // Make sure we have at least one enabled extension.
   extensions::ExtensionRegistry* registry =
       GetPreparedRegistry(browser()->profile());
   const size_t total_enabled_extensions = registry->enabled_extensions().size();
 
+  // Set up the message loop for the user manager.
+  scoped_refptr<content::MessageLoopRunner> runner(
+      new content::MessageLoopRunner);
+  UserManager::AddOnUserManagerShownCallbackForTesting(runner->QuitClosure());
+
   // Create a different profile and then lock it.
   Profile *signed_in = CreateTestingProfile("signed_in");
   SetupProfilesForLock(signed_in);
   extensions::ExtensionSystem::Get(signed_in)->InitForRegularProfile(true);
   Browser* browser_to_lock = CreateBrowser(signed_in);
-  EXPECT_EQ(2U, BrowserList::GetInstance(chrome::GetActiveDesktop())->size());
+  EXPECT_EQ(2U, BrowserList::GetInstance()->size());
 
   ASSERT_NO_FATAL_FAILURE(OpenProfileChooserView(browser_to_lock));
   ClickProfileChooserViewLockButton();
   window_close_observer()->Wait();
-  EXPECT_EQ(1U, BrowserList::GetInstance(chrome::GetActiveDesktop())->size());
+  EXPECT_EQ(1U, BrowserList::GetInstance()->size());
 
-  WaitForUserManager();
+  // Wait until the user manager is shown.
+  runner->Run();
+
   // Assert that the first profile's extensions are not blocked.
   ASSERT_EQ(total_enabled_extensions, registry->enabled_extensions().size());
   ASSERT_EQ(0U, registry->blocked_extensions().size());

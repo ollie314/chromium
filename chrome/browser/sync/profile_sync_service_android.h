@@ -57,10 +57,10 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
   void SetSetupInProgress(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj,
                           jboolean in_progress);
-  jboolean HasSyncSetupCompleted(
+  jboolean IsFirstSetupComplete(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
-  void SetSyncSetupCompleted(JNIEnv* env,
+  void SetFirstSetupComplete(JNIEnv* env,
                              const base::android::JavaParamRef<jobject>& obj);
   base::android::ScopedJavaLocalRef<jintArray> GetActiveDataTypes(
       JNIEnv* env,
@@ -193,7 +193,7 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
 
   // The class that handles getting, setting, and persisting sync
   // preferences.
-  scoped_ptr<sync_driver::SyncPrefs> sync_prefs_;
+  std::unique_ptr<sync_driver::SyncPrefs> sync_prefs_;
 
   // Java-side ProfileSyncService object.
   JavaObjectWeakGlobalRef weak_java_profile_sync_service_;

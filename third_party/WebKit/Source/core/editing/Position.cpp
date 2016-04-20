@@ -30,15 +30,14 @@
 #include "core/editing/TextAffinity.h"
 #include "wtf/text/CString.h"
 #include <stdio.h>
+#include <ostream> // NOLINT
 
 namespace blink {
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
 static bool canBeAnchorNode(Node* node)
 {
-    if (!node || node->isFirstLetterPseudoElement())
-        return true;
-    return !node->isPseudoElement();
+    return !node || !node->isPseudoElement();
 }
 #endif
 
@@ -52,12 +51,12 @@ const TreeScope* PositionTemplate<Strategy>::commonAncestorTreeScope(const Posit
 
 
 template <typename Strategy>
-PositionTemplate<Strategy> PositionTemplate<Strategy>::editingPositionOf(PassRefPtrWillBeRawPtr<Node> anchorNode, int offset)
+PositionTemplate<Strategy> PositionTemplate<Strategy>::editingPositionOf(Node* anchorNode, int offset)
 {
     if (!anchorNode || anchorNode->isTextNode())
         return PositionTemplate<Strategy>(anchorNode, offset);
 
-    if (!Strategy::editingIgnoresContent(anchorNode.get()))
+    if (!Strategy::editingIgnoresContent(anchorNode))
         return PositionTemplate<Strategy>(anchorNode, offset);
 
     if (offset == 0)
@@ -65,12 +64,12 @@ PositionTemplate<Strategy> PositionTemplate<Strategy>::editingPositionOf(PassRef
 
     // Note: |offset| can be >= 1, if |anchorNode| have child nodes, e.g.
     // using Node.appendChild() to add a child node TEXTAREA.
-    ASSERT(offset >= 1);
+    DCHECK_GE(offset, 1);
     return PositionTemplate<Strategy>(anchorNode, PositionAnchorType::AfterAnchor);
 }
 
 template <typename Strategy>
-PositionTemplate<Strategy>::PositionTemplate(PassRefPtrWillBeRawPtr<Node> anchorNode, PositionAnchorType anchorType)
+PositionTemplate<Strategy>::PositionTemplate(Node* anchorNode, PositionAnchorType anchorType)
     : m_anchorNode(anchorNode)
     , m_offset(0)
     , m_anchorType(anchorType)
@@ -80,24 +79,34 @@ PositionTemplate<Strategy>::PositionTemplate(PassRefPtrWillBeRawPtr<Node> anchor
         return;
     }
     if (m_anchorNode->isTextNode()) {
-        ASSERT(m_anchorType == PositionAnchorType::BeforeAnchor || m_anchorType == PositionAnchorType::AfterAnchor);
+        DCHECK(m_anchorType == PositionAnchorType::BeforeAnchor || m_anchorType == PositionAnchorType::AfterAnchor);
         return;
     }
-    ASSERT(canBeAnchorNode(m_anchorNode.get()));
-    ASSERT(m_anchorType != PositionAnchorType::OffsetInAnchor);
+    if (m_anchorNode->isDocumentNode()) {
+        // Since |RangeBoundaryPoint| can't represent before/after Document, we
+        // should not use them.
+        DCHECK(isBeforeChildren() || isAfterChildren()) << m_anchorType;
+        return;
+    }
+#if DCHECK_IS_ON()
+    DCHECK(canBeAnchorNode(m_anchorNode.get()));
+#endif
+    DCHECK_NE(m_anchorType, PositionAnchorType::OffsetInAnchor);
 }
 
 template <typename Strategy>
-PositionTemplate<Strategy>::PositionTemplate(PassRefPtrWillBeRawPtr<Node> anchorNode, int offset)
+PositionTemplate<Strategy>::PositionTemplate(Node* anchorNode, int offset)
     : m_anchorNode(anchorNode)
     , m_offset(offset)
     , m_anchorType(PositionAnchorType::OffsetInAnchor)
 {
     if (m_anchorNode)
-        ASSERT(offset >= 0);
+        DCHECK_GE(offset, 0);
     else
-        ASSERT(offset == 0);
-    ASSERT(canBeAnchorNode(m_anchorNode.get()));
+        DCHECK_EQ(offset, 0);
+#if DCHECK_IS_ON()
+    DCHECK(canBeAnchorNode(m_anchorNode.get()));
+#endif
 }
 
 template <typename Strategy>
@@ -161,13 +170,13 @@ PositionTemplate<Strategy> PositionTemplate<Strategy>::parentAnchoredEquivalent(
 
     // FIXME: This should only be necessary for legacy positions, but is also needed for positions before and after Tables
     if (m_offset == 0 && !isAfterAnchorOrAfterChildren()) {
-        if (Strategy::parent(*m_anchorNode) && (Strategy::editingIgnoresContent(m_anchorNode.get()) || isRenderedHTMLTableElement(m_anchorNode.get())))
+        if (Strategy::parent(*m_anchorNode) && (Strategy::editingIgnoresContent(m_anchorNode.get()) || isDisplayInsideTable(m_anchorNode.get())))
             return inParentBeforeNode(*m_anchorNode);
         return PositionTemplate<Strategy>(m_anchorNode.get(), 0);
     }
     if (!m_anchorNode->offsetInCharacters()
         && (isAfterAnchorOrAfterChildren() || static_cast<unsigned>(m_offset) == m_anchorNode->countChildren())
-        && (Strategy::editingIgnoresContent(m_anchorNode.get()) || isRenderedHTMLTableElement(m_anchorNode.get()))
+        && (Strategy::editingIgnoresContent(m_anchorNode.get()) || isDisplayInsideTable(m_anchorNode.get()))
         && computeContainerNode()) {
         return inParentAfterNode(*m_anchorNode);
     }
@@ -283,10 +292,10 @@ Node* PositionTemplate<Strategy>::commonAncestorContainer(const PositionTemplate
     return Strategy::commonAncestor(*computeContainerNode(), *other.computeContainerNode());
 }
 
-int comparePositions(const PositionInComposedTree& positionA, const PositionInComposedTree& positionB)
+int comparePositions(const PositionInFlatTree& positionA, const PositionInFlatTree& positionB)
 {
-    ASSERT(positionA.isNotNull());
-    ASSERT(positionB.isNotNull());
+    DCHECK(positionA.isNotNull());
+    DCHECK(positionB.isNotNull());
 
     positionA.anchorNode()->updateDistribution();
     Node* containerA = positionA.computeContainerNode();
@@ -294,13 +303,37 @@ int comparePositions(const PositionInComposedTree& positionA, const PositionInCo
     Node* containerB = positionB.computeContainerNode();
     int offsetA = positionA.computeOffsetInContainerNode();
     int offsetB = positionB.computeOffsetInContainerNode();
-    return comparePositionsInComposedTree(containerA, offsetA, containerB, offsetB);
+    return comparePositionsInFlatTree(containerA, offsetA, containerB, offsetB);
 }
 
 template <typename Strategy>
 int PositionTemplate<Strategy>::compareTo(const PositionTemplate<Strategy>& other) const
 {
     return comparePositions(*this, other);
+}
+
+template <typename Strategy>
+bool PositionTemplate<Strategy>::operator<(const PositionTemplate<Strategy>& other) const
+{
+    return comparePositions(*this, other) < 0;
+}
+
+template <typename Strategy>
+bool PositionTemplate<Strategy>::operator<=(const PositionTemplate<Strategy>& other) const
+{
+    return comparePositions(*this, other) <= 0;
+}
+
+template <typename Strategy>
+bool PositionTemplate<Strategy>::operator>(const PositionTemplate<Strategy>& other) const
+{
+    return comparePositions(*this, other) > 0;
+}
+
+template <typename Strategy>
+bool PositionTemplate<Strategy>::operator>=(const PositionTemplate<Strategy>& other) const
+{
+    return comparePositions(*this, other) >= 0;
 }
 
 template <typename Strategy>
@@ -383,40 +416,40 @@ void PositionTemplate<Strategy>::debugPosition(const char* msg) const
     fprintf(stderr, "Position [%s]: %s [%p] %s at %d\n", msg, anchorNode()->nodeName().utf8().data(), anchorNode(), anchorType, m_offset);
 }
 
-PositionInComposedTree toPositionInComposedTree(const Position& pos)
+PositionInFlatTree toPositionInFlatTree(const Position& pos)
 {
     if (pos.isNull())
-        return PositionInComposedTree();
+        return PositionInFlatTree();
 
     if (pos.isOffsetInAnchor()) {
         Node* anchor = pos.anchorNode();
         if (anchor->offsetInCharacters())
-            return PositionInComposedTree(anchor, pos.computeOffsetInContainerNode());
-        ASSERT(!anchor->isSlotOrActiveInsertionPoint());
+            return PositionInFlatTree(anchor, pos.computeOffsetInContainerNode());
+        DCHECK(!anchor->isSlotOrActiveInsertionPoint());
         int offset = pos.computeOffsetInContainerNode();
         Node* child = NodeTraversal::childAt(*anchor, offset);
         if (!child) {
             if (anchor->isShadowRoot())
-                return PositionInComposedTree(anchor->shadowHost(), PositionAnchorType::AfterChildren);
-            return PositionInComposedTree(anchor, PositionAnchorType::AfterChildren);
+                return PositionInFlatTree(anchor->shadowHost(), PositionAnchorType::AfterChildren);
+            return PositionInFlatTree(anchor, PositionAnchorType::AfterChildren);
         }
         child->updateDistribution();
         if (child->isSlotOrActiveInsertionPoint()) {
             if (anchor->isShadowRoot())
-                return PositionInComposedTree(anchor->shadowHost(), offset);
-            return PositionInComposedTree(anchor, offset);
+                return PositionInFlatTree(anchor->shadowHost(), offset);
+            return PositionInFlatTree(anchor, offset);
         }
-        if (Node* parent = ComposedTreeTraversal::parent(*child))
-            return PositionInComposedTree(parent, ComposedTreeTraversal::index(*child));
-        // When |pos| isn't appeared in composed tree, we map |pos| to after
+        if (Node* parent = FlatTreeTraversal::parent(*child))
+            return PositionInFlatTree(parent, FlatTreeTraversal::index(*child));
+        // When |pos| isn't appeared in flat tree, we map |pos| to after
         // children of shadow host.
         // e.g. "foo",0 in <progress>foo</progress>
         if (anchor->isShadowRoot())
-            return PositionInComposedTree(anchor->shadowHost(), PositionAnchorType::AfterChildren);
-        return PositionInComposedTree(anchor, PositionAnchorType::AfterChildren);
+            return PositionInFlatTree(anchor->shadowHost(), PositionAnchorType::AfterChildren);
+        return PositionInFlatTree(anchor, PositionAnchorType::AfterChildren);
     }
 
-    return PositionInComposedTree(pos.anchorNode(), pos.anchorType());
+    return PositionInFlatTree(pos.anchorNode(), pos.anchorType());
 }
 
 Position toPositionInDOMTree(const Position& position)
@@ -424,7 +457,7 @@ Position toPositionInDOMTree(const Position& position)
     return position;
 }
 
-Position toPositionInDOMTree(const PositionInComposedTree& position)
+Position toPositionInDOMTree(const PositionInFlatTree& position)
 {
     if (position.isNull())
         return Position();
@@ -445,7 +478,7 @@ Position toPositionInDOMTree(const PositionInComposedTree& position)
         int offset = position.offsetInContainerNode();
         if (anchorNode->offsetInCharacters())
             return Position(anchorNode, offset);
-        Node* child = ComposedTreeTraversal::childAt(*anchorNode, offset);
+        Node* child = FlatTreeTraversal::childAt(*anchorNode, offset);
         if (child)
             return Position(child->parentNode(), child->nodeIndex());
         if (!position.offsetInContainerNode())
@@ -515,18 +548,57 @@ void PositionTemplate<Strategy>::showTreeForThis() const
 }
 
 template <typename Strategy>
-void PositionTemplate<Strategy>::showTreeForThisInComposedTree() const
+void PositionTemplate<Strategy>::showTreeForThisInFlatTree() const
 {
     if (!anchorNode())
         return;
-    anchorNode()->showTreeForThisInComposedTree();
+    anchorNode()->showTreeForThisInFlatTree();
     showAnchorTypeAndOffset();
 }
 
 #endif
 
+template <typename PositionType>
+static std::ostream& printPosition(std::ostream& ostream, const PositionType& position)
+{
+    if (position.isNull())
+        return ostream << "null";
+    ostream << position.anchorNode() << "@";
+    if (position.isOffsetInAnchor())
+        return ostream << position.offsetInContainerNode();
+    return ostream << position.anchorType();
+}
+
+std::ostream& operator<<(std::ostream& ostream, PositionAnchorType anchorType)
+{
+    switch (anchorType) {
+    case PositionAnchorType::AfterAnchor:
+        return ostream << "afterAnchor";
+    case PositionAnchorType::AfterChildren:
+        return ostream << "afterChildren";
+    case PositionAnchorType::BeforeAnchor:
+        return ostream << "beforeAnchor";
+    case PositionAnchorType::BeforeChildren:
+        return ostream << "beforeChildren";
+    case PositionAnchorType::OffsetInAnchor:
+        return ostream << "offsetInAnchor";
+    }
+    NOTREACHED();
+    return ostream << "anchorType=" << static_cast<int>(anchorType);
+}
+
+std::ostream& operator<<(std::ostream& ostream, const Position& position)
+{
+    return printPosition(ostream, position);
+}
+
+std::ostream& operator<<(std::ostream& ostream, const PositionInFlatTree& position)
+{
+    return printPosition(ostream, position);
+}
+
 template class CORE_TEMPLATE_EXPORT PositionTemplate<EditingStrategy>;
-template class CORE_TEMPLATE_EXPORT PositionTemplate<EditingInComposedTreeStrategy>;
+template class CORE_TEMPLATE_EXPORT PositionTemplate<EditingInFlatTreeStrategy>;
 
 } // namespace blink
 

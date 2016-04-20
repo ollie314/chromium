@@ -47,26 +47,26 @@ public:
 template<>
 class ReadableStreamChunkTypeTraits<DOMArrayBuffer> {
 public:
-    typedef RefPtr<DOMArrayBuffer> HoldType;
-    typedef PassRefPtr<DOMArrayBuffer> PassType;
+    typedef DOMArrayBuffer* HoldType;
+    typedef DOMArrayBuffer* PassType;
 
     static size_t size(const PassType& chunk) { return chunk->byteLength(); }
     static ScriptValue toScriptValue(ScriptState* scriptState, const HoldType& value)
     {
-        return ScriptValue(scriptState, toV8(value.get(), scriptState->context()->Global(), scriptState->isolate()));
+        return ScriptValue(scriptState, toV8(value, scriptState->context()->Global(), scriptState->isolate()));
     }
 };
 
 template<>
 class ReadableStreamChunkTypeTraits<DOMArrayBufferView> {
 public:
-    typedef RefPtr<DOMArrayBufferView> HoldType;
-    typedef PassRefPtr<DOMArrayBufferView> PassType;
+    typedef DOMArrayBufferView* HoldType;
+    typedef DOMArrayBufferView* PassType;
 
     static size_t size(const PassType& chunk) { return chunk->byteLength(); }
     static ScriptValue toScriptValue(ScriptState* scriptState, const HoldType& value)
     {
-        return ScriptValue(scriptState, toV8(value.get(), scriptState->context()->Global(), scriptState->isolate()));
+        return ScriptValue(scriptState, toV8(value, scriptState->context()->Global(), scriptState->isolate()));
     }
 };
 
@@ -139,7 +139,7 @@ private:
     void resolveAllPendingReadsAsDone() override
     {
         for (auto& resolver : m_pendingReads) {
-            ScriptState* scriptState = resolver->scriptState();
+            ScriptState* scriptState = resolver->getScriptState();
             if (!scriptState->contextIsValid())
                 continue;
             ScriptState::Scope scope(scriptState);
@@ -181,7 +181,7 @@ bool ReadableStreamImpl<ChunkTypeTraits>::enqueue(typename ChunkTypeTraits::Pass
     }
 
     ScriptPromiseResolver* resolver = m_pendingReads.takeFirst();
-    ScriptState* scriptState = resolver->scriptState();
+    ScriptState* scriptState = resolver->getScriptState();
     if (!scriptState->contextIsValid())
         return false;
     ScriptState::Scope scope(scriptState);

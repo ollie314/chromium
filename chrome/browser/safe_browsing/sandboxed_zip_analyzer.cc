@@ -101,11 +101,17 @@ void SandboxedZipAnalyzer::AnalyzeInSandbox() {
       base::Bind(&SandboxedZipAnalyzer::StartProcessOnIOThread, this));
 }
 
+void SandboxedZipAnalyzer::OnProcessCrashed(int exit_code) {
+  OnAnalyzeZipFileFinished(zip_analyzer::Results());
+}
+
+void SandboxedZipAnalyzer::OnProcessLaunchFailed() {
+  OnAnalyzeZipFileFinished(zip_analyzer::Results());
+}
+
 bool SandboxedZipAnalyzer::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(SandboxedZipAnalyzer, message)
-    IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_ProcessStarted,
-                        OnUtilityProcessStarted)
     IPC_MESSAGE_HANDLER(
         ChromeUtilityHostMsg_AnalyzeZipFileForDownloadProtection_Finished,
         OnAnalyzeZipFileFinished)
@@ -122,27 +128,11 @@ void SandboxedZipAnalyzer::StartProcessOnIOThread() {
       ->AsWeakPtr();
   utility_process_host_->SetName(l10n_util::GetStringUTF16(
       IDS_UTILITY_PROCESS_SAFE_BROWSING_ZIP_FILE_ANALYZER_NAME));
-  utility_process_host_->Send(new ChromeUtilityMsg_StartupPing);
-  // Wait for the startup notification before sending the main IPC to the
-  // utility process, so that we can dup the file handle.
-}
-
-void SandboxedZipAnalyzer::OnUtilityProcessStarted() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  base::ProcessHandle utility_process =
-      content::RenderProcessHost::run_renderer_in_process() ?
-          base::GetCurrentProcessHandle() :
-          utility_process_host_->GetData().handle;
-
-  if (utility_process == base::kNullProcessHandle) {
-    DLOG(ERROR) << "Child process handle is null";
-  }
   utility_process_host_->Send(
       new ChromeUtilityMsg_AnalyzeZipFileForDownloadProtection(
-          IPC::TakeFileHandleForProcess(std::move(zip_file_), utility_process),
-          IPC::GetFileHandleForProcess(temp_file_.GetPlatformFile(),
-                                       utility_process,
-                                       false /* !close_source_handle */)));
+          IPC::TakePlatformFileForTransit(std::move(zip_file_)),
+          IPC::GetPlatformFileForTransit(temp_file_.GetPlatformFile(),
+                                         false /* !close_source_handle */)));
 }
 
 void SandboxedZipAnalyzer::OnAnalyzeZipFileFinished(

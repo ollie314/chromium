@@ -64,24 +64,31 @@ class CONTENT_EXPORT DWriteFontCollectionProxy
                       IDWriteFontFileStream** font_file_stream) override;
 
   HRESULT STDMETHODCALLTYPE
-  RuntimeClassInitialize(IDWriteFactory* factory,
-                         const base::Callback<IPC::Sender*(void)>& sender);
+  RuntimeClassInitialize(IDWriteFactory* factory, IPC::Sender* sender_override);
 
   void Unregister();
 
   bool LoadFamily(UINT32 family_index,
                   IDWriteFontCollection** containing_collection);
 
+  // Gets the family at the specified index with the expected name. This can be
+  // used to avoid an IPC call when both the index and family name are known.
+  bool GetFontFamily(UINT32 family_index,
+                     const base::string16& family_name,
+                     IDWriteFontFamily** font_family);
+
   bool LoadFamilyNames(UINT32 family_index, IDWriteLocalizedStrings** strings);
 
   bool CreateFamily(UINT32 family_index);
 
  private:
+  IPC::Sender* GetSender();
+
   Microsoft::WRL::ComPtr<IDWriteFactory> factory_;
   std::vector<Microsoft::WRL::ComPtr<DWriteFontFamilyProxy>> families_;
   std::map<base::string16, UINT32> family_names_;
   UINT32 family_count_ = UINT_MAX;
-  base::Callback<IPC::Sender*(void)> sender_;
+  IPC::Sender* sender_override_;
 
   DISALLOW_ASSIGN(DWriteFontCollectionProxy);
 };
@@ -122,6 +129,8 @@ class CONTENT_EXPORT DWriteFontFamilyProxy
   bool GetFontFromFontFace(IDWriteFontFace* font_face, IDWriteFont** font);
 
   void SetName(const base::string16& family_name);
+
+  const base::string16& GetName();
 
   bool IsLoaded();
 

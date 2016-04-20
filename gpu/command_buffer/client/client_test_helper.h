@@ -10,9 +10,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/client/gpu_control.h"
 #include "gpu/command_buffer/common/cmd_buffer_common.h"
 #include "gpu/command_buffer/common/gpu_memory_allocation.h"
@@ -96,6 +97,7 @@ class MockClientGpuControl : public GpuControl {
   MockClientGpuControl();
   virtual ~MockClientGpuControl();
 
+  MOCK_METHOD1(SetGpuControlClient, void(GpuControlClient*));
   MOCK_METHOD0(GetCapabilities, Capabilities());
   MOCK_METHOD4(CreateImage,
                int32_t(ClientBuffer buffer,
@@ -108,11 +110,6 @@ class MockClientGpuControl : public GpuControl {
                        size_t height,
                        unsigned internalformat,
                        unsigned usage));
-  MOCK_METHOD0(InsertSyncPoint, uint32_t());
-  MOCK_METHOD0(InsertFutureSyncPoint, uint32_t());
-  MOCK_METHOD1(RetireSyncPoint, void(uint32_t id));
-  MOCK_METHOD2(SignalSyncPoint,
-               void(uint32_t id, const base::Closure& callback));
   MOCK_METHOD2(SignalQuery,
                void(uint32_t query, const base::Closure& callback));
   MOCK_METHOD1(CreateStreamTexture, uint32_t(uint32_t));
@@ -120,7 +117,7 @@ class MockClientGpuControl : public GpuControl {
   MOCK_METHOD0(IsGpuChannelLost, bool());
   MOCK_METHOD0(EnsureWorkVisible, void());
   MOCK_CONST_METHOD0(GetNamespaceID, CommandBufferNamespace());
-  MOCK_CONST_METHOD0(GetCommandBufferID, uint64_t());
+  MOCK_CONST_METHOD0(GetCommandBufferID, CommandBufferId());
   MOCK_CONST_METHOD0(GetExtraCommandBufferData, int32_t());
   MOCK_METHOD0(GenerateFenceSyncRelease, uint64_t());
   MOCK_METHOD1(IsFenceSyncRelease, bool(uint64_t release));

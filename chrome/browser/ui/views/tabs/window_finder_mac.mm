@@ -4,8 +4,7 @@
 
 #include "chrome/browser/ui/views/tabs/window_finder.h"
 
-gfx::NativeWindow GetLocalProcessWindowAtPoint(
-    chrome::HostDesktopType host_desktop_type,
+gfx::NativeWindow WindowFinder::GetLocalProcessWindowAtPoint(
     const gfx::Point& screen_point,
     const std::set<gfx::NativeWindow>& ignore) {
   NOTIMPLEMENTED();

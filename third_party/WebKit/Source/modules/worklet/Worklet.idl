@@ -5,7 +5,8 @@
 // https://drafts.css-houdini.org/worklets/#worklet
 
 [
-    GarbageCollected,
+    DependentLifetime,
     RuntimeEnabled=Worklet,
 ] interface Worklet {
+    [CallWith=ScriptState] Promise<void> import(DOMString url);
 };

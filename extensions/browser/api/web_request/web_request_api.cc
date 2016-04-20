@@ -527,12 +527,10 @@ bool ExtensionWebRequestEventRouter::RequestFilter::InitFromValue(
         return false;
       for (size_t i = 0; i < types_value->GetSize(); ++i) {
         std::string type_str;
-        content::ResourceType type;
         if (!types_value->GetString(i, &type_str) ||
-            !helpers::ParseResourceType(type_str, &type)) {
+            !helpers::ParseResourceType(type_str, &types)) {
           return false;
         }
-        types.push_back(type);
       }
     } else if (it.key() == "tabId") {
       if (!it.value().GetAsInteger(&tab_id))
@@ -560,6 +558,9 @@ ExtensionWebRequestEventRouter::EventResponse::~EventResponse() {
 ExtensionWebRequestEventRouter::RequestFilter::RequestFilter()
     : tab_id(-1), window_id(-1) {
 }
+
+ExtensionWebRequestEventRouter::RequestFilter::RequestFilter(
+    const RequestFilter& other) = default;
 
 ExtensionWebRequestEventRouter::RequestFilter::~RequestFilter() {
 }
@@ -600,10 +601,17 @@ ExtensionWebRequestEventRouter::CreateEventDetails(
   scoped_ptr<WebRequestEventDetails> event_details(
       new WebRequestEventDetails(request, extra_info_spec));
 
-  if (web_request_event_router_delegate_) {
-    web_request_event_router_delegate_->ExtractExtraRequestDetails(
-        request, event_details.get());
+  int render_frame_id = -1;
+  int render_process_id = -1;
+  int tab_id = -1;
+  ExtensionApiFrameIdMap::FrameData frame_data;
+  if (content::ResourceRequestInfo::GetRenderFrameForRequest(
+          request, &render_process_id, &render_frame_id) &&
+      ExtensionApiFrameIdMap::Get()->GetCachedFrameDataOnIO(
+          render_process_id, render_frame_id, &frame_data)) {
+    tab_id = frame_data.tab_id;
   }
+  event_details->SetInteger(keys::kTabIdKey, tab_id);
   return event_details;
 }
 
@@ -1072,6 +1080,9 @@ void ExtensionWebRequestEventRouter::DispatchEventToListeners(
         continue;
     }
 
+    if (!listener->ipc_sender.get())
+      continue;
+
     // Filter out the optional keys that this listener didn't request.
     scoped_ptr<base::ListValue> args_filtered(new base::ListValue);
     args_filtered->Append(
@@ -1325,9 +1336,26 @@ void ExtensionWebRequestEventRouter::GetMatchingListenersImpl(
       continue;
     }
 
-    if (web_request_event_router_delegate_ &&
-        web_request_event_router_delegate_->OnGetMatchingListenersImplCheck(
-            listener.filter.tab_id, listener.filter.window_id, request)) {
+    int render_process_id = -1;
+    int render_frame_id = -1;
+    // TODO(devlin): Figure out when one/both of these can fail, and if we
+    // need to address it.
+    bool found_render_frame =
+        content::ResourceRequestInfo::GetRenderFrameForRequest(
+            request, &render_process_id, &render_frame_id);
+    UMA_HISTOGRAM_BOOLEAN("Extensions.WebRequestEventFoundFrame",
+                          found_render_frame);
+    ExtensionApiFrameIdMap::FrameData frame_data;
+    if (found_render_frame) {
+      ExtensionApiFrameIdMap::Get()->GetCachedFrameDataOnIO(
+          render_process_id, render_frame_id, &frame_data);
+    }
+    // Check if the tab id and window id match, if they were set in the
+    // listener params.
+    if ((listener.filter.tab_id != -1 &&
+         frame_data.tab_id != listener.filter.tab_id) ||
+        (listener.filter.window_id != -1 &&
+         frame_data.window_id != listener.filter.window_id)) {
       continue;
     }
 
@@ -1337,11 +1365,19 @@ void ExtensionWebRequestEventRouter::GetMatchingListenersImpl(
       continue;
     }
 
-    if (!is_web_view_guest &&
-        !WebRequestPermissions::CanExtensionAccessURL(
-            extension_info_map, listener.extension_id, url, crosses_incognito,
-            WebRequestPermissions::REQUIRE_HOST_PERMISSION)) {
-      continue;
+    if (!is_web_view_guest) {
+      PermissionsData::AccessType access =
+          WebRequestPermissions::CanExtensionAccessURL(
+              extension_info_map, listener.extension_id, url, frame_data.tab_id,
+              crosses_incognito,
+              WebRequestPermissions::REQUIRE_HOST_PERMISSION);
+      if (access != PermissionsData::ACCESS_ALLOWED) {
+        if (access == PermissionsData::ACCESS_WITHHELD) {
+          web_request_event_router_delegate_->NotifyWebRequestWithheld(
+              render_process_id, render_frame_id, listener.extension_id);
+        }
+        continue;
+      }
     }
 
     bool blocking_listener =
@@ -2048,9 +2084,13 @@ bool WebRequestInternalAddEventListenerFunction::RunSync() {
     // while having host permissions for http://www.example.com/foo/* and
     // http://www.example.com/bar/*.
     // For this reason we do only a coarse check here to warn the extension
-    // developer if he does something obviously wrong.
+    // developer if they do something obviously wrong.
     if (extension->permissions_data()
             ->GetEffectiveHostPermissions()
+            .is_empty() &&
+        extension->permissions_data()
+            ->withheld_permissions()
+            .explicit_hosts()
             .is_empty()) {
       error_ = keys::kHostPermissionsRequired;
       return false;

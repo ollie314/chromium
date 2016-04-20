@@ -72,6 +72,9 @@ FamilyInfoFetcher::FamilyMember::FamilyMember(
       profile_image_url(profile_image_url) {
 }
 
+FamilyInfoFetcher::FamilyMember::FamilyMember(const FamilyMember& other) =
+    default;
+
 FamilyInfoFetcher::FamilyMember::~FamilyMember() {
 }
 
@@ -272,7 +275,7 @@ void FamilyInfoFetcher::ParseProfile(const base::DictionaryValue* dict,
 }
 
 void FamilyInfoFetcher::FamilyProfileFetched(const std::string& response) {
-  scoped_ptr<base::Value> value = base::JSONReader::Read(response);
+  std::unique_ptr<base::Value> value = base::JSONReader::Read(response);
   const base::DictionaryValue* dict = NULL;
   if (!value || !value->GetAsDictionary(&dict)) {
     consumer_->OnFailure(SERVICE_ERROR);
@@ -302,7 +305,7 @@ void FamilyInfoFetcher::FamilyProfileFetched(const std::string& response) {
 }
 
 void FamilyInfoFetcher::FamilyMembersFetched(const std::string& response) {
-  scoped_ptr<base::Value> value = base::JSONReader::Read(response);
+  std::unique_ptr<base::Value> value = base::JSONReader::Read(response);
   const base::DictionaryValue* dict = NULL;
   if (!value || !value->GetAsDictionary(&dict)) {
     consumer_->OnFailure(SERVICE_ERROR);

@@ -2,6 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Use an absolute path since this could be loaded from a different scope,
+// which would affect the scope of the importScripts call here.
+self.importScripts('/push_messaging/push_constants.js');
+
+var pushSubscriptionOptions = {
+    userVisibleOnly: true
+};
+
 // The "onpush" event currently understands two values as message payload
 // data coming from the test. Any other input is passed through to the
 // document unchanged.
@@ -10,6 +18,11 @@
 // "shownotification-without-waituntil"
 //     - Display a Web Notification without using event.waitUntil().
 this.onpush = function(event) {
+  if (event.data === null) {
+    sendMessageToClients('push', '[NULL]');
+    return;
+  }
+
   var data = event.data.text();
   if (!data.startsWith('shownotification')) {
     sendMessageToClients('push', data);
@@ -32,6 +45,28 @@ this.onpush = function(event) {
     sendMessageToClients('push', String(ex));
   }));
 };
+
+self.addEventListener('message', function handler (event) {
+  if (event.data.command == 'workerSubscribe') {
+    pushSubscriptionOptions.applicationServerKey = kApplicationServerKey.buffer;
+  } else if (event.data.command == 'workerSubscribeNoKey') {
+    // Nothing to set up
+  } else {
+    sendMessageToClients('message', 'error - unknown message request');
+    return;
+  }
+
+  self.registration.pushManager.subscribe(pushSubscriptionOptions)
+      .then(function(subscription) {
+        sendMessageToClients('message', subscription.endpoint);
+      }, function(error) {
+        sendErrorToClients(error);
+      });
+});
+
+function sendErrorToClients(error) {
+  sendMessageToClients('error', error.name + ' - ' + error.message);
+}
 
 function sendMessageToClients(type, data) {
   var message = JSON.stringify({

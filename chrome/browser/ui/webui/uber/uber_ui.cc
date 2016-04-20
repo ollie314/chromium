@@ -11,6 +11,7 @@
 #include "chrome/browser/ui/webui/extensions/extensions_ui.h"
 #include "chrome/browser/ui/webui/log_web_ui_url.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/chrome_manifest_url_handlers.h"
 #include "chrome/common/url_constants.h"
@@ -108,8 +109,11 @@ content::WebUIDataSource* CreateUberFrameHTMLSource(
   bool overrides_history =
       HasExtensionType(browser_context, chrome::kChromeUIHistoryHost);
   source->AddString("overridesHistory", overrides_history ? "yes" : "no");
-  source->AddBoolean("hideHistory",
-                     ::switches::MdHistoryEnabled() && !overrides_history);
+  source->AddBoolean(
+      "hideHistory",
+      base::FeatureList::IsEnabled(features::kMaterialDesignHistoryFeature)
+      && !overrides_history);
+
   source->DisableDenyXFrameOptions();
   source->OverrideContentSecurityPolicyFrameSrc("frame-src chrome:;");
 
@@ -187,13 +191,6 @@ void UberUI::RenderViewCreated(RenderViewHost* render_view_host) {
   for (SubpageMap::iterator iter = sub_uis_.begin(); iter != sub_uis_.end();
        ++iter) {
     iter->second->GetController()->RenderViewCreated(render_view_host);
-  }
-}
-
-void UberUI::RenderViewReused(RenderViewHost* render_view_host) {
-  for (SubpageMap::iterator iter = sub_uis_.begin(); iter != sub_uis_.end();
-       ++iter) {
-    iter->second->GetController()->RenderViewReused(render_view_host);
   }
 }
 

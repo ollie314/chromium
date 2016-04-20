@@ -6,13 +6,14 @@
 #define CHROME_BROWSER_FILE_SELECT_HELPER_H_
 
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -39,12 +40,17 @@ struct SelectedFileInfo;
 // This class handles file-selection requests coming from WebUI elements
 // (via the extensions::ExtensionHost class). It implements both the
 // initialisation and listener functions for file-selection dialogs.
-class FileSelectHelper : public base::RefCountedThreadSafe<FileSelectHelper>,
+//
+// Since FileSelectHelper has-a NotificationRegistrar, it needs to live on and
+// be destroyed on the UI thread. References to FileSelectHelper may be passed
+// on to other threads.
+class FileSelectHelper : public base::RefCountedThreadSafe<
+                             FileSelectHelper,
+                             content::BrowserThread::DeleteOnUIThread>,
                          public ui::SelectFileDialog::Listener,
                          public content::WebContentsObserver,
                          public content::NotificationObserver {
  public:
-
   // Show the file chooser dialog.
   static void RunFileChooser(content::WebContents* tab,
                              const content::FileChooserParams& params);
@@ -56,6 +62,10 @@ class FileSelectHelper : public base::RefCountedThreadSafe<FileSelectHelper>,
 
  private:
   friend class base::RefCountedThreadSafe<FileSelectHelper>;
+  friend class base::DeleteHelper<FileSelectHelper>;
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::UI>;
+
   FRIEND_TEST_ALL_PREFIXES(FileSelectHelperTest, IsAcceptTypeValid);
   FRIEND_TEST_ALL_PREFIXES(FileSelectHelperTest, ZipPackage);
   FRIEND_TEST_ALL_PREFIXES(FileSelectHelperTest, GetSanitizedFileName);
@@ -85,18 +95,20 @@ class FileSelectHelper : public base::RefCountedThreadSafe<FileSelectHelper>,
 
   void RunFileChooser(content::RenderViewHost* render_view_host,
                       content::WebContents* web_contents,
-                      scoped_ptr<content::FileChooserParams> params);
-  void GetFileTypesOnFileThread(scoped_ptr<content::FileChooserParams> params);
+                      std::unique_ptr<content::FileChooserParams> params);
+  void GetFileTypesOnFileThread(
+      std::unique_ptr<content::FileChooserParams> params);
   void GetSanitizedFilenameOnUIThread(
-      scoped_ptr<content::FileChooserParams> params);
+      std::unique_ptr<content::FileChooserParams> params);
 #if defined(FULL_SAFE_BROWSING)
   void ApplyUnverifiedDownloadPolicy(
       const base::FilePath& default_path,
-      scoped_ptr<content::FileChooserParams> params,
+      std::unique_ptr<content::FileChooserParams> params,
       safe_browsing::UnverifiedDownloadPolicy policy);
 #endif
-  void RunFileChooserOnUIThread(const base::FilePath& default_path,
-                                scoped_ptr<content::FileChooserParams> params);
+  void RunFileChooserOnUIThread(
+      const base::FilePath& default_path,
+      std::unique_ptr<content::FileChooserParams> params);
 
   // Cleans up and releases this instance. This must be called after the last
   // callback is received from the file chooser dialog.
@@ -145,7 +157,7 @@ class FileSelectHelper : public base::RefCountedThreadSafe<FileSelectHelper>,
   // callback is received from the enumeration code.
   void EnumerateDirectoryEnd();
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MACOSX)
   // Must be called on the FILE_USER_BLOCKING thread. Each selected file that is
   // a package will be zipped, and the zip will be passed to the render view
   // host in place of the package.
@@ -161,7 +173,7 @@ class FileSelectHelper : public base::RefCountedThreadSafe<FileSelectHelper>,
   // temporary destination, if the zip was successful. Otherwise returns an
   // empty path.
   static base::FilePath ZipPackage(const base::FilePath& path);
-#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+#endif  // defined(OS_MACOSX)
 
   // Utility method that passes |files| to the render view host, and ends the
   // file chooser.
@@ -184,9 +196,8 @@ class FileSelectHelper : public base::RefCountedThreadSafe<FileSelectHelper>,
   //   http://whatwg.org/html/number-state.html#attr-input-accept
   // |accept_types| contains only valid lowercased MIME types or file extensions
   // beginning with a period (.).
-  static scoped_ptr<ui::SelectFileDialog::FileTypeInfo>
-      GetFileTypesFromAcceptType(
-          const std::vector<base::string16>& accept_types);
+  static std::unique_ptr<ui::SelectFileDialog::FileTypeInfo>
+  GetFileTypesFromAcceptType(const std::vector<base::string16>& accept_types);
 
   // Check the accept type is valid. It is expected to be all lower case with
   // no whitespace.
@@ -218,7 +229,7 @@ class FileSelectHelper : public base::RefCountedThreadSafe<FileSelectHelper>,
 
   // Dialog box used for choosing files to upload from file form fields.
   scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
-  scoped_ptr<ui::SelectFileDialog::FileTypeInfo> select_file_types_;
+  std::unique_ptr<ui::SelectFileDialog::FileTypeInfo> select_file_types_;
 
   // The type of file dialog last shown.
   ui::SelectFileDialog::Type dialog_type_;

@@ -28,25 +28,25 @@ void ServiceWorkerRegistration::dispatchUpdateFoundEvent()
     dispatchEvent(Event::create(EventTypeNames::updatefound));
 }
 
-void ServiceWorkerRegistration::setInstalling(WebPassOwnPtr<WebServiceWorker::Handle> handle)
+void ServiceWorkerRegistration::setInstalling(std::unique_ptr<WebServiceWorker::Handle> handle)
 {
-    if (!executionContext())
+    if (!getExecutionContext())
         return;
-    m_installing = ServiceWorker::from(executionContext(), handle.release());
+    m_installing = ServiceWorker::from(getExecutionContext(), adoptPtr(handle.release()));
 }
 
-void ServiceWorkerRegistration::setWaiting(WebPassOwnPtr<WebServiceWorker::Handle> handle)
+void ServiceWorkerRegistration::setWaiting(std::unique_ptr<WebServiceWorker::Handle> handle)
 {
-    if (!executionContext())
+    if (!getExecutionContext())
         return;
-    m_waiting = ServiceWorker::from(executionContext(), handle.release());
+    m_waiting = ServiceWorker::from(getExecutionContext(), adoptPtr(handle.release()));
 }
 
-void ServiceWorkerRegistration::setActive(WebPassOwnPtr<WebServiceWorker::Handle> handle)
+void ServiceWorkerRegistration::setActive(std::unique_ptr<WebServiceWorker::Handle> handle)
 {
-    if (!executionContext())
+    if (!getExecutionContext())
         return;
-    m_active = ServiceWorker::from(executionContext(), handle.release());
+    m_active = ServiceWorker::from(getExecutionContext(), adoptPtr(handle.release()));
 }
 
 ServiceWorkerRegistration* ServiceWorkerRegistration::getOrCreate(ExecutionContext* executionContext, PassOwnPtr<WebServiceWorkerRegistration::Handle> handle)
@@ -55,7 +55,7 @@ ServiceWorkerRegistration* ServiceWorkerRegistration::getOrCreate(ExecutionConte
 
     ServiceWorkerRegistration* existingRegistration = static_cast<ServiceWorkerRegistration*>(handle->registration()->proxy());
     if (existingRegistration) {
-        ASSERT(existingRegistration->executionContext() == executionContext);
+        ASSERT(existingRegistration->getExecutionContext() == executionContext);
         return existingRegistration;
     }
 
@@ -98,13 +98,15 @@ ScriptPromise ServiceWorkerRegistration::unregister(ScriptState* scriptState)
 }
 
 ServiceWorkerRegistration::ServiceWorkerRegistration(ExecutionContext* executionContext, PassOwnPtr<WebServiceWorkerRegistration::Handle> handle)
-    : ActiveDOMObject(executionContext)
+    : ActiveScriptWrappable(this)
+    , ActiveDOMObject(executionContext)
     , m_handle(handle)
     , m_provider(nullptr)
     , m_stopped(false)
 {
     ASSERT(m_handle);
     ASSERT(!m_handle->registration()->proxy());
+    ThreadState::current()->registerPreFinalizer(this);
 
     if (!executionContext)
         return;
@@ -117,14 +119,21 @@ ServiceWorkerRegistration::~ServiceWorkerRegistration()
 {
 }
 
+void ServiceWorkerRegistration::dispose()
+{
+    // Promptly clears a raw reference from content/ to an on-heap object
+    // so that content/ doesn't access it in a lazy sweeping phase.
+    m_handle.clear();
+}
+
 DEFINE_TRACE(ServiceWorkerRegistration)
 {
     visitor->trace(m_installing);
     visitor->trace(m_waiting);
     visitor->trace(m_active);
-    RefCountedGarbageCollectedEventTargetWithInlineData<ServiceWorkerRegistration>::trace(visitor);
-    HeapSupplementable<ServiceWorkerRegistration>::trace(visitor);
+    EventTargetWithInlineData::trace(visitor);
     ActiveDOMObject::trace(visitor);
+    Supplementable<ServiceWorkerRegistration>::trace(visitor);
 }
 
 bool ServiceWorkerRegistration::hasPendingActivity() const

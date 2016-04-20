@@ -39,8 +39,7 @@ namespace blink {
 class SourceBuffer;
 class GenericEventQueue;
 
-class SourceBufferList final : public RefCountedGarbageCollectedEventTargetWithInlineData<SourceBufferList> {
-    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(SourceBufferList);
+class SourceBufferList final : public EventTargetWithInlineData {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static SourceBufferList* create(ExecutionContext* context, GenericEventQueue* asyncEventQueue)
@@ -61,7 +60,7 @@ public:
 
     // EventTarget interface
     const AtomicString& interfaceName() const override;
-    ExecutionContext* executionContext() const override;
+    ExecutionContext* getExecutionContext() const override;
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -70,8 +69,8 @@ private:
 
     void scheduleEvent(const AtomicString&);
 
-    RawPtrWillBeMember<ExecutionContext> m_executionContext;
-    RawPtrWillBeMember<GenericEventQueue> m_asyncEventQueue;
+    Member<ExecutionContext> m_executionContext;
+    Member<GenericEventQueue> m_asyncEventQueue;
 
     HeapVector<Member<SourceBuffer>> m_list;
 };

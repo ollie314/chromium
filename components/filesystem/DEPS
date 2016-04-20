@@ -1,7 +1,9 @@
 include_rules = [
-  "+mojo/shell",
+  "+components/prefs",
+  "+mojo/common",
   "+mojo/platform_handle",
   "+mojo/public",
-  "+mojo/services/tracing/public/cpp",
   "+mojo/util",
+  "+services/shell",
+  "+services/tracing/public/cpp",
 ]

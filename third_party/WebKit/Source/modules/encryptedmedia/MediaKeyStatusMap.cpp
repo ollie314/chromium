@@ -59,6 +59,7 @@ public:
 
     DEFINE_INLINE_VIRTUAL_TRACE()
     {
+        visitor->trace(m_keyId);
     }
 
 private:
@@ -68,7 +69,7 @@ private:
     {
     }
 
-    RefPtr<DOMArrayBuffer> m_keyId;
+    const Member<DOMArrayBuffer> m_keyId;
     const String m_status;
 };
 
@@ -126,7 +127,7 @@ void MediaKeyStatusMap::addEntry(WebData keyId, const String& status)
 
 const MediaKeyStatusMap::MapEntry& MediaKeyStatusMap::at(size_t index) const
 {
-    BLINK_ASSERT(index < m_entries.size());
+    DCHECK_LT(index, m_entries.size());
     return *m_entries.at(index);
 }
 

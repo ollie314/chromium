@@ -4,10 +4,8 @@
 
 [
     RuntimeEnabled=CSSTypedOM,
-    GarbageCollected
 ] interface TransformComponent {
     readonly attribute DOMString cssString;
     boolean is2DComponent();
-    // TODO: Uncomment when Matrix is implemented.
-    // [RaisesException] Matrix asMatrix();
+    [NewObject] Matrix asMatrix();
 };

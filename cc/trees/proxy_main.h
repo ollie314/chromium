@@ -7,13 +7,13 @@
 
 #include "base/macros.h"
 #include "cc/base/cc_export.h"
-#include "cc/debug/frame_timing_tracker.h"
 #include "cc/input/top_controls_state.h"
 #include "cc/output/output_surface.h"
 #include "cc/output/renderer_capabilities.h"
 #include "cc/trees/channel_main.h"
 #include "cc/trees/proxy.h"
 #include "cc/trees/proxy_common.h"
+#include "cc/trees/remote_proto_channel.h"
 
 namespace cc {
 
@@ -27,7 +27,12 @@ class LayerTreeHost;
 // The class is created and lives on the main thread.
 class CC_EXPORT ProxyMain : public Proxy {
  public:
-  static scoped_ptr<ProxyMain> CreateThreaded(
+  static std::unique_ptr<ProxyMain> CreateThreaded(
+      LayerTreeHost* layer_tree_host,
+      TaskRunnerProvider* task_runner_provider);
+
+  static std::unique_ptr<ProxyMain> CreateRemote(
+      RemoteProtoChannel* remote_proto_channel,
       LayerTreeHost* layer_tree_host,
       TaskRunnerProvider* task_runner_provider);
 
@@ -49,18 +54,15 @@ class CC_EXPORT ProxyMain : public Proxy {
       const RendererCapabilities& capabilities);
   virtual void BeginMainFrameNotExpectedSoon();
   virtual void DidCommitAndDrawFrame();
-  virtual void SetAnimationEvents(scoped_ptr<AnimationEvents> events);
+  virtual void SetAnimationEvents(std::unique_ptr<AnimationEvents> events);
   virtual void DidLoseOutputSurface();
   virtual void RequestNewOutputSurface();
   virtual void DidInitializeOutputSurface(
       bool success,
       const RendererCapabilities& capabilities);
   virtual void DidCompletePageScaleAnimation();
-  virtual void PostFrameTimingEventsOnMain(
-      scoped_ptr<FrameTimingTracker::CompositeTimingSet> composite_events,
-      scoped_ptr<FrameTimingTracker::MainFrameTimingSet> main_frame_events);
   virtual void BeginMainFrame(
-      scoped_ptr<BeginMainFrameAndCommitState> begin_main_frame_state);
+      std::unique_ptr<BeginMainFrameAndCommitState> begin_main_frame_state);
 
   ChannelMain* channel_main() const { return channel_main_.get(); }
   CommitPipelineStage max_requested_pipeline_stage() const {
@@ -86,7 +88,6 @@ class CC_EXPORT ProxyMain : public Proxy {
   bool CommitToActiveTree() const override;
   void SetOutputSurface(OutputSurface* output_surface) override;
   void SetVisible(bool visible) override;
-  void SetThrottleFrameProduction(bool throttle) override;
   const RendererCapabilities& GetRendererCapabilities() const override;
   void SetNeedsAnimate() override;
   void SetNeedsUpdateLayers() override;
@@ -98,19 +99,20 @@ class CC_EXPORT ProxyMain : public Proxy {
   bool CommitRequested() const override;
   bool BeginMainFrameRequested() const override;
   void MainThreadHasStoppedFlinging() override;
-  void Start(scoped_ptr<BeginFrameSource> external_begin_frame_source) override;
+  void Start(
+      std::unique_ptr<BeginFrameSource> external_begin_frame_source) override;
   void Stop() override;
   bool SupportsImplScrolling() const override;
   bool MainFrameWillHappenForTesting() override;
-  void SetChildrenNeedBeginFrames(bool children_need_begin_frames) override;
   void SetAuthoritativeVSyncInterval(const base::TimeDelta& interval) override;
   void ReleaseOutputSurface() override;
   void UpdateTopControlsState(TopControlsState constraints,
                               TopControlsState current,
                               bool animate) override;
+  void SetOutputIsSecure(bool output_is_secure) override;
 
   // This sets the channel used by ProxyMain to communicate with ProxyImpl.
-  void SetChannel(scoped_ptr<ChannelMain> channel_main);
+  void SetChannel(std::unique_ptr<ChannelMain> channel_main);
 
   // Returns |true| if the request was actually sent, |false| if one was
   // already outstanding.
@@ -144,7 +146,7 @@ class CC_EXPORT ProxyMain : public Proxy {
 
   RendererCapabilities renderer_capabilities_;
 
-  scoped_ptr<ChannelMain> channel_main_;
+  std::unique_ptr<ChannelMain> channel_main_;
 
   DISALLOW_COPY_AND_ASSIGN(ProxyMain);
 };

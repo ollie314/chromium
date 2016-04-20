@@ -15,10 +15,10 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
+#include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/load_timing_info_test_util.h"
-#include "net/base/net_util.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/udp/datagram_client_socket.h"
@@ -28,10 +28,10 @@ namespace net {
 
 namespace {
 
-IPAddressNumber ParseIP(const std::string& ip) {
-  IPAddressNumber number;
-  CHECK(ParseIPLiteralToNumber(ip, &number));
-  return number;
+IPAddress ParseIP(const std::string& ip) {
+  IPAddress address;
+  CHECK(address.AssignFromIPLiteral(ip));
+  return address;
 }
 
 // A StreamSocket which connects synchronously and successfully.
@@ -40,8 +40,7 @@ class MockConnectClientSocket : public StreamSocket {
   MockConnectClientSocket(const AddressList& addrlist, net::NetLog* net_log)
       : connected_(false),
         addrlist_(addrlist),
-        net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)),
-        use_tcp_fastopen_(false) {}
+        net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)) {}
 
   // StreamSocket implementation.
   int Connect(const CompletionCallback& callback) override {
@@ -70,8 +69,7 @@ class MockConnectClientSocket : public StreamSocket {
   void SetSubresourceSpeculation() override {}
   void SetOmniboxSpeculation() override {}
   bool WasEverUsed() const override { return false; }
-  void EnableTCPFastOpenIfSupported() override { use_tcp_fastopen_ = true; }
-  bool UsingTCPFastOpen() const override { return use_tcp_fastopen_; }
+  void EnableTCPFastOpenIfSupported() override {}
   bool WasNpnNegotiated() const override { return false; }
   NextProto GetNegotiatedProtocol() const override { return kProtoUnknown; }
   bool GetSSLInfo(SSLInfo* ssl_info) override { return false; }
@@ -103,7 +101,6 @@ class MockConnectClientSocket : public StreamSocket {
   bool connected_;
   const AddressList addrlist_;
   BoundNetLog net_log_;
-  bool use_tcp_fastopen_;
 
   DISALLOW_COPY_AND_ASSIGN(MockConnectClientSocket);
 };
@@ -112,8 +109,7 @@ class MockFailingClientSocket : public StreamSocket {
  public:
   MockFailingClientSocket(const AddressList& addrlist, net::NetLog* net_log)
       : addrlist_(addrlist),
-        net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)),
-        use_tcp_fastopen_(false) {}
+        net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)) {}
 
   // StreamSocket implementation.
   int Connect(const CompletionCallback& callback) override {
@@ -135,8 +131,7 @@ class MockFailingClientSocket : public StreamSocket {
   void SetSubresourceSpeculation() override {}
   void SetOmniboxSpeculation() override {}
   bool WasEverUsed() const override { return false; }
-  void EnableTCPFastOpenIfSupported() override { use_tcp_fastopen_ = true; }
-  bool UsingTCPFastOpen() const override { return use_tcp_fastopen_; }
+  void EnableTCPFastOpenIfSupported() override {}
   bool WasNpnNegotiated() const override { return false; }
   NextProto GetNegotiatedProtocol() const override { return kProtoUnknown; }
   bool GetSSLInfo(SSLInfo* ssl_info) override { return false; }
@@ -170,7 +165,6 @@ class MockFailingClientSocket : public StreamSocket {
  private:
   const AddressList addrlist_;
   BoundNetLog net_log_;
-  bool use_tcp_fastopen_;
 
   DISALLOW_COPY_AND_ASSIGN(MockFailingClientSocket);
 };
@@ -186,7 +180,6 @@ class MockTriggerableClientSocket : public StreamSocket {
         is_connected_(false),
         addrlist_(addrlist),
         net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)),
-        use_tcp_fastopen_(false),
         weak_factory_(this) {}
 
   // Call this method to get a closure which will trigger the connect callback
@@ -197,34 +190,34 @@ class MockTriggerableClientSocket : public StreamSocket {
                       weak_factory_.GetWeakPtr());
   }
 
-  static scoped_ptr<StreamSocket> MakeMockPendingClientSocket(
+  static std::unique_ptr<StreamSocket> MakeMockPendingClientSocket(
       const AddressList& addrlist,
       bool should_connect,
       net::NetLog* net_log) {
-    scoped_ptr<MockTriggerableClientSocket> socket(
+    std::unique_ptr<MockTriggerableClientSocket> socket(
         new MockTriggerableClientSocket(addrlist, should_connect, net_log));
     base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
                                                   socket->GetConnectCallback());
     return std::move(socket);
   }
 
-  static scoped_ptr<StreamSocket> MakeMockDelayedClientSocket(
+  static std::unique_ptr<StreamSocket> MakeMockDelayedClientSocket(
       const AddressList& addrlist,
       bool should_connect,
       const base::TimeDelta& delay,
       net::NetLog* net_log) {
-    scoped_ptr<MockTriggerableClientSocket> socket(
+    std::unique_ptr<MockTriggerableClientSocket> socket(
         new MockTriggerableClientSocket(addrlist, should_connect, net_log));
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, socket->GetConnectCallback(), delay);
     return std::move(socket);
   }
 
-  static scoped_ptr<StreamSocket> MakeMockStalledClientSocket(
+  static std::unique_ptr<StreamSocket> MakeMockStalledClientSocket(
       const AddressList& addrlist,
       net::NetLog* net_log,
       bool failing) {
-    scoped_ptr<MockTriggerableClientSocket> socket(
+    std::unique_ptr<MockTriggerableClientSocket> socket(
         new MockTriggerableClientSocket(addrlist, true, net_log));
     if (failing) {
       DCHECK_LE(1u, addrlist.size());
@@ -264,8 +257,7 @@ class MockTriggerableClientSocket : public StreamSocket {
   void SetSubresourceSpeculation() override {}
   void SetOmniboxSpeculation() override {}
   bool WasEverUsed() const override { return false; }
-  void EnableTCPFastOpenIfSupported() override { use_tcp_fastopen_ = true; }
-  bool UsingTCPFastOpen() const override { return use_tcp_fastopen_; }
+  void EnableTCPFastOpenIfSupported() override {}
   bool WasNpnNegotiated() const override { return false; }
   NextProto GetNegotiatedProtocol() const override { return kProtoUnknown; }
   bool GetSSLInfo(SSLInfo* ssl_info) override { return false; }
@@ -308,7 +300,6 @@ class MockTriggerableClientSocket : public StreamSocket {
   const AddressList addrlist_;
   BoundNetLog net_log_;
   CompletionCallback callback_;
-  bool use_tcp_fastopen_;
   ConnectionAttempts connection_attempts_;
 
   base::WeakPtrFactory<MockTriggerableClientSocket> weak_factory_;
@@ -368,19 +359,20 @@ MockTransportClientSocketFactory::MockTransportClientSocketFactory(
 
 MockTransportClientSocketFactory::~MockTransportClientSocketFactory() {}
 
-scoped_ptr<DatagramClientSocket>
+std::unique_ptr<DatagramClientSocket>
 MockTransportClientSocketFactory::CreateDatagramClientSocket(
     DatagramSocket::BindType bind_type,
     const RandIntCallback& rand_int_cb,
     NetLog* net_log,
     const NetLog::Source& source) {
   NOTREACHED();
-  return scoped_ptr<DatagramClientSocket>();
+  return std::unique_ptr<DatagramClientSocket>();
 }
 
-scoped_ptr<StreamSocket>
+std::unique_ptr<StreamSocket>
 MockTransportClientSocketFactory::CreateTransportClientSocket(
     const AddressList& addresses,
+    std::unique_ptr<SocketPerformanceWatcher> /* socket_performance_watcher */,
     NetLog* /* net_log */,
     const NetLog::Source& /* source */) {
   allocation_count_++;
@@ -392,10 +384,10 @@ MockTransportClientSocketFactory::CreateTransportClientSocket(
 
   switch (type) {
     case MOCK_CLIENT_SOCKET:
-      return scoped_ptr<StreamSocket>(
+      return std::unique_ptr<StreamSocket>(
           new MockConnectClientSocket(addresses, net_log_));
     case MOCK_FAILING_CLIENT_SOCKET:
-      return scoped_ptr<StreamSocket>(
+      return std::unique_ptr<StreamSocket>(
           new MockFailingClientSocket(addresses, net_log_));
     case MOCK_PENDING_CLIENT_SOCKET:
       return MockTriggerableClientSocket::MakeMockPendingClientSocket(
@@ -416,7 +408,7 @@ MockTransportClientSocketFactory::CreateTransportClientSocket(
       return MockTriggerableClientSocket::MakeMockStalledClientSocket(
           addresses, net_log_, true);
     case MOCK_TRIGGERABLE_CLIENT_SOCKET: {
-      scoped_ptr<MockTriggerableClientSocket> rv(
+      std::unique_ptr<MockTriggerableClientSocket> rv(
           new MockTriggerableClientSocket(addresses, true, net_log_));
       triggerable_sockets_.push(rv->GetConnectCallback());
       // run_loop_quit_closure_ behaves like a condition variable. It will
@@ -429,19 +421,19 @@ MockTransportClientSocketFactory::CreateTransportClientSocket(
     }
     default:
       NOTREACHED();
-      return scoped_ptr<StreamSocket>(
+      return std::unique_ptr<StreamSocket>(
           new MockConnectClientSocket(addresses, net_log_));
   }
 }
 
-scoped_ptr<SSLClientSocket>
+std::unique_ptr<SSLClientSocket>
 MockTransportClientSocketFactory::CreateSSLClientSocket(
-    scoped_ptr<ClientSocketHandle> transport_socket,
+    std::unique_ptr<ClientSocketHandle> transport_socket,
     const HostPortPair& host_and_port,
     const SSLConfig& ssl_config,
     const SSLClientSocketContext& context) {
   NOTIMPLEMENTED();
-  return scoped_ptr<SSLClientSocket>();
+  return std::unique_ptr<SSLClientSocket>();
 }
 
 void MockTransportClientSocketFactory::ClearSSLSessionCache() {

@@ -6,8 +6,8 @@
 
 #include <string>
 
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browsing_data/mock_browsing_data_appcache_helper.h"
 #include "chrome/browser/browsing_data/mock_browsing_data_cache_storage_helper.h"
@@ -26,6 +26,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_types.h"
@@ -108,7 +109,7 @@ class CookiesTreeModelTest : public testing::Test {
     base::MessageLoop::current()->RunUntilIdle();
   }
 
-  scoped_ptr<CookiesTreeModel> CreateCookiesTreeModelWithInitialSample() {
+  std::unique_ptr<CookiesTreeModel> CreateCookiesTreeModelWithInitialSample() {
     LocalDataContainer* container =
         new LocalDataContainer(mock_browsing_data_cookie_helper_.get(),
                                mock_browsing_data_database_helper_.get(),
@@ -208,7 +209,7 @@ class CookiesTreeModelTest : public testing::Test {
       EXPECT_EQ("xyz.com",
                 GetDisplayedFlashLSOs(cookies_model));
     }
-    return make_scoped_ptr(cookies_model);
+    return base::WrapUnique(cookies_model);
   }
 
   // Checks that, when setting content settings for host nodes in the
@@ -236,9 +237,7 @@ class CookiesTreeModelTest : public testing::Test {
       if (expected_url.SchemeIsFile()) {
         EXPECT_FALSE(host->CanCreateContentException());
       } else {
-        cookie_settings->ResetCookieSetting(
-            ContentSettingsPattern::FromURLNoWildcard(expected_url),
-            ContentSettingsPattern::Wildcard());
+        cookie_settings->ResetCookieSetting(expected_url);
         EXPECT_FALSE(cookie_settings->IsCookieSessionOnly(expected_url));
 
         host->CreateContentException(cookie_settings,
@@ -353,7 +352,7 @@ class CookiesTreeModelTest : public testing::Test {
     CookieTreeRootNode* root = static_cast<CookieTreeRootNode*>(
         cookies_model->GetRoot());
     std::string retval = GetNodesOfChildren(root, type);
-    if (retval.length() && retval[retval.length() - 1] == ',')
+    if (!retval.empty() && retval.back() == ',')
       retval.erase(retval.length() - 1);
     return retval;
   }
@@ -436,7 +435,7 @@ class CookiesTreeModelTest : public testing::Test {
   }
 
   content::TestBrowserThreadBundle thread_bundle_;
-  scoped_ptr<TestingProfile> profile_;
+  std::unique_ptr<TestingProfile> profile_;
   scoped_refptr<MockBrowsingDataCookieHelper>
       mock_browsing_data_cookie_helper_;
   scoped_refptr<MockBrowsingDataDatabaseHelper>
@@ -468,7 +467,7 @@ class CookiesTreeModelTest : public testing::Test {
 };
 
 TEST_F(CookiesTreeModelTest, RemoveAll) {
-  scoped_ptr<CookiesTreeModel> cookies_model(
+  std::unique_ptr<CookiesTreeModel> cookies_model(
       CreateCookiesTreeModelWithInitialSample());
 
   // Reset the selection of the first row.
@@ -533,7 +532,7 @@ TEST_F(CookiesTreeModelTest, RemoveAll) {
 }
 
 TEST_F(CookiesTreeModelTest, Remove) {
-  scoped_ptr<CookiesTreeModel> cookies_model(
+  std::unique_ptr<CookiesTreeModel> cookies_model(
       CreateCookiesTreeModelWithInitialSample());
 
   // Children start out arranged as follows:
@@ -942,7 +941,7 @@ TEST_F(CookiesTreeModelTest, Remove) {
 }
 
 TEST_F(CookiesTreeModelTest, RemoveCookiesNode) {
-  scoped_ptr<CookiesTreeModel> cookies_model(
+  std::unique_ptr<CookiesTreeModel> cookies_model(
       CreateCookiesTreeModelWithInitialSample());
 
   DeleteStoredObjects(cookies_model->GetRoot()->GetChild(2)->GetChild(0));
@@ -1015,7 +1014,7 @@ TEST_F(CookiesTreeModelTest, RemoveCookiesNode) {
 }
 
 TEST_F(CookiesTreeModelTest, RemoveCookieNode) {
-  scoped_ptr<CookiesTreeModel> cookies_model(
+  std::unique_ptr<CookiesTreeModel> cookies_model(
       CreateCookiesTreeModelWithInitialSample());
 
   DeleteStoredObjects(cookies_model->GetRoot()->GetChild(3)->GetChild(0));
@@ -1430,21 +1429,11 @@ TEST_F(CookiesTreeModelTest, ContentSettings) {
 
   EXPECT_EQ(1, origin->child_count());
   EXPECT_TRUE(origin->CanCreateContentException());
-  EXPECT_CALL(observer,
-              OnContentSettingsChanged(
-                  content_settings,
-                  CONTENT_SETTINGS_TYPE_COOKIES,
-                  false,
-                  ContentSettingsPattern::FromURLNoWildcard(host),
-                  ContentSettingsPattern::Wildcard(),
-                  false));
-  EXPECT_CALL(observer,
-              OnContentSettingsChanged(content_settings,
-                  CONTENT_SETTINGS_TYPE_COOKIES,
-                  false,
-                  ContentSettingsPattern::FromURL(host),
-                  ContentSettingsPattern::Wildcard(),
-                  false));
+  EXPECT_CALL(observer, OnContentSettingsChanged(
+                            content_settings, CONTENT_SETTINGS_TYPE_COOKIES,
+                            false, ContentSettingsPattern::FromURL(host),
+                            ContentSettingsPattern::Wildcard(), false))
+      .Times(2);
   origin->CreateContentException(
       cookie_settings, CONTENT_SETTING_SESSION_ONLY);
   EXPECT_TRUE(cookie_settings->IsReadingCookieAllowed(host, host));
@@ -1452,7 +1441,7 @@ TEST_F(CookiesTreeModelTest, ContentSettings) {
 }
 
 TEST_F(CookiesTreeModelTest, FileSystemFilter) {
-  scoped_ptr<CookiesTreeModel> cookies_model(
+  std::unique_ptr<CookiesTreeModel> cookies_model(
       CreateCookiesTreeModelWithInitialSample());
 
   cookies_model->UpdateSearchResults(base::ASCIIToUTF16("fshost1"));
@@ -1473,7 +1462,7 @@ TEST_F(CookiesTreeModelTest, FileSystemFilter) {
 }
 
 TEST_F(CookiesTreeModelTest, ServiceWorkerFilter) {
-  scoped_ptr<CookiesTreeModel> cookies_model(
+  std::unique_ptr<CookiesTreeModel> cookies_model(
       CreateCookiesTreeModelWithInitialSample());
 
   cookies_model->UpdateSearchResults(base::ASCIIToUTF16("swhost1"));
@@ -1493,7 +1482,7 @@ TEST_F(CookiesTreeModelTest, ServiceWorkerFilter) {
 }
 
 TEST_F(CookiesTreeModelTest, CacheStorageFilter) {
-  scoped_ptr<CookiesTreeModel> cookies_model(
+  std::unique_ptr<CookiesTreeModel> cookies_model(
       CreateCookiesTreeModelWithInitialSample());
 
   cookies_model->UpdateSearchResults(base::ASCIIToUTF16("cshost1"));
@@ -1639,6 +1628,30 @@ TEST_F(CookiesTreeModelTest, CanonicalizeCookieSource) {
   CheckContentSettingsUrlForHostNodes(
       cookies_model.GetRoot(), CookieTreeNode::DetailedInfo::TYPE_ROOT,
       cookie_settings, GURL("http://example4.com"));
+}
+
+TEST_F(CookiesTreeModelTest, CookiesFilterWithoutSource) {
+  // CanonicalCookies don't persist their source_ field. This is a regression
+  // test for crbug.com/601582.
+  LocalDataContainer* container =
+      new LocalDataContainer(mock_browsing_data_cookie_helper_.get(),
+                             mock_browsing_data_database_helper_.get(),
+                             mock_browsing_data_local_storage_helper_.get(),
+                             mock_browsing_data_session_storage_helper_.get(),
+                             mock_browsing_data_appcache_helper_.get(),
+                             mock_browsing_data_indexed_db_helper_.get(),
+                             mock_browsing_data_file_system_helper_.get(),
+                             mock_browsing_data_quota_helper_.get(),
+                             mock_browsing_data_channel_id_helper_.get(),
+                             mock_browsing_data_service_worker_helper_.get(),
+                             mock_browsing_data_cache_storage_helper_.get(),
+                             mock_browsing_data_flash_lso_helper_.get());
+  CookiesTreeModel cookies_model(container, special_storage_policy(), false);
+
+  mock_browsing_data_cookie_helper_->
+      AddCookieSamples(GURL(), "A=1");
+  mock_browsing_data_cookie_helper_->Notify();
+  EXPECT_EQ("A", GetDisplayedCookies(&cookies_model));
 }
 
 }  // namespace

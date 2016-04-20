@@ -41,33 +41,37 @@ class MIDIMessageEventInit;
 class MIDIMessageEvent final : public Event {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<MIDIMessageEvent> create()
+    static MIDIMessageEvent* create()
     {
-        return adoptRefWillBeNoop(new MIDIMessageEvent());
+        return new MIDIMessageEvent();
     }
 
-    static PassRefPtrWillBeRawPtr<MIDIMessageEvent> create(double receivedTime, PassRefPtr<DOMUint8Array> data)
+    static MIDIMessageEvent* create(double receivedTime, DOMUint8Array* data)
     {
-        return adoptRefWillBeNoop(new MIDIMessageEvent(receivedTime, data));
+        return new MIDIMessageEvent(receivedTime, data);
     }
 
-    static PassRefPtrWillBeRawPtr<MIDIMessageEvent> create(const AtomicString& type, const MIDIMessageEventInit& initializer)
+    static MIDIMessageEvent* create(const AtomicString& type, const MIDIMessageEventInit& initializer)
     {
-        return adoptRefWillBeNoop(new MIDIMessageEvent(type, initializer));
+        return new MIDIMessageEvent(type, initializer);
     }
 
     double receivedTime() { return m_receivedTime; }
-    PassRefPtr<DOMUint8Array> data() { return m_data; }
+    DOMUint8Array* data() { return m_data; }
 
     const AtomicString& interfaceName() const override { return EventNames::MIDIMessageEvent; }
 
-    DEFINE_INLINE_VIRTUAL_TRACE() { Event::trace(visitor); }
+    DEFINE_INLINE_VIRTUAL_TRACE()
+    {
+        visitor->trace(m_data);
+        Event::trace(visitor);
+    }
 
 private:
     MIDIMessageEvent()
         : m_receivedTime(0) { }
 
-    MIDIMessageEvent(double receivedTime, PassRefPtr<DOMUint8Array> data)
+    MIDIMessageEvent(double receivedTime, DOMUint8Array* data)
         : Event(EventTypeNames::midimessage, true, false)
         , m_receivedTime(receivedTime)
         , m_data(data) { }
@@ -75,7 +79,7 @@ private:
     MIDIMessageEvent(const AtomicString& type, const MIDIMessageEventInit& initializer);
 
     double m_receivedTime;
-    RefPtr<DOMUint8Array> m_data;
+    Member<DOMUint8Array> m_data;
 };
 
 } // namespace blink

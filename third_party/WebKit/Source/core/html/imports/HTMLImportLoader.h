@@ -48,15 +48,11 @@ class HTMLImportChild;
 class HTMLImportsController;
 
 
-//
 // Owning imported Document lifetime. It also implements ResourceClient through ResourceOwner
 // to feed fetched bytes to the DocumentWriter of the imported document.
 // HTMLImportLoader is owned by HTMLImportsController.
-//
-//
-class HTMLImportLoader final : public NoBaseWillBeGarbageCollectedFinalized<HTMLImportLoader>, public ResourceOwner<RawResource>, public DocumentParserClient {
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(HTMLImportLoader);
-    USING_FAST_MALLOC_WILL_BE_REMOVED(HTMLImportLoader);
+class HTMLImportLoader final : public GarbageCollectedFinalized<HTMLImportLoader>, public ResourceOwner<RawResource>, public DocumentParserClient {
+    USING_GARBAGE_COLLECTED_MIXIN(HTMLImportLoader);
 public:
     enum State {
         StateLoading,
@@ -66,9 +62,9 @@ public:
         StateError
     };
 
-    static PassOwnPtrWillBeRawPtr<HTMLImportLoader> create(HTMLImportsController* controller)
+    static HTMLImportLoader* create(HTMLImportsController* controller)
     {
-        return adoptPtrWillBeNoop(new HTMLImportLoader(controller));
+        return new HTMLImportLoader(controller);
     }
 
     ~HTMLImportLoader() override;
@@ -86,14 +82,14 @@ public:
     bool hasError() const { return m_state == StateError; }
     bool shouldBlockScriptExecution() const;
 
-    void startLoading(const ResourcePtr<RawResource>&);
+    void startLoading(RawResource*);
 
     // Tells the loader that all of the import's stylesheets finished
     // loading.
     // Called by Document::didRemoveAllPendingStylesheet.
     void didRemoveAllPendingStylesheet();
 
-    PassRefPtrWillBeRawPtr<CustomElementSyncMicrotaskQueue> microtaskQueue() const;
+    CustomElementSyncMicrotaskQueue* microtaskQueue() const;
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -119,16 +115,13 @@ private:
     void setState(State);
     void didFinishLoading();
     bool hasPendingResources() const;
-#if !ENABLE(OILPAN)
-    void clear();
-#endif
 
-    RawPtrWillBeMember<HTMLImportsController> m_controller;
-    WillBeHeapVector<RawPtrWillBeMember<HTMLImportChild>> m_imports;
+    Member<HTMLImportsController> m_controller;
+    HeapVector<Member<HTMLImportChild>> m_imports;
     State m_state;
-    RefPtrWillBeMember<Document> m_document;
-    RefPtrWillBeMember<DocumentWriter> m_writer;
-    RefPtrWillBeMember<CustomElementSyncMicrotaskQueue> m_microtaskQueue;
+    Member<Document> m_document;
+    Member<DocumentWriter> m_writer;
+    Member<CustomElementSyncMicrotaskQueue> m_microtaskQueue;
 };
 
 } // namespace blink

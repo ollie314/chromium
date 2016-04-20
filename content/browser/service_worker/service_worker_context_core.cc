@@ -4,6 +4,8 @@
 
 #include "content/browser/service_worker/service_worker_context_core.h"
 
+#include <limits>
+#include <set>
 #include <utility>
 
 #include "base/barrier_closure.h"
@@ -12,6 +14,7 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/thread_task_runner_handle.h"
@@ -72,7 +75,7 @@ bool IsSameOriginWindowProviderHost(const GURL& origin,
 // Returns true if any of the frames specified by |frames| is a top-level frame.
 // |frames| is a vector of (render process id, frame id) pairs.
 bool FrameListContainsMainFrameOnUI(
-    scoped_ptr<std::vector<std::pair<int, int>>> frames) {
+    std::unique_ptr<std::vector<std::pair<int, int>>> frames) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   for (const auto& frame : *frames) {
@@ -102,8 +105,9 @@ class ClearAllServiceWorkersHelper
 
   void DidGetAllRegistrations(
       const base::WeakPtr<ServiceWorkerContextCore>& context,
+      ServiceWorkerStatusCode status,
       const std::vector<ServiceWorkerRegistrationInfo>& registrations) {
-    if (!context)
+    if (!context || status != SERVICE_WORKER_OK)
       return;
     // Make a copy of live versions map because StopWorker() removes the version
     // from it when we were starting up and don't have a process yet.
@@ -208,7 +212,7 @@ bool ServiceWorkerContextCore::ProviderHostIterator::
 
 ServiceWorkerContextCore::ServiceWorkerContextCore(
     const base::FilePath& path,
-    scoped_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager,
+    std::unique_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager,
     const scoped_refptr<base::SingleThreadTaskRunner>& disk_cache_thread,
     storage::QuotaManagerProxy* quota_manager_proxy,
     storage::SpecialStoragePolicy* special_storage_policy,
@@ -217,6 +221,7 @@ ServiceWorkerContextCore::ServiceWorkerContextCore(
     : wrapper_(wrapper),
       providers_(new ProcessToProviderMap),
       provider_by_uuid_(new ProviderByClientUUIDMap),
+      force_update_on_page_load_(false),
       next_handle_id_(0),
       next_registration_handle_id_(0),
       was_service_worker_registered_(false),
@@ -271,7 +276,7 @@ ServiceWorkerProviderHost* ServiceWorkerContextCore::GetProviderHost(
 }
 
 void ServiceWorkerContextCore::AddProviderHost(
-    scoped_ptr<ServiceWorkerProviderHost> host) {
+    std::unique_ptr<ServiceWorkerProviderHost> host) {
   ServiceWorkerProviderHost* host_ptr = host.release();   // we take ownership
   ProviderMap* map = GetProviderMapForProcess(host_ptr->process_id());
   if (!map) {
@@ -294,15 +299,15 @@ void ServiceWorkerContextCore::RemoveAllProviderHostsForProcess(
     providers_->Remove(process_id);
 }
 
-scoped_ptr<ServiceWorkerContextCore::ProviderHostIterator>
+std::unique_ptr<ServiceWorkerContextCore::ProviderHostIterator>
 ServiceWorkerContextCore::GetProviderHostIterator() {
-  return make_scoped_ptr(new ProviderHostIterator(
+  return base::WrapUnique(new ProviderHostIterator(
       providers_.get(), ProviderHostIterator::ProviderHostPredicate()));
 }
 
-scoped_ptr<ServiceWorkerContextCore::ProviderHostIterator>
+std::unique_ptr<ServiceWorkerContextCore::ProviderHostIterator>
 ServiceWorkerContextCore::GetClientProviderHostIterator(const GURL& origin) {
-  return make_scoped_ptr(new ProviderHostIterator(
+  return base::WrapUnique(new ProviderHostIterator(
       providers_.get(), base::Bind(IsSameOriginClientProviderHost, origin)));
 }
 
@@ -319,7 +324,7 @@ void ServiceWorkerContextCore::HasMainFrameProviderHost(
     return;
   }
 
-  scoped_ptr<std::vector<std::pair<int, int>>> render_frames(
+  std::unique_ptr<std::vector<std::pair<int, int>>> render_frames(
       new std::vector<std::pair<int, int>>());
 
   while (!provider_host_iterator.IsAtEnd()) {
@@ -365,12 +370,6 @@ void ServiceWorkerContextCore::RegisterServiceWorker(
     const RegistrationCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   was_service_worker_registered_ = true;
-  if (storage()->IsDisabled()) {
-    callback.Run(SERVICE_WORKER_ERROR_ABORT, std::string(),
-                 kInvalidServiceWorkerRegistrationId);
-    return;
-  }
-
   job_coordinator_->Register(
       pattern,
       script_url,
@@ -385,9 +384,6 @@ void ServiceWorkerContextCore::UpdateServiceWorker(
     ServiceWorkerRegistration* registration,
     bool force_bypass_cache) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (storage()->IsDisabled())
-    return;
-
   job_coordinator_->Update(registration, force_bypass_cache);
 }
 
@@ -398,44 +394,16 @@ void ServiceWorkerContextCore::UpdateServiceWorker(
     ServiceWorkerProviderHost* provider_host,
     const UpdateCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (storage()->IsDisabled()) {
-    callback.Run(SERVICE_WORKER_ERROR_ABORT, std::string(),
-                 kInvalidServiceWorkerRegistrationId);
-    return;
-  }
-
   job_coordinator_->Update(registration, force_bypass_cache,
                            skip_script_comparison, provider_host,
                            base::Bind(&ServiceWorkerContextCore::UpdateComplete,
                                       AsWeakPtr(), callback));
 }
 
-void ServiceWorkerContextCore::SetForceUpdateOnPageLoad(
-    int64_t registration_id,
-    bool force_update_on_page_load) {
-  ServiceWorkerRegistration* registration =
-      GetLiveRegistration(registration_id);
-  if (!registration)
-    return;
-  registration->set_force_update_on_page_load(force_update_on_page_load);
-
-  if (observer_list_.get()) {
-    observer_list_->Notify(
-        FROM_HERE,
-        &ServiceWorkerContextObserver::OnForceUpdateOnPageLoadChanged,
-        registration_id, force_update_on_page_load);
-  }
-}
-
 void ServiceWorkerContextCore::UnregisterServiceWorker(
     const GURL& pattern,
     const UnregistrationCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (storage()->IsDisabled()) {
-    callback.Run(SERVICE_WORKER_ERROR_ABORT);
-    return;
-  }
-
   job_coordinator_->Unregister(
       pattern,
       base::Bind(&ServiceWorkerContextCore::UnregistrationComplete,
@@ -448,12 +416,6 @@ void ServiceWorkerContextCore::UnregisterServiceWorkers(
     const GURL& origin,
     const UnregistrationCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (storage()->IsDisabled()) {
-    // Not posting as new task to match implementations above.
-    callback.Run(SERVICE_WORKER_ERROR_ABORT);
-    return;
-  }
-
   storage()->GetAllRegistrationsInfos(base::Bind(
       &ServiceWorkerContextCore::DidGetAllRegistrationsForUnregisterForOrigin,
       AsWeakPtr(), callback, origin));
@@ -462,7 +424,12 @@ void ServiceWorkerContextCore::UnregisterServiceWorkers(
 void ServiceWorkerContextCore::DidGetAllRegistrationsForUnregisterForOrigin(
     const UnregistrationCallback& result,
     const GURL& origin,
+    ServiceWorkerStatusCode status,
     const std::vector<ServiceWorkerRegistrationInfo>& registrations) {
+  if (status != SERVICE_WORKER_OK) {
+    result.Run(status);
+    return;
+  }
   std::set<GURL> scopes;
   for (const auto& registration_info : registrations) {
     if (origin == registration_info.pattern.GetOrigin()) {
@@ -659,9 +626,9 @@ void ServiceWorkerContextCore::DeleteAndStartOver(
   storage_->DeleteAndStartOver(callback);
 }
 
-scoped_ptr<ServiceWorkerProviderHost>
-ServiceWorkerContextCore::TransferProviderHostOut(
-    int process_id, int provider_id) {
+std::unique_ptr<ServiceWorkerProviderHost>
+ServiceWorkerContextCore::TransferProviderHostOut(int process_id,
+                                                  int provider_id) {
   ProviderMap* map = GetProviderMapForProcess(process_id);
   ServiceWorkerProviderHost* transferee = map->Lookup(provider_id);
   ServiceWorkerProviderHost* replacement =
@@ -673,12 +640,13 @@ ServiceWorkerContextCore::TransferProviderHostOut(
                                     transferee->dispatcher_host());
   map->Replace(provider_id, replacement);
   transferee->PrepareForCrossSiteTransfer();
-  return make_scoped_ptr(transferee);
+  return base::WrapUnique(transferee);
 }
 
 void ServiceWorkerContextCore::TransferProviderHostIn(
-    int new_process_id, int new_provider_id,
-    scoped_ptr<ServiceWorkerProviderHost> transferee) {
+    int new_process_id,
+    int new_provider_id,
+    std::unique_ptr<ServiceWorkerProviderHost> transferee) {
   ProviderMap* map = GetProviderMapForProcess(new_process_id);
   ServiceWorkerProviderHost* temp = map->Lookup(new_provider_id);
   if (!temp)
@@ -716,6 +684,47 @@ void ServiceWorkerContextCore::CheckHasServiceWorker(
       url, base::Bind(&ServiceWorkerContextCore::
                           DidFindRegistrationForCheckHasServiceWorker,
                       AsWeakPtr(), other_url, callback));
+}
+
+void ServiceWorkerContextCore::UpdateVersionFailureCount(
+    int64_t version_id,
+    ServiceWorkerStatusCode status) {
+  // Don't count these, they aren't start worker failures.
+  if (status == SERVICE_WORKER_ERROR_DISALLOWED)
+    return;
+
+  auto it = failure_counts_.find(version_id);
+  if (it != failure_counts_.end()) {
+    ServiceWorkerMetrics::RecordStartStatusAfterFailure(it->second.count,
+                                                        status);
+  }
+
+  if (status == SERVICE_WORKER_OK) {
+    if (it != failure_counts_.end())
+      failure_counts_.erase(it);
+    return;
+  }
+
+  if (it != failure_counts_.end()) {
+    FailureInfo& info = it->second;
+    DCHECK_GT(info.count, 0);
+    if (info.count < std::numeric_limits<int>::max()) {
+      ++info.count;
+      info.last_failure = status;
+    }
+  } else {
+    FailureInfo info;
+    info.count = 1;
+    info.last_failure = status;
+    failure_counts_[version_id] = info;
+  }
+}
+
+int ServiceWorkerContextCore::GetVersionFailureCount(int64_t version_id) {
+  auto it = failure_counts_.find(version_id);
+  if (it == failure_counts_.end())
+    return 0;
+  return it->second.count;
 }
 
 void ServiceWorkerContextCore::OnRunningStateChanged(

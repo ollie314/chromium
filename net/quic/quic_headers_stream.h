@@ -7,9 +7,11 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/base/net_export.h"
+#include "net/quic/quic_header_list.h"
 #include "net/quic/quic_protocol.h"
 #include "net/quic/reliable_quic_stream.h"
 #include "net/spdy/spdy_framer.h"
@@ -46,9 +48,13 @@ class NET_EXPORT_PRIVATE QuicHeadersStream : public ReliableQuicStream {
 
   // ReliableQuicStream implementation
   void OnDataAvailable() override;
-  SpdyPriority Priority() const override;
 
   bool supports_push_promise() { return supports_push_promise_; }
+
+  // Experimental: force HPACK to use static table and huffman coding
+  // only.  Part of exploring improvements related to headers stream
+  // induced HOL blocking in QUIC.
+  void DisableHpackDynamicTable();
 
  private:
   class SpdyFramerVisitor;
@@ -75,6 +81,9 @@ class NET_EXPORT_PRIVATE QuicHeadersStream : public ReliableQuicStream {
   void OnControlFrameHeaderData(SpdyStreamId stream_id,
                                 const char* header_data,
                                 size_t len);
+
+  // Called when the complete list of headers is available.
+  void OnHeaderList(const QuicHeaderList& header_list);
 
   // Called when the size of the compressed frame payload is available.
   void OnCompressedFrameSize(size_t frame_len);
@@ -104,7 +113,10 @@ class NET_EXPORT_PRIVATE QuicHeadersStream : public ReliableQuicStream {
   QuicTime prev_max_timestamp_;
 
   SpdyFramer spdy_framer_;
-  scoped_ptr<SpdyFramerVisitor> spdy_framer_visitor_;
+  std::unique_ptr<SpdyFramerVisitor> spdy_framer_visitor_;
+
+  // Either empty, or contains the complete list of headers.
+  QuicHeaderList header_list_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicHeadersStream);
 };

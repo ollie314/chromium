@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
@@ -28,6 +29,7 @@
 #include "components/policy/core/browser/android/component_jni_registrar.h"
 #include "components/safe_json/android/component_jni_registrar.h"
 #include "components/signin/core/browser/android/component_jni_registrar.h"
+#include "components/web_restrictions/browser/mock_web_restrictions_client.h"
 #include "content/public/test/test_utils.h"
 #include "net/android/net_jni_registrar.h"
 #include "ui/base/android/ui_base_jni_registrar.h"
@@ -35,7 +37,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "third_party/mojo/src/mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/embedder.h"
 #endif
 
 namespace {
@@ -59,14 +61,15 @@ class ComponentsTestSuite : public base::TestSuite {
 #if defined(OS_ANDROID)
     // Register JNI bindings for android.
     JNIEnv* env = base::android::AttachCurrentThread();
+    ASSERT_TRUE(content::RegisterJniForTesting(env));
     ASSERT_TRUE(gfx::android::RegisterJni(env));
-    ASSERT_TRUE(ui::android::RegisterJni(env));
     ASSERT_TRUE(invalidation::android::RegisterInvalidationJni(env));
     ASSERT_TRUE(policy::android::RegisterPolicy(env));
     ASSERT_TRUE(safe_json::android::RegisterSafeJsonJni(env));
     ASSERT_TRUE(signin::android::RegisterSigninJni(env));
     ASSERT_TRUE(net::android::RegisterJni(env));
-    ASSERT_TRUE(content::RegisterJniForTesting(env));
+    ASSERT_TRUE(ui::android::RegisterJni(env));
+    ASSERT_TRUE(web_restrictions::MockWebRestrictionsClient::Register(env));
 #endif
 
     ui::RegisterPathProvider();
@@ -144,7 +147,7 @@ int main(int argc, char** argv) {
   listeners.Append(new ComponentsUnitTestEventListener());
 
 #if defined(OS_CHROMEOS)
-  mojo::embedder::Init();
+  mojo::edk::Init();
 #endif
 
   return base::LaunchUnitTests(

@@ -32,8 +32,8 @@
 #include "media/cast/logging/proto/raw_events.pb.h"
 #include "media/cast/logging/receiver_time_offset_estimator_impl.h"
 #include "media/cast/logging/stats_event_subscriber.h"
+#include "media/cast/net/cast_transport.h"
 #include "media/cast/net/cast_transport_defines.h"
-#include "media/cast/net/cast_transport_sender.h"
 #include "media/cast/net/udp_transport.h"
 #include "media/cast/test/fake_media_source.h"
 #include "media/cast/test/utility/default_config.h"
@@ -79,9 +79,9 @@ void QuitLoopOnInitializationResult(media::cast::OperationalStatus result) {
 }
 
 net::IPEndPoint CreateUDPAddress(const std::string& ip_str, uint16_t port) {
-  net::IPAddressNumber ip_number;
-  CHECK(net::ParseIPLiteralToNumber(ip_str, &ip_number));
-  return net::IPEndPoint(ip_number, port);
+  net::IPAddress ip_address;
+  CHECK(ip_address.AssignFromIPLiteral(ip_str));
+  return net::IPEndPoint(ip_address, port);
 }
 
 void DumpLoggingData(const media::cast::proto::LogMetadata& log_metadata,
@@ -160,6 +160,31 @@ void WriteStatsAndDestroySubscribers(
   VLOG(0) << "Audio stats: " << json;
 }
 
+class TransportClient : public media::cast::CastTransport::Client {
+ public:
+  explicit TransportClient(
+      media::cast::LogEventDispatcher* log_event_dispatcher)
+      : log_event_dispatcher_(log_event_dispatcher) {}
+
+  void OnStatusChanged(media::cast::CastTransportStatus status) final {
+    VLOG(1) << "Transport status: " << status;
+  };
+  void OnLoggingEventsReceived(
+      scoped_ptr<std::vector<media::cast::FrameEvent>> frame_events,
+      scoped_ptr<std::vector<media::cast::PacketEvent>> packet_events) final {
+    DCHECK(log_event_dispatcher_);
+    log_event_dispatcher_->DispatchBatchOfEvents(std::move(frame_events),
+                                                 std::move(packet_events));
+  };
+  void ProcessRtpPacket(scoped_ptr<media::cast::Packet> packet) final {}
+
+ private:
+  media::cast::LogEventDispatcher* const
+      log_event_dispatcher_;  // Not owned by this class.
+
+  DISALLOW_COPY_AND_ASSIGN(TransportClient);
+};
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -232,17 +257,15 @@ int main(int argc, char** argv) {
   if (cmd->HasSwitch(kSwitchVaryFrameSizes))
     fake_media_source->SetVariableFrameSizeMode(true);
 
-  // CastTransportSender initialization.
-  scoped_ptr<media::cast::CastTransportSender> transport_sender =
-      media::cast::CastTransportSender::Create(
-          nullptr,  // net log.
-          cast_environment->Clock(), net::IPEndPoint(), remote_endpoint,
-          make_scoped_ptr(new base::DictionaryValue),  // options
-          base::Bind(&UpdateCastTransportStatus),
-          base::Bind(&media::cast::LogEventDispatcher::DispatchBatchOfEvents,
-                     base::Unretained(cast_environment->logger())),
-          base::TimeDelta::FromSeconds(1),
-          media::cast::PacketReceiverCallback(), io_message_loop.task_runner());
+  // CastTransport initialization.
+  scoped_ptr<media::cast::CastTransport> transport_sender =
+      media::cast::CastTransport::Create(
+          cast_environment->Clock(), base::TimeDelta::FromSeconds(1),
+          make_scoped_ptr(new TransportClient(cast_environment->logger())),
+          make_scoped_ptr(new media::cast::UdpTransport(
+              nullptr, io_message_loop.task_runner(), net::IPEndPoint(),
+              remote_endpoint, base::Bind(&UpdateCastTransportStatus))),
+          io_message_loop.task_runner());
 
   // Set up event subscribers.
   scoped_ptr<media::cast::EncodingEventSubscriber> video_event_subscriber;

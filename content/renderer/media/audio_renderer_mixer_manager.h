@@ -12,8 +12,9 @@
 #include "base/macros.h"
 #include "base/synchronization/lock.h"
 #include "content/common/content_export.h"
+#include "media/audio/audio_manager_base.h"
 #include "media/audio/audio_parameters.h"
-#include "media/base/output_device.h"
+#include "media/base/output_device_info.h"
 #include "url/origin.h"
 
 namespace media {
@@ -47,10 +48,13 @@ class CONTENT_EXPORT AudioRendererMixerManager {
   // retrieve an AudioRendererMixer instance from AudioRendererMixerManager.
   // |source_render_frame_id| refers to the RenderFrame containing the entity
   // rendering the audio.  Caller must ensure AudioRendererMixerManager outlives
-  // the returned input. |device_id| and |security_origin| identify the output
-  // device to use
+  // the returned input. |device_id|, |session_id| and |security_origin|
+  // identify the output device to use. If |device_id| is empty and |session_id|
+  // is nonzero, output device associated with the opened input device
+  // designated by |session_id| is used. Otherwise, |session_id| is ignored.
   media::AudioRendererMixerInput* CreateInput(
       int source_render_frame_id,
+      int session_id,
       const std::string& device_id,
       const url::Origin& security_origin);
 
@@ -80,6 +84,7 @@ class CONTENT_EXPORT AudioRendererMixerManager {
              const media::AudioParameters& params,
              const std::string& device_id,
              const url::Origin& security_origin);
+    MixerKey(const MixerKey& other);
     int source_render_frame_id;
     media::AudioParameters params;
     std::string device_id;
@@ -101,6 +106,14 @@ class CONTENT_EXPORT AudioRendererMixerManager {
       if (a.params.channel_layout() != b.params.channel_layout())
         return a.params.channel_layout() < b.params.channel_layout();
 
+      if (media::AudioManagerBase::IsDefaultDeviceId(a.device_id) &&
+          media::AudioManagerBase::IsDefaultDeviceId(b.device_id)) {
+        // Both device IDs represent the same default device => do not compare
+        // them; the default device is always authorized => ignoring security
+        // origin.
+        return false;
+      }
+
       if (a.device_id != b.device_id)
         return a.device_id < b.device_id;
 
@@ -118,14 +131,9 @@ class CONTENT_EXPORT AudioRendererMixerManager {
   typedef std::map<MixerKey, AudioRendererMixerReference, MixerKeyCompare>
       AudioRendererMixerMap;
 
-  // Overrides the AudioRendererSink implementation for unit testing.
-  void SetAudioRendererSinkForTesting(media::AudioRendererSink* sink);
-
   // Active mixers.
   AudioRendererMixerMap mixers_;
   base::Lock mixers_lock_;
-
-  media::AudioRendererSink* sink_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioRendererMixerManager);
 };

@@ -9,13 +9,13 @@
 #include "base/memory/singleton.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
 #include "components/signin/core/browser/about_signin_internals.h"
+#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/signin/account_tracker_service_factory.h"
 #include "ios/chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "ios/chrome/browser/signin/oauth2_token_service_factory.h"
 #include "ios/chrome/browser/signin/signin_client_factory.h"
 #include "ios/chrome/browser/signin/signin_error_controller_factory.h"
 #include "ios/chrome/browser/signin/signin_manager_factory.h"
-#include "ios/public/provider/chrome/browser/browser_state/chrome_browser_state.h"
 
 namespace ios {
 
@@ -45,11 +45,12 @@ AboutSigninInternalsFactory* AboutSigninInternalsFactory::GetInstance() {
   return base::Singleton<AboutSigninInternalsFactory>::get();
 }
 
-scoped_ptr<KeyedService> AboutSigninInternalsFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+AboutSigninInternalsFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
   ios::ChromeBrowserState* chrome_browser_state =
       ios::ChromeBrowserState::FromBrowserState(context);
-  scoped_ptr<AboutSigninInternals> service(new AboutSigninInternals(
+  std::unique_ptr<AboutSigninInternals> service(new AboutSigninInternals(
       OAuth2TokenServiceFactory::GetForBrowserState(chrome_browser_state),
       AccountTrackerServiceFactory::GetForBrowserState(chrome_browser_state),
       SigninManagerFactory::GetForBrowserState(chrome_browser_state),

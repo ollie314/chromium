@@ -114,29 +114,15 @@
       # but this seems like a really good place to store them.
       'postbuild_name': 'Tweak Info.plist',
       'action': ['<(tweak_info_plist_path)',
+                 '--plist=${TARGET_BUILD_DIR}/${INFOPLIST_PATH}',
                  '--breakpad=<(mac_breakpad_compiled_in)',
                  '--breakpad_uploads=<(mac_breakpad_uploads)',
                  '--keystone=0',
                  '--scm=1',
                  '--branding=<(branding)'],
     },
-    {
-      'postbuild_name': 'Symlink Libraries',
-      'action': [
-        'ln',
-        '-fns',
-        'Versions/Current/Libraries',
-        '${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/Libraries'
-      ],
-    },
   ],
   'copies': [
-    {
-      'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Libraries',
-      'files': [
-        '<(PRODUCT_DIR)/exif.so',
-      ],
-    },
     {
       'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers',
       'files': [

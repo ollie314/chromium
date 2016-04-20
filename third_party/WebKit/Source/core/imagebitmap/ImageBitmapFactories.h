@@ -40,6 +40,7 @@
 #include "core/imagebitmap/ImageBitmapOptions.h"
 #include "platform/Supplementable.h"
 #include "platform/geometry/IntRect.h"
+#include "third_party/skia/include/core/SkImage.h"
 
 namespace blink {
 
@@ -49,13 +50,13 @@ class ExceptionState;
 class ExecutionContext;
 class ImageBitmapSource;
 class ImageBitmapOptions;
+class ImageDecoder;
+class WebTaskRunner;
 
 typedef HTMLImageElementOrHTMLVideoElementOrHTMLCanvasElementOrBlobOrImageDataOrImageBitmap ImageBitmapSourceUnion;
 
-class ImageBitmapFactories final : public NoBaseWillBeGarbageCollectedFinalized<ImageBitmapFactories>, public WillBeHeapSupplement<LocalDOMWindow>, public WillBeHeapSupplement<WorkerGlobalScope> {
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(ImageBitmapFactories);
-    USING_FAST_MALLOC_WILL_BE_REMOVED(ImageBitmapFactories);
-
+class ImageBitmapFactories final : public GarbageCollectedFinalized<ImageBitmapFactories>, public Supplement<LocalDOMWindow>, public Supplement<WorkerGlobalScope> {
+    USING_GARBAGE_COLLECTED_MIXIN(ImageBitmapFactories);
 public:
     static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, const ImageBitmapSourceUnion&, ExceptionState&);
     static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, const ImageBitmapSourceUnion&, const ImageBitmapOptions&, ExceptionState&);
@@ -90,6 +91,10 @@ private:
 
         void rejectPromise();
 
+        void scheduleAsyncImageBitmapDecoding(DOMArrayBuffer*);
+        void decodeImageOnDecoderThread(WebTaskRunner*, DOMArrayBuffer*);
+        void resolvePromiseOnOriginalThread(PassRefPtr<SkImage>);
+
         // FileReaderLoaderClient
         void didStartLoading() override { }
         void didReceiveData() override { }
@@ -97,7 +102,7 @@ private:
         void didFail(FileError::ErrorCode) override;
 
         FileReaderLoader m_loader;
-        RawPtrWillBeMember<ImageBitmapFactories> m_factory;
+        Member<ImageBitmapFactories> m_factory;
         Member<ScriptPromiseResolver> m_resolver;
         IntRect m_cropRect;
         ImageBitmapOptions m_options;
@@ -111,7 +116,7 @@ private:
     void addLoader(ImageBitmapLoader*);
     void didFinishLoading(ImageBitmapLoader*);
 
-    PersistentHeapHashSetWillBeHeapHashSet<Member<ImageBitmapLoader>> m_pendingLoaders;
+    HeapHashSet<Member<ImageBitmapLoader>> m_pendingLoaders;
 };
 
 } // namespace blink

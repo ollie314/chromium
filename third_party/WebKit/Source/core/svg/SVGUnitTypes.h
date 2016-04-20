@@ -23,11 +23,10 @@
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/svg/SVGEnumeration.h"
 #include "platform/heap/Handle.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
-class SVGUnitTypes final : public RefCountedWillBeGarbageCollected<SVGUnitTypes>, public ScriptWrappable {
+class SVGUnitTypes final : public GarbageCollected<SVGUnitTypes>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     enum SVGUnitType {

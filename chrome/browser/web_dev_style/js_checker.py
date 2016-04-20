@@ -47,8 +47,8 @@ class JSChecker(object):
   def GetElementByIdCheck(self, i, line):
     """Checks for use of 'document.getElementById' instead of '$'."""
     return self.RegexCheck(i, line, r"(document\.getElementById)\('",
-        "Use $('id'), from chrome://resources/js/util.js, instead of "
-        "document.getElementById('id')")
+        "Use $('id') or getSVGElement('id') from chrome://resources/js/util.js "
+        "instead of document.getElementById('id')")
 
   def InheritDocCheck(self, i, line):
     """Checks for use of '@inheritDoc' instead of '@override'."""
@@ -90,7 +90,6 @@ class JSChecker(object):
         path.join(resources, 'file_manager'),
         path.join(resources, 'help'),
         path.join(resources, 'history'),
-        path.join(resources, 'memory_internals'),
         path.join(resources, 'net_export'),
         path.join(resources, 'net_internals'),
         path.join(resources, 'network_action_predictor'),

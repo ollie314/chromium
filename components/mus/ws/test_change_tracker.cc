@@ -31,13 +31,22 @@ std::string RectToString(const mojo::Rect& rect) {
 }
 
 std::string DirectionToString(mojom::OrderDirection direction) {
-  return direction == mojom::ORDER_DIRECTION_ABOVE ? "above" : "below";
+  return direction == mojom::OrderDirection::ABOVE ? "above" : "below";
 }
 
-std::string ChangeToDescription1(const Change& change) {
+enum class ChangeDescriptionType {
+  ONE,
+  TWO,
+};
+
+std::string ChangeToDescription(const Change& change,
+                                ChangeDescriptionType type) {
   switch (change.type) {
     case CHANGE_TYPE_EMBED:
-      return "OnEmbed";
+      if (type == ChangeDescriptionType::ONE)
+        return "OnEmbed";
+      return base::StringPrintf("OnEmbed drawn=%s",
+                                change.bool_value ? "true" : "false");
 
     case CHANGE_TYPE_EMBEDDED_APP_DISCONNECTED:
       return base::StringPrintf("OnEmbeddedAppDisconnected window=%s",
@@ -45,6 +54,10 @@ std::string ChangeToDescription1(const Change& change) {
 
     case CHANGE_TYPE_UNEMBED:
       return base::StringPrintf("OnUnembed window=%s",
+                                WindowIdToString(change.window_id).c_str());
+
+    case CHANGE_TYPE_LOST_CAPTURE:
+      return base::StringPrintf("OnLostCapture window=%s",
                                 WindowIdToString(change.window_id).c_str());
 
     case CHANGE_TYPE_NODE_ADD_TRANSIENT_WINDOW:
@@ -65,7 +78,7 @@ std::string ChangeToDescription1(const Change& change) {
 
     case CHANGE_TYPE_NODE_HIERARCHY_CHANGED:
       return base::StringPrintf(
-          "HierarchyChanged window=%s new_parent=%s old_parent=%s",
+          "HierarchyChanged window=%s old_parent=%s new_parent=%s",
           WindowIdToString(change.window_id).c_str(),
           WindowIdToString(change.window_id2).c_str(),
           WindowIdToString(change.window_id3).c_str());
@@ -121,11 +134,27 @@ std::string ChangeToDescription1(const Change& change) {
                                 change.bool_value ? "true" : "false");
 
     case CHANGE_TYPE_ON_TOP_LEVEL_CREATED:
-      return base::StringPrintf("TopLevelCreated id=%d window_id=%s",
+      return base::StringPrintf("TopLevelCreated id=%d window_id=%s drawn=%s",
                                 change.change_id,
-                                WindowIdToString(change.window_id).c_str());
+                                WindowIdToString(change.window_id).c_str(),
+                                change.bool_value ? "true" : "false");
+    case CHANGE_TYPE_OPACITY:
+      return base::StringPrintf("OpacityChanged window_id=%s opacity=%.2f",
+                                WindowIdToString(change.window_id).c_str(),
+                                change.float_value);
   }
   return std::string();
+}
+
+std::string SingleChangeToDescriptionImpl(const std::vector<Change>& changes,
+                                          ChangeDescriptionType change_type) {
+  std::string result;
+  for (auto& change : changes) {
+    if (!result.empty())
+      result += "\n";
+    result += ChangeToDescription(change, change_type);
+  }
+  return result;
 }
 
 }  // namespace
@@ -134,24 +163,25 @@ std::vector<std::string> ChangesToDescription1(
     const std::vector<Change>& changes) {
   std::vector<std::string> strings(changes.size());
   for (size_t i = 0; i < changes.size(); ++i)
-    strings[i] = ChangeToDescription1(changes[i]);
+    strings[i] = ChangeToDescription(changes[i], ChangeDescriptionType::ONE);
   return strings;
 }
 
 std::string SingleChangeToDescription(const std::vector<Change>& changes) {
-  std::string result;
-  for (auto& change : changes) {
-    if (!result.empty())
-      result += "\n";
-    result += ChangeToDescription1(change);
-  }
-  return result;
+  return SingleChangeToDescriptionImpl(changes, ChangeDescriptionType::ONE);
+}
+
+std::string SingleChangeToDescription2(const std::vector<Change>& changes) {
+  return SingleChangeToDescriptionImpl(changes, ChangeDescriptionType::TWO);
 }
 
 std::string SingleWindowDescription(const std::vector<TestWindow>& windows) {
-  if (windows.size() != 1u)
-    return "more than one changes and expected only one";
-  return windows[0].ToString();
+  if (windows.empty())
+    return "no windows";
+  std::string result;
+  for (const TestWindow& window : windows)
+    result += window.ToString();
+  return result;
 }
 
 std::string ChangeWindowDescription(const std::vector<Change>& changes) {
@@ -168,7 +198,6 @@ TestWindow WindowDataToTestWindow(const mojom::WindowDataPtr& data) {
   window.parent_id = data->parent_id;
   window.window_id = data->window_id;
   window.visible = data->visible;
-  window.drawn = data->drawn;
   window.properties =
       data->properties.To<std::map<std::string, std::vector<uint8_t>>>();
   return window;
@@ -187,9 +216,11 @@ Change::Change()
       window_id2(0),
       window_id3(0),
       event_action(0),
-      direction(mojom::ORDER_DIRECTION_ABOVE),
+      direction(mojom::OrderDirection::ABOVE),
       bool_value(false),
       change_id(0u) {}
+
+Change::Change(const Change& other) = default;
 
 Change::~Change() {}
 
@@ -198,10 +229,12 @@ TestChangeTracker::TestChangeTracker() : delegate_(NULL) {}
 TestChangeTracker::~TestChangeTracker() {}
 
 void TestChangeTracker::OnEmbed(ConnectionSpecificId connection_id,
-                                mojom::WindowDataPtr root) {
+                                mojom::WindowDataPtr root,
+                                bool drawn) {
   Change change;
   change.type = CHANGE_TYPE_EMBED;
   change.connection_id = connection_id;
+  change.bool_value = drawn;
   change.windows.push_back(WindowDataToTestWindow(root));
   AddChange(change);
 }
@@ -255,6 +288,13 @@ void TestChangeTracker::OnTransientWindowRemoved(Id window_id,
   AddChange(change);
 }
 
+void TestChangeTracker::OnLostCapture(Id window_id) {
+  Change change;
+  change.type = CHANGE_TYPE_LOST_CAPTURE;
+  change.window_id = window_id;
+  AddChange(change);
+}
+
 void TestChangeTracker::OnWindowViewportMetricsChanged(
     mojom::ViewportMetricsPtr old_metrics,
     mojom::ViewportMetricsPtr new_metrics) {
@@ -266,14 +306,14 @@ void TestChangeTracker::OnWindowViewportMetricsChanged(
 
 void TestChangeTracker::OnWindowHierarchyChanged(
     Id window_id,
-    Id new_parent_id,
     Id old_parent_id,
+    Id new_parent_id,
     Array<mojom::WindowDataPtr> windows) {
   Change change;
   change.type = CHANGE_TYPE_NODE_HIERARCHY_CHANGED;
   change.window_id = window_id;
-  change.window_id2 = new_parent_id;
-  change.window_id3 = old_parent_id;
+  change.window_id2 = old_parent_id;
+  change.window_id3 = new_parent_id;
   WindowDatasToTestWindows(windows, &change.windows);
   AddChange(change);
 }
@@ -304,7 +344,16 @@ void TestChangeTracker::OnWindowVisibilityChanged(Id window_id, bool visible) {
   AddChange(change);
 }
 
-void TestChangeTracker::OnWindowDrawnStateChanged(Id window_id, bool drawn) {
+void TestChangeTracker::OnWindowOpacityChanged(Id window_id, float opacity) {
+  Change change;
+  change.type = CHANGE_TYPE_OPACITY;
+  change.window_id = window_id;
+  change.float_value = opacity;
+  AddChange(change);
+}
+
+void TestChangeTracker::OnWindowParentDrawnStateChanged(Id window_id,
+                                                        bool drawn) {
   Change change;
   change.type = CHANGE_TYPE_NODE_DRAWN_STATE_CHANGED;
   change.window_id = window_id;
@@ -317,7 +366,7 @@ void TestChangeTracker::OnWindowInputEvent(Id window_id,
   Change change;
   change.type = CHANGE_TYPE_INPUT_EVENT;
   change.window_id = window_id;
-  change.event_action = event->action;
+  change.event_action = static_cast<int32_t>(event->action);
   AddChange(change);
 }
 
@@ -348,7 +397,7 @@ void TestChangeTracker::OnWindowPredefinedCursorChanged(
   Change change;
   change.type = CHANGE_TYPE_CURSOR_CHANGED;
   change.window_id = window_id;
-  change.cursor_id = cursor_id;
+  change.cursor_id = static_cast<int32_t>(cursor_id);
   AddChange(change);
 }
 
@@ -361,11 +410,13 @@ void TestChangeTracker::OnChangeCompleted(uint32_t change_id, bool success) {
 }
 
 void TestChangeTracker::OnTopLevelCreated(uint32_t change_id,
-                                          mojom::WindowDataPtr window_data) {
+                                          mojom::WindowDataPtr window_data,
+                                          bool drawn) {
   Change change;
   change.type = CHANGE_TYPE_ON_TOP_LEVEL_CREATED;
   change.change_id = change_id;
   change.window_id = window_data->window_id;
+  change.bool_value = drawn;
   AddChange(change);
 }
 
@@ -377,6 +428,8 @@ void TestChangeTracker::AddChange(const Change& change) {
 
 TestWindow::TestWindow() {}
 
+TestWindow::TestWindow(const TestWindow& other) = default;
+
 TestWindow::~TestWindow() {}
 
 std::string TestWindow::ToString() const {
@@ -387,9 +440,8 @@ std::string TestWindow::ToString() const {
 
 std::string TestWindow::ToString2() const {
   return base::StringPrintf(
-      "window=%s parent=%s visible=%s drawn=%s",
-      WindowIdToString(window_id).c_str(), WindowIdToString(parent_id).c_str(),
-      visible ? "true" : "false", drawn ? "true" : "false");
+      "window=%s parent=%s visible=%s", WindowIdToString(window_id).c_str(),
+      WindowIdToString(parent_id).c_str(), visible ? "true" : "false");
 }
 
 }  // namespace ws

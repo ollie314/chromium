@@ -5,32 +5,47 @@
 #ifndef UI_VIEWS_ANIMATION_TEST_INK_DROP_ANIMATION_TEST_API_H_
 #define UI_VIEWS_ANIMATION_TEST_INK_DROP_ANIMATION_TEST_API_H_
 
+#include <vector>
+
 #include "base/macros.h"
-#include "ui/gfx/geometry/size.h"
+#include "base/time/time.h"
+#include "ui/compositor/test/multi_layer_animator_test_controller.h"
+#include "ui/compositor/test/multi_layer_animator_test_controller_delegate.h"
+
+namespace ui {
+class LayerAnimator;
+}  // namespace ui
 
 namespace views {
 class InkDropAnimation;
 
 namespace test {
 
-// Test API to provide internal access to an InkDropAnimation.
-class InkDropAnimationTestApi {
+// Base Test API used by test fixtures to validate all concrete implementations
+// of the InkDropAnimation class.
+class InkDropAnimationTestApi
+    : public ui::test::MultiLayerAnimatorTestController,
+      public ui::test::MultiLayerAnimatorTestControllerDelegate {
  public:
-  typedef InkDropAnimation::InkDropTransforms InkDropTransforms;
-  typedef InkDropAnimation::PaintedShape PaintedShape;
-
   explicit InkDropAnimationTestApi(InkDropAnimation* ink_drop_animation);
-  ~InkDropAnimationTestApi();
+  ~InkDropAnimationTestApi() override;
 
-  // Wrapper functions the wrapped InkDropedAnimation:
-  void CalculateCircleTransforms(const gfx::Size& size,
-                                 InkDropTransforms* transforms_out) const;
-  void CalculateRectTransforms(const gfx::Size& size,
-                               float corner_radius,
-                               InkDropTransforms* transforms_out) const;
+  // Gets the opacity of the ink drop.
+  virtual float GetCurrentOpacity() const = 0;
+
+ protected:
+  InkDropAnimation* ink_drop_animation() {
+    return static_cast<const InkDropAnimationTestApi*>(this)
+        ->ink_drop_animation();
+  }
+
+  InkDropAnimation* ink_drop_animation() const { return ink_drop_animation_; }
+
+  // MultiLayerAnimatorTestControllerDelegate:
+  std::vector<ui::LayerAnimator*> GetLayerAnimators() override;
 
  private:
-  // The InkDropAnimation to provide internal access to.
+  // The InkDropedAnimation to provide internal access to.
   InkDropAnimation* ink_drop_animation_;
 
   DISALLOW_COPY_AND_ASSIGN(InkDropAnimationTestApi);

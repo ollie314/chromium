@@ -2,52 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <utility>
-
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/arc/arc_bridge_service_impl.h"
+#include "components/arc/test/fake_arc_bridge_bootstrap.h"
 #include "components/arc/test/fake_arc_bridge_instance.h"
 #include "ipc/mojo/scoped_ipc_support.h"
-#include "mojo/public/cpp/environment/environment.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace arc {
-
-namespace {
-
-// A fake ArcBridgeBootstrap that creates a local connection.
-class FakeArcBridgeBootstrap : public ArcBridgeBootstrap {
- public:
-  explicit FakeArcBridgeBootstrap(FakeArcBridgeInstance* instance)
-      : instance_(instance) {}
-  ~FakeArcBridgeBootstrap() override {}
-
-  void Start() override {
-    DCHECK(delegate_);
-    ArcBridgeInstancePtr instance;
-    instance_->Bind(mojo::GetProxy(&instance));
-    delegate_->OnConnectionEstablished(std::move(instance));
-  }
-
-  void Stop() override {
-    DCHECK(delegate_);
-    instance_->Unbind();
-    delegate_->OnStopped();
-  }
-
- private:
-  // Owned by the caller.
-  FakeArcBridgeInstance* instance_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeArcBridgeBootstrap);
-};
-
-}  // namespace
 
 class ArcBridgeTest : public testing::Test, public ArcBridgeService::Observer {
  public:
@@ -84,7 +51,6 @@ class ArcBridgeTest : public testing::Test, public ArcBridgeService::Observer {
     ready_ = false;
     state_ = ArcBridgeService::State::STOPPED;
 
-    ipc_support_.reset(new IPC::ScopedIPCSupport(message_loop_.task_runner()));
     instance_.reset(new FakeArcBridgeInstance());
     service_.reset(new ArcBridgeServiceImpl(
         make_scoped_ptr(new FakeArcBridgeBootstrap(instance_.get()))));
@@ -96,14 +62,12 @@ class ArcBridgeTest : public testing::Test, public ArcBridgeService::Observer {
     service_->RemoveObserver(this);
     instance_.reset();
     service_.reset();
-    ipc_support_.reset();
 
     chromeos::DBusThreadManager::Shutdown();
   }
 
   bool ready_;
   ArcBridgeService::State state_;
-  scoped_ptr<IPC::ScopedIPCSupport> ipc_support_;
   base::MessageLoopForUI message_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcBridgeTest);

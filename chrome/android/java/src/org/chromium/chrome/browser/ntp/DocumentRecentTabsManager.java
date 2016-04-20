@@ -85,7 +85,7 @@ public class DocumentRecentTabsManager extends RecentTabsManager {
             }
 
             @Override
-            public void didCloseTab(Tab tab) {
+            public void didCloseTab(int tabId, boolean incognito) {
                 updateCurrentlyOpenTabsWhenDatabaseReady();
             }
         };
@@ -142,8 +142,8 @@ public class DocumentRecentTabsManager extends RecentTabsManager {
 
     @Override
     public void openHistoryPage() {
-        if (mDialog != null) mDialog.dismiss();
         super.openHistoryPage();
+        if (mDialog != null) mDialog.dismiss();
     }
 
     @Override

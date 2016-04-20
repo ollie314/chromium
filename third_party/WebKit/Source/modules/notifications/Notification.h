@@ -31,10 +31,12 @@
 #ifndef Notification_h
 #define Notification_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/SerializedScriptValue.h"
 #include "core/dom/ActiveDOMObject.h"
+#include "core/dom/DOMTimeStamp.h"
 #include "modules/EventTargetModules.h"
 #include "modules/ModulesExport.h"
 #include "modules/vibration/NavigatorVibration.h"
@@ -44,9 +46,7 @@
 #include "public/platform/WebVector.h"
 #include "public/platform/modules/notifications/WebNotificationData.h"
 #include "public/platform/modules/notifications/WebNotificationDelegate.h"
-#include "public/platform/modules/notifications/WebNotificationPermission.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
+#include "public/platform/modules/permissions/permission_status.mojom.h"
 
 namespace blink {
 
@@ -54,19 +54,20 @@ class ExecutionContext;
 class NotificationAction;
 class NotificationOptions;
 class NotificationPermissionCallback;
+class NotificationResourcesLoader;
 class ScriptState;
 
-class MODULES_EXPORT Notification final : public RefCountedGarbageCollectedEventTargetWithInlineData<Notification>, public ActiveDOMObject, public WebNotificationDelegate {
-    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(Notification);
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Notification);
+class MODULES_EXPORT Notification final : public EventTargetWithInlineData, public ActiveScriptWrappable, public ActiveDOMObject, public WebNotificationDelegate {
+    USING_GARBAGE_COLLECTED_MIXIN(Notification);
     DEFINE_WRAPPERTYPEINFO();
 public:
     // Used for JavaScript instantiations of the Notification object. Will automatically schedule for
     // the notification to be displayed to the user when the developer-provided data is valid.
     static Notification* create(ExecutionContext*, const String& title, const NotificationOptions&, ExceptionState&);
 
-    // Used for embedder-created Notification objects. Will initialize the Notification's state as showing.
-    static Notification* create(ExecutionContext*, int64_t persistentId, const WebNotificationData&);
+    // Used for embedder-created Notification objects. If |showing| is true, will initialize the
+    // Notification's state as showing, or as closed otherwise.
+    static Notification* create(ExecutionContext*, int64_t persistentId, const WebNotificationData&, bool showing);
 
     ~Notification() override;
 
@@ -89,44 +90,52 @@ public:
     String body() const;
     String tag() const;
     String icon() const;
+    String badge() const;
     NavigatorVibration::VibrationPattern vibrate(bool& isNull) const;
+    DOMTimeStamp timestamp() const;
+    bool renotify() const;
     bool silent() const;
     bool requireInteraction() const;
     ScriptValue data(ScriptState*);
     HeapVector<NotificationAction> actions() const;
 
-    static String permissionString(WebNotificationPermission);
+    static String permissionString(mojom::PermissionStatus);
     static String permission(ExecutionContext*);
-    static WebNotificationPermission checkPermission(ExecutionContext*);
+    static mojom::PermissionStatus checkPermission(ExecutionContext*);
     static ScriptPromise requestPermission(ScriptState*, NotificationPermissionCallback*);
 
     static size_t maxActions();
 
     // EventTarget interface.
-    ExecutionContext* executionContext() const final { return ActiveDOMObject::executionContext(); }
+    ExecutionContext* getExecutionContext() const final { return ActiveDOMObject::getExecutionContext(); }
     const AtomicString& interfaceName() const override;
 
     // ActiveDOMObject interface.
     void stop() override;
-    bool hasPendingActivity() const override;
+
+    // ActiveScriptWrappable interface.
+    bool hasPendingActivity() const final;
 
     DECLARE_VIRTUAL_TRACE();
 
 protected:
     // EventTarget interface.
-    bool dispatchEventInternal(PassRefPtrWillBeRawPtr<Event>) final;
+    DispatchEventResult dispatchEventInternal(Event*) final;
 
 private:
     Notification(ExecutionContext*, const WebNotificationData&);
 
-    void scheduleShow();
+    // Schedules an asynchronous call to |prepareShow|, allowing the constructor
+    // to return so that events can be fired on the notification object.
+    void schedulePrepareShow();
 
-    // Calling show() may start asynchronous operation. If this object has
-    // a V8 wrapper, hasPendingActivity() prevents the wrapper from being
-    // collected while m_state is Showing, and so this instance stays alive
-    // until the operation completes. Otherwise, you need to hold a ref on this
-    // instance until the operation completes.
-    void show();
+    // Checks permission and loads any necessary resources (this may be async)
+    // before showing the notification.
+    void prepareShow();
+
+    // Shows the notification, using the resources loaded by the
+    // NotificationResourcesLoader.
+    void didLoadResources(NotificationResourcesLoader*);
 
     void setPersistentId(int64_t persistentId) { m_persistentId = persistentId; }
 
@@ -153,7 +162,9 @@ private:
 
     NotificationState m_state;
 
-    Member<AsyncMethodRunner<Notification>> m_asyncRunner;
+    Member<AsyncMethodRunner<Notification>> m_prepareShowMethodRunner;
+
+    Member<NotificationResourcesLoader> m_loader;
 };
 
 } // namespace blink

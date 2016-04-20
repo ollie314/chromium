@@ -7,7 +7,6 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task_runner.h"
@@ -47,6 +46,8 @@ class SYNC_EXPORT AttachmentServiceProxy : public AttachmentService {
   AttachmentServiceProxy(
       const scoped_refptr<base::SequencedTaskRunner>& wrapped_task_runner,
       const base::WeakPtr<syncer::AttachmentService>& wrapped);
+
+  AttachmentServiceProxy(const AttachmentServiceProxy& other);
 
   ~AttachmentServiceProxy() override;
 

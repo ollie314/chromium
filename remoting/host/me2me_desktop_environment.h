@@ -21,15 +21,14 @@ class Me2MeDesktopEnvironment : public BasicDesktopEnvironment {
   ~Me2MeDesktopEnvironment() override;
 
   // DesktopEnvironment interface.
-  scoped_ptr<ScreenControls> CreateScreenControls() override;
+  std::unique_ptr<ScreenControls> CreateScreenControls() override;
   std::string GetCapabilities() const override;
-  scoped_ptr<GnubbyAuthHandler> CreateGnubbyAuthHandler(
-      protocol::ClientStub* client_stub) override;
 
  protected:
   friend class Me2MeDesktopEnvironmentFactory;
   Me2MeDesktopEnvironment(
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
       bool supports_touch_events);
@@ -40,21 +39,16 @@ class Me2MeDesktopEnvironment : public BasicDesktopEnvironment {
       base::WeakPtr<ClientSessionControl> client_session_control,
       bool curtain_enabled);
 
-  void SetEnableGnubbyAuth(bool gnubby_auth_enabled);
-
  private:
   // "Curtains" the session making sure it is disconnected from the local
   // console.
-  scoped_ptr<CurtainMode> curtain_;
+  std::unique_ptr<CurtainMode> curtain_;
 
   // Presents the disconnect window to the local user.
-  scoped_ptr<HostWindow> disconnect_window_;
+  std::unique_ptr<HostWindow> disconnect_window_;
 
   // Notifies the client session about the local mouse movements.
-  scoped_ptr<LocalInputMonitor> local_input_monitor_;
-
-  // True if gnubby auth is enabled.
-  bool gnubby_auth_enabled_;
+  std::unique_ptr<LocalInputMonitor> local_input_monitor_;
 
   DISALLOW_COPY_AND_ASSIGN(Me2MeDesktopEnvironment);
 };
@@ -64,25 +58,22 @@ class Me2MeDesktopEnvironmentFactory : public BasicDesktopEnvironmentFactory {
  public:
   Me2MeDesktopEnvironmentFactory(
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
   ~Me2MeDesktopEnvironmentFactory() override;
 
   // DesktopEnvironmentFactory interface.
-  scoped_ptr<DesktopEnvironment> Create(
+  std::unique_ptr<DesktopEnvironment> Create(
       base::WeakPtr<ClientSessionControl> client_session_control) override;
   void SetEnableCurtaining(bool enable) override;
-  void SetEnableGnubbyAuth(bool enable) override;
 
  protected:
   bool curtain_enabled() const { return curtain_enabled_; }
 
  private:
   // True if curtain mode is enabled.
-  bool curtain_enabled_;
-
-  // True if gnubby auth is enabled.
-  bool gnubby_auth_enabled_;
+  bool curtain_enabled_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(Me2MeDesktopEnvironmentFactory);
 };

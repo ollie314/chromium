@@ -74,7 +74,7 @@ WebInspector.ElementsPanel = function()
     var sharedSidebarModel = new WebInspector.SharedSidebarModel();
     this.sidebarPanes.platformFonts = WebInspector.PlatformFontsWidget.createSidebarWrapper(sharedSidebarModel);
     this.sidebarPanes.styles = new WebInspector.StylesSidebarPane();
-    this.sidebarPanes.computedStyle = WebInspector.ComputedStyleWidget.createSidebarWrapper(this.sidebarPanes.styles, sharedSidebarModel);
+    this.sidebarPanes.computedStyle = WebInspector.ComputedStyleWidget.createSidebarWrapper(this.sidebarPanes.styles, sharedSidebarModel, this._revealProperty.bind(this));
 
     this.sidebarPanes.metrics = new WebInspector.MetricsSidebarPane();
     this.sidebarPanes.properties = WebInspector.PropertiesWidget.createSidebarWrapper();
@@ -100,6 +100,17 @@ WebInspector.ElementsPanel = function()
 WebInspector.ElementsPanel._elementsSidebarViewTitleSymbol = Symbol("title");
 
 WebInspector.ElementsPanel.prototype = {
+    /**
+     * @param {!WebInspector.CSSProperty} cssProperty
+     */
+    _revealProperty: function(cssProperty)
+    {
+        var stylesSidebarPane = this.sidebarPanes.styles;
+        this.sidebarPaneView.selectTab(stylesSidebarPane.title());
+        stylesSidebarPane.revealProperty(/** @type {!WebInspector.CSSProperty} */(cssProperty));
+        return Promise.resolve();
+    },
+
     /**
      * @param {!WebInspector.StylesSidebarPane} ssp
      * @return {!Element}
@@ -374,6 +385,15 @@ WebInspector.ElementsPanel.prototype = {
         if (selectedNode) {
             selectedNode.setAsInspectedNode();
             this._lastValidSelectedNode = selectedNode;
+
+            var executionContexts = selectedNode.target().runtimeModel.executionContexts();
+            var nodeFrameId = selectedNode.frameId();
+            for (var context of executionContexts) {
+                if (context.frameId == nodeFrameId) {
+                    WebInspector.context.setFlavor(WebInspector.ExecutionContext, context);
+                    break;
+                }
+            }
         }
         WebInspector.notifications.dispatchEventToListeners(WebInspector.NotificationService.Events.SelectedNodeChanged);
         this._selectedNodeChangedForTest();
@@ -445,6 +465,7 @@ WebInspector.ElementsPanel.prototype = {
             }
             var node = nodeId ? domModel.nodeForId(nodeId) : null;
             selectNode.call(this, node);
+            this._lastSelectedNodeSelectedForTest();
         }
 
         if (this._omitDefaultSelection)
@@ -456,6 +477,8 @@ WebInspector.ElementsPanel.prototype = {
             selectNode.call(this, null);
         delete this._selectedPathOnReset;
     },
+
+    _lastSelectedNodeSelectedForTest: function() { },
 
     /**
      * @override
@@ -1216,7 +1239,7 @@ WebInspector.ElementsPanel.PseudoStateMarkerDecorator.prototype = {
      */
     decorate: function(node)
     {
-        return { color: "orange", title: WebInspector.UIString("Element state: %s", ":" + WebInspector.CSSStyleModel.fromNode(node).pseudoState(node).join(", :")) };
+        return { color: "orange", title: WebInspector.UIString("Element state: %s", ":" + WebInspector.CSSModel.fromNode(node).pseudoState(node).join(", :")) };
     }
 }
 

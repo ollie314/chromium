@@ -5,22 +5,23 @@
 #ifndef CONTENT_BROWSER_ANDROID_IN_PROCESS_SURFACE_TEXTURE_MANAGER_H_
 #define CONTENT_BROWSER_ANDROID_IN_PROCESS_SURFACE_TEXTURE_MANAGER_H_
 
-#include "content/common/android/surface_texture_manager.h"
+#include "gpu/ipc/common/android/surface_texture_manager.h"
+
+#include <memory>
 
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/synchronization/lock.h"
-#include "content/common/android/surface_texture_peer.h"
 #include "content/common/content_export.h"
+#include "gpu/ipc/common/android/surface_texture_peer.h"
 #include "ui/gl/android/scoped_java_surface.h"
 
 namespace content {
 
 class CONTENT_EXPORT InProcessSurfaceTextureManager
-    : public SurfaceTextureManager,
-      public SurfaceTexturePeer {
+    : public gpu::SurfaceTextureManager,
+      public gpu::SurfaceTexturePeer {
  public:
   static InProcessSurfaceTextureManager* GetInstance();
 
@@ -46,7 +47,7 @@ class CONTENT_EXPORT InProcessSurfaceTextureManager
   ~InProcessSurfaceTextureManager() override;
 
   using SurfaceTextureMap =
-      base::ScopedPtrHashMap<int, scoped_ptr<gfx::ScopedJavaSurface>>;
+      base::ScopedPtrHashMap<int, std::unique_ptr<gfx::ScopedJavaSurface>>;
   SurfaceTextureMap surface_textures_;
   base::Lock lock_;
 

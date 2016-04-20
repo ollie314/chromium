@@ -10,12 +10,12 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/logging.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
@@ -25,6 +25,7 @@ namespace bookmarks {
 const char ManagedBookmarksTracker::kName[] = "name";
 const char ManagedBookmarksTracker::kUrl[] = "url";
 const char ManagedBookmarksTracker::kChildren[] = "children";
+const char ManagedBookmarksTracker::kFolderName[] = "toplevel_name";
 
 ManagedBookmarksTracker::ManagedBookmarksTracker(
     BookmarkModel* model,
@@ -105,6 +106,10 @@ base::string16 ManagedBookmarksTracker::GetBookmarksFolderTitle() const {
     return l10n_util::GetStringUTF16(
         IDS_BOOKMARK_BAR_SUPERVISED_FOLDER_DEFAULT_NAME);
   } else {
+    std::string name = prefs_->GetString(prefs::kManagedBookmarksFolderName);
+    if (!name.empty())
+      return base::UTF8ToUTF16(name);
+
     const std::string domain = get_management_domain_callback_.Run();
     if (domain.empty()) {
       return l10n_util::GetStringUTF16(

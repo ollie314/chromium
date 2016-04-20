@@ -11,6 +11,7 @@
 #include "ash/shell.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/display/chromeos/display_configurator.h"
+#include "ui/display/manager/display_layout.h"
 #include "ui/display/types/display_snapshot.h"
 #include "ui/events/devices/device_data_manager.h"
 
@@ -174,9 +175,9 @@ void TouchTransformerController::UpdateTouchTransformer() const {
     single_display = display_manager->GetDisplayInfo(single_display_id);
     UpdateTouchRadius(single_display);
   } else {
-    DisplayIdPair id_pair = display_manager->GetCurrentDisplayIdPair();
-    display1_id = id_pair.first;
-    display2_id = id_pair.second;
+    display::DisplayIdList list = display_manager->GetCurrentDisplayIdList();
+    display1_id = list[0];
+    display2_id = list[1];
     DCHECK(display1_id != gfx::Display::kInvalidDisplayID &&
            display2_id != gfx::Display::kInvalidDisplayID);
     display1 = display_manager->GetDisplayInfo(display1_id);

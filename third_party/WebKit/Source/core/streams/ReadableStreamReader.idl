@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 [
-    GarbageCollected,
-    ActiveDOMObject,
+    ActiveScriptWrappable,
+    DependentLifetime,
     Exposed=(Window,Worker),
     NoInterfaceObject,
 ] interface ReadableStreamReader {

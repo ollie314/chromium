@@ -16,6 +16,13 @@ public interface CrashReportingPermissionManager {
     public boolean isUploadPermitted();
 
     /**
+     * Check whether to allow UMA uploading.
+     *
+     * @return whether to allow UMA uploading.
+     */
+    public boolean isUmaUploadPermitted();
+
+    /**
      * Check whether to allow uploading crash dump now based on command line flag only.
      *
      * @return whether experimental flag doesn't disable uploading crash dump.
@@ -38,4 +45,11 @@ public interface CrashReportingPermissionManager {
      * @return whether uploading logic should be constrained.
      */
     public boolean isUploadLimited();
+
+    /**
+     * Check whether to ignore all consent and upload, used by test devices to avoid UI dependency.
+     *
+     * @return whether crash dumps should be uploaded if at all possible.
+     */
+    public boolean isUploadEnabledForTests();
 }

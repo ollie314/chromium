@@ -11,14 +11,14 @@
 #include <limits>
 #include <set>
 
-#include "base/containers/hash_tables.h"
 #include "base/containers/small_map.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/base/math_util.h"
-#include "cc/playback/display_list_raster_source.h"
+#include "cc/playback/raster_source.h"
 #include "cc/tiles/prioritized_tile.h"
 #include "cc/tiles/tile.h"
 #include "cc/tiles/tile_priority.h"
@@ -36,15 +36,15 @@ const float kMaxSoonBorderDistanceInScreenPixels = 312.f;
 
 }  // namespace
 
-scoped_ptr<PictureLayerTiling> PictureLayerTiling::Create(
+std::unique_ptr<PictureLayerTiling> PictureLayerTiling::Create(
     WhichTree tree,
     float contents_scale,
-    scoped_refptr<DisplayListRasterSource> raster_source,
+    scoped_refptr<RasterSource> raster_source,
     PictureLayerTilingClient* client,
     size_t tiling_interest_area_padding,
     float skewport_target_time_in_seconds,
     int skewport_extrapolation_limit_in_content_pixels) {
-  return make_scoped_ptr(new PictureLayerTiling(
+  return base::WrapUnique(new PictureLayerTiling(
       tree, contents_scale, raster_source, client, tiling_interest_area_padding,
       skewport_target_time_in_seconds,
       skewport_extrapolation_limit_in_content_pixels));
@@ -53,7 +53,7 @@ scoped_ptr<PictureLayerTiling> PictureLayerTiling::Create(
 PictureLayerTiling::PictureLayerTiling(
     WhichTree tree,
     float contents_scale,
-    scoped_refptr<DisplayListRasterSource> raster_source,
+    scoped_refptr<RasterSource> raster_source,
     PictureLayerTilingClient* client,
     size_t tiling_interest_area_padding,
     float skewport_target_time_in_seconds,
@@ -75,7 +75,8 @@ PictureLayerTiling::PictureLayerTiling(
       has_skewport_rect_tiles_(false),
       has_soon_border_rect_tiles_(false),
       has_eventually_rect_tiles_(false),
-      all_tiles_done_(true) {
+      all_tiles_done_(true),
+      invalidated_since_last_compute_priority_rects_(false) {
   DCHECK(!raster_source->IsSolidColor());
   gfx::Size content_bounds =
       gfx::ScaleToCeiledSize(raster_source_->GetSize(), contents_scale);
@@ -117,7 +118,7 @@ Tile* PictureLayerTiling::CreateTile(const Tile::CreateInfo& info) {
   all_tiles_done_ = false;
   ScopedTilePtr tile = client_->CreateTile(info);
   Tile* raw_ptr = tile.get();
-  tiles_.add(key, std::move(tile));
+  tiles_[key] = std::move(tile);
   return raw_ptr;
 }
 
@@ -186,8 +187,9 @@ void PictureLayerTiling::TakeTilesAndPropertiesFrom(
     all_tiles_done_ = pending_twin->all_tiles_done_;
   } else {
     while (!pending_twin->tiles_.empty()) {
-      TileMapKey key = pending_twin->tiles_.begin()->first;
-      tiles_.set(key, pending_twin->tiles_.take_and_erase(key));
+      auto pending_iter = pending_twin->tiles_.begin();
+      tiles_[pending_iter->first] = std::move(pending_iter->second);
+      pending_twin->tiles_.erase(pending_iter);
     }
     all_tiles_done_ &= pending_twin->all_tiles_done_;
   }
@@ -208,10 +210,10 @@ void PictureLayerTiling::TakeTilesAndPropertiesFrom(
 }
 
 void PictureLayerTiling::SetRasterSourceAndResize(
-    scoped_refptr<DisplayListRasterSource> raster_source) {
+    scoped_refptr<RasterSource> raster_source) {
   DCHECK(!raster_source->IsSolidColor());
   gfx::Size old_layer_bounds = raster_source_->GetSize();
-  raster_source_.swap(raster_source);
+  raster_source_ = std::move(raster_source);
   gfx::Size new_layer_bounds = raster_source_->GetSize();
   gfx::Size content_bounds =
       gfx::ScaleToCeiledSize(new_layer_bounds, contents_scale_);
@@ -287,6 +289,7 @@ void PictureLayerTiling::SetRasterSourceAndResize(
 
 void PictureLayerTiling::Invalidate(const Region& layer_invalidation) {
   DCHECK(tree_ != ACTIVE_TREE || !client_->GetPendingOrActiveTwinTiling(this));
+  invalidated_since_last_compute_priority_rects_ = true;
   RemoveTilesInRegion(layer_invalidation, true /* recreate tiles */);
 }
 
@@ -296,11 +299,12 @@ void PictureLayerTiling::RemoveTilesInRegion(const Region& layer_invalidation,
   // twin, so it's slated for removal in the future.
   if (live_tiles_rect_.IsEmpty())
     return;
-  // Pick 16 for the size of the SmallMap before it promotes to a hash_map.
+  // Pick 16 for the size of the SmallMap before it promotes to a unordered_map.
   // 4x4 tiles should cover most small invalidations, and walking a vector of
   // 16 is fast enough. If an invalidation is huge we will fall back to a
-  // hash_map instead of a vector in the SmallMap.
-  base::SmallMap<base::hash_map<TileMapKey, gfx::Rect>, 16> remove_tiles;
+  // unordered_map instead of a vector in the SmallMap.
+  base::SmallMap<std::unordered_map<TileMapKey, gfx::Rect, TileMapKeyHash>, 16>
+      remove_tiles;
   gfx::Rect expanded_live_tiles_rect =
       tiling_data_.ExpandRectToTileBounds(live_tiles_rect_);
   for (Region::Iterator iter(layer_invalidation); iter.has_rect();
@@ -382,10 +386,15 @@ bool PictureLayerTiling::ShouldCreateTileAt(
   const Region* layer_invalidation = client_->GetPendingInvalidation();
 
   // If this tile is invalidated, then the pending tree should create one.
-  if (layer_invalidation &&
-      layer_invalidation->Intersects(info.enclosing_layer_rect))
-    return true;
-
+  // Do the intersection test in content space to match the corresponding check
+  // on the active tree and avoid floating point inconsistencies.
+  for (Region::Iterator iter(*layer_invalidation); iter.has_rect();
+       iter.next()) {
+    gfx::Rect invalid_content_rect =
+        gfx::ScaleToEnclosingRect(iter.rect(), contents_scale_);
+    if (invalid_content_rect.Intersects(info.content_rect))
+      return true;
+  }
   // If the active tree doesn't have a tile here, but it's in the pending tree's
   // visible rect, then the pending tree should create a tile. This can happen
   // if the pending visible rect is outside of the active tree's live tiles
@@ -547,7 +556,9 @@ ScopedTilePtr PictureLayerTiling::TakeTileAt(int i, int j) {
   TileMap::iterator found = tiles_.find(TileMapKey(i, j));
   if (found == tiles_.end())
     return nullptr;
-  return tiles_.take_and_erase(found);
+  ScopedTilePtr result = std::move(found->second);
+  tiles_.erase(found);
+  return result;
 }
 
 bool PictureLayerTiling::RemoveTileAt(int i, int j) {
@@ -635,11 +646,13 @@ bool PictureLayerTiling::ComputeTilePriorityRects(
     set_all_tiles_done(false);
   }
 
+  bool invalidated = invalidated_since_last_compute_priority_rects_;
+  invalidated_since_last_compute_priority_rects_ = false;
   if (!NeedsUpdateForFrameAtTimeAndViewport(current_frame_time_in_seconds,
                                             viewport_in_layer_space)) {
     // This should never be zero for the purposes of has_ever_been_updated().
     DCHECK_NE(current_frame_time_in_seconds, 0.0);
-    return false;
+    return invalidated;
   }
 
   const float content_to_screen_scale = ideal_contents_scale / contents_scale_;
@@ -934,7 +947,7 @@ std::map<const Tile*, PrioritizedTile>
 PictureLayerTiling::UpdateAndGetAllPrioritizedTilesForTesting() const {
   std::map<const Tile*, PrioritizedTile> result;
   for (const auto& key_tile_pair : tiles_) {
-    Tile* tile = key_tile_pair.second;
+    Tile* tile = key_tile_pair.second.get();
     UpdateRequiredStatesOnTile(tile);
     PrioritizedTile prioritized_tile =
         MakePrioritizedTile(tile, ComputePriorityRectTypeForTile(tile));
@@ -1005,7 +1018,7 @@ PictureLayerTiling::ComputePriorityRectTypeForTile(const Tile* tile) const {
 void PictureLayerTiling::GetAllPrioritizedTilesForTracing(
     std::vector<PrioritizedTile>* prioritized_tiles) const {
   for (const auto& tile_pair : tiles_) {
-    Tile* tile = tile_pair.second;
+    Tile* tile = tile_pair.second.get();
     prioritized_tiles->push_back(
         MakePrioritizedTile(tile, ComputePriorityRectTypeForTile(tile)));
   }
@@ -1026,7 +1039,7 @@ void PictureLayerTiling::AsValueInto(
 size_t PictureLayerTiling::GPUMemoryUsageInBytes() const {
   size_t amount = 0;
   for (TileMap::const_iterator it = tiles_.begin(); it != tiles_.end(); ++it) {
-    const Tile* tile = it->second;
+    const Tile* tile = it->second.get();
     amount += tile->GPUMemoryUsageInBytes();
   }
   return amount;

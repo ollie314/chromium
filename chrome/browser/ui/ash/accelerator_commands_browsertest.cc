@@ -7,6 +7,7 @@
 #include "ash/ash_switches.h"
 #include "ash/shell.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "build/build_config.h"
@@ -79,7 +80,7 @@ IN_PROC_BROWSER_TEST_F(AcceleratorCommandsBrowserTest, ToggleMaximized) {
 
   // When in fullscreen accelerators::ToggleMaximized gets out of fullscreen.
   EXPECT_FALSE(window_state->IsFullscreen());
-  Browser* browser = chrome::FindBrowserWithWindow(window_state->window());
+  Browser* browser = chrome::FindBrowserWithWindow(window_state->aura_window());
   ASSERT_TRUE(browser);
   chrome::ToggleFullscreenMode(browser);
   EXPECT_TRUE(window_state->IsFullscreen());
@@ -152,17 +153,15 @@ IN_PROC_BROWSER_TEST_P(AcceleratorCommandsFullscreenBrowserTest,
 
   // 2) ToggleFullscreen() should have no effect on windows which cannot be
   // maximized.
-  window_state->window()->SetProperty(aura::client::kCanMaximizeKey, false);
+  window_state->aura_window()->SetProperty(aura::client::kCanMaximizeKey,
+                                           false);
   ash::accelerators::ToggleFullscreen();
   EXPECT_TRUE(IsInitialShowState(window_state));
 
   // 3) Hosted apps.
   Browser::CreateParams browser_create_params(
-      Browser::CreateParams::CreateForApp("Test",
-                                          true /* trusted_source */,
-                                          gfx::Rect(),
-                                          browser()->profile(),
-                                          chrome::HOST_DESKTOP_TYPE_ASH));
+      Browser::CreateParams::CreateForApp("Test", true /* trusted_source */,
+                                          gfx::Rect(), browser()->profile()));
 
   Browser* app_host_browser = new Browser(browser_create_params);
   ASSERT_TRUE(app_host_browser->is_app());
@@ -181,8 +180,8 @@ IN_PROC_BROWSER_TEST_P(AcceleratorCommandsFullscreenBrowserTest,
   EXPECT_TRUE(IsInitialShowState(window_state));
 
   // 4) Popup browser windows.
-  browser_create_params = Browser::CreateParams(
-      Browser::TYPE_POPUP, browser()->profile(), chrome::HOST_DESKTOP_TYPE_ASH);
+  browser_create_params =
+      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile());
   Browser* popup_browser = new Browser(browser_create_params);
   ASSERT_TRUE(popup_browser->is_type_popup());
   ASSERT_FALSE(popup_browser->is_app());
@@ -204,7 +203,7 @@ IN_PROC_BROWSER_TEST_P(AcceleratorCommandsFullscreenBrowserTest,
   views::Widget::InitParams params;
   params.delegate = new MaximizableWidgetDelegate();
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  scoped_ptr<views::Widget> widget(new views::Widget);
+  std::unique_ptr<views::Widget> widget(new views::Widget);
   widget->Init(params);
   widget->Show();
 
@@ -283,7 +282,7 @@ IN_PROC_BROWSER_TEST_P(AcceleratorCommandsPlatformAppFullscreenBrowserTest,
     extensions::AppWindow::CreateParams params;
     params.frame = extensions::AppWindow::FRAME_CHROME;
     extensions::AppWindow* app_window =
-        CreateAppWindowFromParams(extension, params);
+        CreateAppWindowFromParams(browser()->profile(), extension, params);
     extensions::NativeAppWindow* native_app_window =
         app_window->GetBaseWindow();
     SetToInitialShowState(app_window);
@@ -308,7 +307,7 @@ IN_PROC_BROWSER_TEST_P(AcceleratorCommandsPlatformAppFullscreenBrowserTest,
     extensions::AppWindow::CreateParams params;
     params.frame = extensions::AppWindow::FRAME_NONE;
     extensions::AppWindow* app_window =
-        CreateAppWindowFromParams(extension, params);
+        CreateAppWindowFromParams(browser()->profile(), extension, params);
     extensions::NativeAppWindow* native_app_window =
         app_window->GetBaseWindow();
     ASSERT_TRUE(app_window->GetBaseWindow()->IsActive());

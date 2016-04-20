@@ -4,9 +4,10 @@
 
 #include "chromeos/network/host_resolver_impl_chromeos.h"
 
+#include <memory>
+
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
@@ -20,7 +21,7 @@
 #include "chromeos/network/network_state_handler.h"
 #include "dbus/object_path.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
+#include "net/base/network_interfaces.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -145,8 +146,8 @@ class HostResolverImplChromeOSTest : public testing::Test {
         base::Bind(&DoNothingWithCallStatus));
   }
 
-  scoped_ptr<chromeos::NetworkStateHandler> network_state_handler_;
-  scoped_ptr<net::HostResolver> host_resolver_;
+  std::unique_ptr<chromeos::NetworkStateHandler> network_state_handler_;
+  std::unique_ptr<net::HostResolver> host_resolver_;
   base::MessageLoop io_message_loop_;
   net::BoundNetLog net_log_;
 

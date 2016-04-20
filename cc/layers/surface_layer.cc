@@ -40,21 +40,17 @@ class SatisfySwapPromise : public SwapPromise {
 };
 
 scoped_refptr<SurfaceLayer> SurfaceLayer::Create(
-    const LayerSettings& settings,
     const SatisfyCallback& satisfy_callback,
     const RequireCallback& require_callback) {
   return make_scoped_refptr(
-      new SurfaceLayer(settings, satisfy_callback, require_callback));
+      new SurfaceLayer(satisfy_callback, require_callback));
 }
 
-SurfaceLayer::SurfaceLayer(const LayerSettings& settings,
-                           const SatisfyCallback& satisfy_callback,
+SurfaceLayer::SurfaceLayer(const SatisfyCallback& satisfy_callback,
                            const RequireCallback& require_callback)
-    : Layer(settings),
-      surface_scale_(1.f),
+    : surface_scale_(1.f),
       satisfy_callback_(satisfy_callback),
-      require_callback_(require_callback) {
-}
+      require_callback_(require_callback) {}
 
 SurfaceLayer::~SurfaceLayer() {
   DCHECK(!layer_tree_host());
@@ -74,7 +70,8 @@ void SurfaceLayer::SetSurfaceId(SurfaceId surface_id,
   SetNeedsPushProperties();
 }
 
-scoped_ptr<LayerImpl> SurfaceLayer::CreateLayerImpl(LayerTreeImpl* tree_impl) {
+std::unique_ptr<LayerImpl> SurfaceLayer::CreateLayerImpl(
+    LayerTreeImpl* tree_impl) {
   return SurfaceLayerImpl::Create(tree_impl, id());
 }
 
@@ -115,7 +112,7 @@ void SurfaceLayer::SatisfyDestroySequence() {
   if (!layer_tree_host())
     return;
   DCHECK(!destroy_sequence_.is_null());
-  scoped_ptr<SatisfySwapPromise> satisfy(
+  std::unique_ptr<SatisfySwapPromise> satisfy(
       new SatisfySwapPromise(destroy_sequence_, satisfy_callback_));
   layer_tree_host()->QueueSwapPromise(std::move(satisfy));
   destroy_sequence_ = SurfaceSequence();

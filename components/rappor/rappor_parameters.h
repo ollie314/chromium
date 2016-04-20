@@ -9,6 +9,13 @@
 
 namespace rappor {
 
+// Levels of noise added to a sample.
+enum NoiseLevel {
+  NO_NOISE = 0,
+  NORMAL_NOISE,
+  NUM_NOISE_LEVELS,
+};
+
 // The type of data stored in a metric.
 enum RapporType {
   // Generic metrics from UMA opt-in users.
@@ -22,9 +29,11 @@ enum RapporType {
 };
 
 enum Probability {
+  PROBABILITY_100,   // 100%
   PROBABILITY_75,    // 75%
   PROBABILITY_50,    // 50%
   PROBABILITY_25,    // 25%
+  PROBABILITY_0,     // 0%
 };
 
 
@@ -35,6 +44,19 @@ enum RecordingGroup {
   UMA_RAPPOR_GROUP = 1 << 0,
   // Metrics related to SafeBrowsing, for SafeBrowsing users.
   SAFEBROWSING_RAPPOR_GROUP = 1 << 1,
+};
+
+
+// An object describing noise probabilities for a noise level
+struct NoiseParameters {
+  // The probability that a bit will be redacted with fake data.
+  Probability fake_prob;
+  // The probability that a fake bit will be a one.
+  Probability fake_one_prob;
+  // The probability that a one bit in the redacted data reports as one.
+  Probability one_coin_prob;
+  // The probability that a zero bit in the redacted data reports as one.
+  Probability zero_coin_prob;
 };
 
 // An object describing a rappor metric and the parameters used to generate it.
@@ -54,19 +76,12 @@ struct RapporParameters {
   int num_cohorts;
 
   // The number of bytes stored in the Bloom filter.
-  int bloom_filter_size_bytes;
+  size_t bloom_filter_size_bytes;
   // The number of hash functions used in the Bloom filter.
   int bloom_filter_hash_function_count;
 
-  // The probability that a bit will be redacted with fake data.
-  Probability fake_prob;
-  // The probability that a fake bit will be a one.
-  Probability fake_one_prob;
-
-  // The probability that a one bit in the redacted data reports as one.
-  Probability one_coin_prob;
-  // The probability that a zero bit in the redacted data reports as one.
-  Probability zero_coin_prob;
+  // The level of noise to use.
+  NoiseLevel noise_level;
 
   // The reporting level this metric is reported at.
   RecordingGroup recording_group;
@@ -74,33 +89,41 @@ struct RapporParameters {
 
 namespace internal {
 
+const NoiseParameters kNoiseParametersForLevel[NUM_NOISE_LEVELS] = {
+    // NO_NOISE
+    {
+     rappor::PROBABILITY_0 /* Fake data probability */,
+     rappor::PROBABILITY_0 /* Fake one probability */,
+     rappor::PROBABILITY_100 /* One coin probability */,
+     rappor::PROBABILITY_0 /* Zero coin probability */,
+    },
+    // NORMAL_NOISE
+    {
+     rappor::PROBABILITY_50 /* Fake data probability */,
+     rappor::PROBABILITY_50 /* Fake one probability */,
+     rappor::PROBABILITY_75 /* One coin probability */,
+     rappor::PROBABILITY_25 /* Zero coin probability */,
+    },
+};
+
 const RapporParameters kRapporParametersForType[NUM_RAPPOR_TYPES] = {
     // UMA_RAPPOR_TYPE
     {128 /* Num cohorts */,
      4 /* Bloom filter size bytes */,
      2 /* Bloom filter hash count */,
-     rappor::PROBABILITY_50 /* Fake data probability */,
-     rappor::PROBABILITY_50 /* Fake one probability */,
-     rappor::PROBABILITY_75 /* One coin probability */,
-     rappor::PROBABILITY_25 /* Zero coin probability */,
+     rappor::NORMAL_NOISE /* Noise level */,
      UMA_RAPPOR_GROUP /* Recording group */},
     // SAFEBROWSING_RAPPOR_TYPE
     {128 /* Num cohorts */,
      1 /* Bloom filter size bytes */,
      2 /* Bloom filter hash count */,
-     rappor::PROBABILITY_50 /* Fake data probability */,
-     rappor::PROBABILITY_50 /* Fake one probability */,
-     rappor::PROBABILITY_75 /* One coin probability */,
-     rappor::PROBABILITY_25 /* Zero coin probability */,
+     rappor::NORMAL_NOISE /* Noise level */,
      SAFEBROWSING_RAPPOR_GROUP /* Recording group */},
     // ETLD_PLUS_ONE_RAPPOR_TYPE
     {128 /* Num cohorts */,
      16 /* Bloom filter size bytes */,
      2 /* Bloom filter hash count */,
-     rappor::PROBABILITY_50 /* Fake data probability */,
-     rappor::PROBABILITY_50 /* Fake one probability */,
-     rappor::PROBABILITY_75 /* One coin probability */,
-     rappor::PROBABILITY_25 /* Zero coin probability */,
+     rappor::NORMAL_NOISE /* Noise level */,
      UMA_RAPPOR_GROUP /* Recording group */},
 };
 

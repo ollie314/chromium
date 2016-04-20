@@ -45,7 +45,6 @@
 #include "core/layout/LayoutPart.h"
 #include "modules/accessibility/AXObject.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
-#include "platform/Task.h"
 #include "platform/Widget.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebSuspendableTask.h"
@@ -62,29 +61,6 @@
 namespace blink {
 
 namespace {
-
-class NodeDispatchEventTask: public SuspendableTask {
-    WTF_MAKE_NONCOPYABLE(NodeDispatchEventTask);
-public:
-    NodeDispatchEventTask(const WebPrivatePtr<Node>& node, WebDOMEvent event)
-        : m_event(event)
-    {
-        m_node = node;
-    }
-
-    ~NodeDispatchEventTask()
-    {
-        m_node.reset();
-    }
-
-    void run() override
-    {
-        m_node->dispatchEvent(m_event);
-    }
-private:
-    WebPrivatePtr<Node> m_node;
-    WebDOMEvent m_event;
-};
 
 class NodeDispatchSimulatedClickTask: public SuspendableTask {
     WTF_MAKE_NONCOPYABLE(NodeDispatchSimulatedClickTask);
@@ -181,7 +157,7 @@ bool WebNode::isTextNode() const
 
 bool WebNode::isCommentNode() const
 {
-    return m_private->nodeType() == Node::COMMENT_NODE;
+    return m_private->getNodeType() == Node::COMMENT_NODE;
 }
 
 bool WebNode::isFocusable() const
@@ -214,18 +190,12 @@ bool WebNode::isDocumentNode() const
 
 bool WebNode::isDocumentTypeNode() const
 {
-    return m_private->nodeType() == Node::DOCUMENT_TYPE_NODE;
-}
-
-void WebNode::dispatchEvent(const WebDOMEvent& event)
-{
-    if (!event.isNull())
-        m_private->executionContext()->postSuspendableTask(adoptPtr(new NodeDispatchEventTask(m_private, event)));
+    return m_private->getNodeType() == Node::DOCUMENT_TYPE_NODE;
 }
 
 void WebNode::simulateClick()
 {
-    m_private->executionContext()->postSuspendableTask(adoptPtr(new NodeDispatchSimulatedClickTask(m_private)));
+    m_private->getExecutionContext()->postSuspendableTask(adoptPtr(new NodeDispatchSimulatedClickTask(m_private)));
 }
 
 WebElementCollection WebNode::getElementsByHTMLTagName(const WebString& tag) const
@@ -243,37 +213,6 @@ WebElement WebNode::querySelector(const WebString& selector, WebExceptionCode& e
     WebElement element = toContainerNode(m_private.get())->querySelector(selector, exceptionState);
     ec = exceptionState.code();
     return element;
-}
-
-WebElement WebNode::querySelector(const WebString& selector) const
-{
-    WebExceptionCode ec = 0;
-    WebElement element = querySelector(selector, ec);
-    ASSERT(!ec);
-    return element;
-}
-
-void WebNode::querySelectorAll(const WebString& selector, WebVector<WebElement>& results, WebExceptionCode& ec) const
-{
-    if (!m_private->isContainerNode())
-        return;
-    TrackExceptionState exceptionState;
-    RefPtrWillBeRawPtr<StaticElementList> elements = toContainerNode(m_private.get())->querySelectorAll(selector, exceptionState);
-    ec = exceptionState.code();
-    if (exceptionState.hadException())
-        return;
-    Vector<WebElement> temp;
-    temp.reserveCapacity(elements->length());
-    for (unsigned i = 0; i < elements->length(); ++i)
-        temp.append(WebElement(elements->item(i)));
-    results.assign(temp);
-}
-
-void WebNode::querySelectorAll(const WebString& selector, WebVector<WebElement>& results) const
-{
-    WebExceptionCode ec = 0;
-    querySelectorAll(selector, results, ec);
-    ASSERT(!ec);
 }
 
 bool WebNode::focused() const
@@ -306,18 +245,18 @@ WebAXObject WebNode::accessibilityObject()
     return cache ? WebAXObject(cache->get(node)) : WebAXObject();
 }
 
-WebNode::WebNode(const PassRefPtrWillBeRawPtr<Node>& node)
+WebNode::WebNode(Node* node)
     : m_private(node)
 {
 }
 
-WebNode& WebNode::operator=(const PassRefPtrWillBeRawPtr<Node>& node)
+WebNode& WebNode::operator=(Node* node)
 {
     m_private = node;
     return *this;
 }
 
-WebNode::operator PassRefPtrWillBeRawPtr<Node>() const
+WebNode::operator Node*() const
 {
     return m_private.get();
 }

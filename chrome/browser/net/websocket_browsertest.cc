@@ -9,8 +9,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/login/login_prompt.h"
-#include "chrome/browser/ui/login/login_prompt_test_utils.h"
+#include "chrome/browser/ui/login/login_handler.h"
+#include "chrome/browser/ui/login/login_handler_test_utils.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -73,7 +73,7 @@ class WebSocketBrowserTest : public InProcessBrowserTest {
 
  private:
   typedef net::SpawnedTestServer::SSLOptions SSLOptions;
-  scoped_ptr<content::TitleWatcher> watcher_;
+  std::unique_ptr<content::TitleWatcher> watcher_;
 
   DISALLOW_COPY_AND_ASSIGN(WebSocketBrowserTest);
 };

@@ -18,7 +18,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
@@ -63,8 +62,7 @@ IN_PROC_BROWSER_TEST_F(ForceMaximizeOnFirstRunTest, PRE_TwoRuns) {
   LogIn(kAccountId, kAccountPassword);
 
   // Check that the first browser window is maximized.
-  const BrowserList* const browser_list =
-      BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH);
+  const BrowserList* const browser_list = BrowserList::GetInstance();
   EXPECT_EQ(1U, browser_list->size());
   const Browser* const browser = browser_list->get(0);
   ASSERT_TRUE(browser);
@@ -110,8 +108,7 @@ IN_PROC_BROWSER_TEST_F(ForceMaximizePolicyFalseTest, GeneralFirstRun) {
   SkipToLoginScreen();
   LogIn(kAccountId, kAccountPassword);
 
-  const BrowserList* const browser_list =
-      BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH);
+  const BrowserList* const browser_list = BrowserList::GetInstance();
   EXPECT_EQ(1U, browser_list->size());
   const Browser* const browser = browser_list->get(0);
   ASSERT_TRUE(browser);

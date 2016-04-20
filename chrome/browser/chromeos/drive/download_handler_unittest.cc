@@ -10,7 +10,7 @@
 #include "base/run_loop.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/drive/dummy_file_system.h"
+#include "components/drive/chromeos/dummy_file_system.h"
 #include "components/drive/file_system_core_util.h"
 #include "content/public/test/mock_download_item.h"
 #include "content/public/test/mock_download_manager.h"
@@ -34,8 +34,9 @@ class DownloadHandlerTestFileSystem : public DummyFileSystem {
   // FileSystemInterface overrides.
   void GetResourceEntry(const base::FilePath& file_path,
                         const GetResourceEntryCallback& callback) override {
-    callback.Run(error_, scoped_ptr<ResourceEntry>(
-        error_ == FILE_ERROR_OK ? new ResourceEntry : NULL));
+    callback.Run(error_, std::unique_ptr<ResourceEntry>(error_ == FILE_ERROR_OK
+                                                            ? new ResourceEntry
+                                                            : NULL));
   }
 
   void CreateDirectory(const base::FilePath& directory_path,
@@ -107,10 +108,11 @@ class DownloadHandlerTest : public testing::Test {
   base::ScopedTempDir temp_dir_;
   content::TestBrowserThreadBundle thread_bundle_;
   TestingProfile profile_;
-  scoped_ptr<DownloadHandlerTestDownloadManager> download_manager_;
-  scoped_ptr<DownloadHandlerTestDownloadManager> incognito_download_manager_;
+  std::unique_ptr<DownloadHandlerTestDownloadManager> download_manager_;
+  std::unique_ptr<DownloadHandlerTestDownloadManager>
+      incognito_download_manager_;
   DownloadHandlerTestFileSystem test_file_system_;
-  scoped_ptr<DownloadHandler> download_handler_;
+  std::unique_ptr<DownloadHandler> download_handler_;
   content::MockDownloadItem download_item_;
 };
 

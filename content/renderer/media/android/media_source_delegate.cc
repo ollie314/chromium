@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/callback_helpers.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/thread_task_runner_handle.h"
 #include "content/renderer/media/android/renderer_demuxer_android.h"
@@ -147,12 +148,18 @@ void MediaSourceDelegate::InitializeMediaSource(
     const MediaSourceOpenedCB& media_source_opened_cb,
     const media::Demuxer::EncryptedMediaInitDataCB&
         encrypted_media_init_data_cb,
-    const media::SetCdmReadyCB& set_cdm_ready_cb,
+    const SetCdmReadyCB& set_cdm_ready_cb,
     const UpdateNetworkStateCB& update_network_state_cb,
     const DurationChangeCB& duration_change_cb,
     const base::Closure& waiting_for_decryption_key_cb) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
   DCHECK(!media_source_opened_cb.is_null());
+  DCHECK(!encrypted_media_init_data_cb.is_null());
+  DCHECK(!set_cdm_ready_cb.is_null());
+  DCHECK(!update_network_state_cb.is_null());
+  DCHECK(!duration_change_cb.is_null());
+  DCHECK(!waiting_for_decryption_key_cb.is_null());
+
   media_source_opened_cb_ = media_source_opened_cb;
   encrypted_media_init_data_cb_ = encrypted_media_init_data_cb;
   set_cdm_ready_cb_ = media::BindToCurrentLoop(set_cdm_ready_cb);
@@ -340,15 +347,16 @@ void MediaSourceDelegate::OnReadFromDemuxer(media::DemuxerStream::Type type) {
   DCHECK(type == DemuxerStream::AUDIO || type == DemuxerStream::VIDEO);
   // The access unit size should have been initialized properly at this stage.
   DCHECK_GT(access_unit_size_, 0u);
-  scoped_ptr<DemuxerData> data(new DemuxerData());
+  std::unique_ptr<DemuxerData> data(new DemuxerData());
   data->type = type;
   data->access_units.resize(access_unit_size_);
   ReadFromDemuxerStream(type, std::move(data), 0);
 }
 
-void MediaSourceDelegate::ReadFromDemuxerStream(media::DemuxerStream::Type type,
-                                                scoped_ptr<DemuxerData> data,
-                                                size_t index) {
+void MediaSourceDelegate::ReadFromDemuxerStream(
+    media::DemuxerStream::Type type,
+    std::unique_ptr<DemuxerData> data,
+    size_t index) {
   DCHECK(media_task_runner_->BelongsToCurrentThread());
   // DemuxerStream::Read() always returns the read callback asynchronously.
   DemuxerStream* stream =
@@ -360,7 +368,7 @@ void MediaSourceDelegate::ReadFromDemuxerStream(media::DemuxerStream::Type type,
 
 void MediaSourceDelegate::OnBufferReady(
     media::DemuxerStream::Type type,
-    scoped_ptr<DemuxerData> data,
+    std::unique_ptr<DemuxerData> data,
     size_t index,
     DemuxerStream::Status status,
     const scoped_refptr<media::DecoderBuffer>& buffer) {
@@ -495,35 +503,62 @@ void MediaSourceDelegate::OnDemuxerInitDone(media::PipelineStatus status) {
 
   audio_stream_ = chunk_demuxer_->GetStream(DemuxerStream::AUDIO);
   video_stream_ = chunk_demuxer_->GetStream(DemuxerStream::VIDEO);
+  DCHECK(audio_stream_ || video_stream_);
 
-  if (audio_stream_ && audio_stream_->audio_decoder_config().is_encrypted() &&
-      !set_cdm_ready_cb_.is_null()) {
+  if (HasEncryptedStream()) {
+    set_cdm_ready_cb_.Run(BindToCurrentLoop(base::Bind(
+        &MediaSourceDelegate::SetCdm, media_weak_factory_.GetWeakPtr())));
+    return;
+  }
+
+  // Notify demuxer ready when both streams are not encrypted.
+  NotifyDemuxerReady(false);
+}
+
+bool MediaSourceDelegate::HasEncryptedStream() {
+  DCHECK(media_task_runner_->BelongsToCurrentThread());
+  DCHECK(audio_stream_ || video_stream_);
+
+  return (audio_stream_ &&
+          audio_stream_->audio_decoder_config().is_encrypted()) ||
+         (video_stream_ &&
+          video_stream_->video_decoder_config().is_encrypted());
+}
+
+void MediaSourceDelegate::SetCdm(media::CdmContext* cdm_context,
+                                 const media::CdmAttachedCB& cdm_attached_cb) {
+  DCHECK(media_task_runner_->BelongsToCurrentThread());
+  DCHECK(cdm_context);
+  DCHECK(!cdm_attached_cb.is_null());
+  DCHECK(!is_demuxer_ready_);
+  DCHECK(HasEncryptedStream());
+
+  cdm_context_ = cdm_context;
+  pending_cdm_attached_cb_ = cdm_attached_cb;
+
+  if (audio_stream_ && audio_stream_->audio_decoder_config().is_encrypted()) {
     InitAudioDecryptingDemuxerStream();
     // InitVideoDecryptingDemuxerStream() will be called in
     // OnAudioDecryptingDemuxerStreamInitDone().
     return;
   }
 
-  if (video_stream_ && video_stream_->video_decoder_config().is_encrypted() &&
-      !set_cdm_ready_cb_.is_null()) {
+  if (video_stream_ && video_stream_->video_decoder_config().is_encrypted()) {
     InitVideoDecryptingDemuxerStream();
     return;
   }
 
-  // Notify demuxer ready when both streams are not encrypted.
-  is_demuxer_ready_ = true;
-  NotifyDemuxerReady();
+  NOTREACHED() << "No encrytped stream.";
 }
 
 void MediaSourceDelegate::InitAudioDecryptingDemuxerStream() {
   DCHECK(media_task_runner_->BelongsToCurrentThread());
   DVLOG(1) << __FUNCTION__ << " : " << demuxer_client_id_;
-  DCHECK(!set_cdm_ready_cb_.is_null());
-
+  DCHECK(cdm_context_);
   audio_decrypting_demuxer_stream_.reset(new media::DecryptingDemuxerStream(
       media_task_runner_, media_log_, waiting_for_decryption_key_cb_));
   audio_decrypting_demuxer_stream_->Initialize(
-      audio_stream_, set_cdm_ready_cb_,
+      audio_stream_, cdm_context_,
       base::Bind(&MediaSourceDelegate::OnAudioDecryptingDemuxerStreamInitDone,
                  media_weak_factory_.GetWeakPtr()));
 }
@@ -531,12 +566,12 @@ void MediaSourceDelegate::InitAudioDecryptingDemuxerStream() {
 void MediaSourceDelegate::InitVideoDecryptingDemuxerStream() {
   DCHECK(media_task_runner_->BelongsToCurrentThread());
   DVLOG(1) << __FUNCTION__ << " : " << demuxer_client_id_;
-  DCHECK(!set_cdm_ready_cb_.is_null());
+  DCHECK(cdm_context_);
 
   video_decrypting_demuxer_stream_.reset(new media::DecryptingDemuxerStream(
       media_task_runner_, media_log_, waiting_for_decryption_key_cb_));
   video_decrypting_demuxer_stream_->Initialize(
-      video_stream_, set_cdm_ready_cb_,
+      video_stream_, cdm_context_,
       base::Bind(&MediaSourceDelegate::OnVideoDecryptingDemuxerStreamInitDone,
                  media_weak_factory_.GetWeakPtr()));
 }
@@ -547,10 +582,21 @@ void MediaSourceDelegate::OnAudioDecryptingDemuxerStreamInitDone(
   DVLOG(1) << __FUNCTION__ << "(" << status << ") : " << demuxer_client_id_;
   DCHECK(chunk_demuxer_);
 
-  if (status != media::PIPELINE_OK)
+  if (status != media::PIPELINE_OK) {
     audio_decrypting_demuxer_stream_.reset();
-  else
-    audio_stream_ = audio_decrypting_demuxer_stream_.get();
+    // Different CDMs are supported differently. For CDMs that support a
+    // Decryptor, we'll try to use DecryptingDemuxerStream in the render side.
+    // Otherwise, we'll try to use the CDMs in the browser side. Therefore, if
+    // DecryptingDemuxerStream initialization failed, it's still possible that
+    // we can handle the audio with a CDM in the browser. Declare demuxer ready
+    // now to try that path. Note there's no need to try DecryptingDemuxerStream
+    // for video here since it is impossible to handle audio in the browser and
+    // handle video in the render process.
+    NotifyDemuxerReady(false);
+    return;
+  }
+
+  audio_stream_ = audio_decrypting_demuxer_stream_.get();
 
   if (video_stream_ && video_stream_->video_decoder_config().is_encrypted()) {
     InitVideoDecryptingDemuxerStream();
@@ -559,8 +605,7 @@ void MediaSourceDelegate::OnAudioDecryptingDemuxerStreamInitDone(
 
   // Try to notify demuxer ready when audio DDS initialization finished and
   // video is not encrypted.
-  is_demuxer_ready_ = true;
-  NotifyDemuxerReady();
+  NotifyDemuxerReady(true);
 }
 
 void MediaSourceDelegate::OnVideoDecryptingDemuxerStreamInitDone(
@@ -569,14 +614,15 @@ void MediaSourceDelegate::OnVideoDecryptingDemuxerStreamInitDone(
   DVLOG(1) << __FUNCTION__ << "(" << status << ") : " << demuxer_client_id_;
   DCHECK(chunk_demuxer_);
 
-  if (status != media::PIPELINE_OK)
+  bool success = status == media::PIPELINE_OK;
+
+  if (!success)
     video_decrypting_demuxer_stream_.reset();
   else
     video_stream_ = video_decrypting_demuxer_stream_.get();
 
   // Try to notify demuxer ready when video DDS initialization finished.
-  is_demuxer_ready_ = true;
-  NotifyDemuxerReady();
+  NotifyDemuxerReady(success);
 }
 
 void MediaSourceDelegate::OnDemuxerSeekDone(media::PipelineStatus status) {
@@ -629,12 +675,18 @@ void MediaSourceDelegate::FinishResettingDecryptingDemuxerStreams() {
   demuxer_client_->DemuxerSeekDone(demuxer_client_id_, browser_seek_time_);
 }
 
-void MediaSourceDelegate::NotifyDemuxerReady() {
+void MediaSourceDelegate::NotifyDemuxerReady(bool is_cdm_attached) {
   DCHECK(media_task_runner_->BelongsToCurrentThread());
-  DVLOG(1) << __FUNCTION__ << " : " << demuxer_client_id_;
-  DCHECK(is_demuxer_ready_);
+  DVLOG(1) << __FUNCTION__ << " : " << demuxer_client_id_
+           << ", is_cdm_attached: " << is_cdm_attached;
+  DCHECK(!is_demuxer_ready_);
 
-  scoped_ptr<DemuxerConfigs> configs(new DemuxerConfigs());
+  is_demuxer_ready_ = true;
+
+  if (!pending_cdm_attached_cb_.is_null())
+    base::ResetAndReturn(&pending_cdm_attached_cb_).Run(is_cdm_attached);
+
+  std::unique_ptr<DemuxerConfigs> configs(new DemuxerConfigs());
   GetDemuxerConfigFromStream(configs.get(), true);
   GetDemuxerConfigFromStream(configs.get(), false);
   configs->duration = GetDuration();

@@ -12,8 +12,10 @@ import android.content.Intent;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.StrictMode;
+import android.os.SystemClock;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
@@ -24,10 +26,12 @@ import org.chromium.base.CommandLine;
 import org.chromium.base.FieldTrialList;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.preferences.website.SingleCategoryPreferences;
@@ -38,6 +42,7 @@ import org.chromium.chrome.browser.widget.RoundedIconGenerator;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.concurrent.TimeUnit;
 
 import javax.annotation.Nullable;
 
@@ -207,7 +212,22 @@ public class NotificationUIManager {
      * @param incomingIntent The received intent.
      */
     public static void launchNotificationPreferences(Context context, Intent incomingIntent) {
-        // Use the application context because it lives longer. When using he given context, it
+        // This method handles an intent fired by the Android system. There is no guarantee that the
+        // native library is loaded at this point. The native library is needed for the preferences
+        // activity, and it loads the library, but there are some native calls even before that
+        // activity is started: from RecordUserAction.record and (indirectly) from
+        // UrlUtilities.formatUrlForSecurityDisplay.
+        try {
+            ChromeBrowserInitializer.getInstance(context).handleSynchronousStartup();
+        } catch (ProcessInitException e) {
+            Log.e(TAG, "Failed to start browser process.", e);
+            // The library failed to initialize and nothing in the application can work, so kill
+            // the whole application.
+            System.exit(-1);
+            return;
+        }
+
+        // Use the application context because it lives longer. When using the given context, it
         // may be stopped before the preferences intent is handled.
         Context applicationContext = context.getApplicationContext();
 
@@ -309,8 +329,9 @@ public class NotificationUIManager {
      * @param tag A string identifier for this notification.
      * @return The generated platform tag.
      */
-    private static String makePlatformTag(long persistentNotificationId, String origin,
-                                          @Nullable String tag) {
+    @VisibleForTesting
+    static String makePlatformTag(
+            long persistentNotificationId, String origin, @Nullable String tag) {
         // The given tag may contain the separator character, so add it last to make reading the
         // preceding origin token reliable. If no tag was specified (it is the default empty
         // string), make the platform tag unique by appending the notification id.
@@ -417,15 +438,26 @@ public class NotificationUIManager {
      *             text by the Android notification system.
      * @param icon Icon to be displayed in the notification. Valid Bitmap icons will be scaled to
      *             the platforms, whereas a default icon will be generated for invalid Bitmaps.
+     * @param badge An image to represent the notification in the status bar. It is also displayed
+     *              inside the notification.
      * @param vibrationPattern Vibration pattern following the Web Vibration syntax.
+     * @param timestamp The timestamp of the event for which the notification is being shown.
+     * @param renotify Whether the sound, vibration, and lights should be replayed if the
+     *                 notification is replacing another notification.
      * @param silent Whether the default sound, vibration and lights should be suppressed.
      * @param actionTitles Titles of actions to display alongside the notification.
+     * @param actionIcons Icons of actions to display alongside the notification.
      * @see https://developer.android.com/reference/android/app/Notification.html
      */
     @CalledByNative
     private void displayNotification(long persistentNotificationId, String origin, String profileId,
-            boolean incognito, String tag, String title, String body, Bitmap icon,
-            int[] vibrationPattern, boolean silent, String[] actionTitles) {
+            boolean incognito, String tag, String title, String body, Bitmap icon, Bitmap badge,
+            int[] vibrationPattern, long timestamp, boolean renotify, boolean silent,
+            String[] actionTitles, Bitmap[] actionIcons) {
+        if (actionTitles.length != actionIcons.length) {
+            throw new IllegalArgumentException("The number of action titles and icons must match.");
+        }
+
         Resources res = mAppContext.getResources();
 
         // Record whether it's known whether notifications can be shown to the user at all.
@@ -452,20 +484,23 @@ public class NotificationUIManager {
                 NotificationConstants.ACTION_CLOSE_NOTIFICATION, persistentNotificationId, origin,
                 profileId, incognito, tag, -1 /* actionIndex */);
 
-        NotificationBuilder notificationBuilder =
+        NotificationBuilderBase notificationBuilder =
                 createNotificationBuilder()
                         .setTitle(title)
                         .setBody(body)
                         .setLargeIcon(ensureNormalizedIcon(icon, origin))
                         .setSmallIcon(R.drawable.ic_chrome)
+                        .setSmallIcon(badge)
                         .setContentIntent(clickIntent)
                         .setDeleteIntent(closeIntent)
                         .setTicker(createTickerText(title, body))
+                        .setTimestamp(timestamp)
+                        .setRenotify(renotify)
                         .setOrigin(UrlUtilities.formatUrlForSecurityDisplay(
                                 origin, false /* showScheme */));
 
         for (int actionIndex = 0; actionIndex < actionTitles.length; actionIndex++) {
-            notificationBuilder.addAction(0 /* actionIcon */, actionTitles[actionIndex],
+            notificationBuilder.addAction(actionIcons[actionIndex], actionTitles[actionIndex],
                     makePendingIntent(NotificationConstants.ACTION_CLICK_NOTIFICATION,
                                                   persistentNotificationId, origin, profileId,
                                                   incognito, tag, actionIndex));
@@ -494,13 +529,16 @@ public class NotificationUIManager {
         StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
         StrictMode.allowThreadDiskWrites();
         try {
+            long time = SystemClock.elapsedRealtime();
             mNotificationManager.notify(platformTag, PLATFORM_ID, notificationBuilder.build());
+            RecordHistogram.recordTimesHistogram("Android.StrictMode.NotificationUIBuildTime",
+                    SystemClock.elapsedRealtime() - time, TimeUnit.MILLISECONDS);
         } finally {
             StrictMode.setThreadPolicy(oldPolicy);
         }
     }
 
-    private NotificationBuilder createNotificationBuilder() {
+    private NotificationBuilderBase createNotificationBuilder() {
         if (useCustomLayouts()) {
             return new CustomNotificationBuilder(mAppContext);
         }
@@ -577,11 +615,14 @@ public class NotificationUIManager {
         // Query the field trial state first to ensure correct UMA reporting.
         String groupName = FieldTrialList.findFullName("WebNotificationCustomLayouts");
         CommandLine commandLine = CommandLine.getInstance();
+        if (commandLine.hasSwitch(ChromeSwitches.ENABLE_WEB_NOTIFICATION_CUSTOM_LAYOUTS)) {
+            return true;
+        }
         if (commandLine.hasSwitch(ChromeSwitches.DISABLE_WEB_NOTIFICATION_CUSTOM_LAYOUTS)) {
             return false;
         }
-        if (commandLine.hasSwitch(ChromeSwitches.ENABLE_WEB_NOTIFICATION_CUSTOM_LAYOUTS)) {
-            return true;
+        if (Build.VERSION.CODENAME.equals("N")) {
+            return false;
         }
         return !groupName.equals("Disabled");
     }

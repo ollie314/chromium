@@ -25,7 +25,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/toolbar/test_toolbar_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
@@ -45,6 +44,7 @@
 #include "components/omnibox/browser/omnibox_view.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/toolbar/test_toolbar_model.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "net/dns/mock_host_resolver.h"
@@ -53,11 +53,6 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/point.h"
-
-// For fine-grained suppression on flaky tests.
-#if defined(OS_WIN)
-#include "base/win/windows_version.h"
-#endif
 
 using base::ASCIIToUTF16;
 using base::UTF16ToUTF8;
@@ -458,11 +453,6 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DISABLED_BrowserAccelerators) {
 #endif
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_PopupAccelerators) {
-#if defined(OS_WIN)
-  // Flaky on XP bot. http://crbug.com/499155
-  if (base::win::GetVersion() <= base::win::VERSION_XP)
-    return;
-#endif
   // Create a popup.
   Browser* popup = CreateBrowserForPopup(browser()->profile());
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(popup));
@@ -1616,7 +1606,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CopyURLToClipboard) {
   // Set permanent text thus making sure that omnibox treats 'google.com'
   // as URL (not as ordinary user input).
   TestToolbarModel* test_toolbar_model = new TestToolbarModel;
-  scoped_ptr<ToolbarModel> toolbar_model(test_toolbar_model);
+  std::unique_ptr<ToolbarModel> toolbar_model(test_toolbar_model);
   test_toolbar_model->set_text(ASCIIToUTF16("http://www.google.com/"));
   browser()->swap_toolbar_models(&toolbar_model);
   OmniboxView* omnibox_view = NULL;
@@ -1662,7 +1652,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CutURLToClipboard) {
   // Set permanent text thus making sure that omnibox treats 'google.com'
   // as URL (not as ordinary user input).
   TestToolbarModel* test_toolbar_model = new TestToolbarModel;
-  scoped_ptr<ToolbarModel> toolbar_model(test_toolbar_model);
+  std::unique_ptr<ToolbarModel> toolbar_model(test_toolbar_model);
   test_toolbar_model->set_text(ASCIIToUTF16("http://www.google.com/"));
   browser()->swap_toolbar_models(&toolbar_model);
   OmniboxView* omnibox_view = NULL;
@@ -1840,7 +1830,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
   TestToolbarModel* test_toolbar_model = new TestToolbarModel;
-  scoped_ptr<ToolbarModel> toolbar_model(test_toolbar_model);
+  std::unique_ptr<ToolbarModel> toolbar_model(test_toolbar_model);
   browser()->swap_toolbar_models(&toolbar_model);
 
   base::string16 url_a(ASCIIToUTF16("http://www.a.com/"));
@@ -1901,7 +1891,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, SelectAllStaysAfterUpdate) {
   OmniboxView* omnibox_view = nullptr;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
   TestToolbarModel* test_toolbar_model = new TestToolbarModel;
-  scoped_ptr<ToolbarModel> toolbar_model(test_toolbar_model);
+  std::unique_ptr<ToolbarModel> toolbar_model(test_toolbar_model);
   browser()->swap_toolbar_models(&toolbar_model);
 
   base::string16 url_a(ASCIIToUTF16("http://www.a.com/"));

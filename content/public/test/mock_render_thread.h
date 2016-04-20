@@ -18,6 +18,7 @@
 #include "ipc/message_filter.h"
 #include "third_party/WebKit/public/web/WebPopupType.h"
 
+struct FrameHostMsg_CreateChildFrame_Params;
 struct ViewHostMsg_CreateWindow_Params;
 struct ViewHostMsg_CreateWindow_Reply;
 
@@ -58,14 +59,13 @@ class MockRenderThread : public RenderThread {
   int GenerateRoutingID() override;
   void AddFilter(IPC::MessageFilter* filter) override;
   void RemoveFilter(IPC::MessageFilter* filter) override;
-  void AddObserver(RenderProcessObserver* observer) override;
-  void RemoveObserver(RenderProcessObserver* observer) override;
+  void AddObserver(RenderThreadObserver* observer) override;
+  void RemoveObserver(RenderThreadObserver* observer) override;
   void SetResourceDispatcherDelegate(
       ResourceDispatcherDelegate* delegate) override;
-  void EnsureWebKitInitialized() override;
   void RecordAction(const base::UserMetricsAction& action) override;
   void RecordComputedAction(const std::string& action) override;
-  scoped_ptr<base::SharedMemory> HostAllocateSharedMemoryBuffer(
+  std::unique_ptr<base::SharedMemory> HostAllocateSharedMemoryBuffer(
       size_t buffer_size) override;
   cc::SharedBitmapManager* GetSharedBitmapManager() override;
   void RegisterExtension(v8::Extension* extension) override;
@@ -107,7 +107,7 @@ class MockRenderThread : public RenderThread {
   // Dispatches control messages to observers.
   bool OnControlMessageReceived(const IPC::Message& msg);
 
-  base::ObserverList<RenderProcessObserver>& observers() { return observers_; }
+  base::ObserverList<RenderThreadObserver>& observers() { return observers_; }
 
  protected:
   // This function operates as a regular IPC listener. Subclasses
@@ -126,13 +126,8 @@ class MockRenderThread : public RenderThread {
                       ViewHostMsg_CreateWindow_Reply* reply);
 
   // The Frame expects to be returned a valid route_id different from its own.
-  void OnCreateChildFrame(
-      int new_frame_routing_id,
-      blink::WebTreeScopeType scope,
-      const std::string& frame_name,
-      blink::WebSandboxFlags sandbox_flags,
-      const blink::WebFrameOwnerProperties& frame_owner_properties,
-      int* new_render_frame_id);
+  void OnCreateChildFrame(const FrameHostMsg_CreateChildFrame_Params& params,
+                          int* new_render_frame_id);
 
 #if defined(OS_WIN)
   void OnDuplicateSection(base::SharedMemoryHandle renderer_handle,
@@ -154,15 +149,16 @@ class MockRenderThread : public RenderThread {
   int32_t new_frame_routing_id_;
 
   // The last known good deserializer for sync messages.
-  scoped_ptr<IPC::MessageReplyDeserializer> reply_deserializer_;
+  std::unique_ptr<IPC::MessageReplyDeserializer> reply_deserializer_;
 
   // A list of message filters added to this thread.
   std::vector<scoped_refptr<IPC::MessageFilter> > filters_;
 
   // Observers to notify.
-  base::ObserverList<RenderProcessObserver> observers_;
+  base::ObserverList<RenderThreadObserver> observers_;
 
   cc::TestSharedBitmapManager shared_bitmap_manager_;
+  std::unique_ptr<ServiceRegistry> service_registry_;
 };
 
 }  // namespace content

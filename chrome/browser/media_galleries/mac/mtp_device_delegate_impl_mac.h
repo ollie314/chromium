@@ -9,6 +9,7 @@
 
 #include <list>
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "base/containers/hash_tables.h"
@@ -152,7 +153,7 @@ class MTPDeviceDelegateImplMac : public MTPDeviceAsyncDelegate {
   base::FilePath root_path_;
 
   // Interface object for the camera underlying this MTP session.
-  scoped_ptr<DeviceListener> camera_interface_;
+  std::unique_ptr<DeviceListener> camera_interface_;
 
   // Stores a map from filename to file metadata received from the camera.
   base::hash_map<base::FilePath::StringType,
@@ -170,6 +171,7 @@ class MTPDeviceDelegateImplMac : public MTPDeviceAsyncDelegate {
                     const base::FilePath& snapshot_filename,
                     CreateSnapshotFileSuccessCallback success_cb,
                     ErrorCallback error_cb);
+    ReadFileRequest(const ReadFileRequest& other);
     ~ReadFileRequest();
 
     std::string request_file;
@@ -184,6 +186,7 @@ class MTPDeviceDelegateImplMac : public MTPDeviceAsyncDelegate {
     ReadDirectoryRequest(const base::FilePath& dir,
                          ReadDirectorySuccessCallback success_cb,
                          ErrorCallback error_cb);
+    ReadDirectoryRequest(const ReadDirectoryRequest& other);
     ~ReadDirectoryRequest();
 
     base::FilePath directory;

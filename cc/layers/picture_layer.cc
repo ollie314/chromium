@@ -8,7 +8,7 @@
 #include "base/trace_event/trace_event.h"
 #include "cc/layers/content_layer_client.h"
 #include "cc/layers/picture_layer_impl.h"
-#include "cc/playback/display_list_recording_source.h"
+#include "cc/playback/recording_source.h"
 #include "cc/proto/cc_conversions.h"
 #include "cc/proto/gfx_conversions.h"
 #include "cc/proto/layer.pb.h"
@@ -19,34 +19,29 @@
 
 namespace cc {
 
-scoped_refptr<PictureLayer> PictureLayer::Create(const LayerSettings& settings,
-                                                 ContentLayerClient* client) {
-  return make_scoped_refptr(new PictureLayer(settings, client));
+scoped_refptr<PictureLayer> PictureLayer::Create(ContentLayerClient* client) {
+  return make_scoped_refptr(new PictureLayer(client));
 }
 
-PictureLayer::PictureLayer(const LayerSettings& settings,
-                           ContentLayerClient* client)
-    : Layer(settings),
-      client_(client),
+PictureLayer::PictureLayer(ContentLayerClient* client)
+    : client_(client),
       instrumentation_object_tracker_(id()),
       update_source_frame_number_(-1),
       is_mask_(false),
-      nearest_neighbor_(false) {
-}
+      nearest_neighbor_(false) {}
 
-PictureLayer::PictureLayer(const LayerSettings& settings,
-                           ContentLayerClient* client,
-                           scoped_ptr<DisplayListRecordingSource> source)
-    : PictureLayer(settings, client) {
+PictureLayer::PictureLayer(ContentLayerClient* client,
+                           std::unique_ptr<RecordingSource> source)
+    : PictureLayer(client) {
   recording_source_ = std::move(source);
 }
 
 PictureLayer::~PictureLayer() {
 }
 
-scoped_ptr<LayerImpl> PictureLayer::CreateLayerImpl(LayerTreeImpl* tree_impl) {
-  return PictureLayerImpl::Create(tree_impl, id(), is_mask_,
-                                  new LayerImpl::SyncedScrollOffset);
+std::unique_ptr<LayerImpl> PictureLayer::CreateLayerImpl(
+    LayerTreeImpl* tree_impl) {
+  return PictureLayerImpl::Create(tree_impl, id(), is_mask_);
 }
 
 void PictureLayer::PushPropertiesTo(LayerImpl* base_layer) {
@@ -61,13 +56,13 @@ void PictureLayer::PushPropertiesTo(LayerImpl* base_layer) {
 
   // Preserve lcd text settings from the current raster source.
   bool can_use_lcd_text = layer_impl->RasterSourceUsesLCDText();
-  scoped_refptr<DisplayListRasterSource> raster_source =
+  scoped_refptr<RasterSource> raster_source =
       recording_source_->CreateRasterSource(can_use_lcd_text);
   layer_impl->set_gpu_raster_max_texture_size(
       layer_tree_host()->device_viewport_size());
-  layer_impl->UpdateRasterSource(raster_source, invalidation_.region(),
+  layer_impl->UpdateRasterSource(raster_source, &last_updated_invalidation_,
                                  nullptr);
-  DCHECK(invalidation_.IsEmpty());
+  DCHECK(last_updated_invalidation_.IsEmpty());
 }
 
 void PictureLayer::SetLayerTreeHost(LayerTreeHost* host) {
@@ -76,7 +71,7 @@ void PictureLayer::SetLayerTreeHost(LayerTreeHost* host) {
     return;
 
   if (!recording_source_)
-    recording_source_.reset(new DisplayListRecordingSource);
+    recording_source_.reset(new RecordingSource);
   recording_source_->SetSlowdownRasterScaleFactor(
       host->debug_state().slow_down_raster_scale_factor);
   // If we need to enable image decode tasks, then we have to generate the
@@ -88,10 +83,8 @@ void PictureLayer::SetLayerTreeHost(LayerTreeHost* host) {
 
 void PictureLayer::SetNeedsDisplayRect(const gfx::Rect& layer_rect) {
   DCHECK(!layer_tree_host() || !layer_tree_host()->in_paint_layer_contents());
-  if (!layer_rect.IsEmpty()) {
-    // Clamp invalidation to the layer bounds.
-    invalidation_.Union(gfx::IntersectRects(layer_rect, gfx::Rect(bounds())));
-  }
+  if (recording_source_)
+    recording_source_->SetNeedsDisplayRect(layer_rect);
   Layer::SetNeedsDisplayRect(layer_rect);
 }
 
@@ -99,14 +92,7 @@ bool PictureLayer::Update() {
   update_source_frame_number_ = layer_tree_host()->source_frame_number();
   bool updated = Layer::Update();
 
-  gfx::Rect update_rect = visible_layer_rect();
   gfx::Size layer_size = paint_properties().bounds;
-
-  if (last_updated_visible_layer_rect_ == update_rect &&
-      recording_source_->GetSize() == layer_size && invalidation_.IsEmpty()) {
-    // Only early out if the visible content rect of this layer hasn't changed.
-    return updated;
-  }
 
   recording_source_->SetBackgroundColor(SafeOpaqueBackgroundColor());
   recording_source_->SetRequiresClear(!contents_opaque() &&
@@ -124,16 +110,15 @@ bool PictureLayer::Update() {
   // for them.
   DCHECK(client_);
   updated |= recording_source_->UpdateAndExpandInvalidation(
-      client_, invalidation_.region(), layer_size, update_rect,
-      update_source_frame_number_, DisplayListRecordingSource::RECORD_NORMALLY);
-  last_updated_visible_layer_rect_ = visible_layer_rect();
+      client_, &last_updated_invalidation_, layer_size,
+      update_source_frame_number_, RecordingSource::RECORD_NORMALLY);
 
   if (updated) {
     SetNeedsPushProperties();
   } else {
     // If this invalidation did not affect the recording source, then it can be
     // cleared as an optimization.
-    invalidation_.Clear();
+    last_updated_invalidation_.Clear();
   }
 
   return updated;
@@ -143,22 +128,21 @@ void PictureLayer::SetIsMask(bool is_mask) {
   is_mask_ = is_mask;
 }
 
-skia::RefPtr<SkPicture> PictureLayer::GetPicture() const {
-  // We could either flatten the DisplayListRecordingSource into a single
+sk_sp<SkPicture> PictureLayer::GetPicture() const {
+  // We could either flatten the RecordingSource into a single
   // SkPicture, or paint a fresh one depending on what we intend to do with the
   // picture. For now we just paint a fresh one to get consistent results.
   if (!DrawsContent())
-    return skia::RefPtr<SkPicture>();
+    return nullptr;
 
   gfx::Size layer_size = bounds();
-  scoped_ptr<DisplayListRecordingSource> recording_source(
-      new DisplayListRecordingSource);
+  std::unique_ptr<RecordingSource> recording_source(new RecordingSource);
   Region recording_invalidation;
   recording_source->UpdateAndExpandInvalidation(
-      client_, &recording_invalidation, layer_size, gfx::Rect(layer_size),
-      update_source_frame_number_, DisplayListRecordingSource::RECORD_NORMALLY);
+      client_, &recording_invalidation, layer_size, update_source_frame_number_,
+      RecordingSource::RECORD_NORMALLY);
 
-  scoped_refptr<DisplayListRasterSource> raster_source =
+  scoped_refptr<RasterSource> raster_source =
       recording_source->CreateRasterSource(false);
 
   return raster_source->GetFlattenedPicture();
@@ -186,7 +170,7 @@ bool PictureLayer::HasDrawableContent() const {
 }
 
 void PictureLayer::SetTypeForProtoSerialization(proto::LayerNode* proto) const {
-  proto->set_type(proto::LayerType::PICTURE_LAYER);
+  proto->set_type(proto::LayerNode::PICTURE_LAYER);
 }
 
 void PictureLayer::LayerSpecificPropertiesToProto(
@@ -195,28 +179,34 @@ void PictureLayer::LayerSpecificPropertiesToProto(
   DropRecordingSourceContentIfInvalid();
 
   proto::PictureLayerProperties* picture = proto->mutable_picture();
-  recording_source_->ToProtobuf(picture->mutable_recording_source());
-  RegionToProto(*invalidation_.region(), picture->mutable_invalidation());
-  RectToProto(last_updated_visible_layer_rect_,
-              picture->mutable_last_updated_visible_layer_rect());
+  recording_source_->ToProtobuf(
+      picture->mutable_recording_source(),
+      layer_tree_host()->image_serialization_processor());
+  RegionToProto(last_updated_invalidation_, picture->mutable_invalidation());
   picture->set_is_mask(is_mask_);
   picture->set_nearest_neighbor(nearest_neighbor_);
 
   picture->set_update_source_frame_number(update_source_frame_number_);
 
-  invalidation_.Clear();
+  last_updated_invalidation_.Clear();
 }
 
 void PictureLayer::FromLayerSpecificPropertiesProto(
     const proto::LayerProperties& proto) {
   Layer::FromLayerSpecificPropertiesProto(proto);
   const proto::PictureLayerProperties& picture = proto.picture();
-  recording_source_->FromProtobuf(picture.recording_source());
+  // If this is a new layer, ensure it has a recording source. During layer
+  // hierarchy deserialization, ::SetLayerTreeHost(...) is not called, but
+  // instead the member is set directly, so it needs to be set here explicitly.
+  if (!recording_source_)
+    recording_source_.reset(new RecordingSource);
+
+  recording_source_->FromProtobuf(
+      picture.recording_source(),
+      layer_tree_host()->image_serialization_processor());
 
   Region new_invalidation = RegionFromProto(picture.invalidation());
-  invalidation_.Swap(&new_invalidation);
-  last_updated_visible_layer_rect_ =
-      ProtoToRect(picture.last_updated_visible_layer_rect());
+  last_updated_invalidation_.Swap(&new_invalidation);
   is_mask_ = picture.is_mask();
   nearest_neighbor_ = picture.nearest_neighbor();
 

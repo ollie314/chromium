@@ -101,12 +101,12 @@ class OcclusionTrackerTest : public testing::Test {
                                    const gfx::Size& bounds) {
     LayerTreeImpl* tree = host_->host_impl()->active_tree();
     int id = next_layer_impl_id_++;
-    scoped_ptr<TestContentLayerImpl> layer(new TestContentLayerImpl(tree, id));
+    std::unique_ptr<TestContentLayerImpl> layer(
+        new TestContentLayerImpl(tree, id));
     TestContentLayerImpl* layer_ptr = layer.get();
     SetProperties(layer_ptr, transform, position, bounds);
 
-    DCHECK(!root_.get());
-    root_ = std::move(layer);
+    host_->host_impl()->active_tree()->SetRootLayer(std::move(layer));
 
     layer_ptr->SetForceRenderSurface(true);
     SetRootLayerOnMainThread(layer_ptr);
@@ -120,7 +120,7 @@ class OcclusionTrackerTest : public testing::Test {
                          const gfx::Size& bounds) {
     LayerTreeImpl* tree = host_->host_impl()->active_tree();
     int id = next_layer_impl_id_++;
-    scoped_ptr<LayerImpl> layer = LayerImpl::Create(tree, id);
+    std::unique_ptr<LayerImpl> layer = LayerImpl::Create(tree, id);
     LayerImpl* layer_ptr = layer.get();
     SetProperties(layer_ptr, transform, position, bounds);
     parent->AddChild(std::move(layer));
@@ -143,7 +143,8 @@ class OcclusionTrackerTest : public testing::Test {
                                            bool opaque) {
     LayerTreeImpl* tree = host_->host_impl()->active_tree();
     int id = next_layer_impl_id_++;
-    scoped_ptr<TestContentLayerImpl> layer(new TestContentLayerImpl(tree, id));
+    std::unique_ptr<TestContentLayerImpl> layer(
+        new TestContentLayerImpl(tree, id));
     TestContentLayerImpl* layer_ptr = layer.get();
     SetProperties(layer_ptr, transform, position, bounds);
 
@@ -167,7 +168,8 @@ class OcclusionTrackerTest : public testing::Test {
                                 const gfx::Size& bounds) {
     LayerTreeImpl* tree = host_->host_impl()->active_tree();
     int id = next_layer_impl_id_++;
-    scoped_ptr<TestContentLayerImpl> layer(new TestContentLayerImpl(tree, id));
+    std::unique_ptr<TestContentLayerImpl> layer(
+        new TestContentLayerImpl(tree, id));
     TestContentLayerImpl* layer_ptr = layer.get();
     SetProperties(layer_ptr, transform, position, bounds);
     SetReplica(owning_layer, std::move(layer));
@@ -177,7 +179,8 @@ class OcclusionTrackerTest : public testing::Test {
   LayerImpl* CreateMaskLayer(LayerImpl* owning_layer, const gfx::Size& bounds) {
     LayerTreeImpl* tree = host_->host_impl()->active_tree();
     int id = next_layer_impl_id_++;
-    scoped_ptr<TestContentLayerImpl> layer(new TestContentLayerImpl(tree, id));
+    std::unique_ptr<TestContentLayerImpl> layer(
+        new TestContentLayerImpl(tree, id));
     TestContentLayerImpl* layer_ptr = layer.get();
     SetProperties(layer_ptr, identity_matrix, gfx::PointF(), bounds);
     SetMask(owning_layer, std::move(layer));
@@ -196,14 +199,14 @@ class OcclusionTrackerTest : public testing::Test {
   }
 
   void DestroyLayers() {
-    root_ = nullptr;
+    host_->host_impl()->active_tree()->SetRootLayer(nullptr);
     render_surface_layer_list_impl_.clear();
     replica_layers_.clear();
     mask_layers_.clear();
     ResetLayerIterator();
   }
 
-  void CopyOutputCallback(scoped_ptr<CopyOutputResult> result) {}
+  void CopyOutputCallback(std::unique_ptr<CopyOutputResult> result) {}
 
   void AddCopyRequest(Layer* layer) {
     layer->RequestCopyOfOutput(CopyOutputRequest::CreateBitmapRequest(
@@ -212,14 +215,14 @@ class OcclusionTrackerTest : public testing::Test {
   }
 
   void AddCopyRequest(LayerImpl* layer) {
-    std::vector<scoped_ptr<CopyOutputRequest>> requests;
+    std::vector<std::unique_ptr<CopyOutputRequest>> requests;
     requests.push_back(CopyOutputRequest::CreateBitmapRequest(base::Bind(
         &OcclusionTrackerTest::CopyOutputCallback, base::Unretained(this))));
     layer->PassCopyRequests(&requests);
   }
 
   void CalcDrawEtc(TestContentLayerImpl* root) {
-    DCHECK(root == root_.get());
+    DCHECK(root == root->layer_tree_impl()->root_layer());
 
     // These occlusion tests attach and detach layers in multiple
     // iterations, so rebuild property trees every time.
@@ -298,20 +301,21 @@ class OcclusionTrackerTest : public testing::Test {
     layer->SetBounds(bounds);
   }
 
-  void SetReplica(LayerImpl* owning_layer, scoped_ptr<LayerImpl> layer) {
+  void SetReplica(LayerImpl* owning_layer, std::unique_ptr<LayerImpl> layer) {
+    // We need to set parent on replica layer for property tree building.
+    layer->SetParent(owning_layer);
     owning_layer->SetReplicaLayer(std::move(layer));
   }
 
-  void SetMask(LayerImpl* owning_layer, scoped_ptr<LayerImpl> layer) {
+  void SetMask(LayerImpl* owning_layer, std::unique_ptr<LayerImpl> layer) {
     owning_layer->SetMaskLayer(std::move(layer));
   }
 
   bool opaque_layers_;
   FakeLayerTreeHostClient client_;
   TestTaskGraphRunner task_graph_runner_;
-  scoped_ptr<FakeLayerTreeHost> host_;
+  std::unique_ptr<FakeLayerTreeHost> host_;
   // These hold ownership of the layers for the duration of the test.
-  scoped_ptr<LayerImpl> root_;
   LayerImplList render_surface_layer_list_impl_;
   LayerIterator layer_iterator_begin_;
   LayerIterator layer_iterator_;

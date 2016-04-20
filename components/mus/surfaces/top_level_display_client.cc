@@ -4,14 +4,27 @@
 
 #include "components/mus/surfaces/top_level_display_client.h"
 
+#include "base/memory/ptr_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "cc/output/compositor_frame.h"
+#include "cc/output/copy_output_request.h"
+#include "cc/scheduler/begin_frame_source.h"
 #include "cc/surfaces/display.h"
+#include "cc/surfaces/display_scheduler.h"
 #include "cc/surfaces/surface.h"
 #include "components/mus/gles2/gpu_state.h"
 #include "components/mus/surfaces/direct_output_surface.h"
 #include "components/mus/surfaces/surfaces_context_provider.h"
-#include "components/mus/surfaces/surfaces_scheduler.h"
 #include "components/mus/surfaces/surfaces_state.h"
+
+#if defined(USE_OZONE)
+#include "components/mus/surfaces/direct_output_surface_ozone.h"
+#include "gpu/command_buffer/client/gles2_interface.h"
+#endif
+
+namespace base {
+class SingleThreadTaskRunner;
+}
 
 namespace mus {
 namespace {
@@ -24,23 +37,41 @@ TopLevelDisplayClient::TopLevelDisplayClient(
     gfx::AcceleratedWidget widget,
     const scoped_refptr<GpuState>& gpu_state,
     const scoped_refptr<SurfacesState>& surfaces_state)
-    : surfaces_state_(surfaces_state),
+    : task_runner_(base::ThreadTaskRunnerHandle::Get()),
+      surfaces_state_(surfaces_state),
       factory_(surfaces_state->manager(), this),
       cc_id_(static_cast<uint64_t>(surfaces_state->next_id_namespace()) << 32) {
   factory_.Create(cc_id_);
+  surfaces_state_->manager()->RegisterSurfaceIdNamespace(cc_id_.id_namespace());
 
   display_.reset(new cc::Display(this, surfaces_state_->manager(), nullptr,
-                                 nullptr, cc::RendererSettings()));
-  surfaces_state_->scheduler()->AddDisplay(display_.get());
+                                 nullptr, cc::RendererSettings(),
+                                 cc_id_.id_namespace()));
 
-  // TODO(brianderson): Reconcile with SurfacesScheduler crbug.com/476676
-  cc::DisplayScheduler* null_display_scheduler = nullptr;
+  scoped_refptr<SurfacesContextProvider> surfaces_context_provider(
+      new SurfacesContextProvider(widget, gpu_state));
+  // TODO(rjkroege): If there is something better to do than CHECK, add it.
+  CHECK(surfaces_context_provider->BindToCurrentThread());
+
+  std::unique_ptr<cc::OutputSurface> output_surface;
+  if (surfaces_context_provider->ContextCapabilities().gpu.surfaceless) {
+#if defined(USE_OZONE)
+    output_surface = base::WrapUnique(new DirectOutputSurfaceOzone(
+        surfaces_context_provider, widget, task_runner_.get(), GL_TEXTURE_2D,
+        GL_RGB));
+#else
+    NOTREACHED();
+#endif
+  } else {
+    output_surface = base::WrapUnique(
+        new DirectOutputSurface(surfaces_context_provider, task_runner_.get()));
+  }
+
+  int max_frames_pending = output_surface->capabilities().max_frames_pending;
+  DCHECK_GT(max_frames_pending, 0);
 
   if (gpu_state->HardwareRenderingAvailable()) {
-    display_->Initialize(
-        make_scoped_ptr(new DirectOutputSurface(
-            new SurfacesContextProvider(this, widget, gpu_state))),
-        null_display_scheduler);
+    display_->Initialize(std::move(output_surface), task_runner_.get());
   } else {
     // TODO(rjkroege): Implement software compositing.
   }
@@ -51,15 +82,13 @@ TopLevelDisplayClient::TopLevelDisplayClient(
 }
 
 TopLevelDisplayClient::~TopLevelDisplayClient() {
+  surfaces_state_->manager()->InvalidateSurfaceIdNamespace(
+      cc_id_.id_namespace());
   factory_.Destroy(cc_id_);
-  surfaces_state_->scheduler()->RemoveDisplay(display_.get());
-  // By deleting the object after display_ is reset, OutputSurfaceLost can
-  // know not to do anything (which would result in double delete).
-  delete display_.release();
 }
 
 void TopLevelDisplayClient::SubmitCompositorFrame(
-    scoped_ptr<cc::CompositorFrame> frame,
+    std::unique_ptr<cc::CompositorFrame> frame,
     const base::Closure& callback) {
   pending_frame_ = std::move(frame);
 
@@ -69,35 +98,21 @@ void TopLevelDisplayClient::SubmitCompositorFrame(
   display_->Resize(last_submitted_frame_size_);
   factory_.SubmitCompositorFrame(cc_id_, std::move(pending_frame_),
                                  base::Bind(&CallCallback, callback));
-  surfaces_state_->scheduler()->SetNeedsDraw();
 }
 
-void TopLevelDisplayClient::CommitVSyncParameters(base::TimeTicks timebase,
-                                                  base::TimeDelta interval) {}
+void TopLevelDisplayClient::RequestCopyOfOutput(
+    std::unique_ptr<cc::CopyOutputRequest> output_request) {
+  factory_.RequestCopyOfSurface(cc_id_, std::move(output_request));
+}
 
 void TopLevelDisplayClient::OutputSurfaceLost() {
   if (!display_)  // Shutdown case
     return;
-
-  // If our OutputSurface is lost we can't draw until we get a new one. For now,
-  // destroy the display and create a new one when our ContextProvider provides
-  // a new one.
-  // TODO: This is more violent than necessary - we could simply remove this
-  // display from the scheduler's set and pass a new context in to the
-  // OutputSurface. It should be able to reinitialize properly.
-  surfaces_state_->scheduler()->RemoveDisplay(display_.get());
   display_.reset();
 }
 
 void TopLevelDisplayClient::SetMemoryPolicy(
     const cc::ManagedMemoryPolicy& policy) {}
-
-void TopLevelDisplayClient::OnVSyncParametersUpdated(int64_t timebase,
-                                                     int64_t interval) {
-  surfaces_state_->scheduler()->OnVSyncParametersUpdated(
-      base::TimeTicks::FromInternalValue(timebase),
-      base::TimeDelta::FromInternalValue(interval));
-}
 
 void TopLevelDisplayClient::ReturnResources(
     const cc::ReturnedResourceArray& resources) {
@@ -105,7 +120,6 @@ void TopLevelDisplayClient::ReturnResources(
 }
 
 void TopLevelDisplayClient::SetBeginFrameSource(
-    cc::SurfaceId surface_id,
     cc::BeginFrameSource* begin_frame_source) {
   // TODO(tansell): Implement this.
 }

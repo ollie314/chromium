@@ -38,7 +38,7 @@ class FakeSafeBrowsingService : public SafeBrowsingService {
  public:
   FakeSafeBrowsingService() {}
 
-  void SendDownloadRecoveryReport(const std::string& report) override {
+  void SendSerializedDownloadReport(const std::string& report) override {
     report_ = report;
   }
 
@@ -181,7 +181,7 @@ class DownloadDangerPromptTest : public InProcessBrowserTest {
   DownloadDangerPrompt* prompt_;
   DownloadDangerPrompt::Action expected_action_;
   bool did_receive_callback_;
-  scoped_ptr<TestSafeBrowsingServiceFactory> test_safe_browsing_factory_;
+  std::unique_ptr<TestSafeBrowsingServiceFactory> test_safe_browsing_factory_;
   std::string expected_serialized_report_;
   bool report_sent_;
 
@@ -202,6 +202,9 @@ IN_PROC_BROWSER_TEST_F(DownloadDangerPromptTest, MAYBE_TestAll) {
       .WillByDefault(ReturnRef(GURL::EmptyGURL()));
   ON_CALL(download(), GetBrowserContext())
       .WillByDefault(Return(browser()->profile()));
+  base::FilePath empty_file_path;
+  ON_CALL(download(), GetTargetFilePath())
+      .WillByDefault(ReturnRef(empty_file_path));
 
   OpenNewTab();
 

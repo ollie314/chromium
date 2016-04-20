@@ -164,7 +164,8 @@ std::string BuildPing(const Configurator& config, const CrxUpdateItem* item) {
 
   return BuildProtocolRequest(config.GetBrowserVersion().GetString(),
                               config.GetChannel(), config.GetLang(),
-                              config.GetOSLongName(), app_element, "");
+                              config.GetOSLongName(),
+                              config.GetDownloadPreference(), app_element, "");
 }
 
 // Sends a fire and forget ping. The instances of this class have no
@@ -178,7 +179,9 @@ class PingSender {
   bool SendPing(const CrxUpdateItem* item);
 
  private:
-  void OnRequestSenderComplete(const net::URLFetcher* source);
+  void OnRequestSenderComplete(int error,
+                               const std::string& response,
+                               int retry_after_sec);
 
   const scoped_refptr<Configurator> config_;
   scoped_ptr<RequestSender> request_sender_;
@@ -194,7 +197,9 @@ PingSender::~PingSender() {
   DCHECK(thread_checker_.CalledOnValidThread());
 }
 
-void PingSender::OnRequestSenderComplete(const net::URLFetcher* source) {
+void PingSender::OnRequestSenderComplete(int error,
+                                         const std::string& response,
+                                         int retry_after_sec) {
   DCHECK(thread_checker_.CalledOnValidThread());
   delete this;
 }
@@ -203,14 +208,16 @@ bool PingSender::SendPing(const CrxUpdateItem* item) {
   DCHECK(item);
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  std::vector<GURL> urls(config_->PingUrl());
+  auto urls(config_->PingUrl());
+  if (item->component.requires_network_encryption)
+    RemoveUnsecureUrls(&urls);
 
   if (urls.empty())
     return false;
 
   request_sender_.reset(new RequestSender(config_));
   request_sender_->Send(
-      BuildPing(*config_, item), urls,
+      false, BuildPing(*config_, item), urls,
       base::Bind(&PingSender::OnRequestSenderComplete, base::Unretained(this)));
   return true;
 }
@@ -223,12 +230,14 @@ PingManager::PingManager(const scoped_refptr<Configurator>& config)
 PingManager::~PingManager() {
 }
 
-// Sends a fire and forget ping when the updates are complete. The ping
-// sender object self-deletes after sending the ping has completed asynchrously.
-void PingManager::SendPing(const CrxUpdateItem* item) {
-  PingSender* ping_sender(new PingSender(config_));
+bool PingManager::SendPing(const CrxUpdateItem* item) {
+  scoped_ptr<PingSender> ping_sender(new PingSender(config_));
   if (!ping_sender->SendPing(item))
-    delete ping_sender;
+    return false;
+
+  // The ping sender object self-deletes after sending the ping asynchrously.
+  ping_sender.release();
+  return true;
 }
 
 }  // namespace update_client

@@ -47,7 +47,6 @@ const QuicTag kC255 = TAG('C', '2', '5', '5');   // ECDH, Curve25519
 // AEAD algorithms
 const QuicTag kNULL = TAG('N', 'U', 'L', 'N');   // null algorithm
 const QuicTag kAESG = TAG('A', 'E', 'S', 'G');   // AES128 + GCM-12
-const QuicTag kCC12 = TAG('C', 'C', '1', '2');   // ChaCha20 + Poly1305
 const QuicTag kCC20 = TAG('C', 'C', '2', '0');   // ChaCha20 + Poly1305 RFC7539
 
 // Socket receive buffer
@@ -57,20 +56,6 @@ const QuicTag kSRBF = TAG('S', 'R', 'B', 'F');   // Socket receive buffer
 const QuicTag kQBIC = TAG('Q', 'B', 'I', 'C');   // TCP cubic
 
 // Connection options (COPT) values
-const QuicTag kAFCW = TAG('A', 'F', 'C', 'W');   // Auto-tune flow control
-                                                 // receive windows.
-const QuicTag kIFW5 = TAG('I', 'F', 'W', '5');   // Set initial size
-                                                 // of stream flow control
-                                                 // receive window to
-                                                 // 32KB. (2^5 KB).
-const QuicTag kIFW6 = TAG('I', 'F', 'W', '6');   // Set initial size
-                                                 // of stream flow control
-                                                 // receive window to
-                                                 // 64KB. (2^6 KB).
-const QuicTag kIFW7 = TAG('I', 'F', 'W', '7');   // Set initial size
-                                                 // of stream flow control
-                                                 // receive window to
-                                                 // 128KB. (2^7 KB).
 const QuicTag kTBBR = TAG('T', 'B', 'B', 'R');   // Reduced Buffer Bloat TCP
 const QuicTag kRENO = TAG('R', 'E', 'N', 'O');   // Reno Congestion Control
 const QuicTag kBYTE = TAG('B', 'Y', 'T', 'E');   // TCP cubic or reno in bytes
@@ -89,7 +74,13 @@ const QuicTag kMIN4 = TAG('M', 'I', 'N', '4');   // Min CWND of 4 packets,
 const QuicTag kTLPR = TAG('T', 'L', 'P', 'R');   // Tail loss probe delay of
                                                  // 0.5RTT.
 const QuicTag kACKD = TAG('A', 'C', 'K', 'D');   // Ack decimation style acking.
+const QuicTag kAKD2 = TAG('A', 'K', 'D', '2');   // Ack decimation tolerating
+                                                 // out of order packets.
 const QuicTag kSSLR = TAG('S', 'S', 'L', 'R');   // Slow Start Large Reduction.
+const QuicTag k5RTO = TAG('5', 'R', 'T', 'O');   // Close connection on 5 RTOs
+const QuicTag kCTIM = TAG('C', 'T', 'I', 'M');   // Client timestamp in seconds
+                                                 // since UNIX epoch.
+const QuicTag kDHDT = TAG('D', 'H', 'D', 'T');   // Disable HPACK dynamic table.
 
 // Optional support of truncated Connection IDs.  If sent by a peer, the value
 // is the minimum number of bytes allowed for the connection ID sent to the
@@ -99,14 +90,8 @@ const QuicTag kTCID = TAG('T', 'C', 'I', 'D');   // Connection ID truncation.
 // Multipath option.
 const QuicTag kMPTH = TAG('M', 'P', 'T', 'H');   // Enable multipath.
 
-// FEC options
-const QuicTag kFHDR = TAG('F', 'H', 'D', 'R');   // FEC protect headers
-const QuicTag kFSTR = TAG('F', 'S', 'T', 'R');   // FEC protect all streams
-// Set FecSendPolicy for sending FEC packet only when FEC alarm goes off.
-const QuicTag kFSPA = TAG('F', 'S', 'P', 'A');
-// Run an experiment that sets FecTimeOut alarm to 0.25RTT.
-// TODO(rtenneti): Delete it after the experiment.
-const QuicTag kFRTT = TAG('F', 'R', 'T', 'T');
+const QuicTag kNCMR = TAG('N', 'C', 'M', 'R');   // Do not attempt connection
+                                                 // migration.
 
 // Enable bandwidth resumption experiment.
 const QuicTag kBWRE = TAG('B', 'W', 'R', 'E');  // Bandwidth resumption.
@@ -129,6 +114,7 @@ const QuicTag kCHID = TAG('C', 'H', 'I', 'D');   // Channel ID.
 // Client hello tags
 const QuicTag kVER  = TAG('V', 'E', 'R', '\0');  // Version
 const QuicTag kNONC = TAG('N', 'O', 'N', 'C');   // The client's nonce
+const QuicTag kNONP = TAG('N', 'O', 'N', 'P');   // The client's proof nonce
 const QuicTag kKEXS = TAG('K', 'E', 'X', 'S');   // Key exchange methods
 const QuicTag kAEAD = TAG('A', 'E', 'A', 'D');   // Authenticated
                                                  // encryption algorithms
@@ -177,6 +163,9 @@ const QuicTag kRSEQ = TAG('R', 'S', 'E', 'Q');   // Rejected packet number
 // Universal tags
 const QuicTag kPAD  = TAG('P', 'A', 'D', '\0');  // Padding
 
+// Server push tags
+const QuicTag kSPSH = TAG('S', 'P', 'S', 'H');  // Support server push.
+
 // Sent by clients with the fix to crbug/566156
 const QuicTag kFIXD = TAG('F', 'I', 'X', 'D');   // Client hello
 // clang-format on
@@ -212,7 +201,12 @@ const size_t kOrbitSize = 8;  // Number of bytes in an orbit value.
 
 // kProofSignatureLabel is prepended to server configs before signing to avoid
 // any cross-protocol attacks on the signature.
-const char kProofSignatureLabel[] = "QUIC server config signature";
+// TODO(rch): Remove this when QUIC_VERSION_30 is removed.
+const char kProofSignatureLabelOld[] = "QUIC server config signature";
+
+// kProofSignatureLabel is prepended to the CHLO hash and server configs before
+// signing to avoid any cross-protocol attacks on the signature.
+const char kProofSignatureLabel[] = "QUIC CHLO and server config signature";
 
 // kClientHelloMinimumSize is the minimum size of a client hello. Client hellos
 // will have PAD tags added in order to ensure this minimum is met and client

@@ -1,4 +1,5 @@
 include_rules = [
+  "+components/prefs",
   "+components/url_formatter",
   "+crypto",
   "+ios/public/provider/web",
@@ -10,4 +11,5 @@ include_rules = [
 
   # For tests.
   "+ios/testing",
+  "+ios/third_party/earl_grey/src",
 ]

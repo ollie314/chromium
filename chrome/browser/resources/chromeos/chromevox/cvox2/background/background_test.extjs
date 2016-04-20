@@ -66,7 +66,14 @@ BackgroundTest.prototype = {
       <option>grape</option>
       <option> banana</option>
     </select>
-  */}
+  */},
+
+  iframesDoc: function() {/*!
+    <p>start</p>
+    <button>Before</button>
+    <iframe srcdoc="<button>Inside</button>"></iframe>
+    <button>After</button>
+  */},
 };
 
 /** Tests that ChromeVox classic is in this context. */
@@ -101,38 +108,38 @@ TEST_F('BackgroundTest', 'ForwardBackwardNavigation', function() {
         .expectSpeech('beta', 'Link')
         .expectBraille('beta lnk');
     mockFeedback.call(doCmd('nextHeading'))
-        .expectSpeech('Heading 1', 'charlie')
-        .expectBraille('h1 charlie');
+        .expectSpeech('charlie', 'Heading 1')
+        .expectBraille('charlie h1');
     mockFeedback.call(doCmd('nextHeading'))
-        .expectSpeech('Heading 2', 'foxtraut')
-        .expectBraille('h2 foxtraut');
+        .expectSpeech('foxtraut', 'Heading 2')
+        .expectBraille('foxtraut h2');
     mockFeedback.call(doCmd('previousHeading'))
-        .expectSpeech('Heading 1', 'charlie')
-        .expectBraille('h1 charlie');
+        .expectSpeech('charlie', 'Heading 1')
+        .expectBraille('charlie h1');
 
-    mockFeedback.call(doCmd('nextElement'))
+    mockFeedback.call(doCmd('nextObject'))
         .expectSpeech('delta', 'Link')
         .expectBraille('delta lnk');
-    mockFeedback.call(doCmd('nextElement'))
+    mockFeedback.call(doCmd('nextObject'))
         .expectSpeech('echo', 'Link')
         .expectBraille('echo lnk');
-    mockFeedback.call(doCmd('nextElement'))
-        .expectSpeech('Heading 2', 'foxtraut')
-        .expectBraille('h2 foxtraut');
-    mockFeedback.call(doCmd('nextElement'))
+    mockFeedback.call(doCmd('nextObject'))
+        .expectSpeech('foxtraut', 'Heading 2')
+        .expectBraille('foxtraut h2');
+    mockFeedback.call(doCmd('nextObject'))
         .expectSpeech('end')
         .expectBraille('end');
-    mockFeedback.call(doCmd('previousElement'))
-        .expectSpeech('Heading 2', 'foxtraut')
-        .expectBraille('h2 foxtraut');
+    mockFeedback.call(doCmd('previousObject'))
+        .expectSpeech('foxtraut', 'Heading 2')
+        .expectBraille('foxtraut h2');
     mockFeedback.call(doCmd('nextLine'))
         .expectSpeech('end', 'of test')
         .expectBraille('end of test');
 
-    mockFeedback.call(doCmd('goToBeginning'))
+    mockFeedback.call(doCmd('jumpToTop'))
         .expectSpeech('start')
         .expectBraille('start');
-    mockFeedback.call(doCmd('goToEnd'))
+    mockFeedback.call(doCmd('jumpToBottom'))
         .expectSpeech('of test')
         .expectBraille('of test');
 
@@ -152,17 +159,17 @@ TEST_F('BackgroundTest', 'CaretNavigation', function() {
     mockFeedback.call(doCmd('nextCharacter'))
         .expectSpeech('a');
     mockFeedback.call(doCmd('nextWord'))
-        .expectSpeech('Link', 'alpha');
+        .expectSpeech('alpha', 'Link');
     mockFeedback.call(doCmd('nextWord'))
-        .expectSpeech('Link', 'beta');
+        .expectSpeech('beta', 'Link');
     mockFeedback.call(doCmd('nextWord'))
-        .expectSpeech('Heading 1', 'charlie');
+        .expectSpeech('charlie', 'Heading 1');
     mockFeedback.call(doCmd('nextLine'))
-        .expectSpeech('Link', 'delta');
+        .expectSpeech('delta', 'Link');
     mockFeedback.call(doCmd('nextLine'))
-        .expectSpeech('Link', 'echo');
+        .expectSpeech('echo', 'Link');
     mockFeedback.call(doCmd('nextLine'))
-        .expectSpeech('Heading 2', 'foxtraut');
+        .expectSpeech('foxtraut', 'Heading 2');
     mockFeedback.call(doCmd('nextLine'))
         .expectSpeech('end', 'of test');
     mockFeedback.call(doCmd('nextCharacter'))
@@ -170,17 +177,17 @@ TEST_F('BackgroundTest', 'CaretNavigation', function() {
     mockFeedback.call(doCmd('previousCharacter'))
         .expectSpeech('e');
     mockFeedback.call(doCmd('previousCharacter'))
-        .expectSpeech('Heading 2', 't');
+        .expectSpeech('t', 'Heading 2');
     mockFeedback.call(doCmd('previousWord'))
         .expectSpeech('foxtraut');
     mockFeedback.call(doCmd('previousWord'))
-        .expectSpeech('Link', 'echo');
+        .expectSpeech('echo', 'Link');
     mockFeedback.call(doCmd('previousCharacter'))
-        .expectSpeech('Link', 'a');
+        .expectSpeech('a', 'Link');
     mockFeedback.call(doCmd('previousCharacter'))
         .expectSpeech('t');
     mockFeedback.call(doCmd('nextWord'))
-        .expectSpeech('Link', 'echo');
+        .expectSpeech('echo', 'Link');
     mockFeedback.replay();
   });
 });
@@ -190,8 +197,8 @@ TEST_F('BackgroundTest', 'SelectSingleBasic', function() {
   this.runWithLoadedTree(this.formsDoc, function() {
     var sendDownToSelect =
         this.sendKeyToElement.bind(this, undefined, 'Down', '#fruitSelect');
-    mockFeedback.expectSpeech('apple', 'Menu item', /1 of 3/)
-        .expectBraille('apple mnuitm 1/3')
+    mockFeedback.expectSpeech('apple', 'has pop up', 'Collapsed')
+        .expectBraille('apple btn +popup +')
         .call(sendDownToSelect)
         .expectSpeech('grape', /2 of 3/)
         .expectBraille('grape mnuitm 2/3')
@@ -206,12 +213,12 @@ TEST_F('BackgroundTest', 'ContinuousRead', function() {
   var mockFeedback = this.createMockFeedback();
   this.runWithLoadedTree(this.linksAndHeadingsDoc, function() {
     mockFeedback.expectSpeech('start')
-        .call(this.doCmd('continuousRead'))
+        .call(this.doCmd('readFromHere'))
         .expectSpeech(
             'start',
             'alpha', 'Link',
             'beta', 'Link',
-            'Heading 1', 'charlie');
+            'charlie', 'Heading 1');
     mockFeedback.replay();
   });
 });
@@ -220,7 +227,9 @@ TEST_F('BackgroundTest', 'InitialFocus', function() {
   var mockFeedback = this.createMockFeedback();
   this.runWithLoadedTree('<a href="a">a</a>',
     function(rootNode) {
-      mockFeedback.expectSpeech('a')
+      mockFeedback.expectSpeech('data:text/html,<!doctype html>' +
+              '<a href="a">a</a><!-- chromevox_next_test -->')
+          .expectSpeech('a')
           .expectSpeech('Link');
       mockFeedback.replay();
     });
@@ -254,7 +263,7 @@ TEST_F('BackgroundTest', 'ShowContextMenu', function() {
 
       var go = rootNode.find({ role: RoleType.link });
       this.listenOnce(go, 'focus', function(e) {
-        this.doCmd('showContextMenu')();
+        this.doCmd('contextMenu')();
       }.bind(this), true);
       go.focus();
     }.bind(this));
@@ -336,7 +345,7 @@ TEST_F('BackgroundTest', 'UseEditableState', function() {
     function(rootNode) {
       var assertExists = this.newCallback(function (evt) {
         assertNotNullNorUndefined(
-            global.desktopAutomationHandler.editableTextHandler_);
+            global.desktopAutomationHandler.textEditHandler_);
         evt.stopPropagation();
       });
       var assertDoesntExist = this.newCallback(function (evt) {
@@ -372,28 +381,28 @@ TEST_F('BackgroundTest', 'EarconsForControls', function() {
     function(rootNode) {
       var doCmd = this.doCmd.bind(this);
 
-      mockFeedback.call(doCmd('nextElement'))
+      mockFeedback.call(doCmd('nextObject'))
           .expectSpeech('MyLink')
           .expectEarcon(cvox.Earcon.LINK)
-          .call(doCmd('nextElement'))
+          .call(doCmd('nextObject'))
           .expectSpeech('MyButton')
           .expectEarcon(cvox.Earcon.BUTTON)
-          .call(doCmd('nextElement'))
+          .call(doCmd('nextObject'))
           .expectSpeech('Check box')
           .expectEarcon(cvox.Earcon.CHECK_OFF)
-          .call(doCmd('nextElement'))
+          .call(doCmd('nextObject'))
           .expectSpeech('Check box')
           .expectEarcon(cvox.Earcon.CHECK_ON)
-          .call(doCmd('nextElement'))
+          .call(doCmd('nextObject'))
           .expectSpeech('Edit text')
           .expectEarcon(cvox.Earcon.EDITABLE_TEXT)
-          .call(doCmd('nextElement'))
+          .call(doCmd('nextObject'))
           .expectSpeech('List box')
           .expectEarcon(cvox.Earcon.LISTBOX)
-          .call(doCmd('nextElement'))
+          .call(doCmd('nextObject'))
           .expectSpeech('Button', 'has pop up')
           .expectEarcon(cvox.Earcon.POP_UP_BUTTON)
-          .call(doCmd('nextElement'))
+          .call(doCmd('nextObject'))
           .expectSpeech(/slider/)
           .expectEarcon(cvox.Earcon.SLIDER);
 
@@ -504,4 +513,120 @@ TEST_F('BackgroundTest', 'ModeSwitching', function() {
     global.backgroundObj.refreshMode('');
     assertEquals('classic', global.backgroundObj.mode);
   }.bind(this));
+});
+
+TEST_F('BackgroundTest', 'FocusIframe', function() {
+  this.runWithLoadedTree(  function() {/*!
+    <iframe tabindex=0 src="data:text/html,<p>Inside</p>"></iframe>
+    <button>outside</button>
+  */}, function(root) {
+    var iframe = root.find({role: 'iframe'});
+    var button = root.find({role: 'button'});
+
+    assertEquals('iframe', iframe.role);
+    assertEquals('button', button.role);
+
+    var didFocus = false;
+    iframe.focus = function() {
+      didFocus = true;
+    };
+    var b = global.backgroundObj;
+    b.currentRange_ = cursors.Range.fromNode(button);
+    b.onGotCommand('previousElement');
+    assertFalse(didFocus);
+  }.bind(this));
+});
+
+TEST_F('BackgroundTest', 'NoisySlider', function() {
+  var mockFeedback = this.createMockFeedback();
+  this.runWithLoadedTree(  function() {/*!
+    <button id="go">go</button>
+    <div id="slider" tabindex=0 role="slider"></div>
+    <script>
+      function update() {
+        var s = document.getElementById('slider');
+        s.setAttribute('aria-valuetext', 'noisy');
+        setTimeout(update, 500);
+      }
+      update();
+    </script>
+  */}, function(root) {
+    var go = root.find({role: 'button'});
+    var slider = root.find({role: 'slider'});
+    var focusButton = go.focus.bind(go);
+    var focusSlider = slider.focus.bind(slider);
+    mockFeedback.call(focusButton)
+        .expectNextSpeechUtteranceIsNot('noisy')
+        .call(focusSlider)
+        .expectSpeech('noisy')
+        .expectSpeech('noisy')
+        .replay();
+  }.bind(this));
+});
+
+TEST_F('BackgroundTest', 'Checkbox', function() {
+  var mockFeedback = this.createMockFeedback();
+  this.runWithLoadedTree(function() {/*!
+    <div id="go" role="checkbox">go</div>
+    <script>
+      var go = document.getElementById('go');
+      var isChecked = true;
+      go.addEventListener('click', function(e) {
+        if (isChecked)
+          go.setAttribute('aria-checked', true);
+        else
+          go.removeAttribute('aria-checked');
+        isChecked = !isChecked;
+      });
+    </script>
+  */}, function(root) {
+    var cbx = root.find({role: 'checkBox'});
+    var click = cbx.doDefault.bind(cbx);
+    mockFeedback.call(click)
+        .expectSpeech('go')
+        .expectSpeech('Check box')
+        .expectSpeech('checked')
+        .call(click)
+        .expectSpeech('go')
+        .expectSpeech('Check box')
+        .expectSpeech('not checked')
+        .replay();
+  });
+});
+
+/** Tests navigating into and out of iframes.. */
+TEST_F('BackgroundTest', 'DISABLED_ForwardNavigationThroughIframes', function() {
+  var mockFeedback = this.createMockFeedback();
+
+  var runTestIfIframeIsLoaded = function(rootNode) {
+    // Return if the iframe hasn't loaded yet.
+    var iframe = rootNode.find({role: 'iframe'});
+    var childDoc = iframe.firstChild;
+    if (childDoc && childDoc.children.length == 0) {
+      return;
+    }
+
+    var doCmd = this.doCmd.bind(this);
+
+    mockFeedback.expectSpeech('start').expectBraille('start');
+
+    mockFeedback.call(doCmd('nextButton'))
+        .expectSpeech('Before', 'Button');
+    mockFeedback.call(doCmd('nextButton'))
+        .expectSpeech('Inside', 'Button');
+    mockFeedback.call(doCmd('nextButton'))
+        .expectSpeech('After', 'Button');
+
+    mockFeedback.replay();
+  }.bind(this);
+
+  this.runWithLoadedTree(this.iframesDoc, function(rootNode) {
+    chrome.automation.getDesktop(function(desktopNode) {
+      runTestIfIframeIsLoaded(rootNode);
+
+      desktopNode.addEventListener('loadComplete', function(evt) {
+        runTestIfIframeIsLoaded(rootNode);
+      }, true);      
+    });
+  });
 });

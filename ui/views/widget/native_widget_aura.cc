@@ -5,6 +5,7 @@
 #include "ui/views/widget/native_widget_aura.h"
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "third_party/skia/include/core/SkRegion.h"
@@ -100,6 +101,7 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
   DCHECK(params.parent || params.context);
 
   ownership_ = params.ownership;
+  name_ = params.name;
 
   RegisterNativeWidgetForWindow(this, window_);
   window_->SetType(GetAuraWindowTypeForWidgetType(params.type));
@@ -137,8 +139,8 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
       // If a parent is specified but no bounds are given,
       // use the origin of the parent's display so that the widget
       // will be added to the same display as the parent.
-      gfx::Rect bounds = gfx::Screen::GetScreenFor(parent)->
-          GetDisplayNearestWindow(parent).bounds();
+      gfx::Rect bounds =
+          gfx::Screen::GetScreen()->GetDisplayNearestWindow(parent).bounds();
       window_bounds.set_origin(bounds.origin());
     }
   }
@@ -283,8 +285,8 @@ void NativeWidgetAura::CenterWindow(const gfx::Size& size) {
   // When centering window, we take the intersection of the host and
   // the parent. We assume the root window represents the visible
   // rect of a single screen.
-  gfx::Rect work_area = gfx::Screen::GetScreenFor(window_)->
-      GetDisplayNearestWindow(window_).work_area();
+  gfx::Rect work_area =
+      gfx::Screen::GetScreen()->GetDisplayNearestWindow(window_).work_area();
 
   aura::client::ScreenPositionClient* screen_position_client =
       aura::client::GetScreenPositionClient(window_->GetRootWindow());
@@ -404,7 +406,7 @@ void NativeWidgetAura::SetBounds(const gfx::Rect& bounds) {
         aura::client::GetScreenPositionClient(root);
     if (screen_position_client) {
       gfx::Display dst_display =
-          gfx::Screen::GetScreenFor(window_)->GetDisplayMatching(bounds);
+          gfx::Screen::GetScreen()->GetDisplayMatching(bounds);
       screen_position_client->SetBounds(window_, bounds, dst_display);
       return;
     }
@@ -436,7 +438,7 @@ void NativeWidgetAura::StackBelow(gfx::NativeView native_view) {
 
 void NativeWidgetAura::SetShape(SkRegion* region) {
   if (window_)
-    window_->layer()->SetAlphaShape(make_scoped_ptr(region));
+    window_->layer()->SetAlphaShape(base::WrapUnique(region));
   else
     delete region;
 }
@@ -495,7 +497,10 @@ void NativeWidgetAura::ShowWithWindowState(ui::WindowShowState state) {
     // SetInitialFocus() should be always be called, even for
     // SHOW_STATE_INACTIVE. If the window has to stay inactive, the method will
     // do the right thing.
-    SetInitialFocus(state);
+    // Activate() might fail if the window is non-activatable. In this case, we
+    // should pass SHOW_STATE_INACTIVE to SetInitialFocus() to stop the initial
+    // focused view from getting focused. See crbug.com/515594 for example.
+    SetInitialFocus(IsActive() ? state : ui::SHOW_STATE_INACTIVE);
   }
 
   // On desktop aura, a window is activated first even when it is shown as
@@ -595,10 +600,6 @@ void NativeWidgetAura::SetOpacity(unsigned char opacity) {
     window_->layer()->SetOpacity(opacity / 255.0);
 }
 
-void NativeWidgetAura::SetUseDragFrame(bool use_drag_frame) {
-  NOTIMPLEMENTED();
-}
-
 void NativeWidgetAura::FlashFrame(bool flash) {
   if (window_)
     window_->SetProperty(aura::client::kDrawAttentionKey, flash);
@@ -643,8 +644,7 @@ void NativeWidgetAura::ClearNativeFocus() {
 gfx::Rect NativeWidgetAura::GetWorkAreaBoundsInScreen() const {
   if (!window_)
     return gfx::Rect();
-  return gfx::Screen::GetScreenFor(window_)->
-      GetDisplayNearestWindow(window_).work_area();
+  return gfx::Screen::GetScreen()->GetDisplayNearestWindow(window_).work_area();
 }
 
 Widget::MoveLoopResult NativeWidgetAura::RunMoveLoop(
@@ -737,6 +737,10 @@ void NativeWidgetAura::OnSizeConstraintsChanged() {
 
 void NativeWidgetAura::RepostNativeEvent(gfx::NativeEvent native_event) {
   OnEvent(native_event);
+}
+
+std::string NativeWidgetAura::GetName() const {
+  return name_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -874,11 +878,7 @@ void NativeWidgetAura::OnKeyEvent(ui::KeyEvent* event) {
   if (!window_->IsVisible())
     return;
 
-  FocusManager* focus_manager = GetWidget()->GetFocusManager();
   delegate_->OnKeyEvent(event);
-  if (!event->handled() && focus_manager)
-    focus_manager->OnKeyEvent(*event);
-  event->SetHandled();
 }
 
 void NativeWidgetAura::OnMouseEvent(ui::MouseEvent* event) {

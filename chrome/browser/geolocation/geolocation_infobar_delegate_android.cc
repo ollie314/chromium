@@ -8,31 +8,26 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
-#include "components/url_formatter/elide_url.h"
 #include "grit/generated_resources.h"
-#include "ui/base/l10n/l10n_util.h"
 
 // static
 infobars::InfoBar* GeolocationInfoBarDelegateAndroid::Create(
     InfoBarService* infobar_service,
     const GURL& requesting_frame,
-    const std::string& display_languages,
     const PermissionSetCallback& callback) {
   return infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
-      scoped_ptr<ConfirmInfoBarDelegate>(new GeolocationInfoBarDelegateAndroid(
-          requesting_frame, display_languages, callback))));
+      std::unique_ptr<ConfirmInfoBarDelegate>(
+          new GeolocationInfoBarDelegateAndroid(requesting_frame, callback))));
 }
 
 GeolocationInfoBarDelegateAndroid::GeolocationInfoBarDelegateAndroid(
     const GURL& requesting_frame,
-    const std::string& display_languages,
     const PermissionSetCallback& callback)
     : PermissionInfobarDelegate(requesting_frame,
                                 content::PermissionType::GEOLOCATION,
                                 CONTENT_SETTINGS_TYPE_GEOLOCATION,
                                 callback),
-      requesting_frame_(requesting_frame),
-      display_languages_(display_languages) {}
+      requesting_frame_(requesting_frame) {}
 
 GeolocationInfoBarDelegateAndroid::~GeolocationInfoBarDelegateAndroid() {}
 
@@ -45,8 +40,6 @@ int GeolocationInfoBarDelegateAndroid::GetIconId() const {
   return IDR_ANDROID_INFOBAR_GEOLOCATION;
 }
 
-base::string16 GeolocationInfoBarDelegateAndroid::GetMessageText() const {
-  return l10n_util::GetStringFUTF16(IDS_GEOLOCATION_INFOBAR_QUESTION,
-                                    url_formatter::FormatUrlForSecurityDisplay(
-                                        requesting_frame_, display_languages_));
+int GeolocationInfoBarDelegateAndroid::GetMessageResourceId() const {
+  return IDS_GEOLOCATION_INFOBAR_QUESTION;
 }

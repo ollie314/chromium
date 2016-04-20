@@ -80,12 +80,10 @@ WebIDBKey WebIDBKey::createNull()
     return key;
 }
 
-#if BLINK_WEB_IMPLEMENTATION || !LINK_CORE_MODULES_SEPARATELY
 void WebIDBKey::reset()
 {
     m_private.reset();
 }
-#endif
 
 void WebIDBKey::assign(const WebIDBKey& value)
 {
@@ -118,7 +116,7 @@ static IDBKey* convertFromWebIDBKeyArray(const WebVector<WebIDBKey>& array)
             break;
         case WebIDBKeyTypeNull:
         case WebIDBKeyTypeMin:
-            ASSERT_NOT_REACHED();
+            NOTREACHED();
             break;
         }
     }
@@ -131,7 +129,7 @@ static void convertToWebIDBKeyArray(const IDBKey::KeyArray& array, WebVector<Web
     WebVector<WebIDBKey> subkeys;
     for (size_t i = 0; i < array.size(); ++i) {
         IDBKey* key = array[i];
-        switch (key->type()) {
+        switch (key->getType()) {
         case IDBKey::ArrayType:
             convertToWebIDBKeyArray(key->array(), subkeys);
             keys[i] = WebIDBKey::createArray(subkeys);
@@ -152,7 +150,7 @@ static void convertToWebIDBKeyArray(const IDBKey::KeyArray& array, WebVector<Web
             keys[i] = WebIDBKey::createInvalid();
             break;
         case IDBKey::MinType:
-            ASSERT_NOT_REACHED();
+            NOTREACHED();
             break;
         }
     }
@@ -198,7 +196,7 @@ WebIDBKeyType WebIDBKey::keyType() const
 {
     if (!m_private.get())
         return WebIDBKeyTypeNull;
-    return static_cast<WebIDBKeyType>(m_private->type());
+    return static_cast<WebIDBKeyType>(m_private->getType());
 }
 
 bool WebIDBKey::isValid() const

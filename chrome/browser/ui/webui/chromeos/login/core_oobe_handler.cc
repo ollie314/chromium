@@ -12,7 +12,7 @@
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
@@ -78,6 +78,7 @@ void CoreOobeHandler::DeclareLocalizedValues(
   builder->Add("highContrastOption", IDS_OOBE_HIGH_CONTRAST_MODE_OPTION);
   builder->Add("screenMagnifierOption", IDS_OOBE_SCREEN_MAGNIFIER_OPTION);
   builder->Add("virtualKeyboardOption", IDS_OOBE_VIRTUAL_KEYBOARD_OPTION);
+  builder->Add("monoAudioOption", IDS_OOBE_MONO_AUDIO_OPTION);
   builder->Add("closeAccessibilityMenu", IDS_OOBE_CLOSE_ACCESSIBILITY_MENU);
 
   // Strings for the device requisition prompt.
@@ -129,6 +130,8 @@ void CoreOobeHandler::RegisterMessages() {
               &CoreOobeHandler::HandleEnableLargeCursor);
   AddCallback("enableVirtualKeyboard",
               &CoreOobeHandler::HandleEnableVirtualKeyboard);
+  AddCallback("enableMonoAudio",
+              &CoreOobeHandler::HandleEnableMonoAudio);
   AddCallback("enableScreenMagnifier",
               &CoreOobeHandler::HandleEnableScreenMagnifier);
   AddCallback("enableSpokenFeedback",
@@ -172,11 +175,9 @@ void CoreOobeHandler::ShowDeviceResetScreen() {
     if (wizard_controller && !wizard_controller->login_screen_started()) {
       wizard_controller->AdvanceToScreen(WizardController::kResetScreenName);
     } else {
-      DCHECK(LoginDisplayHostImpl::default_host());
-      if (LoginDisplayHostImpl::default_host()) {
-        LoginDisplayHostImpl::default_host()->StartWizard(
-            WizardController::kResetScreenName);
-      }
+      DCHECK(LoginDisplayHost::default_host());
+      LoginDisplayHost::default_host()->StartWizard(
+          WizardController::kResetScreenName);
     }
   }
 }
@@ -266,6 +267,10 @@ void CoreOobeHandler::HandleEnableLargeCursor(bool enabled) {
 
 void CoreOobeHandler::HandleEnableVirtualKeyboard(bool enabled) {
   AccessibilityManager::Get()->EnableVirtualKeyboard(enabled);
+}
+
+void CoreOobeHandler::HandleEnableMonoAudio(bool enabled) {
+  AccessibilityManager::Get()->EnableMonoAudio(enabled);
 }
 
 void CoreOobeHandler::HandleEnableScreenMagnifier(bool enabled) {
@@ -398,8 +403,7 @@ void CoreOobeHandler::UpdateKeyboardState() {
 }
 
 void CoreOobeHandler::UpdateClientAreaSize() {
-  const gfx::Size& size =
-      gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().size();
+  const gfx::Size& size = gfx::Screen::GetScreen()->GetPrimaryDisplay().size();
   SetClientAreaSize(size.width(), size.height());
 }
 
@@ -419,7 +423,7 @@ void CoreOobeHandler::HandleLaunchHelpApp(double help_topic_id) {
 }
 
 void CoreOobeHandler::HandleHeaderBarVisible() {
-  LoginDisplayHost* login_display_host = LoginDisplayHostImpl::default_host();
+  LoginDisplayHost* login_display_host = LoginDisplayHost::default_host();
   if (login_display_host)
     login_display_host->SetStatusAreaVisible(true);
   if (ScreenLocker::default_screen_locker())

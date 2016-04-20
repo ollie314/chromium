@@ -29,24 +29,24 @@ class CertVerifyResult;
 // This class is a debug visitor of a QuicConnection which logs
 // events to |net_log|.
 class NET_EXPORT_PRIVATE QuicConnectionLogger
-    : public QuicConnectionDebugVisitor {
+    : public QuicConnectionDebugVisitor,
+      public QuicPacketCreator::DebugDelegate {
  public:
   QuicConnectionLogger(
       QuicSpdySession* session,
       const char* const connection_description,
-      scoped_ptr<SocketPerformanceWatcher> socket_performance_watcher,
+      std::unique_ptr<SocketPerformanceWatcher> socket_performance_watcher,
       const BoundNetLog& net_log);
 
   ~QuicConnectionLogger() override;
 
-  // QuicPacketGenerator::DebugDelegateInterface
+  // QuicPacketCreator::DebugDelegateInterface
   void OnFrameAddedToPacket(const QuicFrame& frame) override;
 
   // QuicConnectionDebugVisitorInterface
   void OnPacketSent(const SerializedPacket& serialized_packet,
                     QuicPacketNumber original_packet_number,
                     TransmissionType transmission_type,
-                    size_t encrypted_length,
                     QuicTime sent_time) override;
   void OnPacketReceived(const IPEndPoint& self_address,
                         const IPEndPoint& peer_address,
@@ -69,9 +69,9 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
   void OnPublicResetPacket(const QuicPublicResetPacket& packet) override;
   void OnVersionNegotiationPacket(
       const QuicVersionNegotiationPacket& packet) override;
-  void OnRevivedPacket(const QuicPacketHeader& revived_header,
-                       base::StringPiece payload) override;
-  void OnConnectionClosed(QuicErrorCode error, bool from_peer) override;
+  void OnConnectionClosed(QuicErrorCode error,
+                          const std::string& error_details,
+                          ConnectionCloseSource source) override;
   void OnSuccessfulVersionNegotiation(const QuicVersion& version) override;
   void OnRttChanged(QuicTime::Delta rtt) const override;
 
@@ -185,7 +185,7 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
   const char* const connection_description_;
   // Receives notifications regarding the performance of the underlying socket
   // for the QUIC connection. May be null.
-  const scoped_ptr<SocketPerformanceWatcher> socket_performance_watcher_;
+  const std::unique_ptr<SocketPerformanceWatcher> socket_performance_watcher_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionLogger);
 };

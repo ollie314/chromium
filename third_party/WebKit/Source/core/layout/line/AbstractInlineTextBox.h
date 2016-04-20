@@ -36,6 +36,7 @@
 #include "core/layout/api/LineLayoutText.h"
 #include "core/layout/line/InlineTextBox.h"
 #include "wtf/HashMap.h"
+#include "wtf/RefCounted.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
@@ -75,12 +76,12 @@ public:
 
     ~AbstractInlineTextBox();
 
-    LineLayoutText lineLayoutItem() const { return m_lineLayoutItem; }
+    LineLayoutText getLineLayoutItem() const { return m_lineLayoutItem; }
 
     PassRefPtr<AbstractInlineTextBox> nextInlineTextBox() const;
     LayoutRect bounds() const;
     unsigned len() const;
-    Direction direction() const;
+    Direction getDirection() const;
     void characterWidths(Vector<float>&) const;
     void wordBoundaries(Vector<WordBoundaries>&) const;
     String text() const;

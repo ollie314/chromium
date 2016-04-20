@@ -5,10 +5,12 @@
 #include "chrome/browser/extensions/extension_reenabler.h"
 
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/webstore_data_fetcher.h"
 #include "chrome/browser/extensions/webstore_inline_installer.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -23,7 +25,7 @@ ExtensionReenabler::~ExtensionReenabler() {
 }
 
 // static
-scoped_ptr<ExtensionReenabler> ExtensionReenabler::PromptForReenable(
+std::unique_ptr<ExtensionReenabler> ExtensionReenabler::PromptForReenable(
     const scoped_refptr<const Extension>& extension,
     content::BrowserContext* browser_context,
     content::WebContents* web_contents,
@@ -40,21 +42,21 @@ scoped_ptr<ExtensionReenabler> ExtensionReenabler::PromptForReenable(
   DCHECK_NE(0, disable_reasons & Extension::DISABLE_PERMISSIONS_INCREASE);
 #endif  // DCHECK_IS_ON()
 
-  return make_scoped_ptr(new ExtensionReenabler(
+  return base::WrapUnique(new ExtensionReenabler(
       extension, browser_context, referrer_url, callback, web_contents,
       ExtensionInstallPrompt::GetDefaultShowDialogCallback()));
 }
 
 // static
-scoped_ptr<ExtensionReenabler>
+std::unique_ptr<ExtensionReenabler>
 ExtensionReenabler::PromptForReenableWithCallbackForTest(
     const scoped_refptr<const Extension>& extension,
     content::BrowserContext* browser_context,
     const Callback& callback,
     const ExtensionInstallPrompt::ShowDialogCallback& show_dialog_callback) {
-  return make_scoped_ptr(new ExtensionReenabler(extension, browser_context,
-                                                GURL(), callback, nullptr,
-                                                show_dialog_callback));
+  return base::WrapUnique(new ExtensionReenabler(extension, browser_context,
+                                                 GURL(), callback, nullptr,
+                                                 show_dialog_callback));
 }
 
 ExtensionReenabler::ExtensionReenabler(
@@ -82,7 +84,8 @@ ExtensionReenabler::ExtensionReenabler(
   if (!referrer_url_.is_empty()) {
     webstore_data_fetcher_.reset(new WebstoreDataFetcher(
         this,
-        browser_context_->GetRequestContext(),
+        content::BrowserContext::GetDefaultStoragePartition(browser_context_)->
+            GetURLRequestContext(),
         referrer_url_,
         extension->id()));
     webstore_data_fetcher_->Start();
@@ -94,7 +97,7 @@ ExtensionReenabler::ExtensionReenabler(
         base::Bind(&ExtensionReenabler::OnInstallPromptDone,
                    weak_factory_.GetWeakPtr()),
         extension.get(), nullptr,
-        make_scoped_ptr(new ExtensionInstallPrompt::Prompt(type)),
+        base::WrapUnique(new ExtensionInstallPrompt::Prompt(type)),
         show_dialog_callback_);
   }
 }
@@ -155,7 +158,7 @@ void ExtensionReenabler::OnWebstoreRequestFailure() {
 }
 
 void ExtensionReenabler::OnWebstoreResponseParseSuccess(
-    scoped_ptr<base::DictionaryValue> webstore_data) {
+    std::unique_ptr<base::DictionaryValue> webstore_data) {
   DCHECK(!referrer_url_.is_empty());
   std::string error;
   if (!WebstoreInlineInstaller::IsRequestorPermitted(*webstore_data,
@@ -170,7 +173,7 @@ void ExtensionReenabler::OnWebstoreResponseParseSuccess(
         base::Bind(&ExtensionReenabler::OnInstallPromptDone,
                    weak_factory_.GetWeakPtr()),
         extension_.get(), nullptr,
-        make_scoped_ptr(new ExtensionInstallPrompt::Prompt(type)),
+        base::WrapUnique(new ExtensionInstallPrompt::Prompt(type)),
         show_dialog_callback_);
   }
 }

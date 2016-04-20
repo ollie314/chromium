@@ -86,22 +86,23 @@ void TCPSocket::Connect(const net::AddressList& address,
     callback.Run(net::ERR_CONNECTION_FAILED);
     return;
   }
+
+  if (is_connected_) {
+    callback.Run(net::ERR_SOCKET_IS_CONNECTED);
+    return;
+  }
+
   DCHECK(!server_socket_.get());
   socket_mode_ = CLIENT;
   connect_callback_ = callback;
 
   int result = net::ERR_CONNECTION_FAILED;
-  do {
-    if (is_connected_)
-      break;
-
+  if (!is_connected_) {
     socket_.reset(
-        new net::TCPClientSocket(address, NULL, net::NetLog::Source()));
-
-    connect_callback_ = callback;
+        new net::TCPClientSocket(address, NULL, NULL, net::NetLog::Source()));
     result = socket_->Connect(
         base::Bind(&TCPSocket::OnConnectComplete, base::Unretained(this)));
-  } while (false);
+  }
 
   if (result != net::ERR_IO_PENDING)
     OnConnectComplete(result);
@@ -130,7 +131,9 @@ void TCPSocket::Read(int count, const ReadCompletionCallback& callback) {
     return;
   }
 
-  if (!read_callback_.is_null()) {
+  if (!read_callback_.is_null() || !connect_callback_.is_null()) {
+    // It's illegal to read a net::TCPSocket while a pending Connect or Read is
+    // already in progress.
     callback.Run(net::ERR_IO_PENDING, NULL);
     return;
   }
@@ -140,7 +143,7 @@ void TCPSocket::Read(int count, const ReadCompletionCallback& callback) {
     return;
   }
 
-  if (!socket_.get()) {
+  if (!socket_.get() || !is_connected_) {
     callback.Run(net::ERR_SOCKET_NOT_CONNECTED, NULL);
     return;
   }
@@ -277,8 +280,12 @@ void TCPSocket::OnConnectComplete(int result) {
   DCHECK(!connect_callback_.is_null());
   DCHECK(!is_connected_);
   is_connected_ = result == net::OK;
-  connect_callback_.Run(result);
+
+  // The completion callback may re-enter TCPSocket, e.g. to Read(); therefore
+  // we reset |connect_callback_| before calling it.
+  CompletionCallback connect_callback = connect_callback_;
   connect_callback_.Reset();
+  connect_callback.Run(result);
 }
 
 void TCPSocket::OnReadComplete(scoped_refptr<net::IOBuffer> io_buffer,

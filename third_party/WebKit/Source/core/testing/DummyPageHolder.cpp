@@ -30,8 +30,9 @@
 
 #include "core/testing/DummyPageHolder.h"
 
-#include "core/frame/LocalDOMWindow.h"
+#include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
+#include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/loader/EmptyClients.h"
@@ -47,7 +48,7 @@ void RootLayerScrollsFrameSettingOverride(Settings& settings)
 PassOwnPtr<DummyPageHolder> DummyPageHolder::create(
     const IntSize& initialViewSize,
     Page::PageClients* pageClients,
-    PassOwnPtrWillBeRawPtr<FrameLoaderClient> frameLoaderClient,
+    FrameLoaderClient* frameLoaderClient,
     FrameSettingOverrideFunction settingOverrider) {
     return adoptPtr(new DummyPageHolder(initialViewSize, pageClients, frameLoaderClient, settingOverrider));
 }
@@ -55,7 +56,7 @@ PassOwnPtr<DummyPageHolder> DummyPageHolder::create(
 DummyPageHolder::DummyPageHolder(
     const IntSize& initialViewSize,
     Page::PageClients* pageClientsArgument,
-    PassOwnPtrWillBeRawPtr<FrameLoaderClient> frameLoaderClient,
+    FrameLoaderClient* frameLoaderClient,
     FrameSettingOverrideFunction settingOverrider)
 {
     Page::PageClients pageClients;
@@ -65,7 +66,6 @@ DummyPageHolder::DummyPageHolder(
         pageClients.chromeClient = pageClientsArgument->chromeClient;
         pageClients.contextMenuClient = pageClientsArgument->contextMenuClient;
         pageClients.editorClient = pageClientsArgument->editorClient;
-        pageClients.dragClient = pageClientsArgument->dragClient;
         pageClients.spellCheckerClient = pageClientsArgument->spellCheckerClient;
     }
     m_page = Page::create(pageClients);
@@ -82,6 +82,7 @@ DummyPageHolder::DummyPageHolder(
 
     m_frame = LocalFrame::create(m_frameLoaderClient.get(), &m_page->frameHost(), 0);
     m_frame->setView(FrameView::create(m_frame.get(), initialViewSize));
+    m_frame->view()->page()->frameHost().visualViewport().setSize(initialViewSize);
     m_frame->init();
 }
 

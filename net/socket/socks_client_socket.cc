@@ -11,7 +11,6 @@
 #include "base/compiler_specific.h"
 #include "base/sys_byteorder.h"
 #include "net/base/io_buffer.h"
-#include "net/base/net_util.h"
 #include "net/log/net_log.h"
 #include "net/socket/client_socket_handle.h"
 
@@ -58,7 +57,7 @@ static_assert(sizeof(SOCKS4ServerResponse) == kReadHeaderSize,
               "socks4 server response struct has incorrect size");
 
 SOCKSClientSocket::SOCKSClientSocket(
-    scoped_ptr<ClientSocketHandle> transport_socket,
+    std::unique_ptr<ClientSocketHandle> transport_socket,
     const HostResolver::RequestInfo& req_info,
     RequestPriority priority,
     HostResolver* host_resolver)
@@ -141,14 +140,6 @@ void SOCKSClientSocket::SetOmniboxSpeculation() {
 
 bool SOCKSClientSocket::WasEverUsed() const {
   return was_ever_used_;
-}
-
-bool SOCKSClientSocket::UsingTCPFastOpen() const {
-  if (transport_.get() && transport_->socket()) {
-    return transport_->socket()->UsingTCPFastOpen();
-  }
-  NOTREACHED();
-  return false;
 }
 
 bool SOCKSClientSocket::WasNpnNegotiated() const {
@@ -335,7 +326,8 @@ const std::string SOCKSClientSocket::BuildHandshakeWriteBuffer() const {
   //               failing the connect attempt.
   CHECK_EQ(ADDRESS_FAMILY_IPV4, endpoint.GetFamily());
   CHECK_LE(endpoint.address().size(), sizeof(request.ip));
-  memcpy(&request.ip, &endpoint.address()[0], endpoint.address().size());
+  memcpy(&request.ip, &endpoint.address().bytes()[0],
+         endpoint.address().size());
 
   DVLOG(1) << "Resolved Host is : " << endpoint.ToStringWithoutPort();
 
@@ -425,7 +417,7 @@ int SOCKSClientSocket::DoHandshakeReadComplete(int result) {
       reinterpret_cast<const SOCKS4ServerResponse*>(buffer_.data());
 
   if (response->reserved_null != 0x00) {
-    LOG(ERROR) << "Unknown response from SOCKS server.";
+    DVLOG(1) << "Unknown response from SOCKS server.";
     return ERR_SOCKS_CONNECTION_FAILED;
   }
 
@@ -434,18 +426,18 @@ int SOCKSClientSocket::DoHandshakeReadComplete(int result) {
       completed_handshake_ = true;
       return OK;
     case kServerResponseRejected:
-      LOG(ERROR) << "SOCKS request rejected or failed";
+      DVLOG(1) << "SOCKS request rejected or failed";
       return ERR_SOCKS_CONNECTION_FAILED;
     case kServerResponseNotReachable:
-      LOG(ERROR) << "SOCKS request failed because client is not running "
-                 << "identd (or not reachable from the server)";
+      DVLOG(1) << "SOCKS request failed because client is not running "
+               << "identd (or not reachable from the server)";
       return ERR_SOCKS_CONNECTION_HOST_UNREACHABLE;
     case kServerResponseMismatchedUserId:
-      LOG(ERROR) << "SOCKS request failed because client's identd could "
-                 << "not confirm the user ID string in the request";
+      DVLOG(1) << "SOCKS request failed because client's identd could "
+               << "not confirm the user ID string in the request";
       return ERR_SOCKS_CONNECTION_FAILED;
     default:
-      LOG(ERROR) << "SOCKS server sent unknown response";
+      DVLOG(1) << "SOCKS server sent unknown response";
       return ERR_SOCKS_CONNECTION_FAILED;
   }
 

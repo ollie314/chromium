@@ -43,13 +43,16 @@
 #include "modules/notifications/NotificationData.h"
 #include "modules/notifications/NotificationOptions.h"
 #include "modules/notifications/NotificationPermissionClient.h"
+#include "modules/notifications/NotificationResourcesLoader.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/UserGestureIndicator.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebSecurityOrigin.h"
 #include "public/platform/WebString.h"
 #include "public/platform/modules/notifications/WebNotificationAction.h"
+#include "public/platform/modules/notifications/WebNotificationConstants.h"
 #include "public/platform/modules/notifications/WebNotificationManager.h"
+#include "wtf/Functional.h"
 
 namespace blink {
 namespace {
@@ -84,39 +87,44 @@ Notification* Notification::create(ExecutionContext* context, const String& titl
     }
 
     String insecureOriginMessage;
-    UseCounter::Feature feature = context->isSecureContext(insecureOriginMessage)
-        ? UseCounter::NotificationSecureOrigin
-        : UseCounter::NotificationInsecureOrigin;
-
-    UseCounter::count(context, feature);
+    if (context->isSecureContext(insecureOriginMessage)) {
+        UseCounter::count(context, UseCounter::NotificationSecureOrigin);
+        if (context->isDocument())
+            UseCounter::countCrossOriginIframe(*toDocument(context),  UseCounter::NotificationAPISecureOriginIframe);
+    } else {
+        UseCounter::count(context, UseCounter::NotificationInsecureOrigin);
+        if (context->isDocument())
+            UseCounter::countCrossOriginIframe(*toDocument(context),  UseCounter::NotificationAPIInsecureOriginIframe);
+    }
 
     WebNotificationData data = createWebNotificationData(context, title, options, exceptionState);
     if (exceptionState.hadException())
         return nullptr;
 
     Notification* notification = new Notification(context, data);
-    notification->scheduleShow();
+    notification->schedulePrepareShow();
     notification->suspendIfNeeded();
 
     return notification;
 }
 
-Notification* Notification::create(ExecutionContext* context, int64_t persistentId, const WebNotificationData& data)
+Notification* Notification::create(ExecutionContext* context, int64_t persistentId, const WebNotificationData& data, bool showing)
 {
     Notification* notification = new Notification(context, data);
     notification->setPersistentId(persistentId);
-    notification->setState(NotificationStateShowing);
+    notification->setState(showing ? NotificationStateShowing : NotificationStateClosed);
     notification->suspendIfNeeded();
 
     return notification;
 }
 
 Notification::Notification(ExecutionContext* context, const WebNotificationData& data)
-    : ActiveDOMObject(context)
+    : ActiveScriptWrappable(this)
+    , ActiveDOMObject(context)
     , m_data(data)
     , m_persistentId(kInvalidPersistentId)
     , m_state(NotificationStateIdle)
-    , m_asyncRunner(AsyncMethodRunner<Notification>::create(this, &Notification::show))
+    , m_prepareShowMethodRunner(AsyncMethodRunner<Notification>::create(this, &Notification::prepareShow))
 {
     ASSERT(notificationManager());
 }
@@ -125,26 +133,35 @@ Notification::~Notification()
 {
 }
 
-void Notification::scheduleShow()
+void Notification::schedulePrepareShow()
 {
     ASSERT(m_state == NotificationStateIdle);
-    ASSERT(!m_asyncRunner->isActive());
+    ASSERT(!m_prepareShowMethodRunner->isActive());
 
-    m_asyncRunner->runAsync();
+    m_prepareShowMethodRunner->runAsync();
 }
 
-void Notification::show()
+void Notification::prepareShow()
 {
     ASSERT(m_state == NotificationStateIdle);
-    if (Notification::checkPermission(executionContext()) != WebNotificationPermissionAllowed) {
+    if (Notification::checkPermission(getExecutionContext()) != mojom::PermissionStatus::GRANTED) {
         dispatchErrorEvent();
         return;
     }
 
-    SecurityOrigin* origin = executionContext()->securityOrigin();
+    m_loader = new NotificationResourcesLoader(bind<NotificationResourcesLoader*>(&Notification::didLoadResources, WeakPersistentThisPointer<Notification>(this)));
+    m_loader->start(getExecutionContext(), m_data);
+}
+
+void Notification::didLoadResources(NotificationResourcesLoader* loader)
+{
+    DCHECK_EQ(loader, m_loader.get());
+
+    SecurityOrigin* origin = getExecutionContext()->getSecurityOrigin();
     ASSERT(origin);
 
-    notificationManager()->show(WebSecurityOrigin(origin), m_data, this);
+    notificationManager()->show(WebSecurityOrigin(origin), m_data, loader->getResources(), this);
+    m_loader.clear();
 
     m_state = NotificationStateShowing;
 }
@@ -156,14 +173,14 @@ void Notification::close()
 
     if (m_persistentId == kInvalidPersistentId) {
         // Fire the close event asynchronously.
-        executionContext()->postTask(BLINK_FROM_HERE, createSameThreadTask(&Notification::dispatchCloseEvent, this));
+        getExecutionContext()->postTask(BLINK_FROM_HERE, createSameThreadTask(&Notification::dispatchCloseEvent, this));
 
         m_state = NotificationStateClosing;
         notificationManager()->close(this);
     } else {
         m_state = NotificationStateClosed;
 
-        SecurityOrigin* origin = executionContext()->securityOrigin();
+        SecurityOrigin* origin = getExecutionContext()->getSecurityOrigin();
         ASSERT(origin);
 
         notificationManager()->closePersistent(WebSecurityOrigin(origin), m_persistentId);
@@ -178,7 +195,7 @@ void Notification::dispatchShowEvent()
 void Notification::dispatchClickEvent()
 {
     UserGestureIndicator gestureIndicator(DefinitelyProcessingNewUserGesture);
-    ScopedWindowFocusAllowedIndicator windowFocusAllowed(executionContext());
+    ScopedWindowFocusAllowedIndicator windowFocusAllowed(getExecutionContext());
     dispatchEvent(Event::create(EventTypeNames::click));
 }
 
@@ -238,6 +255,11 @@ String Notification::icon() const
     return m_data.icon.string();
 }
 
+String Notification::badge() const
+{
+    return m_data.badge.string();
+}
+
 NavigatorVibration::VibrationPattern Notification::vibrate(bool& isNull) const
 {
     NavigatorVibration::VibrationPattern pattern;
@@ -247,6 +269,16 @@ NavigatorVibration::VibrationPattern Notification::vibrate(bool& isNull) const
         isNull = true;
 
     return pattern;
+}
+
+DOMTimeStamp Notification::timestamp() const
+{
+    return m_data.timestamp;
+}
+
+bool Notification::renotify() const
+{
+    return m_data.renotify;
 }
 
 bool Notification::silent() const
@@ -282,21 +314,33 @@ HeapVector<NotificationAction> Notification::actions() const
     actions.grow(m_data.actions.size());
 
     for (size_t i = 0; i < m_data.actions.size(); ++i) {
+        switch (m_data.actions[i].type) {
+        case WebNotificationAction::Button:
+            actions[i].setType("button");
+            break;
+        case WebNotificationAction::Text:
+            actions[i].setType("text");
+            break;
+        default:
+            NOTREACHED() << "Unknown action type: " << m_data.actions[i].type;
+        }
         actions[i].setAction(m_data.actions[i].action);
         actions[i].setTitle(m_data.actions[i].title);
+        actions[i].setIcon(m_data.actions[i].icon.string());
+        actions[i].setPlaceholder(m_data.actions[i].placeholder);
     }
 
     return actions;
 }
 
-String Notification::permissionString(WebNotificationPermission permission)
+String Notification::permissionString(mojom::PermissionStatus permission)
 {
     switch (permission) {
-    case WebNotificationPermissionAllowed:
+    case mojom::PermissionStatus::GRANTED:
         return "granted";
-    case WebNotificationPermissionDenied:
+    case mojom::PermissionStatus::DENIED:
         return "denied";
-    case WebNotificationPermissionDefault:
+    case mojom::PermissionStatus::ASK:
         return "default";
     }
 
@@ -309,9 +353,9 @@ String Notification::permission(ExecutionContext* context)
     return permissionString(checkPermission(context));
 }
 
-WebNotificationPermission Notification::checkPermission(ExecutionContext* context)
+mojom::PermissionStatus Notification::checkPermission(ExecutionContext* context)
 {
-    SecurityOrigin* origin = context->securityOrigin();
+    SecurityOrigin* origin = context->getSecurityOrigin();
     ASSERT(origin);
 
     return notificationManager()->checkPermission(WebSecurityOrigin(origin));
@@ -319,7 +363,7 @@ WebNotificationPermission Notification::checkPermission(ExecutionContext* contex
 
 ScriptPromise Notification::requestPermission(ScriptState* scriptState, NotificationPermissionCallback* deprecatedCallback)
 {
-    ExecutionContext* context = scriptState->executionContext();
+    ExecutionContext* context = scriptState->getExecutionContext();
     if (NotificationPermissionClient* permissionClient = NotificationPermissionClient::from(context))
         return permissionClient->requestPermission(scriptState, deprecatedCallback);
 
@@ -330,16 +374,12 @@ ScriptPromise Notification::requestPermission(ScriptState* scriptState, Notifica
 
 size_t Notification::maxActions()
 {
-    // Returns a fixed number for unit tests, which run without the availability of the Platform object.
-    if (!notificationManager())
-        return 2;
-
-    return notificationManager()->maxActions();
+    return kWebNotificationMaxActions;
 }
 
-bool Notification::dispatchEventInternal(PassRefPtrWillBeRawPtr<Event> event)
+DispatchEventResult Notification::dispatchEventInternal(Event* event)
 {
-    ASSERT(executionContext()->isContextThread());
+    ASSERT(getExecutionContext()->isContextThread());
     return EventTarget::dispatchEventInternal(event);
 }
 
@@ -354,18 +394,22 @@ void Notification::stop()
 
     m_state = NotificationStateClosed;
 
-    m_asyncRunner->stop();
+    m_prepareShowMethodRunner->stop();
+
+    if (m_loader)
+        m_loader->stop();
 }
 
 bool Notification::hasPendingActivity() const
 {
-    return m_state == NotificationStateShowing || m_asyncRunner->isActive();
+    return m_state == NotificationStateShowing || m_prepareShowMethodRunner->isActive() || m_loader;
 }
 
 DEFINE_TRACE(Notification)
 {
-    visitor->trace(m_asyncRunner);
-    RefCountedGarbageCollectedEventTargetWithInlineData<Notification>::trace(visitor);
+    visitor->trace(m_prepareShowMethodRunner);
+    visitor->trace(m_loader);
+    EventTargetWithInlineData::trace(visitor);
     ActiveDOMObject::trace(visitor);
 }
 

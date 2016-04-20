@@ -54,10 +54,11 @@ public:
 
     void addCSSRules(const char* ruleText);
     RuleSet& ruleSet();
+    CSSRuleList* cssRules();
 
 private:
-    RefPtrWillBePersistent<Document> m_document;
-    RefPtrWillBePersistent<CSSStyleSheet> m_styleSheet;
+    Persistent<Document> m_document;
+    Persistent<CSSStyleSheet> m_styleSheet;
 };
 
 } // namespace blink

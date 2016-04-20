@@ -9,13 +9,15 @@
 #include "ash/display/display_manager.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
+#include "ash/wm/common/window_animation_types.h"
+#include "ash/wm/common/window_state_util.h"
+#include "ash/wm/common/wm_event.h"
 #include "ash/wm/lock_layout_manager.h"
 #include "ash/wm/window_animations.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_state_delegate.h"
-#include "ash/wm/window_state_util.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/wm_event.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/gfx/geometry/rect.h"
@@ -34,7 +36,7 @@ LockWindowState::~LockWindowState() {
 
 void LockWindowState::OnWMEvent(wm::WindowState* window_state,
                                 const wm::WMEvent* event) {
-  aura::Window* window = window_state->window();
+  aura::Window* window = window_state->aura_window();
   gfx::Rect bounds = window->bounds();
 
   switch (event->type()) {
@@ -112,8 +114,9 @@ void LockWindowState::DetachState(wm::WindowState* window_state) {
 
 // static
 wm::WindowState* LockWindowState::SetLockWindowState(aura::Window* window) {
-  scoped_ptr<wm::WindowState::State> lock_state(new LockWindowState(window));
-  scoped_ptr<wm::WindowState::State> old_state(
+  std::unique_ptr<wm::WindowState::State> lock_state(
+      new LockWindowState(window));
+  std::unique_ptr<wm::WindowState::State> old_state(
       wm::GetWindowState(window)->SetStateObject(std::move(lock_state)));
   return wm::GetWindowState(window);
 }
@@ -132,7 +135,8 @@ void LockWindowState::UpdateWindow(wm::WindowState* window_state,
 
     current_state_type_ = target_state;
     ::wm::SetWindowVisibilityAnimationType(
-        window_state->window(), WINDOW_VISIBILITY_ANIMATION_TYPE_MINIMIZE);
+        window_state->aura_window(),
+        wm::WINDOW_VISIBILITY_ANIMATION_TYPE_MINIMIZE);
     window_state->window()->Hide();
     if (window_state->IsActive())
       window_state->Deactivate();
@@ -152,9 +156,9 @@ void LockWindowState::UpdateWindow(wm::WindowState* window_state,
   UpdateBounds(window_state);
   window_state->NotifyPostStateTypeChange(old_state_type);
 
-  if ((window_state->window()->TargetVisibility() ||
-      old_state_type == wm::WINDOW_STATE_TYPE_MINIMIZED) &&
-      !window_state->window()->layer()->visible()) {
+  if ((window_state->aura_window()->TargetVisibility() ||
+       old_state_type == wm::WINDOW_STATE_TYPE_MINIMIZED) &&
+      !window_state->aura_window()->layer()->visible()) {
     // The layer may be hidden if the window was previously minimized. Make
     // sure it's visible.
     window_state->window()->Show();
@@ -192,7 +196,7 @@ void LockWindowState::UpdateBounds(wm::WindowState* window_state) {
     keyboard_bounds = keyboard_controller->current_keyboard_bounds();
   }
   gfx::Rect bounds =
-      ScreenUtil::GetShelfDisplayBoundsInRoot(window_state->window());
+      ScreenUtil::GetShelfDisplayBoundsInRoot(window_state->aura_window());
 
   bounds.set_height(bounds.height() - keyboard_bounds.height());
 

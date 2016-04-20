@@ -34,14 +34,12 @@
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
 class LocalFrame;
 
-class Console final : public ConsoleBase, public DOMWindowProperty, public HeapSupplementable<Console> {
+class Console final : public ConsoleBase, public DOMWindowProperty, public Supplementable<Console> {
     USING_GARBAGE_COLLECTED_MIXIN(Console);
     DEFINE_WRAPPERTYPEINFO();
 public:
@@ -55,7 +53,7 @@ public:
 
 protected:
     ExecutionContext* context() override;
-    void reportMessageToConsole(PassRefPtrWillBeRawPtr<ConsoleMessage>) override;
+    void reportMessageToConsole(ConsoleMessage*) override;
 
 private:
     explicit Console(LocalFrame*);

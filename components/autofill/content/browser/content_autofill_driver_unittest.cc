@@ -5,12 +5,14 @@
 #include "components/autofill/content/browser/content_autofill_driver.h"
 
 #include <stdint.h>
+
 #include <algorithm>
+#include <memory>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/core/browser/autofill_external_delegate.h"
@@ -21,6 +23,7 @@
 #include "components/autofill/core/common/form_data_predictions.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_details.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "content/public/test/mock_render_process_host.h"
@@ -53,7 +56,7 @@ class TestContentAutofillDriver : public ContentAutofillDriver {
   TestContentAutofillDriver(content::RenderFrameHost* rfh,
                             AutofillClient* client)
       : ContentAutofillDriver(rfh, client, kAppLocale, kDownloadState) {
-    scoped_ptr<AutofillManager> autofill_manager(
+    std::unique_ptr<AutofillManager> autofill_manager(
         new MockAutofillManager(this, client));
     SetAutofillManager(std::move(autofill_manager));
   }
@@ -94,13 +97,13 @@ class ContentAutofillDriverTest : public content::RenderViewHostTestHarness {
         process()->sink().GetFirstMessageMatching(kMsgID);
     if (!message)
       return false;
-    base::Tuple<int, FormData> autofill_param;
+    std::tuple<int, FormData> autofill_param;
     if (!AutofillMsg_FillForm::Read(message, &autofill_param))
       return false;
     if (page_id)
-      *page_id = base::get<0>(autofill_param);
+      *page_id = std::get<0>(autofill_param);
     if (results)
-      *results = base::get<1>(autofill_param);
+      *results = std::get<1>(autofill_param);
     process()->sink().ClearMessages();
     return true;
   }
@@ -115,13 +118,13 @@ class ContentAutofillDriverTest : public content::RenderViewHostTestHarness {
         process()->sink().GetFirstMessageMatching(kMsgID);
     if (!message)
       return false;
-    base::Tuple<int, FormData> autofill_param;
+    std::tuple<int, FormData> autofill_param;
     if (!AutofillMsg_PreviewForm::Read(message, &autofill_param))
       return false;
     if (page_id)
-      *page_id = base::get<0>(autofill_param);
+      *page_id = std::get<0>(autofill_param);
     if (results)
-      *results = base::get<1>(autofill_param);
+      *results = std::get<1>(autofill_param);
     process()->sink().ClearMessages();
     return true;
   }
@@ -138,12 +141,12 @@ class ContentAutofillDriverTest : public content::RenderViewHostTestHarness {
         process()->sink().GetFirstMessageMatching(kMsgID);
     if (!message)
       return false;
-    base::Tuple<std::vector<FormDataPredictions> > autofill_param;
+    std::tuple<std::vector<FormDataPredictions> > autofill_param;
     if (!AutofillMsg_FieldTypePredictionsAvailable::Read(message,
                                                          &autofill_param))
       return false;
     if (predictions)
-      *predictions = base::get<0>(autofill_param);
+      *predictions = std::get<0>(autofill_param);
 
     process()->sink().ClearMessages();
     return true;
@@ -158,7 +161,7 @@ class ContentAutofillDriverTest : public content::RenderViewHostTestHarness {
         process()->sink().GetFirstMessageMatching(messageID);
     if (!message)
       return false;
-    base::Tuple<base::string16> autofill_param;
+    std::tuple<base::string16> autofill_param;
     switch (messageID) {
       case AutofillMsg_FillFieldWithValue::ID:
         if (!AutofillMsg_FillFieldWithValue::Read(message, &autofill_param))
@@ -177,7 +180,7 @@ class ContentAutofillDriverTest : public content::RenderViewHostTestHarness {
         NOTREACHED();
     }
     if (value)
-      *value = base::get<0>(autofill_param);
+      *value = std::get<0>(autofill_param);
     process()->sink().ClearMessages();
     return true;
   }
@@ -194,15 +197,16 @@ class ContentAutofillDriverTest : public content::RenderViewHostTestHarness {
     return true;
   }
 
-  scoped_ptr<TestAutofillClient> test_autofill_client_;
-  scoped_ptr<TestContentAutofillDriver> driver_;
+  std::unique_ptr<TestAutofillClient> test_autofill_client_;
+  std::unique_ptr<TestContentAutofillDriver> driver_;
 };
 
 TEST_F(ContentAutofillDriverTest, GetURLRequestContext) {
   net::URLRequestContextGetter* request_context =
       driver_->GetURLRequestContext();
   net::URLRequestContextGetter* expected_request_context =
-      web_contents()->GetBrowserContext()->GetRequestContext();
+      content::BrowserContext::GetDefaultStoragePartition(
+          web_contents()->GetBrowserContext())->GetURLRequestContext();
   EXPECT_EQ(request_context, expected_request_context);
 }
 

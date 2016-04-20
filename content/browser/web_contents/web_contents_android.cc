@@ -70,17 +70,17 @@ void JavaScriptResultCallback(const ScopedJavaGlobalRef<jobject>& callback,
 
 struct AccessibilitySnapshotParams {
   AccessibilitySnapshotParams(float scale,
-                              float horizontal_scroll,
-                              float vertical_offset)
+                              float vertical_offset,
+                              float horizontal_scroll)
       : scale_factor(scale),
-        x_scroll(horizontal_scroll),
         y_offset(vertical_offset),
+        x_scroll(horizontal_scroll),
         has_tree_data(false),
         should_select_leaf_nodes(false) {}
 
   float scale_factor;
-  float x_scroll;
   float y_offset;
+  float x_scroll;
   bool has_tree_data;
   // The current text selection within this tree, if any, expressed as the
   // node ID and character offset of the anchor (selection start) and focus
@@ -164,7 +164,7 @@ void AXTreeSnapshotCallback(const ScopedJavaGlobalRef<jobject>& callback,
     Java_WebContentsImpl_onAccessibilitySnapshot(env, nullptr, callback.obj());
     return;
   }
-  scoped_ptr<BrowserAccessibilityManagerAndroid> manager(
+  std::unique_ptr<BrowserAccessibilityManagerAndroid> manager(
       static_cast<BrowserAccessibilityManagerAndroid*>(
           BrowserAccessibilityManager::Create(result, nullptr)));
   manager->set_prune_tree_for_screen_reader(false);
@@ -180,15 +180,6 @@ void AXTreeSnapshotCallback(const ScopedJavaGlobalRef<jobject>& callback,
   ScopedJavaLocalRef<jobject> j_root = WalkAXTreeDepthFirst(env, root, params);
   Java_WebContentsImpl_onAccessibilitySnapshot(
       env, j_root.obj(), callback.obj());
-}
-
-void ReleaseAllMediaPlayers(WebContents* web_contents,
-                            RenderFrameHost* render_frame_host) {
-  BrowserMediaPlayerManager* manager =
-      MediaWebContentsObserverAndroid::FromWebContents(web_contents)
-          ->GetMediaPlayerManager(render_frame_host);
-  if (manager)
-    manager->ReleaseAllMediaPlayers();
 }
 
 }  // namespace
@@ -249,7 +240,7 @@ bool WebContentsAndroid::Register(JNIEnv* env) {
   return RegisterNativesImpl(env);
 }
 
-WebContentsAndroid::WebContentsAndroid(WebContents* web_contents)
+WebContentsAndroid::WebContentsAndroid(WebContentsImpl* web_contents)
     : web_contents_(web_contents),
       navigation_controller_(&(web_contents->GetController())),
       synchronous_compositor_client_(nullptr),
@@ -398,13 +389,17 @@ void WebContentsAndroid::OnShow(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   web_contents_->WasShown();
 }
 
-void WebContentsAndroid::ReleaseMediaPlayers(
+void WebContentsAndroid::SuspendAllMediaPlayers(
     JNIEnv* env,
     const JavaParamRef<jobject>& jobj) {
-#if defined(ENABLE_BROWSER_CDMS)
-  web_contents_->ForEachFrame(
-      base::Bind(&ReleaseAllMediaPlayers, base::Unretained(web_contents_)));
-#endif // defined(ENABLE_BROWSER_CDMS)
+  MediaWebContentsObserverAndroid::FromWebContents(web_contents_)
+      ->SuspendAllMediaPlayers();
+}
+
+void WebContentsAndroid::SetAudioMuted(JNIEnv* env,
+                                       const JavaParamRef<jobject>& jobj,
+                                       jboolean mute) {
+  web_contents_->SetAudioMuted(mute);
 }
 
 void WebContentsAndroid::ShowInterstitialPage(JNIEnv* env,
@@ -441,7 +436,7 @@ jboolean WebContentsAndroid::IsRenderWidgetHostViewReady(
 
 void WebContentsAndroid::ExitFullscreen(JNIEnv* env,
                                         const JavaParamRef<jobject>& obj) {
-  web_contents_->ExitFullscreen();
+  web_contents_->ExitFullscreen(/*will_cause_resize=*/false);
 }
 
 void WebContentsAndroid::UpdateTopControlsState(
@@ -680,6 +675,11 @@ void WebContentsAndroid::OnContextMenuClosed(JNIEnv* env,
                                              const JavaParamRef<jobject>& obj) {
   static_cast<WebContentsImpl*>(web_contents_)
       ->NotifyContextMenuClosed(CustomContextMenuContext());
+}
+
+void WebContentsAndroid::ReloadLoFiImages(JNIEnv* env,
+                                          const JavaParamRef<jobject>& obj) {
+  static_cast<WebContentsImpl*>(web_contents_)->ReloadLoFiImages();
 }
 
 void WebContentsAndroid::OnFinishGetContentBitmap(

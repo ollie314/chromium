@@ -12,7 +12,6 @@
 #include "base/md5.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_samples.h"
-#include "base/prefs/pref_registry_simple.h"
 #include "base/test/histogram_tester.h"
 #include "base/test/mock_entropy_provider.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
@@ -25,6 +24,7 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "net/socket/socket_test_util.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -185,7 +185,7 @@ TEST(DataReductionProxySettingsStandaloneTest, TestEndToEndSecureProxyCheck) {
   for (const TestCase& test_case : kTestCases) {
     net::TestURLRequestContext context(true);
 
-    scoped_ptr<DataReductionProxyTestContext> drp_test_context =
+    std::unique_ptr<DataReductionProxyTestContext> drp_test_context =
         DataReductionProxyTestContext::Builder()
             .WithURLRequestContext(&context)
             .WithTestConfigurator()
@@ -221,7 +221,7 @@ TEST(DataReductionProxySettingsStandaloneTest, TestEndToEndSecureProxyCheck) {
 
 TEST(DataReductionProxySettingsStandaloneTest, TestOnProxyEnabledPrefChange) {
   base::MessageLoopForIO message_loop;
-  scoped_ptr<DataReductionProxyTestContext> drp_test_context =
+  std::unique_ptr<DataReductionProxyTestContext> drp_test_context =
       DataReductionProxyTestContext::Builder()
           .WithMockConfig()
           .WithTestConfigurator()
@@ -539,7 +539,7 @@ TEST_F(DataReductionProxySettingsTest, TestLoFiSessionStateHistograms) {
   settings_->SetDataReductionProxyEnabled(false);
   settings_->data_reduction_proxy_service_->InitializeLoFiPrefs();
   test_context_->RunUntilIdle();
-  scoped_ptr<base::HistogramSamples> samples(
+  std::unique_ptr<base::HistogramSamples> samples(
       histogram_tester.GetHistogramSamplesSinceCreation(kUMALoFiSessionState));
   EXPECT_EQ(0, samples->TotalCount());
 

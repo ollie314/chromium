@@ -72,7 +72,7 @@ def _AddTracingResults(thread, results):
     if event.name == 'ThreadHeap::coalesce':
       values['oilpan_coalesce'].append(duration)
       continue
-    if event.name == 'Heap::collectGarbage':
+    if event.name == 'BlinkGCMarking':
       if reason is not None:
         values['oilpan_%s_mark' % reason].append(mark_time)
         values['oilpan_%s_lazy_sweep' % reason].append(lazy_sweep_time)
@@ -131,6 +131,7 @@ def _AddTracingResults(thread, results):
 
 
 class _OilpanGCTimesBase(page_test.PageTest):
+
   def __init__(self, action_name=''):
     super(_OilpanGCTimesBase, self).__init__(action_name)
 
@@ -157,6 +158,7 @@ class _OilpanGCTimesBase(page_test.PageTest):
 
 
 class OilpanGCTimesForSmoothness(_OilpanGCTimesBase):
+
   def __init__(self):
     super(OilpanGCTimesForSmoothness, self).__init__()
     self._interaction = None
@@ -173,6 +175,7 @@ class OilpanGCTimesForSmoothness(_OilpanGCTimesBase):
 
 
 class OilpanGCTimesForBlinkPerf(_OilpanGCTimesBase):
+
   def __init__(self):
     super(OilpanGCTimesForBlinkPerf, self).__init__()
     with open(os.path.join(os.path.dirname(__file__), '..', 'benchmarks',
@@ -190,6 +193,7 @@ class OilpanGCTimesForBlinkPerf(_OilpanGCTimesBase):
 
 
 class OilpanGCTimesForInternals(OilpanGCTimesForBlinkPerf):
+
   def __init__(self):
     super(OilpanGCTimesForInternals, self).__init__()
 

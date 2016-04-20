@@ -33,8 +33,9 @@ bool CanUseNetworkMonitor(bool external_plugin,
                                                render_frame_id);
 }
 
-scoped_ptr<net::NetworkInterfaceList> GetNetworkList() {
-  scoped_ptr<net::NetworkInterfaceList> list(new net::NetworkInterfaceList());
+std::unique_ptr<net::NetworkInterfaceList> GetNetworkList() {
+  std::unique_ptr<net::NetworkInterfaceList> list(
+      new net::NetworkInterfaceList());
   net::GetNetworkList(list.get(), net::INCLUDE_HOST_SCOPE_VIRTUAL_INTERFACES);
   return list;
 }
@@ -93,10 +94,10 @@ void PepperNetworkMonitorHost::GetAndSendNetworkList() {
 }
 
 void PepperNetworkMonitorHost::SendNetworkList(
-    scoped_ptr<net::NetworkInterfaceList> list) {
+    std::unique_ptr<net::NetworkInterfaceList> list) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  scoped_ptr<ppapi::proxy::SerializedNetworkList> list_copy(
+  std::unique_ptr<ppapi::proxy::SerializedNetworkList> list_copy(
       new ppapi::proxy::SerializedNetworkList(list->size()));
   for (size_t i = 0; i < list->size(); ++i) {
     const net::NetworkInterface& network = list->at(i);
@@ -106,7 +107,7 @@ void PepperNetworkMonitorHost::SendNetworkList(
     network_copy.addresses.resize(
         1, ppapi::NetAddressPrivateImpl::kInvalidNetAddress);
     bool result = ppapi::NetAddressPrivateImpl::IPEndPointToNetAddress(
-        network.address, 0, &(network_copy.addresses[0]));
+        network.address.bytes(), 0, &(network_copy.addresses[0]));
     DCHECK(result);
 
     // TODO(sergeyu): Currently net::NetworkInterfaceList provides

@@ -4,7 +4,8 @@
 
 #include "content/renderer/service_worker/embedded_worker_dispatcher.h"
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
@@ -39,8 +40,8 @@ class EmbeddedWorkerDispatcher::WorkerWrapper {
 
  private:
   ScopedChildProcessReference process_ref_;
-  scoped_ptr<blink::WebEmbeddedWorker> worker_;
-  scoped_ptr<EmbeddedWorkerDevToolsAgent> dev_tools_agent_;
+  std::unique_ptr<blink::WebEmbeddedWorker> worker_;
+  std::unique_ptr<EmbeddedWorkerDevToolsAgent> dev_tools_agent_;
 };
 
 EmbeddedWorkerDispatcher::EmbeddedWorkerDispatcher() : weak_factory_(this) {}
@@ -53,6 +54,8 @@ bool EmbeddedWorkerDispatcher::OnMessageReceived(
   IPC_BEGIN_MESSAGE_MAP(EmbeddedWorkerDispatcher, message)
     IPC_MESSAGE_HANDLER(EmbeddedWorkerMsg_StartWorker, OnStartWorker)
     IPC_MESSAGE_HANDLER(EmbeddedWorkerMsg_StopWorker, OnStopWorker)
+    IPC_MESSAGE_HANDLER(EmbeddedWorkerMsg_ResumeAfterDownload,
+                        OnResumeAfterDownload)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -76,17 +79,14 @@ void EmbeddedWorkerDispatcher::OnStartWorker(
     const EmbeddedWorkerMsg_StartWorker_Params& params) {
   DCHECK(!workers_.Lookup(params.embedded_worker_id));
   TRACE_EVENT0("ServiceWorker", "EmbeddedWorkerDispatcher::OnStartWorker");
-  RenderThread::Get()->EnsureWebKitInitialized();
-  scoped_ptr<WorkerWrapper> wrapper(
-      new WorkerWrapper(blink::WebEmbeddedWorker::create(
-                            new ServiceWorkerContextClient(
-                                params.embedded_worker_id,
-                                params.service_worker_version_id,
-                                params.scope,
-                                params.script_url,
-                                params.worker_devtools_agent_route_id),
-                            NULL),
-                        params.worker_devtools_agent_route_id));
+  std::unique_ptr<WorkerWrapper> wrapper(new WorkerWrapper(
+      blink::WebEmbeddedWorker::create(
+          new ServiceWorkerContextClient(params.embedded_worker_id,
+                                         params.service_worker_version_id,
+                                         params.scope, params.script_url,
+                                         params.worker_devtools_agent_route_id),
+          NULL),
+      params.worker_devtools_agent_route_id));
 
   blink::WebEmbeddedWorkerStartData start_data;
   start_data.scriptURL = params.script_url;
@@ -95,8 +95,13 @@ void EmbeddedWorkerDispatcher::OnStartWorker(
       params.wait_for_debugger ?
           blink::WebEmbeddedWorkerStartData::WaitForDebugger :
           blink::WebEmbeddedWorkerStartData::DontWaitForDebugger;
-  start_data.v8CacheOptions =
-      static_cast<blink::WebSettings::V8CacheOptions>(params.v8_cache_options);
+  start_data.v8CacheOptions = static_cast<blink::WebSettings::V8CacheOptions>(
+      params.settings.v8_cache_options);
+  start_data.dataSaverEnabled = params.settings.data_saver_enabled;
+  start_data.pauseAfterDownloadMode =
+      params.pause_after_download
+          ? blink::WebEmbeddedWorkerStartData::PauseAfterDownload
+          : blink::WebEmbeddedWorkerStartData::DontPauseAfterDownload;
 
   wrapper->worker()->startWorkerContext(start_data);
   workers_.AddWithID(wrapper.release(), params.embedded_worker_id);
@@ -115,6 +120,17 @@ void EmbeddedWorkerDispatcher::OnStopWorker(int embedded_worker_id) {
   // necessary)
   stop_worker_times_[embedded_worker_id] = base::TimeTicks::Now();
   wrapper->worker()->terminateWorkerContext();
+}
+
+void EmbeddedWorkerDispatcher::OnResumeAfterDownload(int embedded_worker_id) {
+  TRACE_EVENT0("ServiceWorker",
+               "EmbeddedWorkerDispatcher::OnResumeAfterDownload");
+  WorkerWrapper* wrapper = workers_.Lookup(embedded_worker_id);
+  if (!wrapper) {
+    LOG(WARNING) << "Got OnResumeAfterDownload for nonexistent worker";
+    return;
+  }
+  wrapper->worker()->resumeAfterDownload();
 }
 
 }  // namespace content

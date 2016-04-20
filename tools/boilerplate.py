@@ -25,7 +25,9 @@ EXTENSIONS_TO_COMMENTS = {
     'cc': '//',
     'mm': '//',
     'js': '//',
-    'py': '#'
+    'py': '#',
+    'gn': '#',
+    'gni': '#',
 }
 
 def _GetHeader(filename):
@@ -53,13 +55,21 @@ def _CppImplementation(filename):
   return '\n'.join(['', include])
 
 
+def _ObjCppImplementation(filename):
+  base, _ = os.path.splitext(filename)
+  include = '#import "' + base + '.h"'
+  return '\n'.join(['', include])
+
+
 def _CreateFile(filename):
   contents = _GetHeader(filename) + '\n'
 
   if filename.endswith('.h'):
     contents += _CppHeader(filename)
-  elif filename.endswith('.cc') or filename.endswith('.mm'):
+  elif filename.endswith('.cc'):
     contents += _CppImplementation(filename)
+  elif filename.endswith('.mm'):
+    contents += _ObjCppImplementation(filename)
 
   fd = open(filename, 'w')
   fd.write(contents)

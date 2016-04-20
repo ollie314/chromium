@@ -7,47 +7,45 @@
 
 #include "core/css/CSSFontFaceSource.h"
 #include "core/fetch/FontResource.h"
-#include "core/fetch/ResourcePtr.h"
 #include "wtf/Allocator.h"
 
 namespace blink {
 
-class FontLoader;
+class CSSFontSelector;
 
 enum FontDisplay {
     FontDisplayAuto,
     FontDisplayBlock,
     FontDisplaySwap,
     FontDisplayFallback,
-    FontDisplayOptional
+    FontDisplayOptional,
+    FontDisplayEnumMax
 };
 
 class RemoteFontFaceSource final : public CSSFontFaceSource, public FontResourceClient {
-    WILL_BE_USING_PRE_FINALIZER(RemoteFontFaceSource, dispose);
+    USING_PRE_FINALIZER(RemoteFontFaceSource, dispose);
 public:
     enum DisplayPeriod { BlockPeriod, SwapPeriod, FailurePeriod };
 
-    explicit RemoteFontFaceSource(FontResource*, PassRefPtrWillBeRawPtr<FontLoader>, FontDisplay);
+    explicit RemoteFontFaceSource(FontResource*, CSSFontSelector*, FontDisplay);
     ~RemoteFontFaceSource() override;
     void dispose();
 
-    FontResource* resource() override { return m_font.get(); }
     bool isLoading() const override;
     bool isLoaded() const override;
     bool isValid() const override;
-    DisplayPeriod displayPeriod() const { return m_period; }
+    DisplayPeriod getDisplayPeriod() const { return m_period; }
 
     void beginLoadIfNeeded() override;
 
-    void didStartFontLoad(FontResource*) override;
-    void fontLoaded(FontResource*) override;
+    void notifyFinished(Resource*) override;
     void fontLoadShortLimitExceeded(FontResource*) override;
     void fontLoadLongLimitExceeded(FontResource*) override;
     String debugName() const override { return "RemoteFontFaceSource"; }
 
     // For UMA reporting
     bool hadBlankText() override { return m_histograms.hadBlankText(); }
-    void paintRequested() { m_histograms.fallbackFontPainted(); }
+    void paintRequested() { m_histograms.fallbackFontPainted(m_period); }
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -60,27 +58,31 @@ private:
     class FontLoadHistograms {
         DISALLOW_NEW();
     public:
-        FontLoadHistograms() : m_loadStartTime(0), m_fallbackPaintTime(0) { }
+        FontLoadHistograms() : m_loadStartTime(0), m_blankPaintTime(0), m_isLongLimitExceeded(false) { }
         void loadStarted();
-        void fallbackFontPainted();
-        void recordRemoteFont(const FontResource*);
+        void fallbackFontPainted(DisplayPeriod);
+        void fontLoaded(bool isInterventionTriggered);
+        void longLimitExceeded(bool isInterventionTriggered);
         void recordFallbackTime(const FontResource*);
-        bool hadBlankText() { return m_fallbackPaintTime; }
+        void recordRemoteFont(const FontResource*);
+        bool hadBlankText() { return m_blankPaintTime; }
     private:
-        const char* histogramName(const FontResource*);
+        void recordLoadTimeHistogram(const FontResource*, int duration);
+        void recordInterventionResult(bool triggered);
         double m_loadStartTime;
-        double m_fallbackPaintTime;
+        double m_blankPaintTime;
+        bool m_isLongLimitExceeded;
     };
 
     void switchToSwapPeriod();
     void switchToFailurePeriod();
 
-    ResourcePtr<FontResource> m_font;
-    RefPtrWillBeMember<FontLoader> m_fontLoader;
+    Member<FontResource> m_font;
+    Member<CSSFontSelector> m_fontSelector;
     const FontDisplay m_display;
     DisplayPeriod m_period;
     FontLoadHistograms m_histograms;
-    bool m_isInterventionEnabled;
+    bool m_isInterventionTriggered;
 };
 
 } // namespace blink

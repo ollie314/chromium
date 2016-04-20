@@ -14,12 +14,14 @@ namespace mus {
 // Subclass with public ctor/dtor.
 class TestWindow : public Window {
  public:
-  TestWindow() { WindowPrivate(this).set_id(1); }
-  explicit TestWindow(Id window_id) { WindowPrivate(this).set_id(window_id); }
+  TestWindow() { WindowPrivate(this).set_server_id(1); }
+  explicit TestWindow(Id window_id) {
+    WindowPrivate(this).set_server_id(window_id);
+  }
   ~TestWindow() {}
 
  private:
-  MOJO_DISALLOW_COPY_AND_ASSIGN(TestWindow);
+  DISALLOW_COPY_AND_ASSIGN(TestWindow);
 };
 
 }  // namespace mus

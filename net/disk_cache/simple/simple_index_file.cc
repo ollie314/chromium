@@ -55,19 +55,10 @@ void UmaRecordIndexFileState(IndexFileState state, net::CacheType cache_type) {
                    "IndexFileStateOnLoad", cache_type, state, INDEX_STATE_MAX);
 }
 
-// Used in histograms. Please only add new values at the end.
-enum IndexInitMethod {
-  INITIALIZE_METHOD_RECOVERED = 0,
-  INITIALIZE_METHOD_LOADED = 1,
-  INITIALIZE_METHOD_NEWCACHE = 2,
-  INITIALIZE_METHOD_MAX = 3,
-};
-
-void UmaRecordIndexInitMethod(IndexInitMethod method,
+void UmaRecordIndexInitMethod(SimpleIndex::IndexInitMethod method,
                               net::CacheType cache_type) {
-  SIMPLE_CACHE_UMA(ENUMERATION,
-                   "IndexInitializeMethod", cache_type,
-                   method, INITIALIZE_METHOD_MAX);
+  SIMPLE_CACHE_UMA(ENUMERATION, "IndexInitializeMethod", cache_type, method,
+                   SimpleIndex::INITIALIZE_METHOD_MAX);
 }
 
 bool WritePickleFile(base::Pickle* pickle, const base::FilePath& file_name) {
@@ -198,7 +189,7 @@ void SimpleIndexFile::SyncWriteToDisk(net::CacheType cache_type,
                                       const base::FilePath& cache_directory,
                                       const base::FilePath& index_filename,
                                       const base::FilePath& temp_index_filename,
-                                      scoped_ptr<base::Pickle> pickle,
+                                      std::unique_ptr<base::Pickle> pickle,
                                       const base::TimeTicks& start_time,
                                       bool app_on_background) {
   DCHECK_EQ(index_filename.DirName().value(),
@@ -283,7 +274,7 @@ void SimpleIndexFile::WriteToDisk(const SimpleIndex::EntrySet& entry_set,
                                   bool app_on_background,
                                   const base::Closure& callback) {
   IndexMetadata index_metadata(entry_set.size(), cache_size);
-  scoped_ptr<base::Pickle> pickle = Serialize(index_metadata, entry_set);
+  std::unique_ptr<base::Pickle> pickle = Serialize(index_metadata, entry_set);
   base::Closure task =
       base::Bind(&SimpleIndexFile::SyncWriteToDisk,
                  cache_type_, cache_directory_, index_file_, temp_index_file_,
@@ -320,7 +311,8 @@ void SimpleIndexFile::SyncLoadIndexEntries(
       } else {
         UmaRecordIndexFileState(INDEX_STATE_FRESH, cache_type);
       }
-      UmaRecordIndexInitMethod(INITIALIZE_METHOD_LOADED, cache_type);
+      out_result->init_method = SimpleIndex::INITIALIZE_METHOD_LOADED;
+      UmaRecordIndexInitMethod(out_result->init_method, cache_type);
       return;
     }
     UmaRecordIndexFileState(INDEX_STATE_STALE, cache_type);
@@ -334,13 +326,15 @@ void SimpleIndexFile::SyncLoadIndexEntries(
   SIMPLE_CACHE_UMA(COUNTS, "IndexEntriesRestored", cache_type,
                    out_result->entries.size());
   if (index_file_existed) {
-    UmaRecordIndexInitMethod(INITIALIZE_METHOD_RECOVERED, cache_type);
+    out_result->init_method = SimpleIndex::INITIALIZE_METHOD_RECOVERED;
+
   } else {
-    UmaRecordIndexInitMethod(INITIALIZE_METHOD_NEWCACHE, cache_type);
+    out_result->init_method = SimpleIndex::INITIALIZE_METHOD_NEWCACHE;
     SIMPLE_CACHE_UMA(COUNTS,
                      "IndexCreatedEntryCount", cache_type,
                      out_result->entries.size());
   }
+  UmaRecordIndexInitMethod(out_result->init_method, cache_type);
 }
 
 // static
@@ -371,10 +365,10 @@ void SimpleIndexFile::SyncLoadFromDisk(const base::FilePath& index_filename,
 }
 
 // static
-scoped_ptr<base::Pickle> SimpleIndexFile::Serialize(
+std::unique_ptr<base::Pickle> SimpleIndexFile::Serialize(
     const SimpleIndexFile::IndexMetadata& index_metadata,
     const SimpleIndex::EntrySet& entries) {
-  scoped_ptr<base::Pickle> pickle(
+  std::unique_ptr<base::Pickle> pickle(
       new base::Pickle(sizeof(SimpleIndexFile::PickleHeader)));
 
   index_metadata.Serialize(pickle.get());
@@ -423,10 +417,7 @@ void SimpleIndexFile::Deserialize(const char* data, int data_len,
     return;
   }
 
-#if !defined(OS_WIN)
-  // TODO(gavinp): Consider using std::unordered_map.
-  entries->resize(index_metadata.GetNumberOfEntries() + kExtraSizeForMerge);
-#endif
+  entries->reserve(index_metadata.GetNumberOfEntries() + kExtraSizeForMerge);
   while (entries->size() < index_metadata.GetNumberOfEntries()) {
     uint64_t hash_key;
     EntryMetadata entry_metadata;

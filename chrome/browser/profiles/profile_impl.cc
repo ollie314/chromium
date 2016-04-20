@@ -5,6 +5,8 @@
 #include "chrome/browser/profiles/profile_impl.h"
 
 #include <stddef.h>
+
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -15,12 +17,10 @@
 #include "base/environment.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
-#include "base/prefs/json_pref_store.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -53,6 +53,8 @@
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
+#include "chrome/browser/policy/schema_registry_service.h"
+#include "chrome/browser/policy/schema_registry_service_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
@@ -76,6 +78,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
@@ -88,7 +91,10 @@
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/metrics/metrics_service.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
+#include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/json_pref_store.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/proxy_config/pref_proxy_config_tracker.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/signin_pref_names.h"
@@ -109,11 +115,6 @@
 #include "content/public/common/page_zoom.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(OS_ANDROID)
-#include "chrome/browser/media/protected_media_identifier_permission_context.h"
-#include "chrome/browser/media/protected_media_identifier_permission_context_factory.h"
-#endif
-
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/locale_change_guard.h"
 #include "chrome/browser/chromeos/preferences.h"
@@ -121,14 +122,10 @@
 #include "components/user_manager/user_manager.h"
 #endif
 
-#if defined(ENABLE_BACKGROUND)
+#if BUILDFLAG(ENABLE_BACKGROUND)
 #include "chrome/browser/background/background_mode_manager.h"
 #endif
 
-#if defined(ENABLE_CONFIGURATION_POLICY)
-#include "chrome/browser/policy/schema_registry_service.h"
-#include "chrome/browser/policy/schema_registry_service_factory.h"
-#include "components/policy/core/browser/browser_policy_connector.h"
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
@@ -136,7 +133,6 @@
 #else
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
 #include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
-#endif
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
@@ -406,7 +402,6 @@ ProfileImpl::ProfileImpl(
   // If we are creating the profile synchronously, then we should load the
   // policy data immediately.
   bool force_immediate_policy_load = (create_mode == CREATE_MODE_SYNCHRONOUS);
-#if defined(ENABLE_CONFIGURATION_POLICY)
   policy::BrowserPolicyConnector* connector =
       g_browser_process->browser_policy_connector();
   schema_registry_service_ =
@@ -424,7 +419,6 @@ ProfileImpl::ProfileImpl(
           sequenced_task_runner,
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
-#endif
 #endif
   profile_policy_connector_ =
       policy::ProfilePolicyConnectorFactory::CreateForBrowserContext(
@@ -458,6 +452,8 @@ ProfileImpl::ProfileImpl(
     pref_validation_delegate_ =
         safe_browsing_service->CreatePreferenceValidationDelegate(this);
   }
+
+  content::BrowserContext::Initialize(this, path_);
 
   {
     prefs_ = chrome_prefs::CreateProfilePrefs(
@@ -542,7 +538,7 @@ void ProfileImpl::DoFinalInit() {
           local_state,
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
 
-#if defined(ENABLE_BACKGROUND)
+#if BUILDFLAG(ENABLE_BACKGROUND)
   // Initialize the BackgroundModeManager - this has to be done here before
   // InitExtensions() is called because it relies on receiving notifications
   // when extensions are loaded. BackgroundModeManager is not needed under
@@ -558,7 +554,7 @@ void ProfileImpl::DoFinalInit() {
     if (g_browser_process->background_mode_manager())
       g_browser_process->background_mode_manager()->RegisterProfile(this);
   }
-#endif  // defined(ENABLE_BACKGROUND)
+#endif  // BUILDFLAG(ENABLE_BACKGROUND)
 
   base::FilePath cookie_path = GetPath();
   cookie_path = cookie_path.Append(chrome::kCookieFilename);
@@ -644,7 +640,7 @@ void ProfileImpl::DoFinalInit() {
 
   PushMessagingServiceImpl::InitializeForProfile(this);
 
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS) && !defined(OS_IOS)
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
   signin_ui_util::InitializePrefsForProfile(this);
 #endif
 }
@@ -710,9 +706,9 @@ Profile::ProfileType ProfileImpl::GetProfileType() const {
   return REGULAR_PROFILE;
 }
 
-scoped_ptr<content::ZoomLevelDelegate> ProfileImpl::CreateZoomLevelDelegate(
-    const base::FilePath& partition_path) {
-  return make_scoped_ptr(new ChromeZoomLevelPrefs(
+std::unique_ptr<content::ZoomLevelDelegate>
+ProfileImpl::CreateZoomLevelDelegate(const base::FilePath& partition_path) {
+  return base::WrapUnique(new ChromeZoomLevelPrefs(
       GetPrefs(), GetPath(), partition_path,
       ui_zoom::ZoomEventManager::GetForBrowserContext(this)->GetWeakPtr()));
 }
@@ -732,7 +728,7 @@ bool ProfileImpl::IsOffTheRecord() const {
 
 Profile* ProfileImpl::GetOffTheRecordProfile() {
   if (!off_the_record_profile_) {
-    scoped_ptr<Profile> p(CreateOffTheRecordProfile());
+    std::unique_ptr<Profile> p(CreateOffTheRecordProfile());
     off_the_record_profile_.swap(p);
 
     content::NotificationService::current()->Notify(
@@ -745,6 +741,7 @@ Profile* ProfileImpl::GetOffTheRecordProfile() {
 
 void ProfileImpl::DestroyOffTheRecordProfile() {
   off_the_record_profile_.reset();
+  otr_prefs_->ClearMutableValues();
 #if defined(ENABLE_EXTENSIONS)
   ExtensionPrefValueMapFactory::GetForBrowserContext(this)->
       ClearAllIncognitoSessionOnlyPreferences();
@@ -913,68 +910,16 @@ PrefService* ProfileImpl::GetOffTheRecordPrefs() {
   return otr_prefs_.get();
 }
 
-net::URLRequestContextGetter* ProfileImpl::CreateRequestContext(
-    content::ProtocolHandlerMap* protocol_handlers,
-    content::URLRequestInterceptorScopedVector request_interceptors) {
-  return io_data_.CreateMainRequestContextGetter(
-                     protocol_handlers, std::move(request_interceptors),
-                     g_browser_process->io_thread())
-      .get();
+content::ResourceContext* ProfileImpl::GetResourceContext() {
+  return io_data_.GetResourceContext();
 }
 
 net::URLRequestContextGetter* ProfileImpl::GetRequestContext() {
   return GetDefaultStoragePartition(this)->GetURLRequestContext();
 }
 
-net::URLRequestContextGetter* ProfileImpl::GetRequestContextForRenderProcess(
-    int renderer_child_id) {
-  content::RenderProcessHost* rph = content::RenderProcessHost::FromID(
-      renderer_child_id);
-
-  return rph->GetStoragePartition()->GetURLRequestContext();
-}
-
-net::URLRequestContextGetter* ProfileImpl::GetMediaRequestContext() {
-  // Return the default media context.
-  return io_data_.GetMediaRequestContextGetter().get();
-}
-
-net::URLRequestContextGetter*
-ProfileImpl::GetMediaRequestContextForRenderProcess(
-    int renderer_child_id) {
-  content::RenderProcessHost* rph = content::RenderProcessHost::FromID(
-      renderer_child_id);
-  content::StoragePartition* storage_partition = rph->GetStoragePartition();
-
-  return storage_partition->GetMediaURLRequestContext();
-}
-
-net::URLRequestContextGetter*
-ProfileImpl::GetMediaRequestContextForStoragePartition(
-    const base::FilePath& partition_path,
-    bool in_memory) {
-  return io_data_
-      .GetIsolatedMediaRequestContextGetter(partition_path, in_memory).get();
-}
-
-content::ResourceContext* ProfileImpl::GetResourceContext() {
-  return io_data_.GetResourceContext();
-}
-
 net::URLRequestContextGetter* ProfileImpl::GetRequestContextForExtensions() {
   return io_data_.GetExtensionsRequestContextGetter().get();
-}
-
-net::URLRequestContextGetter*
-ProfileImpl::CreateRequestContextForStoragePartition(
-    const base::FilePath& partition_path,
-    bool in_memory,
-    content::ProtocolHandlerMap* protocol_handlers,
-    content::URLRequestInterceptorScopedVector request_interceptors) {
-  return io_data_.CreateIsolatedAppRequestContextGetter(
-                     partition_path, in_memory, protocol_handlers,
-                     std::move(request_interceptors))
-      .get();
 }
 
 net::SSLConfigService* ProfileImpl::GetSSLConfigService() {
@@ -1025,6 +970,39 @@ content::PermissionManager* ProfileImpl::GetPermissionManager() {
 
 content::BackgroundSyncController* ProfileImpl::GetBackgroundSyncController() {
   return BackgroundSyncControllerFactory::GetForProfile(this);
+}
+
+net::URLRequestContextGetter* ProfileImpl::CreateRequestContext(
+    content::ProtocolHandlerMap* protocol_handlers,
+    content::URLRequestInterceptorScopedVector request_interceptors) {
+  return io_data_.CreateMainRequestContextGetter(
+                     protocol_handlers, std::move(request_interceptors),
+                     g_browser_process->io_thread())
+      .get();
+}
+
+net::URLRequestContextGetter*
+ProfileImpl::CreateRequestContextForStoragePartition(
+    const base::FilePath& partition_path,
+    bool in_memory,
+    content::ProtocolHandlerMap* protocol_handlers,
+    content::URLRequestInterceptorScopedVector request_interceptors) {
+  return io_data_.CreateIsolatedAppRequestContextGetter(
+                     partition_path, in_memory, protocol_handlers,
+                     std::move(request_interceptors))
+      .get();
+}
+
+net::URLRequestContextGetter* ProfileImpl::CreateMediaRequestContext() {
+  return io_data_.GetMediaRequestContextGetter().get();
+}
+
+net::URLRequestContextGetter*
+ProfileImpl::CreateMediaRequestContextForStoragePartition(
+    const base::FilePath& partition_path,
+    bool in_memory) {
+  return io_data_
+      .GetIsolatedMediaRequestContextGetter(partition_path, in_memory).get();
 }
 
 bool ProfileImpl::IsSameProfile(Profile* profile) {
@@ -1273,13 +1251,13 @@ PrefProxyConfigTracker* ProfileImpl::CreateProxyConfigTracker() {
       GetPrefs(), g_browser_process->local_state());
 }
 
-scoped_ptr<domain_reliability::DomainReliabilityMonitor>
+std::unique_ptr<domain_reliability::DomainReliabilityMonitor>
 ProfileImpl::CreateDomainReliabilityMonitor(PrefService* local_state) {
   domain_reliability::DomainReliabilityService* service =
       domain_reliability::DomainReliabilityServiceFactory::GetInstance()->
           GetForBrowserContext(this);
   if (!service)
-    return scoped_ptr<domain_reliability::DomainReliabilityMonitor>();
+    return std::unique_ptr<domain_reliability::DomainReliabilityMonitor>();
 
   return service->CreateMonitor(
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));

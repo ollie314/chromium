@@ -40,12 +40,16 @@ const uint32_t kDefaultOpenTabExpirationDurationSeconds =
 const uint32_t kDefaultMatchingRuleExpirationDurationSeconds =
     60 * 60 * 24;  // 24 hours.
 
+// Default maximum limit imposed for the initial UI navigation event buffer.
+// Once this limit is reached, the buffer will be cleared.
+const uint32_t kDefaultMaxNavigationEventsBuffered = 100;
+
 const char kUMAExpiredInactiveTabEntryRemovalDurationHistogram[] =
-    "DataUse.TabModel.ExpiredInactiveTabEntryRemovalDuration";
+    "DataUsage.TabModel.ExpiredInactiveTabEntryRemovalDuration";
 const char kUMAExpiredActiveTabEntryRemovalDurationHistogram[] =
-    "DataUse.TabModel.ExpiredActiveTabEntryRemovalDuration";
+    "DataUsage.TabModel.ExpiredActiveTabEntryRemovalDuration";
 const char kUMAUnexpiredTabEntryRemovalDurationHistogram[] =
-    "DataUse.TabModel.UnexpiredTabEntryRemovalDuration";
+    "DataUsage.TabModel.UnexpiredTabEntryRemovalDuration";
 
 // Returns true if |tab_id| is a valid tab ID.
 bool IsValidTabID(SessionID::id_type tab_id) {
@@ -133,6 +137,7 @@ DataUseTabModel::DataUseTabModel()
       closed_tab_expiration_duration_(GetClosedTabExpirationDuration()),
       open_tab_expiration_duration_(GetOpenTabExpirationDuration()),
       is_control_app_installed_(false),
+      data_use_ui_navigations_(new std::vector<DataUseUINavigationEvent>()),
       weak_factory_(this) {
   // Detach from current thread since rest of DataUseTabModel lives on the UI
   // thread and the current thread may not be UI thread..
@@ -149,16 +154,15 @@ base::WeakPtr<DataUseTabModel> DataUseTabModel::GetWeakPtr() {
 }
 
 void DataUseTabModel::InitOnUIThread(
-    const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
-    const base::WeakPtr<ExternalDataUseObserver>& external_data_use_observer) {
+    const ExternalDataUseObserverBridge* external_data_use_observer_bridge) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(io_task_runner);
+  DCHECK(external_data_use_observer_bridge);
 
   tick_clock_.reset(new base::DefaultTickClock());
-  data_use_matcher_.reset(new DataUseMatcher(
-      GetWeakPtr(), io_task_runner, external_data_use_observer,
-      GetDefaultMatchingRuleExpirationDuration()));
+  data_use_matcher_.reset(
+      new DataUseMatcher(GetWeakPtr(), external_data_use_observer_bridge,
+                         GetDefaultMatchingRuleExpirationDuration()));
 }
 
 void DataUseTabModel::OnNavigationEvent(SessionID::id_type tab_id,
@@ -167,6 +171,19 @@ void DataUseTabModel::OnNavigationEvent(SessionID::id_type tab_id,
                                         const std::string& package) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(IsValidTabID(tab_id));
+
+  if (data_use_ui_navigations_) {
+    // Buffer the navigation event for later processing.
+    data_use_ui_navigations_->push_back(
+        DataUseUINavigationEvent(tab_id, transition, url, package));
+
+    if (data_use_ui_navigations_->size() >=
+        kDefaultMaxNavigationEventsBuffered) {
+      ProcessBufferedNavigationEvents();
+    }
+    return;
+  }
+
   std::string current_label, new_label;
   bool is_package_match;
 
@@ -200,10 +217,8 @@ void DataUseTabModel::OnTabCloseEvent(SessionID::id_type tab_id) {
 }
 
 void DataUseTabModel::OnTrackingLabelRemoved(std::string label) {
-  for (auto& tab_entry : active_tabs_) {
-    if (tab_entry.second.EndTrackingWithLabel(label))
-      NotifyObserversOfTrackingEnding(tab_entry.first);
-  }
+  for (auto& tab_entry : active_tabs_)
+    tab_entry.second.EndTrackingWithLabel(label);
 }
 
 bool DataUseTabModel::GetLabelForTabAtTime(SessionID::id_type tab_id,
@@ -253,13 +268,33 @@ void DataUseTabModel::RegisterURLRegexes(
     const std::vector<std::string>& domain_path_regex,
     const std::vector<std::string>& label) {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  // Fetch rule requests could be started when control app was installed, and
+  // the response could be received when control app was uninstalled. Ignore
+  // these spurious rule fetch responses.
+  if (!is_control_app_installed_)
+    return;
   data_use_matcher_->RegisterURLRegexes(app_package_name, domain_path_regex,
                                         label);
+  ProcessBufferedNavigationEvents();
 }
 
-void DataUseTabModel::OnControlAppInstalled() {
-  is_control_app_installed_ = true;
-  data_use_matcher_->FetchMatchingRules();
+void DataUseTabModel::OnControlAppInstallStateChange(
+    bool is_control_app_installed) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_NE(is_control_app_installed_, is_control_app_installed);
+  DCHECK(data_use_matcher_);
+
+  is_control_app_installed_ = is_control_app_installed;
+  std::vector<std::string> empty;
+  if (!is_control_app_installed_) {
+    // Clear rules, and process the buffered UI navigation events.
+    data_use_matcher_->RegisterURLRegexes(empty, empty, empty);
+    ProcessBufferedNavigationEvents();
+  } else {
+    // Fetch the matching rules when the app is installed.
+    data_use_matcher_->FetchMatchingRules();
+  }
 }
 
 base::TimeTicks DataUseTabModel::NowTicks() const {
@@ -441,6 +476,19 @@ void DataUseTabModel::CompactTabEntries() {
             oldest_tab_entry_iterator->second.GetLatestStartOrEndTime(),
         base::TimeDelta::FromMinutes(1), base::TimeDelta::FromHours(1), 50);
     active_tabs_.erase(oldest_tab_entry_iterator);
+  }
+}
+
+void DataUseTabModel::ProcessBufferedNavigationEvents() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  if (!data_use_ui_navigations_)
+    return;
+  // Move the ownership of vector managed by |data_use_ui_navigations_| and
+  // release it, so that navigation events will be processed immediately.
+  const auto tmp_data_use_ui_navigations_ = std::move(data_use_ui_navigations_);
+  for (const auto& ui_event : *tmp_data_use_ui_navigations_.get()) {
+    OnNavigationEvent(ui_event.tab_id, ui_event.transition_type, ui_event.url,
+                      ui_event.package);
   }
 }
 

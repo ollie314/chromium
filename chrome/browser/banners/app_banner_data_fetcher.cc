@@ -6,6 +6,8 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/lazy_instance.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/banners/app_banner_debug_log.h"
@@ -25,12 +27,14 @@
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "net/base/load_flags.h"
+#include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/platform/modules/app_banner/WebAppBannerPromptReply.h"
 #include "ui/gfx/screen.h"
 
 namespace {
 
-base::TimeDelta gTimeDeltaForTesting;
+base::LazyInstance<base::TimeDelta> gTimeDeltaForTesting =
+    LAZY_INSTANCE_INITIALIZER;
 int gCurrentRequestID = -1;
 const char kPngExtension[] = ".png";
 
@@ -63,19 +67,19 @@ namespace banners {
 
 // static
 base::Time AppBannerDataFetcher::GetCurrentTime() {
-  return base::Time::Now() + gTimeDeltaForTesting;
+  return base::Time::Now() + gTimeDeltaForTesting.Get();
 }
 
 // static
 void AppBannerDataFetcher::SetTimeDeltaForTesting(int days) {
-  gTimeDeltaForTesting = base::TimeDelta::FromDays(days);
+  gTimeDeltaForTesting.Get() = base::TimeDelta::FromDays(days);
 }
 
-AppBannerDataFetcher::AppBannerDataFetcher(
-    content::WebContents* web_contents,
-    base::WeakPtr<Delegate> delegate,
-    int ideal_icon_size_in_dp,
-    int minimum_icon_size_in_dp)
+AppBannerDataFetcher::AppBannerDataFetcher(content::WebContents* web_contents,
+                                           base::WeakPtr<Delegate> delegate,
+                                           int ideal_icon_size_in_dp,
+                                           int minimum_icon_size_in_dp,
+                                           bool is_debug_mode)
     : WebContentsObserver(web_contents),
       weak_delegate_(delegate),
       ideal_icon_size_in_dp_(ideal_icon_size_in_dp),
@@ -83,6 +87,9 @@ AppBannerDataFetcher::AppBannerDataFetcher(
       is_active_(false),
       was_canceled_by_page_(false),
       page_requested_prompt_(false),
+      is_debug_mode_(is_debug_mode ||
+                     base::CommandLine::ForCurrentProcess()->HasSwitch(
+                         switches::kBypassAppBannerEngagementChecks)),
       event_request_id_(-1) {
   DCHECK(minimum_icon_size_in_dp <= ideal_icon_size_in_dp);
 }
@@ -184,7 +191,8 @@ void AppBannerDataFetcher::OnBannerPromptReply(
       !page_requested_prompt_) {
     was_canceled_by_page_ = true;
     referrer_ = referrer;
-    OutputDeveloperNotShownMessage(web_contents, kRendererRequestCancel);
+    OutputDeveloperNotShownMessage(web_contents, kRendererRequestCancel,
+                                   is_debug_mode_);
     return;
   }
 
@@ -250,7 +258,7 @@ void AppBannerDataFetcher::OnDidHasManifest(bool has_manifest) {
 
   if (!CheckFetcherIsStillAlive(web_contents) || !has_manifest) {
     if (!has_manifest)
-      OutputDeveloperNotShownMessage(web_contents, kNoManifest);
+      OutputDeveloperNotShownMessage(web_contents, kNoManifest, is_debug_mode_);
 
     Cancel();
     return;
@@ -268,7 +276,8 @@ void AppBannerDataFetcher::OnDidGetManifest(
     return;
   }
   if (manifest.IsEmpty()) {
-    OutputDeveloperNotShownMessage(web_contents, kManifestEmpty);
+    OutputDeveloperNotShownMessage(web_contents, kManifestEmpty,
+                                   is_debug_mode_);
     Cancel();
     return;
   }
@@ -278,24 +287,27 @@ void AppBannerDataFetcher::OnDidGetManifest(
     for (const auto& application : manifest.related_applications) {
       std::string platform = base::UTF16ToUTF8(application.platform.string());
       std::string id = base::UTF16ToUTF8(application.id.string());
-      if (weak_delegate_->HandleNonWebApp(platform, application.url, id))
+      if (weak_delegate_->HandleNonWebApp(platform, application.url, id,
+                                          is_debug_mode_))
         return;
     }
   }
 
-  if (!IsManifestValidForWebApp(manifest, web_contents)) {
+  if (!IsManifestValidForWebApp(manifest, web_contents, is_debug_mode_)) {
     Cancel();
     return;
   }
 
+  // Since the manifest is valid, one of short name or name must be non-null.
+  // Prefer name if it isn't null.
   web_app_data_ = manifest;
-  app_title_ = web_app_data_.name.string();
+  app_title_ = (web_app_data_.name.is_null())
+                   ? web_app_data_.short_name.string()
+                   : web_app_data_.name.string();
 
   if (IsWebAppInstalled(web_contents->GetBrowserContext(),
                         manifest.start_url) &&
-      !base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kBypassAppBannerEngagementChecks)) {
-    OutputDeveloperNotShownMessage(web_contents, kBannerAlreadyAdded);
+      !is_debug_mode_) {
     Cancel();
     return;
   }
@@ -327,7 +339,8 @@ void AppBannerDataFetcher::OnDidCheckHasServiceWorker(
 
   if (!has_service_worker) {
     TrackDisplayEvent(DISPLAY_EVENT_LACKS_SERVICE_WORKER);
-    OutputDeveloperNotShownMessage(web_contents, kNoMatchingServiceWorker);
+    OutputDeveloperNotShownMessage(web_contents, kNoMatchingServiceWorker,
+                                   is_debug_mode_);
     Cancel();
     return;
   }
@@ -337,15 +350,20 @@ void AppBannerDataFetcher::OnDidCheckHasServiceWorker(
 
 void AppBannerDataFetcher::OnHasServiceWorker(
     content::WebContents* web_contents) {
-  GURL icon_url =
-    ManifestIconSelector::FindBestMatchingIcon(
-        web_app_data_.icons,
-        ideal_icon_size_in_dp_,
-        minimum_icon_size_in_dp_,
-        gfx::Screen::GetScreenFor(web_contents->GetNativeView()));
+  GURL icon_url = ManifestIconSelector::FindBestMatchingIcon(
+      web_app_data_.icons, ideal_icon_size_in_dp_, minimum_icon_size_in_dp_);
 
-  if (!FetchAppIcon(web_contents, icon_url)) {
-    OutputDeveloperNotShownMessage(web_contents, kCannotDetermineBestIcon);
+  if (icon_url.is_empty()) {
+    OutputDeveloperNotShownMessage(
+        web_contents,
+        kNoIconMatchingRequirements,
+        base::IntToString(ManifestIconSelector::ConvertIconSizeFromDpToPx(
+            minimum_icon_size_in_dp_)),
+        is_debug_mode_);
+    Cancel();
+  } else if (!FetchAppIcon(web_contents, icon_url)) {
+    OutputDeveloperNotShownMessage(web_contents, kCannotDownloadIcon,
+                                   is_debug_mode_);
     Cancel();
   }
 }
@@ -370,16 +388,16 @@ void AppBannerDataFetcher::OnAppIconFetched(const SkBitmap& bitmap) {
     return;
   }
   if (bitmap.drawsNothing()) {
-    OutputDeveloperNotShownMessage(web_contents, kNoIconAvailable);
+    OutputDeveloperNotShownMessage(web_contents, kNoIconAvailable,
+                                   is_debug_mode_);
     Cancel();
     return;
   }
 
   RecordCouldShowBanner();
-  if (!CheckIfShouldShowBanner()) {
+  if (!is_debug_mode_ && !CheckIfShouldShowBanner()) {
     // At this point, the only possible case is that the banner has been added
     // to the homescreen, given all of the other checks that have been made.
-    OutputDeveloperNotShownMessage(web_contents, kBannerAlreadyAdded);
     Cancel();
     return;
   }
@@ -419,8 +437,8 @@ bool AppBannerDataFetcher::CheckIfShouldShowBanner() {
 bool AppBannerDataFetcher::CheckFetcherIsStillAlive(
     content::WebContents* web_contents) {
   if (!is_active_) {
-    OutputDeveloperNotShownMessage(web_contents,
-                                   kUserNavigatedBeforeBannerShown);
+    OutputDeveloperNotShownMessage(
+        web_contents, kUserNavigatedBeforeBannerShown, is_debug_mode_);
     return false;
   }
   if (!web_contents) {
@@ -432,22 +450,37 @@ bool AppBannerDataFetcher::CheckFetcherIsStillAlive(
 // static
 bool AppBannerDataFetcher::IsManifestValidForWebApp(
     const content::Manifest& manifest,
-    content::WebContents* web_contents) {
+    content::WebContents* web_contents,
+    bool is_debug_mode) {
   if (manifest.IsEmpty()) {
-    OutputDeveloperNotShownMessage(web_contents, kManifestEmpty);
+    OutputDeveloperNotShownMessage(web_contents, kManifestEmpty, is_debug_mode);
     return false;
   }
   if (!manifest.start_url.is_valid()) {
-    OutputDeveloperNotShownMessage(web_contents, kStartURLNotValid);
+    OutputDeveloperNotShownMessage(web_contents, kStartURLNotValid,
+                                   is_debug_mode);
     return false;
   }
-  if (manifest.name.is_null() && manifest.short_name.is_null()) {
-    OutputDeveloperNotShownMessage(web_contents,
-                                   kManifestMissingNameOrShortName);
+  if ((manifest.name.is_null() || manifest.name.string().empty()) &&
+      (manifest.short_name.is_null() || manifest.short_name.string().empty())) {
+    OutputDeveloperNotShownMessage(
+        web_contents, kManifestMissingNameOrShortName, is_debug_mode);
     return false;
   }
+
+  // TODO(dominickn,mlamouri): when Chrome supports "minimal-ui", it should be
+  // accepted. If we accept it today, it would fallback to "browser" and make
+  // this check moot. See https://crbug.com/604390
+  if (manifest.display != blink::WebDisplayModeStandalone &&
+      manifest.display != blink::WebDisplayModeFullscreen) {
+    OutputDeveloperNotShownMessage(
+        web_contents, kManifestDisplayStandaloneFullscreen, is_debug_mode);
+    return false;
+  }
+
   if (!DoesManifestContainRequiredIcon(manifest)) {
-    OutputDeveloperNotShownMessage(web_contents, kManifestMissingSuitableIcon);
+    OutputDeveloperNotShownMessage(web_contents, kManifestMissingSuitableIcon,
+                                   is_debug_mode);
     return false;
   }
   return true;

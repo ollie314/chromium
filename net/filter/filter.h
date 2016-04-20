@@ -48,13 +48,13 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "net/base/net_export.h"
 #include "net/base/sdch_manager.h"
@@ -151,7 +151,8 @@ class NET_EXPORT_PRIVATE Filter {
     FILTER_ERROR
   };
 
-  // Specifies type of filters that can be created.
+  // Specifies type of filters that can be created.  Do not change the values
+  // of this enum; it is preserved in a histogram.
   enum FilterType {
     FILTER_TYPE_BROTLI,
     FILTER_TYPE_DEFLATE,
@@ -160,6 +161,8 @@ class NET_EXPORT_PRIVATE Filter {
     FILTER_TYPE_SDCH,
     FILTER_TYPE_SDCH_POSSIBLE,  // Sdch possible, but pass through allowed.
     FILTER_TYPE_UNSUPPORTED,
+
+    FILTER_TYPE_MAX
   };
 
   virtual ~Filter();
@@ -233,6 +236,8 @@ class NET_EXPORT_PRIVATE Filter {
   // Returns a string describing the FilterTypes implemented by this filter.
   std::string OrderedFilterList() const;
 
+  FilterType type() const { return type_id_; }
+
  protected:
   friend class BrotliUnitTest;
   friend class GZipUnitTest;
@@ -303,7 +308,7 @@ class NET_EXPORT_PRIVATE Filter {
                                  int buffer_size);
 
   // An optional filter to process output from this filter.
-  scoped_ptr<Filter> next_filter_;
+  std::unique_ptr<Filter> next_filter_;
 
   // Remember what status or local filter last returned so we can better handle
   // chained filters.

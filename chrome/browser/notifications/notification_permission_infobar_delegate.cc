@@ -8,33 +8,26 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
-#include "components/url_formatter/elide_url.h"
-#include "net/base/escape.h"
-#include "ui/base/l10n/l10n_util.h"
 
 // static
 infobars::InfoBar* NotificationPermissionInfobarDelegate::Create(
     InfoBarService* infobar_service,
     const GURL& requesting_frame,
-    const std::string& display_languages,
     const base::Callback<void(bool, bool)>& callback) {
   return infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
-      scoped_ptr<ConfirmInfoBarDelegate>(
+      std::unique_ptr<ConfirmInfoBarDelegate>(
           new NotificationPermissionInfobarDelegate(requesting_frame,
-                                                    display_languages,
                                                     callback))));
 }
 
 NotificationPermissionInfobarDelegate::NotificationPermissionInfobarDelegate(
     const GURL& requesting_frame,
-    const std::string& display_languages,
     const base::Callback<void(bool, bool)>& callback)
     : PermissionInfobarDelegate(requesting_frame,
                                 content::PermissionType::NOTIFICATIONS,
                                 CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
                                 callback),
-      requesting_frame_(requesting_frame),
-      display_languages_(display_languages) {}
+      requesting_frame_(requesting_frame) {}
 
 NotificationPermissionInfobarDelegate::~NotificationPermissionInfobarDelegate()
     {}
@@ -48,9 +41,6 @@ int NotificationPermissionInfobarDelegate::GetIconId() const {
   return IDR_ANDROID_INFOBAR_NOTIFICATIONS;
 }
 
-base::string16 NotificationPermissionInfobarDelegate::GetMessageText() const {
-  return l10n_util::GetStringFUTF16(
-      IDS_NOTIFICATION_PERMISSIONS,
-      url_formatter::FormatUrlForSecurityDisplay(requesting_frame_.GetOrigin(),
-                                                 display_languages_));
+int NotificationPermissionInfobarDelegate::GetMessageResourceId() const {
+  return IDS_NOTIFICATION_PERMISSIONS;
 }

@@ -70,7 +70,7 @@ TEST_F(ManagePasswordsBubbleControllerTest, DismissingShouldCloseWindow) {
 
 TEST_F(ManagePasswordsBubbleControllerTest, ManageStateShouldHaveManageView) {
   SetUpManageState();
-  EXPECT_EQ([ManagePasswordsBubbleManageViewController class],
+  EXPECT_EQ([ManagePasswordsViewController class],
             [[controller() currentController] class]);
 }
 
@@ -79,6 +79,13 @@ TEST_F(ManagePasswordsBubbleControllerTest,
   SetUpUpdatePendingState(false);
   EXPECT_EQ([UpdatePendingPasswordViewController class],
             [[controller() currentController] class]);
+}
+
+TEST_F(ManagePasswordsBubbleControllerTest, ClearModelOnClose) {
+  SetUpUpdatePendingState(false);
+  EXPECT_TRUE(controller().model);
+  [controller() close];
+  EXPECT_FALSE(controller().model);
 }
 
 }  // namespace

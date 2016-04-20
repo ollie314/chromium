@@ -23,9 +23,9 @@
 #ifndef WTF_RefPtr_h
 #define WTF_RefPtr_h
 
+#include "wtf/Allocator.h"
 #include "wtf/HashTableDeletedValueType.h"
 #include "wtf/PassRefPtr.h"
-#include "wtf/RawPtr.h"
 #include <algorithm>
 #include <utility>
 
@@ -35,11 +35,11 @@ template <typename T> class PassRefPtr;
 template <typename T> class RefPtrValuePeeker;
 
 template <typename T> class RefPtr {
+    USING_FAST_MALLOC(RefPtr);
 public:
     ALWAYS_INLINE RefPtr() : m_ptr(nullptr) {}
     ALWAYS_INLINE RefPtr(std::nullptr_t) : m_ptr(nullptr) {}
     ALWAYS_INLINE RefPtr(T* ptr) : m_ptr(ptr) { refIfNotNull(ptr); }
-    template <typename U> RefPtr(const RawPtr<U>& ptr, EnsurePtrConvertibleArgDecl(U, T)) : m_ptr(ptr.get()) { refIfNotNull(m_ptr); }
     ALWAYS_INLINE explicit RefPtr(T& ref) : m_ptr(&ref) { m_ptr->ref(); }
     ALWAYS_INLINE RefPtr(const RefPtr& o) : m_ptr(o.m_ptr) { refIfNotNull(m_ptr); }
     template <typename U> RefPtr(const RefPtr<U>& o, EnsurePtrConvertibleArgDecl(U, T)) : m_ptr(o.get()) { refIfNotNull(m_ptr); }
@@ -70,11 +70,7 @@ public:
     ALWAYS_INLINE T* operator->() const { return m_ptr; }
 
     bool operator!() const { return !m_ptr; }
-
-    // This conversion operator allows implicit conversion to bool but not to
-    // other integer types.
-    typedef T* (RefPtr::*UnspecifiedBoolType);
-    operator UnspecifiedBoolType() const { return m_ptr ? &RefPtr::m_ptr : 0; }
+    explicit operator bool() const { return m_ptr; }
 
     RefPtr& operator=(RefPtr o) { swap(o); return *this; }
     RefPtr& operator=(std::nullptr_t) { clear(); return *this; }
@@ -135,6 +131,16 @@ template <typename T, typename U> inline bool operator==(T* a, const RefPtr<U>& 
     return a == b.get();
 }
 
+template <typename T> inline bool operator==(const RefPtr<T>& a, std::nullptr_t)
+{
+    return !a.get();
+}
+
+template <typename T> inline bool operator==(std::nullptr_t, const RefPtr<T>& b)
+{
+    return !b.get();
+}
+
 template <typename T, typename U> inline bool operator!=(const RefPtr<T>& a, const RefPtr<U>& b)
 {
     return a.get() != b.get();
@@ -150,6 +156,16 @@ template <typename T, typename U> inline bool operator!=(T* a, const RefPtr<U>& 
     return a != b.get();
 }
 
+template <typename T> inline bool operator!=(const RefPtr<T>& a, std::nullptr_t)
+{
+    return a.get();
+}
+
+template <typename T> inline bool operator!=(std::nullptr_t, const RefPtr<T>& b)
+{
+    return b.get();
+}
+
 template <typename T, typename U> inline RefPtr<T> static_pointer_cast(const RefPtr<U>& p)
 {
     return RefPtr<T>(static_cast<T*>(p.get()));
@@ -161,6 +177,7 @@ template <typename T> inline T* getPtr(const RefPtr<T>& p)
 }
 
 template <typename T> class RefPtrValuePeeker {
+    DISALLOW_NEW();
 public:
     ALWAYS_INLINE RefPtrValuePeeker(T* p): m_ptr(p) {}
     ALWAYS_INLINE RefPtrValuePeeker(std::nullptr_t): m_ptr(nullptr) {}

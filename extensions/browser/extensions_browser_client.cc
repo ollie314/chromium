@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "components/update_client/update_client.h"
+#include "extensions/browser/extension_api_frame_id_map.h"
 #include "extensions/browser/extension_error.h"
 #include "extensions/browser/updater/update_client_config.h"
 
@@ -20,6 +21,12 @@ ExtensionsBrowserClient* g_client = NULL;
 scoped_refptr<update_client::UpdateClient>
 ExtensionsBrowserClient::CreateUpdateClient(content::BrowserContext* context) {
   return scoped_refptr<update_client::UpdateClient>(nullptr);
+}
+
+std::unique_ptr<ExtensionApiFrameIdMapHelper>
+ExtensionsBrowserClient::CreateExtensionApiFrameIdMapHelper(
+    ExtensionApiFrameIdMap* map) {
+  return nullptr;
 }
 
 void ExtensionsBrowserClient::ReportError(content::BrowserContext* context,

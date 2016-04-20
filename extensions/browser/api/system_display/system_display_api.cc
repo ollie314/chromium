@@ -22,11 +22,8 @@ using api::system_display::DisplayUnitInfo;
 
 namespace SetDisplayProperties = api::system_display::SetDisplayProperties;
 
-typedef std::vector<linked_ptr<api::system_display::DisplayUnitInfo>>
-    DisplayInfo;
-
 bool SystemDisplayGetInfoFunction::RunSync() {
-  DisplayInfo all_displays_info =
+  DisplayUnitInfoList all_displays_info =
       DisplayInfoProvider::Get()->GetAllDisplaysInfo();
   results_ = api::system_display::GetInfo::Results::Create(all_displays_info);
   return true;
@@ -37,18 +34,18 @@ bool SystemDisplaySetDisplayPropertiesFunction::RunSync() {
   SetError("Function available only on ChromeOS.");
   return false;
 #else
-  if (!KioskModeInfo::IsKioskEnabled(extension())) {
+  if (extension() && !KioskModeInfo::IsKioskEnabled(extension())) {
     SetError("The extension needs to be kiosk enabled to use the function.");
     return false;
   }
   std::string error;
   scoped_ptr<SetDisplayProperties::Params> params(
       SetDisplayProperties::Params::Create(*args_));
-  bool success =
+  bool result =
       DisplayInfoProvider::Get()->SetInfo(params->id, params->info, &error);
-  if (!success)
+  if (!result)
     SetError(error);
-  return true;
+  return result;
 #endif
 }
 

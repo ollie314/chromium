@@ -4,6 +4,9 @@
 
 #include "chrome/browser/ui/browser_finder.h"
 
+#include "ash/shell.h"
+#include "ash/test/ash_test_helper.h"
+#include "ash/test/test_session_state_delegate.h"
 #include "base/macros.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
@@ -27,10 +30,12 @@ class BrowserFinderChromeOSTest : public BrowserWithTestWindowTest {
  protected:
   BrowserFinderChromeOSTest() : multi_user_window_manager_(nullptr) {}
 
-  TestingProfile* CreateMultiUserProfile(const std::string& user_email) {
+  TestingProfile* CreateMultiUserProfile(const AccountId& account_id) {
     TestingProfile* profile =
-        profile_manager_->CreateTestingProfile(user_email);
+        profile_manager_->CreateTestingProfile(account_id.GetUserEmail());
     GetUserWindowManager()->AddUser(profile);
+    ash::test::AshTestHelper::GetTestSessionStateDelegate()->AddUser(
+        account_id);
     return profile;
   }
 
@@ -59,7 +64,7 @@ class BrowserFinderChromeOSTest : public BrowserWithTestWindowTest {
     profile_manager_->SetLoggedIn(true);
     chromeos::WallpaperManager::Initialize();
     BrowserWithTestWindowTest::SetUp();
-    second_profile_ = CreateMultiUserProfile(test_account_id2_.GetUserEmail());
+    second_profile_ = CreateMultiUserProfile(test_account_id2_);
   }
 
   void TearDown() override {
@@ -73,7 +78,7 @@ class BrowserFinderChromeOSTest : public BrowserWithTestWindowTest {
   }
 
   TestingProfile* CreateProfile() override {
-    return CreateMultiUserProfile(test_account_id1_.GetUserEmail());
+    return CreateMultiUserProfile(test_account_id1_);
   }
 
   void DestroyProfile(TestingProfile* test_profile) override {
@@ -81,7 +86,7 @@ class BrowserFinderChromeOSTest : public BrowserWithTestWindowTest {
   }
 
   TestingProfile* second_profile_;
-  scoped_ptr<TestingProfileManager> profile_manager_;
+  std::unique_ptr<TestingProfileManager> profile_manager_;
   chrome::MultiUserWindowManagerChromeOS* multi_user_window_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserFinderChromeOSTest);
@@ -89,55 +94,41 @@ class BrowserFinderChromeOSTest : public BrowserWithTestWindowTest {
 
 TEST_F(BrowserFinderChromeOSTest, IncognitoBrowserMatchTest) {
   // GetBrowserCount() use kMatchAll to find all browser windows for profile().
-  EXPECT_EQ(1u,
-            chrome::GetBrowserCount(profile(), chrome::HOST_DESKTOP_TYPE_ASH));
-  EXPECT_TRUE(
-      chrome::FindAnyBrowser(profile(), true, chrome::HOST_DESKTOP_TYPE_ASH));
-  EXPECT_TRUE(
-      chrome::FindAnyBrowser(profile(), false, chrome::HOST_DESKTOP_TYPE_ASH));
+  EXPECT_EQ(1u, chrome::GetBrowserCount(profile()));
+  EXPECT_TRUE(chrome::FindAnyBrowser(profile(), true));
+  EXPECT_TRUE(chrome::FindAnyBrowser(profile(), false));
   set_browser(nullptr);
 
   // Create an incognito browser.
-  Browser::CreateParams params(profile()->GetOffTheRecordProfile(),
-                               chrome::HOST_DESKTOP_TYPE_ASH);
-  scoped_ptr<Browser> incognito_browser(
+  Browser::CreateParams params(profile()->GetOffTheRecordProfile());
+  std::unique_ptr<Browser> incognito_browser(
       chrome::CreateBrowserWithAuraTestWindowForParams(nullptr, &params));
   // Incognito windows are excluded in GetBrowserCount() because kMatchAll
   // doesn't match original profile of the browser with the given profile.
-  EXPECT_EQ(0u,
-            chrome::GetBrowserCount(profile(), chrome::HOST_DESKTOP_TYPE_ASH));
-  EXPECT_TRUE(
-      chrome::FindAnyBrowser(profile(), true, chrome::HOST_DESKTOP_TYPE_ASH));
-  EXPECT_FALSE(
-      chrome::FindAnyBrowser(profile(), false, chrome::HOST_DESKTOP_TYPE_ASH));
+  EXPECT_EQ(0u, chrome::GetBrowserCount(profile()));
+  EXPECT_TRUE(chrome::FindAnyBrowser(profile(), true));
+  EXPECT_FALSE(chrome::FindAnyBrowser(profile(), false));
 }
 
 TEST_F(BrowserFinderChromeOSTest, FindBrowserOwnedByAnotherProfile) {
   set_browser(nullptr);
 
-  Browser::CreateParams params(profile()->GetOriginalProfile(),
-                               chrome::HOST_DESKTOP_TYPE_ASH);
-  scoped_ptr<Browser> browser(
+  Browser::CreateParams params(profile()->GetOriginalProfile());
+  std::unique_ptr<Browser> browser(
       chrome::CreateBrowserWithAuraTestWindowForParams(nullptr, &params));
   GetUserWindowManager()->SetWindowOwner(browser->window()->GetNativeWindow(),
                                          test_account_id1_);
-  EXPECT_EQ(1u,
-            chrome::GetBrowserCount(profile(), chrome::HOST_DESKTOP_TYPE_ASH));
-  EXPECT_TRUE(
-      chrome::FindAnyBrowser(profile(), true, chrome::HOST_DESKTOP_TYPE_ASH));
-  EXPECT_TRUE(
-      chrome::FindAnyBrowser(profile(), false, chrome::HOST_DESKTOP_TYPE_ASH));
+  EXPECT_EQ(1u, chrome::GetBrowserCount(profile()));
+  EXPECT_TRUE(chrome::FindAnyBrowser(profile(), true));
+  EXPECT_TRUE(chrome::FindAnyBrowser(profile(), false));
 
   // Move the browser window to another user's desktop. Then no window should
   // be available for the current profile.
   GetUserWindowManager()->ShowWindowForUser(
       browser->window()->GetNativeWindow(), test_account_id2_);
-  EXPECT_EQ(0u,
-            chrome::GetBrowserCount(profile(), chrome::HOST_DESKTOP_TYPE_ASH));
-  EXPECT_FALSE(
-      chrome::FindAnyBrowser(profile(), true, chrome::HOST_DESKTOP_TYPE_ASH));
-  EXPECT_FALSE(
-      chrome::FindAnyBrowser(profile(), false, chrome::HOST_DESKTOP_TYPE_ASH));
+  EXPECT_EQ(0u, chrome::GetBrowserCount(profile()));
+  EXPECT_FALSE(chrome::FindAnyBrowser(profile(), true));
+  EXPECT_FALSE(chrome::FindAnyBrowser(profile(), false));
 }
 
 }  // namespace test

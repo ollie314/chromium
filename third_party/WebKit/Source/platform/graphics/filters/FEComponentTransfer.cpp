@@ -45,10 +45,10 @@ FEComponentTransfer::FEComponentTransfer(Filter* filter, const ComponentTransfer
 {
 }
 
-PassRefPtrWillBeRawPtr<FEComponentTransfer> FEComponentTransfer::create(Filter* filter, const ComponentTransferFunction& redFunc,
+FEComponentTransfer* FEComponentTransfer::create(Filter* filter, const ComponentTransferFunction& redFunc,
     const ComponentTransferFunction& greenFunc, const ComponentTransferFunction& blueFunc, const ComponentTransferFunction& alphaFunc)
 {
-    return adoptRefWillBeNoop(new FEComponentTransfer(filter, redFunc, greenFunc, blueFunc, alphaFunc));
+    return new FEComponentTransfer(filter, redFunc, greenFunc, blueFunc, alphaFunc);
 }
 
 static void identity(unsigned char*, const ComponentTransferFunction&)
@@ -128,17 +128,16 @@ bool FEComponentTransfer::affectsTransparentPixels()
     return 255 * intercept >= 1;
 }
 
-PassRefPtr<SkImageFilter> FEComponentTransfer::createImageFilter(SkiaImageFilterBuilder& builder)
+sk_sp<SkImageFilter> FEComponentTransfer::createImageFilter()
 {
-    RefPtr<SkImageFilter> input(builder.build(inputEffect(0), operatingColorSpace()));
+    sk_sp<SkImageFilter> input(SkiaImageFilterBuilder::build(inputEffect(0), operatingColorSpace()));
 
     unsigned char rValues[256], gValues[256], bValues[256], aValues[256];
     getValues(rValues, gValues, bValues, aValues);
 
-    SkAutoTUnref<SkColorFilter> colorFilter(SkTableColorFilter::CreateARGB(aValues, rValues, gValues, bValues));
-
-    SkImageFilter::CropRect cropRect = getCropRect(builder.cropOffset());
-    return adoptRef(SkColorFilterImageFilter::Create(colorFilter, input.get(), &cropRect));
+    SkImageFilter::CropRect cropRect = getCropRect();
+    sk_sp<SkColorFilter> colorFilter = SkTableColorFilter::MakeARGB(aValues, rValues, gValues, bValues);
+    return SkColorFilterImageFilter::Make(std::move(colorFilter), std::move(input), &cropRect);
 }
 
 void FEComponentTransfer::getValues(unsigned char rValues[256], unsigned char gValues[256], unsigned char bValues[256], unsigned char aValues[256])

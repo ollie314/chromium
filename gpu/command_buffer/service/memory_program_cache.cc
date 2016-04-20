@@ -16,26 +16,9 @@
 #include "gpu/command_buffer/service/disk_cache_proto.pb.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
-#include "gpu/command_buffer/service/gpu_switches.h"
+#include "gpu/command_buffer/service/gpu_preferences.h"
 #include "gpu/command_buffer/service/shader_manager.h"
 #include "ui/gl/gl_bindings.h"
-
-namespace {
-
-size_t GetCacheSizeBytes() {
-  const base::CommandLine* command_line =
-      base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kGpuProgramCacheSizeKb)) {
-    size_t size;
-    if (base::StringToSizeT(
-        command_line->GetSwitchValueNative(switches::kGpuProgramCacheSizeKb),
-        &size))
-      return size * 1024;
-  }
-  return gpu::kDefaultMaxProgramCacheMemoryBytes;
-}
-
-}  // anonymous namespace
 
 namespace gpu {
 namespace gles2 {
@@ -166,14 +149,10 @@ void RunShaderCallback(const ShaderCacheCallback& callback,
 
 }  // namespace
 
-MemoryProgramCache::MemoryProgramCache()
-    : max_size_bytes_(GetCacheSizeBytes()),
-      curr_size_bytes_(0),
-      store_(ProgramMRUCache::NO_AUTO_EVICT) {
-}
-
-MemoryProgramCache::MemoryProgramCache(const size_t max_cache_size_bytes)
+MemoryProgramCache::MemoryProgramCache(size_t max_cache_size_bytes,
+                                       bool disable_gpu_shader_disk_cache)
     : max_size_bytes_(max_cache_size_bytes),
+      disable_gpu_shader_disk_cache_(disable_gpu_shader_disk_cache),
       curr_size_bytes_(0),
       store_(ProgramMRUCache::NO_AUTO_EVICT) {
 }
@@ -234,10 +213,8 @@ ProgramCache::ProgramLoadResult MemoryProgramCache::LoadLinkedProgram(
   shader_b->set_varying_map(value->varying_map_1());
   shader_b->set_output_variable_list(value->output_variable_list_1());
 
-  if (!shader_callback.is_null() &&
-      !base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableGpuShaderDiskCache)) {
-    scoped_ptr<GpuProgramProto> proto(
+  if (!shader_callback.is_null() && !disable_gpu_shader_disk_cache_) {
+    std::unique_ptr<GpuProgramProto> proto(
         GpuProgramProto::default_instance().New());
     proto->set_sha(sha, kHashLength);
     proto->set_format(value->format());
@@ -265,7 +242,7 @@ void MemoryProgramCache::SaveLinkedProgram(
   if (length == 0 || static_cast<unsigned int>(length) > max_size_bytes_) {
     return;
   }
-  scoped_ptr<char[]> binary(new char[length]);
+  std::unique_ptr<char[]> binary(new char[length]);
   glGetProgramBinary(program,
                      length,
                      NULL,
@@ -305,10 +282,8 @@ void MemoryProgramCache::SaveLinkedProgram(
     store_.Erase(store_.rbegin());
   }
 
-  if (!shader_callback.is_null() &&
-      !base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableGpuShaderDiskCache)) {
-    scoped_ptr<GpuProgramProto> proto(
+  if (!shader_callback.is_null() && !disable_gpu_shader_disk_cache_) {
+    std::unique_ptr<GpuProgramProto> proto(
         GpuProgramProto::default_instance().New());
     proto->set_sha(sha, kHashLength);
     proto->set_format(format);
@@ -333,7 +308,8 @@ void MemoryProgramCache::SaveLinkedProgram(
 }
 
 void MemoryProgramCache::LoadProgram(const std::string& program) {
-  scoped_ptr<GpuProgramProto> proto(GpuProgramProto::default_instance().New());
+  std::unique_ptr<GpuProgramProto> proto(
+      GpuProgramProto::default_instance().New());
   if (proto->ParseFromString(program)) {
     AttributeMap vertex_attribs;
     UniformMap vertex_uniforms;
@@ -378,7 +354,7 @@ void MemoryProgramCache::LoadProgram(const std::string& program) {
           &fragment_output_variables);
     }
 
-    scoped_ptr<char[]> binary(new char[proto->program().length()]);
+    std::unique_ptr<char[]> binary(new char[proto->program().length()]);
     memcpy(binary.get(), proto->program().c_str(), proto->program().length());
 
     store_.Put(

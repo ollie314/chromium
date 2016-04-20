@@ -8,17 +8,18 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "remoting/base/capabilities.h"
+#include "remoting/base/constants.h"
 #include "remoting/base/logging.h"
 #include "remoting/codec/audio_encoder.h"
 #include "remoting/codec/audio_encoder_opus.h"
 #include "remoting/codec/audio_encoder_verbatim.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/audio_pump.h"
-#include "remoting/host/desktop_capturer_proxy.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/host_extension_session.h"
 #include "remoting/host/input_injector.h"
@@ -34,10 +35,6 @@
 #include "remoting/protocol/session_config.h"
 #include "remoting/protocol/video_frame_pump.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_capturer.h"
-#include "third_party/webrtc/modules/desktop_capture/mouse_cursor_monitor.h"
-
-// Default DPI to assume for old clients that use notifyClientDimensions.
-const int kDefaultDPI = 96;
 
 namespace remoting {
 
@@ -46,14 +43,14 @@ namespace {
 // Name of command-line flag to disable use of I444 by default.
 const char kDisableI444SwitchName[] = "disable-i444";
 
-scoped_ptr<AudioEncoder> CreateAudioEncoder(
+std::unique_ptr<AudioEncoder> CreateAudioEncoder(
     const protocol::SessionConfig& config) {
   const protocol::ChannelConfig& audio_config = config.audio_config();
 
   if (audio_config.codec == protocol::ChannelConfig::CODEC_VERBATIM) {
-    return make_scoped_ptr(new AudioEncoderVerbatim());
+    return base::WrapUnique(new AudioEncoderVerbatim());
   } else if (audio_config.codec == protocol::ChannelConfig::CODEC_OPUS) {
-    return make_scoped_ptr(new AudioEncoderOpus());
+    return base::WrapUnique(new AudioEncoderOpus());
   }
 
   NOTREACHED();
@@ -65,12 +62,7 @@ scoped_ptr<AudioEncoder> CreateAudioEncoder(
 ClientSession::ClientSession(
     EventHandler* event_handler,
     scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
-    scoped_ptr<protocol::ConnectionToClient> connection,
+    std::unique_ptr<protocol::ConnectionToClient> connection,
     DesktopEnvironmentFactory* desktop_environment_factory,
     const base::TimeDelta& max_duration,
     scoped_refptr<protocol::PairingRegistry> pairing_registry,
@@ -87,15 +79,7 @@ ClientSession::ClientSession(
       client_clipboard_factory_(clipboard_echo_filter_.client_filter()),
       max_duration_(max_duration),
       audio_task_runner_(audio_task_runner),
-      input_task_runner_(input_task_runner),
-      video_capture_task_runner_(video_capture_task_runner),
-      video_encode_task_runner_(video_encode_task_runner),
-      network_task_runner_(network_task_runner),
-      ui_task_runner_(ui_task_runner),
       pairing_registry_(pairing_registry),
-      is_authenticated_(false),
-      pause_video_(false),
-      lossless_video_encode_(false),
       // Note that |lossless_video_color_| defaults to true, but actually only
       // controls VP9 video stream color quality.
       lossless_video_color_(!base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -145,7 +129,7 @@ void ClientSession::NotifyClientResolution(
 
   ScreenResolution client_resolution(
       webrtc::DesktopSize(resolution.dips_width(), resolution.dips_height()),
-      webrtc::DesktopVector(kDefaultDPI, kDefaultDPI));
+      webrtc::DesktopVector(kDefaultDpi, kDefaultDpi));
 
   // Try to match the client's resolution.
   screen_controls_->SetScreenResolution(client_resolution);
@@ -201,7 +185,7 @@ void ClientSession::SetCapabilities(
   }
 
   // Compute the set of capabilities supported by both client and host.
-  client_capabilities_ = make_scoped_ptr(new std::string());
+  client_capabilities_ = base::WrapUnique(new std::string());
   if (capabilities.has_capabilities())
     *client_capabilities_ = capabilities.capabilities();
   capabilities_ = IntersectCapabilities(*client_capabilities_,
@@ -211,8 +195,6 @@ void ClientSession::SetCapabilities(
 
   VLOG(1) << "Client capabilities: " << *client_capabilities_;
 
-  // Calculate the set of capabilities enabled by both client and host and
-  // pass it to the desktop environment if it is available.
   desktop_environment_->SetCapabilities(capabilities_);
 }
 
@@ -237,13 +219,6 @@ void ClientSession::DeliverClientMessage(
       if (message.has_data())
         reply.set_data(message.data().substr(0, 16));
       connection_->client_stub()->DeliverHostMessage(reply);
-      return;
-    } else if (message.type() == "gnubby-auth") {
-      if (gnubby_auth_handler_) {
-        gnubby_auth_handler_->DeliverClientMessage(message.data());
-      } else {
-        HOST_LOG << "gnubby auth is not enabled";
-      }
       return;
     } else {
       if (extension_manager_->OnExtensionMessage(message))
@@ -314,16 +289,35 @@ void ClientSession::OnConnectionAuthenticated(
   connection_->set_clipboard_stub(&disable_clipboard_filter_);
   clipboard_echo_filter_.set_host_stub(input_injector_.get());
   clipboard_echo_filter_.set_client_stub(connection_->client_stub());
+}
 
-  // Create a GnubbyAuthHandler to proxy gnubbyd messages.
-  gnubby_auth_handler_ = desktop_environment_->CreateGnubbyAuthHandler(
-      connection_->client_stub());
+void ClientSession::CreateVideoStreams(
+    protocol::ConnectionToClient* connection) {
+  DCHECK(CalledOnValidThread());
+  DCHECK_EQ(connection_.get(), connection);
+
+  // Create a VideoStream to pump frames from the capturer to the client.
+  video_stream_ = connection_->StartVideoStream(
+      desktop_environment_->CreateVideoCapturer());
+
+  video_stream_->SetSizeCallback(
+      base::Bind(&ClientSession::OnScreenSizeChanged, base::Unretained(this)));
+
+  // Apply video-control parameters to the new stream.
+  video_stream_->SetLosslessEncode(lossless_video_encode_);
+  video_stream_->SetLosslessColor(lossless_video_color_);
+
+  // Pause capturing if necessary.
+  video_stream_->Pause(pause_video_);
 }
 
 void ClientSession::OnConnectionChannelsConnected(
     protocol::ConnectionToClient* connection) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(connection_.get(), connection);
+
+  DCHECK(!channels_connected_);
+  channels_connected_ = true;
 
   // Negotiate capabilities with the client.
   VLOG(1) << "Host capabilities: " << host_capabilities_;
@@ -335,16 +329,23 @@ void ClientSession::OnConnectionChannelsConnected(
   input_injector_->Start(CreateClipboardProxy());
   SetDisableInputs(false);
 
-  // Start recording video.
-  ResetVideoPipeline();
+  // Create MouseShapePump to send mouse cursor shape.
+  mouse_shape_pump_.reset(
+      new MouseShapePump(desktop_environment_->CreateMouseCursorMonitor(),
+                         connection_->client_stub()));
 
   // Create an AudioPump if audio is enabled, to pump audio samples.
   if (connection_->session()->config().is_audio_enabled()) {
-    scoped_ptr<AudioEncoder> audio_encoder =
+    std::unique_ptr<AudioEncoder> audio_encoder =
         CreateAudioEncoder(connection_->session()->config());
     audio_pump_.reset(new AudioPump(
         audio_task_runner_, desktop_environment_->CreateAudioCapturer(),
         std::move(audio_encoder), connection_->audio_stub()));
+  }
+
+  if (pending_video_layout_message_) {
+    connection_->client_stub()->SetVideoLayout(*pending_video_layout_message_);
+    pending_video_layout_message_.reset();
   }
 
   // Notify the event handler that all our channels are now connected.
@@ -381,11 +382,6 @@ void ClientSession::OnConnectionClosed(
 
   // Notify the ChromotingHost that this client is disconnected.
   event_handler_->OnSessionClosed(this);
-}
-
-void ClientSession::OnCreateVideoEncoder(scoped_ptr<VideoEncoder>* encoder) {
-  DCHECK(CalledOnValidThread());
-  extension_manager_->OnCreateVideoEncoder(encoder);
 }
 
 void ClientSession::OnInputEventReceived(
@@ -437,66 +433,54 @@ void ClientSession::SetDisableInputs(bool disable_inputs) {
   disable_clipboard_filter_.set_enabled(!disable_inputs);
 }
 
-void ClientSession::ResetVideoPipeline() {
+std::unique_ptr<protocol::ClipboardStub> ClientSession::CreateClipboardProxy() {
   DCHECK(CalledOnValidThread());
 
-  video_stream_.reset();
-  mouse_shape_pump_.reset();
-
-  // Create VideoEncoder and DesktopCapturer to match the session's video
-  // channel configuration.
-  scoped_ptr<webrtc::DesktopCapturer> video_capturer =
-      desktop_environment_->CreateVideoCapturer();
-  extension_manager_->OnCreateVideoCapturer(&video_capturer);
-
-  // Don't start the video stream if the extension took ownership of the
-  // capturer.
-  if (!video_capturer)
-    return;
-
-  // Create MouseShapePump to send mouse cursor shape.
-  mouse_shape_pump_.reset(
-      new MouseShapePump(video_capture_task_runner_,
-                         desktop_environment_->CreateMouseCursorMonitor(),
-                         connection_->client_stub()));
-
-  // Create a VideoStream to pump frames from the capturer to the client.
-
-  // TODO(sergeyu): Move DesktopCapturerProxy creation to DesktopEnvironment.
-  // When using IpcDesktopCapturer the capture thread is not useful.
-  scoped_ptr<webrtc::DesktopCapturer> capturer_proxy(new DesktopCapturerProxy(
-      video_capture_task_runner_, std::move(video_capturer)));
-
-  video_stream_ = connection_->StartVideoStream(std::move(capturer_proxy));
-  video_stream_->SetSizeCallback(
-      base::Bind(&ClientSession::OnScreenSizeChanged, base::Unretained(this)));
-
-  // Apply video-control parameters to the new stream.
-  video_stream_->SetLosslessEncode(lossless_video_encode_);
-  video_stream_->SetLosslessColor(lossless_video_color_);
-
-  // Pause capturing if necessary.
-  video_stream_->Pause(pause_video_);
-}
-
-void ClientSession::SetGnubbyAuthHandlerForTesting(
-    GnubbyAuthHandler* gnubby_auth_handler) {
-  DCHECK(CalledOnValidThread());
-  gnubby_auth_handler_.reset(gnubby_auth_handler);
-}
-
-scoped_ptr<protocol::ClipboardStub> ClientSession::CreateClipboardProxy() {
-  DCHECK(CalledOnValidThread());
-
-  return make_scoped_ptr(
+  return base::WrapUnique(
       new protocol::ClipboardThreadProxy(client_clipboard_factory_.GetWeakPtr(),
                                          base::ThreadTaskRunnerHandle::Get()));
 }
 
-void ClientSession::OnScreenSizeChanged(const webrtc::DesktopSize& size) {
+void ClientSession::OnScreenSizeChanged(const webrtc::DesktopSize& size,
+                                        const webrtc::DesktopVector& dpi) {
   DCHECK(CalledOnValidThread());
-  mouse_clamping_filter_.set_input_size(size);
+
   mouse_clamping_filter_.set_output_size(size);
+
+  switch (connection_->session()->config().protocol()) {
+    case protocol::SessionConfig::Protocol::ICE:
+      mouse_clamping_filter_.set_input_size(size);
+      break;
+
+    case protocol::SessionConfig::Protocol::WEBRTC: {
+      // When using WebRTC protocol the client sends mouse coordinates in DIPs,
+      // while InputInjector expects them in physical pixels.
+      // TODO(sergeyu): Fix InputInjector implementations to use DIPs as well.
+      webrtc::DesktopSize size_dips(size.width() * kDefaultDpi / dpi.x(),
+                                    size.height() * kDefaultDpi / dpi.y());
+      mouse_clamping_filter_.set_input_size(size_dips);
+
+      // Generate and send VideoLayout message.
+      protocol::VideoLayout layout;
+      protocol::VideoTrackLayout* video_track = layout.add_video_track();
+      video_track->set_position_x(0);
+      video_track->set_position_y(0);
+      video_track->set_width(size_dips.width());
+      video_track->set_height(size_dips.height());
+      video_track->set_x_dpi(dpi.x());
+      video_track->set_y_dpi(dpi.y());
+
+      // VideoLayout can be sent only after the control channel is connected.
+      // TODO(sergeyu): Change client_stub() implementation to allow queuing
+      // while connection is being established.
+      if (channels_connected_) {
+        connection_->client_stub()->SetVideoLayout(layout);
+      } else {
+        pending_video_layout_message_.reset(new protocol::VideoLayout(layout));
+      }
+      break;
+    }
+  }
 }
 
 }  // namespace remoting

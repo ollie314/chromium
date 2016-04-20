@@ -5,15 +5,17 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_NAVIGATION_OBSERVER_H_
 #define CHROME_BROWSER_EXTENSIONS_NAVIGATION_OBSERVER_H_
 
+#include <memory>
 #include <set>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/browser/extension_registry_observer.h"
 
 class Profile;
 
@@ -27,7 +29,8 @@ namespace extensions {
 // navigates into an extension that has been disabled due to a permission
 // increase, it prompts the user to accept the new permissions and re-enables
 // the extension.
-class NavigationObserver : public content::NotificationObserver {
+class NavigationObserver : public content::NotificationObserver,
+                           public ExtensionRegistryObserver {
  public:
   explicit NavigationObserver(Profile* profile);
   ~NavigationObserver() override;
@@ -49,12 +52,17 @@ class NavigationObserver : public content::NotificationObserver {
 
   void OnInstallPromptDone(ExtensionInstallPrompt::Result result);
 
+  // extensions::ExtensionRegistryObserver:
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const Extension* extension,
+                              UninstallReason reason) override;
+
   content::NotificationRegistrar registrar_;
 
   Profile* profile_;
 
   // The UI used to confirm enabling extensions.
-  scoped_ptr<ExtensionInstallPrompt> extension_install_prompt_;
+  std::unique_ptr<ExtensionInstallPrompt> extension_install_prompt_;
 
   // The data we keep track of when prompting to enable extensions.
   std::string in_progress_prompt_extension_id_;
@@ -62,6 +70,9 @@ class NavigationObserver : public content::NotificationObserver {
 
   // The extension ids we've already prompted the user about.
   std::set<std::string> prompted_extensions_;
+
+  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
+      extension_registry_observer_;
 
   base::WeakPtrFactory<NavigationObserver> weak_factory_;
 

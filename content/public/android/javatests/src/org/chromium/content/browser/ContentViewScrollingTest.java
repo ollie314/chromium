@@ -5,13 +5,11 @@
 package org.chromium.content.browser;
 
 import android.content.res.Configuration;
-import android.graphics.Canvas;
 import android.os.SystemClock;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
-import android.view.View;
 
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
@@ -40,13 +38,6 @@ public class ContentViewScrollingTest extends ContentShellTestBase {
 
         private boolean mScrollChanged;
         private final Object mLock = new Object();
-
-
-
-        @Override
-        public boolean drawChild(Canvas canvas, View child, long drawingTime) {
-            return false;
-        }
 
         @Override
         public boolean super_onKeyUp(int keyCode, KeyEvent event) {
@@ -101,7 +92,7 @@ public class ContentViewScrollingTest extends ContentShellTestBase {
 
     private void assertWaitForScroll(final boolean hugLeft, final boolean hugTop)
             throws InterruptedException {
-        CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 // Scrolling and flinging don't result in exact coordinates.
@@ -338,7 +329,7 @@ public class ContentViewScrollingTest extends ContentShellTestBase {
         });
         scrollTo(scrollToX, scrollToY);
         assertWaitForScroll(false, false);
-        CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 return containerViewInternals.isScrollChanged();

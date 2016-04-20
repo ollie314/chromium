@@ -8,17 +8,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "ash/ash_export.h"
 #include "ash/display/display_info.h"
-#include "ash/display/display_layout.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "ui/display/manager/display_layout.h"
 #include "ui/gfx/display.h"
 
 #if defined(OS_CHROMEOS)
@@ -82,8 +82,6 @@ class ASH_EXPORT DisplayManager
     virtual void PostDisplayConfigurationChange() = 0;
   };
 
-  typedef std::vector<gfx::Display> DisplayList;
-
   // How the second display will be used.
   // 1) EXTENDED mode extends the desktop to the second dislpay.
   // 2) MIRRORING mode copies the content of the primary display to
@@ -133,15 +131,15 @@ class ASH_EXPORT DisplayManager
   void RefreshFontParams();
 
   // Returns the display layout used for current displays.
-  DisplayLayout GetCurrentDisplayLayout();
+  const display::DisplayLayout& GetCurrentDisplayLayout() const;
 
-  // Returns the current display pair.
-  DisplayIdPair GetCurrentDisplayIdPair() const;
+  // Returns the current display list.
+  display::DisplayIdList GetCurrentDisplayIdList() const;
 
   // Sets the layout for the current display pair. The |layout| specifies
-  // the locaion of the secondary display relative to the primary.
+  // the locaion of the displays relative to their parents.
   void SetLayoutForCurrentDisplays(
-      const DisplayLayout& layout_relative_to_primary);
+      std::unique_ptr<display::DisplayLayout> layout);
 
   // Returns display for given |id|;
   const gfx::Display& GetDisplayForId(int64_t id) const;
@@ -225,7 +223,7 @@ class ASH_EXPORT DisplayManager
       const std::vector<DisplayInfo>& display_info_list);
 
   // Updates the internal display data and notifies observers about the changes.
-  void UpdateDisplays(const std::vector<DisplayInfo>& display_info_list);
+  void UpdateDisplaysWith(const std::vector<DisplayInfo>& display_info_list);
 
   // Updates current displays using current |display_info_|.
   void UpdateDisplays();
@@ -240,7 +238,7 @@ class ASH_EXPORT DisplayManager
   // when displays are mirrored.
   size_t GetNumDisplays() const;
 
-  const DisplayList& active_display_list() const {
+  const display::DisplayList& active_display_list() const {
     return active_display_list_;
   }
 
@@ -255,7 +253,7 @@ class ASH_EXPORT DisplayManager
   // Returns the mirroring status.
   bool IsInMirrorMode() const;
   int64_t mirroring_display_id() const { return mirroring_display_id_; }
-  const DisplayList& software_mirroring_display_list() const {
+  const display::DisplayList& software_mirroring_display_list() const {
     return software_mirroring_display_list_;
   }
 
@@ -320,7 +318,7 @@ class ASH_EXPORT DisplayManager
   // Creates a MouseWarpController for the current display
   // configuration. |drag_source| is the window where dragging
   // started, or nullptr otherwise.
-  scoped_ptr<MouseWarpController> CreateMouseWarpController(
+  std::unique_ptr<MouseWarpController> CreateMouseWarpController(
       aura::Window* drag_source) const;
 
   // Create a screen instance to be used during shutdown.
@@ -391,30 +389,30 @@ private:
   // When the size of |display_list| equals 2, the bounds are updated using
   // the layout registered for the display pair. For more than 2 displays,
   // the bounds are updated using horizontal layout.
-  // Returns true if any of the non-primary display's bounds has been changed
-  // from current value, or false otherwise.
-  bool UpdateNonPrimaryDisplayBoundsForLayout(
-      DisplayList* display_list, std::vector<size_t>* updated_indices) const;
+  void UpdateNonPrimaryDisplayBoundsForLayout(
+      display::DisplayList* display_list,
+      std::vector<size_t>* updated_indices);
 
   void CreateMirrorWindowIfAny();
 
   void RunPendingTasksForTest();
 
-  static void UpdateDisplayBoundsForLayout(
-      const DisplayLayout& layout,
-      const gfx::Display& primary_display,
-      gfx::Display* secondary_display);
+  // Applies the |layout| and updates the bounds of displays in |display_list|.
+  // |updated_ids| contains the ids for displays whose bounds have changed.
+  void ApplyDisplayLayout(const display::DisplayLayout& layout,
+                          display::DisplayList* display_list,
+                          std::vector<int64_t>* updated_ids);
 
   Delegate* delegate_;  // not owned.
 
-  scoped_ptr<ScreenAsh> screen_;
+  std::unique_ptr<ScreenAsh> screen_;
 
-  scoped_ptr<DisplayLayoutStore> layout_store_;
+  std::unique_ptr<DisplayLayoutStore> layout_store_;
 
   int64_t first_display_id_;
 
   // List of current active displays.
-  DisplayList active_display_list_;
+  display::DisplayList active_display_list_;
 
   int num_connected_displays_;
 
@@ -437,7 +435,7 @@ private:
   MultiDisplayMode current_default_multi_display_mode_;
 
   int64_t mirroring_display_id_;
-  DisplayList software_mirroring_display_list_;
+  display::DisplayList software_mirroring_display_list_;
 
   // User preference for rotation lock of the internal display.
   bool registered_internal_display_rotation_lock_;

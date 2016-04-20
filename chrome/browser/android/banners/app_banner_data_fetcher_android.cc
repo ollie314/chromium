@@ -6,6 +6,9 @@
 
 #include <utility>
 
+#include "base/bind.h"
+#include "base/callback.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/android/banners/app_banner_infobar_delegate_android.h"
 #include "chrome/browser/android/shortcut_helper.h"
 #include "chrome/browser/banners/app_banner_metrics.h"
@@ -23,14 +26,15 @@ AppBannerDataFetcherAndroid::AppBannerDataFetcherAndroid(
     int ideal_icon_size_in_dp,
     int minimum_icon_size_in_dp,
     int ideal_splash_image_size_in_dp,
-    int minimum_splash_image_size_in_dp)
+    int minimum_splash_image_size_in_dp,
+    bool is_debug_mode)
     : AppBannerDataFetcher(web_contents,
                            weak_delegate,
                            ideal_icon_size_in_dp,
-                           minimum_icon_size_in_dp),
+                           minimum_icon_size_in_dp,
+                           is_debug_mode),
       ideal_splash_image_size_in_dp_(ideal_splash_image_size_in_dp),
-      minimum_splash_image_size_in_dp_(minimum_splash_image_size_in_dp) {
-}
+      minimum_splash_image_size_in_dp_(minimum_splash_image_size_in_dp) {}
 
 AppBannerDataFetcherAndroid::~AppBannerDataFetcherAndroid() {
 }
@@ -56,23 +60,18 @@ std::string AppBannerDataFetcherAndroid::GetAppIdentifier() {
       ? AppBannerDataFetcher::GetAppIdentifier() : native_app_package_;
 }
 
-void AppBannerDataFetcherAndroid::FetchWebappSplashScreenImage(
+base::Closure AppBannerDataFetcherAndroid::FetchWebappSplashScreenImageCallback(
     const std::string& webapp_id) {
   content::WebContents* web_contents = GetWebContents();
   DCHECK(web_contents);
 
   GURL image_url = ManifestIconSelector::FindBestMatchingIcon(
-      web_app_data().icons,
-      ideal_splash_image_size_in_dp_,
-      minimum_splash_image_size_in_dp_,
-      gfx::Screen::GetScreenFor(web_contents->GetNativeView()));
+      web_app_data().icons, ideal_splash_image_size_in_dp_,
+      minimum_splash_image_size_in_dp_);
 
-  ShortcutHelper::FetchSplashScreenImage(
-      web_contents,
-      image_url,
-      ideal_splash_image_size_in_dp_,
-      minimum_splash_image_size_in_dp_,
-      webapp_id);
+  return base::Bind(&ShortcutHelper::FetchSplashScreenImage,
+      web_contents, image_url, ideal_splash_image_size_in_dp_,
+      minimum_splash_image_size_in_dp_, webapp_id);
 }
 
 void AppBannerDataFetcherAndroid::ShowBanner(const SkBitmap* icon,
@@ -83,10 +82,10 @@ void AppBannerDataFetcherAndroid::ShowBanner(const SkBitmap* icon,
 
   infobars::InfoBar* infobar = nullptr;
   if (native_app_data_.is_null()) {
-    scoped_ptr<AppBannerInfoBarDelegateAndroid> delegate(
-        new AppBannerInfoBarDelegateAndroid(
-            event_request_id(), this, title, new SkBitmap(*icon),
-            web_app_data()));
+    std::unique_ptr<AppBannerInfoBarDelegateAndroid> delegate(
+        new AppBannerInfoBarDelegateAndroid(event_request_id(), this, title,
+                                            new SkBitmap(*icon),
+                                            web_app_data()));
 
     infobar = new AppBannerInfoBarAndroid(std::move(delegate),
                                           web_app_data().start_url);
@@ -95,7 +94,7 @@ void AppBannerDataFetcherAndroid::ShowBanner(const SkBitmap* icon,
       TrackDisplayEvent(DISPLAY_EVENT_WEB_APP_BANNER_CREATED);
     }
   } else {
-    scoped_ptr<AppBannerInfoBarDelegateAndroid> delegate(
+    std::unique_ptr<AppBannerInfoBarDelegateAndroid> delegate(
         new AppBannerInfoBarDelegateAndroid(
             event_request_id(), title, new SkBitmap(*icon), native_app_data_,
             native_app_package_, referrer));
@@ -107,7 +106,7 @@ void AppBannerDataFetcherAndroid::ShowBanner(const SkBitmap* icon,
     }
   }
   InfoBarService::FromWebContents(web_contents)
-      ->AddInfoBar(make_scoped_ptr(infobar));
+      ->AddInfoBar(base::WrapUnique(infobar));
 }
 
 }  // namespace banners

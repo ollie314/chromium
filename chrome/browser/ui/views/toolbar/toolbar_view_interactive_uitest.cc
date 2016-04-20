@@ -10,7 +10,6 @@
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/test_with_browser_view.h"
-#include "chrome/browser/ui/views/tabs/tab_drag_controller_interactive_uitest.h"
 #include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/extension_toolbar_menu_view.h"
@@ -60,10 +59,10 @@ class ToolbarViewInteractiveUITest : public ExtensionBrowserTest {
   BrowserActionsContainer* browser_actions_;
 
   // The drag-and-drop background thread.
-  scoped_ptr<base::Thread> dnd_thread_;
+  std::unique_ptr<base::Thread> dnd_thread_;
 
   // Override the extensions-action-redesign switch.
-  scoped_ptr<extensions::FeatureSwitch::ScopedOverride> feature_override_;
+  std::unique_ptr<extensions::FeatureSwitch::ScopedOverride> feature_override_;
 };
 
 ToolbarViewInteractiveUITest::ToolbarViewInteractiveUITest()
@@ -162,9 +161,10 @@ IN_PROC_BROWSER_TEST_F(ToolbarViewInteractiveUITest,
   ToolbarActionView* view = browser_actions()->GetToolbarActionViewAt(0);
   ASSERT_TRUE(view);
 
-  gfx::Point browser_action_view_loc = test::GetCenterInScreenCoordinates(view);
-  gfx::Point app_button_loc =
-      test::GetCenterInScreenCoordinates(toolbar_view()->app_menu_button());
+  gfx::Point browser_action_view_loc =
+      ui_test_utils::GetCenterInScreenCoordinates(view);
+  gfx::Point app_button_loc = ui_test_utils::GetCenterInScreenCoordinates(
+      toolbar_view()->app_menu_button());
 
   // Perform a drag and drop from the browser action view to the app button,
   // which should open the app menu.

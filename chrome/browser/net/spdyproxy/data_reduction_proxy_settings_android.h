@@ -5,14 +5,15 @@
 #ifndef CHROME_BROWSER_NET_SPDYPROXY_DATA_REDUCTION_PROXY_SETTINGS_ANDROID_H_
 #define CHROME_BROWSER_NET_SPDYPROXY_DATA_REDUCTION_PROXY_SETTINGS_ANDROID_H_
 
+#include <memory>
+
 #include "base/android/jni_string.h"
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_member.h"
+#include "components/prefs/pref_member.h"
 
 using base::android::ScopedJavaLocalRef;
 
@@ -38,9 +39,6 @@ class DataReductionProxySettingsAndroid {
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
   jboolean IsDataReductionProxyPromoAllowed(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj);
-  jboolean IsIncludedInAltFieldTrial(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
   jboolean IsDataReductionProxyEnabled(
@@ -96,6 +94,11 @@ class DataReductionProxySettingsAndroid {
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
 
+  // Return if Lo-Fi previews are enabled via a field trial or the command line.
+  jboolean AreLoFiPreviewsEnabled(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+
   ScopedJavaLocalRef<jstring> GetTokenForAuthChallenge(JNIEnv* env,
                                                        jobject obj,
                                                        jstring host,
@@ -104,12 +107,6 @@ class DataReductionProxySettingsAndroid {
   // Returns a Java string of the Data Reduction Proxy proxy list for HTTP
   // origins as a semi-colon delimited list.
   ScopedJavaLocalRef<jstring> GetHttpProxyList(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj);
-
-  // Returns a Java string of the Data Reduction Proxy proxy list for HTTPS
-  // origins as a semi-colon delimited list.
-  ScopedJavaLocalRef<jstring> GetHttpsProxyList(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
 

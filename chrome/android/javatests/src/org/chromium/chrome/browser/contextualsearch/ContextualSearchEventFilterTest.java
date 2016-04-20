@@ -162,12 +162,6 @@ public class ContextualSearchEventFilterTest extends InstrumentationTestCase
             @Override
             public void removeLastHistoryEntry(String url, long timeInMs) {}
         }
-
-        @Override
-        protected float getPeekPromoHeight() {
-            // Android Views are not used in this test so we cannot get the actual height.
-            return 0.f;
-        }
     }
 
     // --------------------------------------------------------------------------------------------
@@ -216,11 +210,11 @@ public class ContextualSearchEventFilterTest extends InstrumentationTestCase
 
         mContextualSearchPanel.setSearchBarHeightForTesting(SEARCH_BAR_HEIGHT_DP);
         mContextualSearchPanel.setHeightForTesting(LAYOUT_HEIGHT_DP);
-        mContextualSearchPanel.setIsFullscreenSizePanelForTesting(true);
+        mContextualSearchPanel.setIsFullWidthSizePanelForTesting(true);
 
         // NOTE(pedrosimonetti): This should be called after calling the method
-        // setIsFullscreenSizePanelForTesting(), otherwise it will crash the test.
-        mContextualSearchPanel.onSizeChanged(LAYOUT_WIDTH_DP, LAYOUT_HEIGHT_DP, false);
+        // setIsFullWidthSizePanelForTesting(), otherwise it will crash the test.
+        mContextualSearchPanel.onSizeChanged(LAYOUT_WIDTH_DP, LAYOUT_HEIGHT_DP);
 
         setSearchContentViewVerticalScroll(0);
 

@@ -8,14 +8,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_piece.h"
+#include "crypto/ec_private_key.h"
 #include "net/base/completion_callback.h"
+#include "net/base/net_errors.h"
 #include "net/base/net_export.h"
 #include "net/base/upload_progress.h"
 #include "net/log/net_log.h"
@@ -94,6 +96,9 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
   void GetSSLInfo(SSLInfo* ssl_info);
 
   void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info);
+
+  Error GetSignedEKMForTokenBinding(crypto::ECPrivateKey* key,
+                                    std::vector<uint8_t>* out);
 
   // Encodes the given |payload| in the chunked format to |output|.
   // Returns the number of bytes written to |output|. |output_size| should
@@ -233,7 +238,7 @@ class NET_EXPORT_PRIVATE HttpStreamParser {
   int64_t response_body_read_;
 
   // Helper if the data is chunked.
-  scoped_ptr<HttpChunkedDecoder> chunked_decoder_;
+  std::unique_ptr<HttpChunkedDecoder> chunked_decoder_;
 
   // Where the caller wants the body data.
   scoped_refptr<IOBuffer> user_read_buf_;

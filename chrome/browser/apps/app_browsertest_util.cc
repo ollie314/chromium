@@ -6,7 +6,6 @@
 
 #include "base/command_line.h"
 #include "base/strings/stringprintf.h"
-#include "chrome/browser/apps/scoped_keep_alive.h"
 #include "chrome/browser/extensions/api/tabs/tabs_api.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/ui/apps/chrome_app_delegate.h"
@@ -128,10 +127,9 @@ void PlatformAppBrowserTest::LaunchPlatformApp(const Extension* extension) {
 }
 
 void PlatformAppBrowserTest::LaunchHostedApp(const Extension* extension) {
-  AppLaunchParams launch_params(browser()->profile(), extension,
-                                NEW_FOREGROUND_TAB,
-                                extensions::SOURCE_COMMAND_LINE);
-  OpenApplication(launch_params);
+  OpenApplication(CreateAppLaunchParamsUserContainer(
+      browser()->profile(), extension, NEW_FOREGROUND_TAB,
+      extensions::SOURCE_COMMAND_LINE));
 }
 
 WebContents* PlatformAppBrowserTest::GetFirstAppWindowWebContents() {
@@ -164,10 +162,9 @@ size_t PlatformAppBrowserTest::RunGetWindowsFunctionForExtension(
     const Extension* extension) {
   scoped_refptr<WindowsGetAllFunction> function = new WindowsGetAllFunction();
   function->set_extension(extension);
-  scoped_ptr<base::ListValue> result(utils::ToList(
-      utils::RunFunctionAndReturnSingleResult(function.get(),
-                                              "[]",
-                                              browser())));
+  std::unique_ptr<base::ListValue> result(
+      utils::ToList(utils::RunFunctionAndReturnSingleResult(function.get(),
+                                                            "[]", browser())));
   return result->GetSize();
 }
 
@@ -195,18 +192,24 @@ size_t PlatformAppBrowserTest::GetAppWindowCountForApp(
       .size();
 }
 
-AppWindow* PlatformAppBrowserTest::CreateAppWindow(const Extension* extension) {
-  return CreateAppWindowFromParams(extension, AppWindow::CreateParams());
+AppWindow* PlatformAppBrowserTest::CreateAppWindow(
+    content::BrowserContext* context,
+    const Extension* extension) {
+  return CreateAppWindowFromParams(context, extension,
+                                   AppWindow::CreateParams());
 }
 
 AppWindow* PlatformAppBrowserTest::CreateAppWindowFromParams(
+    content::BrowserContext* context,
     const Extension* extension,
     const AppWindow::CreateParams& params) {
-  AppWindow* window =
-      new AppWindow(browser()->profile(),
-                    new ChromeAppDelegate(make_scoped_ptr(new ScopedKeepAlive)),
-                    extension);
-  window->Init(GURL(std::string()), new AppWindowContentsImpl(window), params);
+  AppWindow* window = new AppWindow(browser()->profile(),
+                                    new ChromeAppDelegate(true), extension);
+  ProcessManager* process_manager = ProcessManager::Get(context);
+  ExtensionHost* background_host =
+      process_manager->GetBackgroundHostForExtension(extension->id());
+  window->Init(GURL(std::string()), new AppWindowContentsImpl(window),
+               background_host->host_contents()->GetMainFrame(), params);
   return window;
 }
 

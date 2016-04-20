@@ -32,66 +32,50 @@
 
 namespace blink {
 
-static size_t copyFromSharedBuffer(char* buffer, size_t bufferLength, const SharedBuffer& sharedBuffer, size_t offset)
-{
-    size_t bytesExtracted = 0;
-    const char* moreData;
-    while (size_t moreDataLength = sharedBuffer.getSomeData(moreData, offset)) {
-        size_t bytesToCopy = std::min(bufferLength - bytesExtracted, moreDataLength);
-        memcpy(buffer + bytesExtracted, moreData, bytesToCopy);
-        bytesExtracted += bytesToCopy;
-        if (bytesExtracted == bufferLength)
-            break;
-        offset += bytesToCopy;
-    }
-    return bytesExtracted;
-}
-
-inline bool matchesJPEGSignature(char* contents)
+inline bool matchesJPEGSignature(const char* contents)
 {
     return !memcmp(contents, "\xFF\xD8\xFF", 3);
 }
 
-inline bool matchesPNGSignature(char* contents)
+inline bool matchesPNGSignature(const char* contents)
 {
     return !memcmp(contents, "\x89\x50\x4E\x47\x0D\x0A\x1A\x0A", 8);
 }
 
-inline bool matchesGIFSignature(char* contents)
+inline bool matchesGIFSignature(const char* contents)
 {
     return !memcmp(contents, "GIF87a", 6) || !memcmp(contents, "GIF89a", 6);
 }
 
-inline bool matchesWebPSignature(char* contents)
+inline bool matchesWebPSignature(const char* contents)
 {
     return !memcmp(contents, "RIFF", 4) && !memcmp(contents + 8, "WEBPVP", 6);
 }
 
-inline bool matchesICOSignature(char* contents)
+inline bool matchesICOSignature(const char* contents)
 {
     return !memcmp(contents, "\x00\x00\x01\x00", 4);
 }
 
-inline bool matchesCURSignature(char* contents)
+inline bool matchesCURSignature(const char* contents)
 {
     return !memcmp(contents, "\x00\x00\x02\x00", 4);
 }
 
-inline bool matchesBMPSignature(char* contents)
+inline bool matchesBMPSignature(const char* contents)
 {
     return !memcmp(contents, "BM", 2);
 }
 
-PassOwnPtr<ImageDecoder> ImageDecoder::create(const SharedBuffer& data, AlphaOption alphaOption, GammaAndColorProfileOption colorOptions)
+PassOwnPtr<ImageDecoder> ImageDecoder::create(const char* contents, size_t length, AlphaOption alphaOption, GammaAndColorProfileOption colorOptions)
 {
     const size_t longestSignatureLength = sizeof("RIFF????WEBPVP") - 1;
     ASSERT(longestSignatureLength == 14);
 
-    size_t maxDecodedBytes = Platform::current() ? Platform::current()->maxDecodedImageBytes() : noDecodedImageByteLimit;
-
-    char contents[longestSignatureLength];
-    if (copyFromSharedBuffer(contents, longestSignatureLength, data, 0) < longestSignatureLength)
+    if (length < longestSignatureLength)
         return nullptr;
+
+    size_t maxDecodedBytes = Platform::current() ? Platform::current()->maxDecodedImageBytes() : noDecodedImageByteLimit;
 
     if (matchesJPEGSignature(contents))
         return adoptPtr(new JPEGImageDecoder(alphaOption, colorOptions, maxDecodedBytes));
@@ -114,6 +98,20 @@ PassOwnPtr<ImageDecoder> ImageDecoder::create(const SharedBuffer& data, AlphaOpt
     return nullptr;
 }
 
+PassOwnPtr<ImageDecoder> ImageDecoder::create(const SharedBuffer& data, AlphaOption alphaOption, GammaAndColorProfileOption colorOptions)
+{
+    const char* contents;
+    const size_t length = data.getSomeData<size_t>(contents);
+    return create(contents, length, alphaOption, colorOptions);
+}
+
+PassOwnPtr<ImageDecoder> ImageDecoder::create(const SegmentReader& data, AlphaOption alphaOption, GammaAndColorProfileOption colorOptions)
+{
+    const char* contents;
+    const size_t length = data.getSomeData(contents, 0);
+    return create(contents, length, alphaOption, colorOptions);
+}
+
 size_t ImageDecoder::frameCount()
 {
     const size_t oldSize = m_frameBufferCache.size();
@@ -134,7 +132,7 @@ ImageFrame* ImageDecoder::frameBufferAtIndex(size_t index)
         return 0;
 
     ImageFrame* frame = &m_frameBufferCache[index];
-    if (frame->status() != ImageFrame::FrameComplete) {
+    if (frame->getStatus() != ImageFrame::FrameComplete) {
         PlatformInstrumentation::willDecodeImage(filenameExtension());
         decode(index);
         PlatformInstrumentation::didDecodeImage();
@@ -152,12 +150,12 @@ bool ImageDecoder::frameHasAlphaAtIndex(size_t index) const
 bool ImageDecoder::frameIsCompleteAtIndex(size_t index) const
 {
     return (index < m_frameBufferCache.size()) &&
-        (m_frameBufferCache[index].status() == ImageFrame::FrameComplete);
+        (m_frameBufferCache[index].getStatus() == ImageFrame::FrameComplete);
 }
 
 size_t ImageDecoder::frameBytesAtIndex(size_t index) const
 {
-    if (index >= m_frameBufferCache.size() || m_frameBufferCache[index].status() == ImageFrame::FrameEmpty)
+    if (index >= m_frameBufferCache.size() || m_frameBufferCache[index].getStatus() == ImageFrame::FrameEmpty)
         return 0;
 
     struct ImageSize {
@@ -208,7 +206,7 @@ size_t ImageDecoder::findRequiredPreviousFrame(size_t frameIndex, bool frameRect
     }
 
     const ImageFrame* currBuffer = &m_frameBufferCache[frameIndex];
-    if ((frameRectIsOpaque || currBuffer->alphaBlendSource() == ImageFrame::BlendAtopBgcolor)
+    if ((frameRectIsOpaque || currBuffer->getAlphaBlendSource() == ImageFrame::BlendAtopBgcolor)
         && currBuffer->originalFrameRect().contains(IntRect(IntPoint(), size())))
         return kNotFound;
 
@@ -217,7 +215,7 @@ size_t ImageDecoder::findRequiredPreviousFrame(size_t frameIndex, bool frameRect
     size_t prevFrame = frameIndex - 1;
     const ImageFrame* prevBuffer = &m_frameBufferCache[prevFrame];
 
-    switch (prevBuffer->disposalMethod()) {
+    switch (prevBuffer->getDisposalMethod()) {
     case ImageFrame::DisposeNotSpecified:
     case ImageFrame::DisposeKeep:
         // prevFrame will be used as the starting state for this frame.
@@ -251,7 +249,7 @@ ImagePlanes::ImagePlanes()
     }
 }
 
-ImagePlanes::ImagePlanes(void* planes[3], size_t rowBytes[3])
+ImagePlanes::ImagePlanes(void* planes[3], const size_t rowBytes[3])
 {
     for (int i = 0; i < 3; ++i) {
         m_planes[i] = planes[i];
@@ -270,5 +268,98 @@ size_t ImagePlanes::rowBytes(int i) const
     ASSERT((i >= 0) && i < 3);
     return m_rowBytes[i];
 }
+
+bool ImageDecoder::hasColorProfile() const
+{
+#if USE(QCMSLIB)
+    return m_sourceToOutputDeviceColorTransform.get();
+#else
+    return false;
+#endif
+}
+
+#if USE(QCMSLIB)
+namespace {
+
+const unsigned kIccColorProfileHeaderLength = 128;
+
+bool rgbColorProfile(const char* profileData, unsigned profileLength)
+{
+    ASSERT_UNUSED(profileLength, profileLength >= kIccColorProfileHeaderLength);
+
+    return !memcmp(&profileData[16], "RGB ", 4);
+}
+
+bool inputDeviceColorProfile(const char* profileData, unsigned profileLength)
+{
+    ASSERT_UNUSED(profileLength, profileLength >= kIccColorProfileHeaderLength);
+
+    return !memcmp(&profileData[12], "mntr", 4) || !memcmp(&profileData[12], "scnr", 4);
+}
+
+// The output device color profile is global and shared across multiple threads.
+SpinLock gOutputDeviceProfileLock;
+qcms_profile* gOutputDeviceProfile = nullptr;
+
+} // namespace
+
+// static
+void ImageDecoder::setColorProfileAndTransform(const char* iccData, unsigned iccLength, bool hasAlpha, bool useSRGB)
+{
+    m_sourceToOutputDeviceColorTransform.clear();
+
+    // Create the input profile
+    OwnPtr<qcms_profile> inputProfile;
+    if (useSRGB) {
+        inputProfile = adoptPtr(qcms_profile_sRGB());
+    } else {
+        // Only accept RGB color profiles from input class devices.
+        if (iccLength < kIccColorProfileHeaderLength)
+            return;
+        if (!rgbColorProfile(iccData, iccLength))
+            return;
+        if (!inputDeviceColorProfile(iccData, iccLength))
+            return;
+        inputProfile = adoptPtr(qcms_profile_from_memory(iccData, iccLength));
+    }
+    if (!inputProfile)
+        return;
+
+    // We currently only support color profiles for RGB profiled images.
+    ASSERT(rgbData == qcms_profile_get_color_space(inputProfile.get()));
+
+    // Take a lock around initializing and accessing the global device color profile.
+    SpinLock::Guard guard(gOutputDeviceProfileLock);
+
+    // Initialize the output device profile.
+    if (!gOutputDeviceProfile) {
+        // FIXME: Add optional ICCv4 support and support for multiple monitors.
+        WebVector<char> profile;
+        Platform::current()->screenColorProfile(&profile);
+
+        if (!profile.isEmpty())
+            gOutputDeviceProfile = qcms_profile_from_memory(profile.data(), profile.size());
+
+        if (gOutputDeviceProfile && qcms_profile_is_bogus(gOutputDeviceProfile)) {
+            qcms_profile_release(gOutputDeviceProfile);
+            gOutputDeviceProfile = nullptr;
+        }
+
+        if (!gOutputDeviceProfile)
+            gOutputDeviceProfile = qcms_profile_sRGB();
+
+        qcms_profile_precache_output_transform(gOutputDeviceProfile);
+    }
+
+    if (qcms_profile_match(inputProfile.get(), gOutputDeviceProfile))
+        return;
+
+    qcms_data_type dataFormat = hasAlpha ? QCMS_DATA_RGBA_8 : QCMS_DATA_RGB_8;
+
+    // FIXME: Don't force perceptual intent if the image profile contains an intent.
+    m_sourceToOutputDeviceColorTransform = adoptPtr(qcms_transform_create(inputProfile.get(), dataFormat, gOutputDeviceProfile, QCMS_DATA_RGBA_8, QCMS_INTENT_PERCEPTUAL));
+}
+
+#endif // USE(QCMSLIB)
 
 } // namespace blink

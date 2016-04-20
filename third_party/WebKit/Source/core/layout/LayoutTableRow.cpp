@@ -237,9 +237,18 @@ LayoutTableRow* LayoutTableRow::createAnonymousWithParent(const LayoutObject* pa
     return newRow;
 }
 
+void LayoutTableRow::computeOverflow()
+{
+    clearAllOverflows();
+    addVisualEffectOverflow();
+    for (LayoutTableCell* cell = firstCell(); cell; cell = cell->nextCell())
+        addOverflowFromCell(cell);
+}
+
 void LayoutTableRow::addOverflowFromCell(const LayoutTableCell* cell)
 {
     // Non-row-spanning-cells don't create overflow (they are fully contained within this row).
+    // TODO(crbug.com/603993): This seems incorrect because cell may have visual effect overflow that should be included in this row.
     if (cell->rowSpan() == 1)
         return;
 
@@ -250,18 +259,9 @@ void LayoutTableRow::addOverflowFromCell(const LayoutTableCell* cell)
     // the visual overflow should be determined in the coordinate system of
     // the row, that's why we shift it below.
     LayoutUnit cellOffsetLogicalTopDifference = cell->location().y() - location().y();
-    cellVisualOverflowRect.move(0, cellOffsetLogicalTopDifference);
+    cellVisualOverflowRect.move(LayoutUnit(), cellOffsetLogicalTopDifference);
 
     addVisualOverflow(cellVisualOverflowRect);
-}
-
-bool LayoutTableRow::backgroundIsKnownToBeOpaqueInRect(const LayoutRect& localRect) const
-{
-    // If this object has layer, the area of collapsed borders should be transparent
-    // to expose the collapsed borders painted on the underlying layer.
-    if (hasLayer() && table()->collapseBorders())
-        return false;
-    return LayoutBox::backgroundIsKnownToBeOpaqueInRect(localRect);
 }
 
 } // namespace blink

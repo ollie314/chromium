@@ -18,8 +18,8 @@
 namespace mojo {
 
 template <>
-struct TypeConverter<arc::AppInfoPtr, arc::AppInfo> {
-  static arc::AppInfoPtr Convert(const arc::AppInfo& app_info) {
+struct TypeConverter<arc::mojom::AppInfoPtr, arc::mojom::AppInfo> {
+  static arc::mojom::AppInfoPtr Convert(const arc::mojom::AppInfo& app_info) {
     return app_info.Clone();
   }
 };
@@ -28,7 +28,7 @@ struct TypeConverter<arc::AppInfoPtr, arc::AppInfo> {
 
 namespace arc {
 
-FakeAppInstance::FakeAppInstance(AppHost* app_host)
+FakeAppInstance::FakeAppInstance(mojom::AppHost* app_host)
     : binding_(this), app_host_(app_host) {}
 FakeAppInstance::~FakeAppInstance() {}
 
@@ -36,52 +36,55 @@ void FakeAppInstance::RefreshAppList() {
   ++refresh_app_list_count_;
 }
 
-void FakeAppInstance::LaunchApp(const mojo::String& package,
-                                const mojo::String& activity) {
-  launch_requests_.push_back(new Request(package, activity));
+void FakeAppInstance::LaunchApp(const mojo::String& package_name,
+                                const mojo::String& activity,
+                                mojom::ScreenRectPtr dimension) {
+  launch_requests_.push_back(new Request(package_name, activity));
 }
 
-void FakeAppInstance::RequestAppIcon(const mojo::String& package,
+void FakeAppInstance::RequestAppIcon(const mojo::String& package_name,
                                      const mojo::String& activity,
-                                     ScaleFactor scale_factor) {
-  icon_requests_.push_back(new IconRequest(package, activity, scale_factor));
+                                     mojom::ScaleFactor scale_factor) {
+  icon_requests_.push_back(
+      new IconRequest(package_name, activity, scale_factor));
 }
 
-void FakeAppInstance::SendRefreshAppList(const std::vector<AppInfo>& apps) {
-  app_host_->OnAppListRefreshed(mojo::Array<AppInfoPtr>::From(apps));
+void FakeAppInstance::SendRefreshAppList(
+    const std::vector<mojom::AppInfo>& apps) {
+  app_host_->OnAppListRefreshed(mojo::Array<mojom::AppInfoPtr>::From(apps));
 }
 
-bool FakeAppInstance::GenerateAndSendIcon(const AppInfo& app,
-                                          ScaleFactor scale_factor,
+bool FakeAppInstance::GenerateAndSendIcon(const mojom::AppInfo& app,
+                                          mojom::ScaleFactor scale_factor,
                                           std::string* png_data_as_string) {
   CHECK(png_data_as_string != nullptr);
   std::string icon_file_name;
   switch (scale_factor) {
-    case SCALE_FACTOR_SCALE_FACTOR_100P:
+    case mojom::ScaleFactor::SCALE_FACTOR_100P:
       icon_file_name = "icon_100p.png";
       break;
-    case SCALE_FACTOR_SCALE_FACTOR_125P:
+    case mojom::ScaleFactor::SCALE_FACTOR_125P:
       icon_file_name = "icon_125p.png";
       break;
-    case SCALE_FACTOR_SCALE_FACTOR_133P:
+    case mojom::ScaleFactor::SCALE_FACTOR_133P:
       icon_file_name = "icon_133p.png";
       break;
-    case SCALE_FACTOR_SCALE_FACTOR_140P:
+    case mojom::ScaleFactor::SCALE_FACTOR_140P:
       icon_file_name = "icon_140p.png";
       break;
-    case SCALE_FACTOR_SCALE_FACTOR_150P:
+    case mojom::ScaleFactor::SCALE_FACTOR_150P:
       icon_file_name = "icon_150p.png";
       break;
-    case SCALE_FACTOR_SCALE_FACTOR_180P:
+    case mojom::ScaleFactor::SCALE_FACTOR_180P:
       icon_file_name = "icon_180p.png";
       break;
-    case SCALE_FACTOR_SCALE_FACTOR_200P:
+    case mojom::ScaleFactor::SCALE_FACTOR_200P:
       icon_file_name = "icon_200p.png";
       break;
-    case SCALE_FACTOR_SCALE_FACTOR_250P:
+    case mojom::ScaleFactor::SCALE_FACTOR_250P:
       icon_file_name = "icon_250p.png";
       break;
-    case SCALE_FACTOR_SCALE_FACTOR_300P:
+    case mojom::ScaleFactor::SCALE_FACTOR_300P:
       icon_file_name = "icon_300p.png";
       break;
     default:
@@ -99,10 +102,16 @@ bool FakeAppInstance::GenerateAndSendIcon(const AppInfo& app,
   CHECK(base::PathExists(icon_file_path));
   CHECK(base::ReadFileToString(icon_file_path, png_data_as_string));
 
-  app_host_->OnAppIcon(app.package, app.activity, scale_factor,
+  app_host_->OnAppIcon(app.package_name, app.activity, scale_factor,
                        mojo::Array<uint8_t>::From(*png_data_as_string));
 
   return true;
+}
+
+void FakeAppInstance::SetTaskInfo(int32_t task_id,
+                                  const std::string& package_name,
+                                  const std::string& activity) {
+  task_id_to_info_[task_id].reset(new Request(package_name, activity));
 }
 
 void FakeAppInstance::WaitForIncomingMethodCall() {
@@ -122,6 +131,26 @@ void FakeAppInstance::WaitForOnAppInstanceReady() {
   while (refresh_app_list_count_ != 1) {
     base::RunLoop().RunUntilIdle();
   }
+}
+
+void FakeAppInstance::CanHandleResolution(
+    const mojo::String& package_name,
+    const mojo::String& activity,
+    mojom::ScreenRectPtr dimension,
+    const CanHandleResolutionCallback& callback) {
+  callback.Run(true);
+}
+
+void FakeAppInstance::UninstallPackage(const mojo::String& package_name) {
+}
+
+void FakeAppInstance::GetTaskInfo(int32_t task_id,
+                                  const GetTaskInfoCallback& callback) {
+  TaskIdToInfo::const_iterator it = task_id_to_info_.find(task_id);
+  if (it != task_id_to_info_.end())
+    callback.Run(it->second->package_name(), it->second->activity());
+  else
+    callback.Run(mojo::String(), mojo::String());
 }
 
 }  // namespace arc

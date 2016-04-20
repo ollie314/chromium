@@ -9,11 +9,11 @@
 #include "bindings/core/v8/SerializedScriptValue.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "core/CoreExport.h"
-#include "wtf/ArrayBufferContents.h"
 #include "wtf/HashMap.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
+#include "wtf/typed_arrays/ArrayBufferContents.h"
 #include <v8.h>
 
 namespace blink {
@@ -24,6 +24,7 @@ class DOMArrayBufferView;
 class DOMSharedArrayBuffer;
 class File;
 class FileList;
+class ImageData;
 class StaticBitmapImage;
 
 typedef Vector<WTF::ArrayBufferContents, 1> ArrayBufferContentsArray;
@@ -135,7 +136,9 @@ public:
     void writeFileListIndex(const Vector<int>& blobIndices);
     void writeArrayBuffer(const DOMArrayBuffer&);
     void writeArrayBufferView(const DOMArrayBufferView&);
+    void doWriteImageData(uint32_t width, uint32_t height, const uint8_t* pixelData, uint32_t pixelDataLength);
     void writeImageData(uint32_t width, uint32_t height, const uint8_t* pixelData, uint32_t pixelDataLength);
+    void writeImageBitmap(uint32_t width, uint32_t height, const uint8_t* pixelData, uint32_t pixelDataLength);
     void writeRegExp(v8::Local<v8::String> pattern, v8::RegExp::Flags);
     void writeTransferredMessagePort(uint32_t index);
     void writeTransferredArrayBuffer(uint32_t index);
@@ -205,7 +208,7 @@ public:
         JSException
     };
 
-    ScriptValueSerializer(SerializedScriptValueWriter&, MessagePortArray* messagePorts, ArrayBufferArray* arrayBuffers, ImageBitmapArray* imageBitmaps, WebBlobInfoArray*, BlobDataHandleMap& blobDataHandles, v8::TryCatch&, ScriptState*);
+    ScriptValueSerializer(SerializedScriptValueWriter&, const Transferables*, WebBlobInfoArray*, BlobDataHandleMap& blobDataHandles, v8::TryCatch&, ScriptState*);
     v8::Isolate* isolate() { return m_scriptState->isolate(); }
     v8::Local<v8::Context> context() { return m_scriptState->context(); }
 
@@ -400,6 +403,7 @@ private:
     StateBase* writeFile(v8::Local<v8::Value>, StateBase* next);
     StateBase* writeFileList(v8::Local<v8::Value>, StateBase* next);
     void writeImageData(v8::Local<v8::Value>);
+    StateBase* writeImageBitmap(v8::Local<v8::Value>, StateBase* next);
     void writeRegExp(v8::Local<v8::Value>);
     StateBase* writeAndGreyArrayBufferView(v8::Local<v8::Object>, StateBase* next);
     StateBase* writeArrayBuffer(v8::Local<v8::Value>, StateBase* next);
@@ -427,6 +431,9 @@ protected:
     uint32_t nextObjectReference() const { return m_nextObjectReference; }
 
 private:
+
+    void copyTransferables(const Transferables&);
+
     RefPtr<ScriptState> m_scriptState;
     SerializedScriptValueWriter& m_writer;
     v8::TryCatch& m_tryCatch;
@@ -492,7 +499,7 @@ public:
 
     bool isEof() const { return m_position >= m_length; }
 
-    ScriptState* scriptState() const { return m_scriptState.get(); }
+    ScriptState* getScriptState() const { return m_scriptState.get(); }
 
 protected:
     v8::Isolate* isolate() const { return m_scriptState->isolate(); }
@@ -531,9 +538,11 @@ private:
     bool readDate(v8::Local<v8::Value>*);
     bool readNumber(v8::Local<v8::Value>*);
     bool readNumberObject(v8::Local<v8::Value>*);
+    ImageData* doReadImageData();
     bool readImageData(v8::Local<v8::Value>*);
+    bool readImageBitmap(v8::Local<v8::Value>*);
     bool readCompositorProxy(v8::Local<v8::Value>*);
-    PassRefPtr<DOMArrayBuffer> doReadArrayBuffer();
+    DOMArrayBuffer* doReadArrayBuffer();
     bool readArrayBuffer(v8::Local<v8::Value>*);
     bool readArrayBufferView(v8::Local<v8::Value>*, ScriptValueCompositeCreator&);
     bool readRegExp(v8::Local<v8::Value>*);

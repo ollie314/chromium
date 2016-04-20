@@ -51,7 +51,7 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
   // |printing::COMPLETE_PREVIEW_DOCUMENT_INDEX| to set the entire preview
   // document.
   void SetPrintPreviewDataForIndex(int index,
-                                   const base::RefCountedBytes* data);
+                                   scoped_refptr<base::RefCountedBytes> data);
 
   // Clear the existing print preview data.
   void ClearAllPreviewData();
@@ -112,11 +112,6 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
   // |preview_request_id| indicates which request resulted in this response.
   void OnPreviewDataIsAvailable(int expected_pages_count,
                                 int preview_request_id);
-
-  // Notifies the Web UI that preview dialog has been destroyed. This is the
-  // last chance to communicate with the initiator before the association is
-  // erased.
-  void OnPrintPreviewDialogDestroyed();
 
   // Notifies the Web UI that the print preview failed to render.
   void OnPrintPreviewFailed();

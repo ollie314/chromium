@@ -4,6 +4,8 @@
 
 #include "device/hid/input_service_linux.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
@@ -19,6 +21,7 @@ namespace {
 
 const char kSubsystemHid[] = "hid";
 const char kSubsystemInput[] = "input";
+const char kSubsystemMisc[] = "misc";
 const char kTypeBluetooth[] = "bluetooth";
 const char kTypeUsb[] = "usb";
 const char kTypeSerio[] = "serio";
@@ -32,7 +35,7 @@ const char kIdInputTouchpad[] = "ID_INPUT_TOUCHPAD";
 const char kIdInputTouchscreen[] = "ID_INPUT_TOUCHSCREEN";
 
 // The instance will be reset when message loop destroys.
-base::LazyInstance<scoped_ptr<InputServiceLinux> >::Leaky
+base::LazyInstance<std::unique_ptr<InputServiceLinux>>::Leaky
     g_input_service_linux_ptr = LAZY_INSTANCE_INITIALIZER;
 
 bool GetBoolProperty(udev_device* device, const char* key) {
@@ -50,8 +53,14 @@ bool GetBoolProperty(udev_device* device, const char* key) {
 }
 
 InputServiceLinux::InputDeviceInfo::Type GetDeviceType(udev_device* device) {
-  if (udev_device_get_parent_with_subsystem_devtype(
-          device, kTypeBluetooth, NULL)) {
+  // Bluetooth classic hid devices are registered under bluetooth subsystem.
+  // Bluetooth LE hid devices are registered under virtual misc/hid subsystems.
+  if (udev_device_get_parent_with_subsystem_devtype(device, kTypeBluetooth,
+                                                    NULL) ||
+      (udev_device_get_parent_with_subsystem_devtype(device, kSubsystemHid,
+                                                     NULL) &&
+       udev_device_get_parent_with_subsystem_devtype(device, kSubsystemMisc,
+                                                     NULL))) {
     return InputServiceLinux::InputDeviceInfo::TYPE_BLUETOOTH;
   }
   if (udev_device_get_parent_with_subsystem_devtype(device, kTypeUsb, NULL))
@@ -165,6 +174,9 @@ InputServiceLinux::InputDeviceInfo::InputDeviceInfo()
       is_tablet(false),
       is_touchpad(false),
       is_touchscreen(false) {}
+
+InputServiceLinux::InputDeviceInfo::InputDeviceInfo(
+    const InputDeviceInfo& other) = default;
 
 InputServiceLinux::InputServiceLinux() {
 }

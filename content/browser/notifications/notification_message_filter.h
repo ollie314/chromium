@@ -8,20 +8,21 @@
 #include <stdint.h>
 
 #include <map>
+#include <vector>
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/notification_database_data.h"
-#include "third_party/WebKit/public/platform/modules/notifications/WebNotificationPermission.h"
+#include "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h"
 
 class GURL;
-class SkBitmap;
 
 namespace content {
 
 class BrowserContext;
+struct NotificationResources;
 class PlatformNotificationContextImpl;
 struct PlatformNotificationData;
 class PlatformNotificationService;
@@ -53,18 +54,19 @@ class NotificationMessageFilter : public BrowserMessageFilter {
   friend class BrowserThread;
 
   void OnCheckNotificationPermission(
-      const GURL& origin, blink::WebNotificationPermission* permission);
+      const GURL& origin,
+      blink::mojom::PermissionStatus* permission_status);
   void OnShowPlatformNotification(
       int notification_id,
       const GURL& origin,
-      const SkBitmap& icon,
-      const PlatformNotificationData& notification_data);
+      const PlatformNotificationData& notification_data,
+      const NotificationResources& notification_resources);
   void OnShowPersistentNotification(
       int request_id,
       int64_t service_worker_registration_id,
       const GURL& origin,
-      const SkBitmap& icon,
-      const PlatformNotificationData& notification_data);
+      const PlatformNotificationData& notification_data,
+      const NotificationResources& notification_resources);
   void OnGetNotifications(int request_id,
                           int64_t service_worker_registration_id,
                           const GURL& origin,
@@ -79,8 +81,8 @@ class NotificationMessageFilter : public BrowserMessageFilter {
   void DidWritePersistentNotificationData(
       int request_id,
       const GURL& origin,
-      const SkBitmap& icon,
       const PlatformNotificationData& notification_data,
+      const NotificationResources& notification_resources,
       bool success,
       int64_t persistent_notification_id);
 
@@ -102,7 +104,7 @@ class NotificationMessageFilter : public BrowserMessageFilter {
   // Returns the permission status for |origin|. Must only be used on the IO
   // thread. If the PlatformNotificationService is unavailable, permission will
   // assumed to be denied.
-  blink::WebNotificationPermission GetPermissionForOriginOnIO(
+  blink::mojom::PermissionStatus GetPermissionForOriginOnIO(
       const GURL& origin) const;
 
   // Verifies that Web Notification permission has been granted for |origin| in

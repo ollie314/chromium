@@ -31,7 +31,7 @@ class FakeFloatAnimationCurve : public FloatAnimationCurve {
 
   base::TimeDelta Duration() const override;
   float GetValue(base::TimeDelta now) const override;
-  scoped_ptr<AnimationCurve> Clone() const override;
+  std::unique_ptr<AnimationCurve> Clone() const override;
 
  private:
   base::TimeDelta duration_;
@@ -54,7 +54,7 @@ class FakeTransformTransition : public TransformAnimationCurve {
   bool MaximumTargetScale(bool forward_direction,
                           float* max_scale) const override;
 
-  scoped_ptr<AnimationCurve> Clone() const override;
+  std::unique_ptr<AnimationCurve> Clone() const override;
 
  private:
   base::TimeDelta duration_;
@@ -68,7 +68,7 @@ class FakeFloatTransition : public FloatAnimationCurve {
   base::TimeDelta Duration() const override;
   float GetValue(base::TimeDelta time) const override;
 
-  scoped_ptr<AnimationCurve> Clone() const override;
+  std::unique_ptr<AnimationCurve> Clone() const override;
 
  private:
   base::TimeDelta duration_;
@@ -81,39 +81,48 @@ class FakeLayerAnimationValueObserver : public LayerAnimationValueObserver {
   FakeLayerAnimationValueObserver();
   ~FakeLayerAnimationValueObserver() override;
 
-  // LayerAnimationValueObserver implementation
-  void OnFilterAnimated(const FilterOperations& filters) override;
-  void OnOpacityAnimated(float opacity) override;
-  void OnTransformAnimated(const gfx::Transform& transform) override;
-  void OnScrollOffsetAnimated(const gfx::ScrollOffset& scroll_offset) override;
+  // LayerAnimationValueObserver implementation.
+  void OnFilterAnimated(LayerTreeType tree_type,
+                        const FilterOperations& filters) override;
+  void OnOpacityAnimated(LayerTreeType tree_type, float opacity) override;
+  void OnTransformAnimated(LayerTreeType tree_type,
+                           const gfx::Transform& transform) override;
+  void OnScrollOffsetAnimated(LayerTreeType tree_type,
+                              const gfx::ScrollOffset& scroll_offset) override;
   void OnAnimationWaitingForDeletion() override;
-  void OnTransformIsPotentiallyAnimatingChanged(bool is_animating) override;
-  bool IsActive() const override;
+  void OnTransformIsPotentiallyAnimatingChanged(LayerTreeType tree_type,
+                                                bool is_animating) override;
 
-  const FilterOperations& filters() const { return filters_; }
-  float opacity() const  { return opacity_; }
-  const gfx::Transform& transform() const { return transform_; }
-  gfx::ScrollOffset scroll_offset() { return scroll_offset_; }
+  const FilterOperations& filters(LayerTreeType tree_type) const {
+    return filters_[ToIndex(tree_type)];
+  }
+  float opacity(LayerTreeType tree_type) const {
+    return opacity_[ToIndex(tree_type)];
+  }
+  const gfx::Transform& transform(LayerTreeType tree_type) const {
+    return transform_[ToIndex(tree_type)];
+  }
+  gfx::ScrollOffset scroll_offset(LayerTreeType tree_type) {
+    return scroll_offset_[ToIndex(tree_type)];
+  }
 
   bool animation_waiting_for_deletion() {
     return animation_waiting_for_deletion_;
   }
 
-  bool transform_is_animating() { return transform_is_animating_; }
+  bool transform_is_animating(LayerTreeType tree_type) {
+    return transform_is_animating_[ToIndex(tree_type)];
+  }
 
  private:
-  FilterOperations filters_;
-  float opacity_;
-  gfx::Transform transform_;
-  gfx::ScrollOffset scroll_offset_;
-  bool animation_waiting_for_deletion_;
-  bool transform_is_animating_;
-};
+  static int ToIndex(LayerTreeType tree_type);
 
-class FakeInactiveLayerAnimationValueObserver
-    : public FakeLayerAnimationValueObserver {
- public:
-  bool IsActive() const override;
+  FilterOperations filters_[2];
+  float opacity_[2];
+  gfx::Transform transform_[2];
+  gfx::ScrollOffset scroll_offset_[2];
+  bool animation_waiting_for_deletion_;
+  bool transform_is_animating_[2];
 };
 
 class FakeLayerAnimationValueProvider : public LayerAnimationValueProvider {
@@ -144,48 +153,6 @@ int AddAnimatedFilterToController(LayerAnimationController* controller,
                                   float start_brightness,
                                   float end_brightness);
 
-int AddOpacityTransitionToLayer(Layer* layer,
-                                double duration,
-                                float start_opacity,
-                                float end_opacity,
-                                bool use_timing_function);
-
-int AddOpacityTransitionToLayer(LayerImpl* layer,
-                                double duration,
-                                float start_opacity,
-                                float end_opacity,
-                                bool use_timing_function);
-
-int AddAnimatedTransformToLayer(Layer* layer,
-                                double duration,
-                                int delta_x,
-                                int delta_y);
-
-int AddAnimatedTransformToLayer(LayerImpl* layer,
-                                double duration,
-                                int delta_x,
-                                int delta_y);
-
-int AddAnimatedTransformToLayer(Layer* layer,
-                                double duration,
-                                TransformOperations start_operations,
-                                TransformOperations operations);
-
-int AddAnimatedTransformToLayer(LayerImpl* layer,
-                                double duration,
-                                TransformOperations start_operations,
-                                TransformOperations operations);
-
-int AddAnimatedFilterToLayer(Layer* layer,
-                             double duration,
-                             float start_brightness,
-                             float end_brightness);
-
-int AddAnimatedFilterToLayer(LayerImpl* layer,
-                             double duration,
-                             float start_brightness,
-                             float end_brightness);
-
 int AddAnimatedTransformToPlayer(AnimationPlayer* player,
                                  double duration,
                                  int delta_x,
@@ -215,11 +182,11 @@ int AddOpacityStepsToController(LayerAnimationController* target,
 
 void AddAnimationToLayerWithPlayer(int layer_id,
                                    scoped_refptr<AnimationTimeline> timeline,
-                                   scoped_ptr<Animation> animation);
+                                   std::unique_ptr<Animation> animation);
 void AddAnimationToLayerWithExistingPlayer(
     int layer_id,
     scoped_refptr<AnimationTimeline> timeline,
-    scoped_ptr<Animation> animation);
+    std::unique_ptr<Animation> animation);
 
 void RemoveAnimationFromLayerWithExistingPlayer(
     int layer_id,
@@ -260,10 +227,9 @@ int AddOpacityTransitionToLayerWithPlayer(
     float end_opacity,
     bool use_timing_function);
 
-void AbortAnimationsOnLayerWithPlayer(
-    int layer_id,
-    scoped_refptr<AnimationTimeline> timeline,
-    Animation::TargetProperty target_property);
+void AbortAnimationsOnLayerWithPlayer(int layer_id,
+                                      scoped_refptr<AnimationTimeline> timeline,
+                                      TargetProperty::Type target_property);
 
 }  // namespace cc
 

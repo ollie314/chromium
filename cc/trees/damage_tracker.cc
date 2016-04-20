@@ -8,6 +8,7 @@
 
 #include <algorithm>
 
+#include "base/memory/ptr_util.h"
 #include "cc/base/math_util.h"
 #include "cc/layers/heads_up_display_layer_impl.h"
 #include "cc/layers/layer_impl.h"
@@ -19,8 +20,8 @@
 
 namespace cc {
 
-scoped_ptr<DamageTracker> DamageTracker::Create() {
-  return make_scoped_ptr(new DamageTracker());
+std::unique_ptr<DamageTracker> DamageTracker::Create() {
+  return base::WrapUnique(new DamageTracker());
 }
 
 DamageTracker::DamageTracker()
@@ -50,7 +51,7 @@ static inline void ExpandDamageRectInsideRectWithFilters(
 
 void DamageTracker::UpdateDamageTrackingState(
     const LayerImplList& layer_list,
-    int target_surface_layer_id,
+    const RenderSurfaceImpl* target_surface,
     bool target_surface_property_changed_only_from_descendant,
     const gfx::Rect& target_surface_content_rect,
     LayerImpl* target_surface_mask_layer,
@@ -128,7 +129,7 @@ void DamageTracker::UpdateDamageTrackingState(
   // the damage will be for this frame, because we need to update the damage
   // tracker state to correctly track the next frame.
   gfx::Rect damage_from_active_layers =
-      TrackDamageFromActiveLayers(layer_list, target_surface_layer_id);
+      TrackDamageFromActiveLayers(layer_list, target_surface);
   gfx::Rect damage_from_surface_mask =
       TrackDamageFromSurfaceMask(target_surface_mask_layer);
   gfx::Rect damage_from_leftover_rects = TrackDamageFromLeftoverRects();
@@ -171,7 +172,7 @@ DamageTracker::RectMapData& DamageTracker::RectDataForLayer(
 
 gfx::Rect DamageTracker::TrackDamageFromActiveLayers(
     const LayerImplList& layer_list,
-    int target_surface_layer_id) {
+    const RenderSurfaceImpl* target_surface) {
   gfx::Rect damage_rect;
 
   for (size_t layer_index = 0; layer_index < layer_list.size(); ++layer_index) {
@@ -183,8 +184,8 @@ gfx::Rect DamageTracker::TrackDamageFromActiveLayers(
     // HUD damage rect visualization.
     if (layer == layer->layer_tree_impl()->hud_layer())
       continue;
-    if (LayerTreeHostCommon::RenderSurfaceContributesToTarget<LayerImpl>(
-            layer, target_surface_layer_id))
+
+    if (layer->render_surface() && layer->render_surface() != target_surface)
       ExtendDamageForRenderSurface(layer, &damage_rect);
     else
       ExtendDamageForLayer(layer, &damage_rect);

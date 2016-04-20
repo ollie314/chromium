@@ -15,7 +15,7 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
-#include "net/base/net_util.h"
+#include "ipc/attachment_broker_privileged.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/host/branding.h"
 #include "remoting/host/chromoting_messages.h"
@@ -183,6 +183,12 @@ DaemonProcess::DaemonProcess(
       stopped_callback_(stopped_callback),
       weak_factory_(this) {
   DCHECK(caller_task_runner->BelongsToCurrentThread());
+
+  // TODO(sergeyu): On OSX AttachmentBroker depends on base::PortProvider
+  // implementation. Add it here when this code is used on OSX.
+#if !defined(OS_MACOSX)
+  IPC::AttachmentBrokerPrivileged::CreateBrokerIfNeeded();
+#endif  // !defined(OS_MACOSX)
 }
 
 void DaemonProcess::CreateDesktopSession(int terminal_id,
@@ -203,8 +209,8 @@ void DaemonProcess::CreateDesktopSession(int terminal_id,
   next_terminal_id_ = std::max(next_terminal_id_, terminal_id + 1);
 
   // Create the desktop session.
-  scoped_ptr<DesktopSession> session = DoCreateDesktopSession(
-      terminal_id, resolution, virtual_terminal);
+  std::unique_ptr<DesktopSession> session =
+      DoCreateDesktopSession(terminal_id, resolution, virtual_terminal);
   if (!session) {
     LOG(ERROR) << "Failed to create a desktop session.";
     SendToNetwork(
@@ -326,36 +332,10 @@ void DaemonProcess::OnClientRouteChange(const std::string& jid,
                                         const SerializedTransportRoute& route) {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
-  // Validate |route|.
-  if (route.type != protocol::TransportRoute::DIRECT &&
-      route.type != protocol::TransportRoute::STUN &&
-      route.type != protocol::TransportRoute::RELAY) {
-    LOG(ERROR) << "An invalid RouteType " << route.type << " passed.";
-    CrashNetworkProcess(FROM_HERE);
-    return;
-  }
-  if (route.remote_address.size() != net::kIPv4AddressSize &&
-      route.remote_address.size() != net::kIPv6AddressSize) {
-    LOG(ERROR) << "An invalid net::IPAddressNumber size "
-               << route.remote_address.size() << " passed.";
-    CrashNetworkProcess(FROM_HERE);
-    return;
-  }
-  if (route.local_address.size() != net::kIPv4AddressSize &&
-      route.local_address.size() != net::kIPv6AddressSize) {
-    LOG(ERROR) << "An invalid net::IPAddressNumber size "
-               << route.local_address.size() << " passed.";
-    CrashNetworkProcess(FROM_HERE);
-    return;
-  }
-
   protocol::TransportRoute parsed_route;
-  parsed_route.type =
-      static_cast<protocol::TransportRoute::RouteType>(route.type);
-  parsed_route.remote_address =
-      net::IPEndPoint(route.remote_address, route.remote_port);
-  parsed_route.local_address =
-      net::IPEndPoint(route.local_address, route.local_port);
+  parsed_route.type = route.type;
+  parsed_route.remote_address = route.remote_address;
+  parsed_route.local_address = route.local_address;
   FOR_EACH_OBSERVER(HostStatusObserver, status_observers_,
                     OnClientRouteChange(jid, channel_name, parsed_route));
 }

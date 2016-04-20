@@ -5,32 +5,26 @@
 #ifndef SYNC_INTERNAL_API_PUBLIC_SYNC_MANAGER_FACTORY_H_
 #define SYNC_INTERNAL_API_PUBLIC_SYNC_MANAGER_FACTORY_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "sync/base/sync_export.h"
 
 namespace syncer {
 
 class SyncManager;
 
-// Helper class to allow dependency injection of the SyncManager.
+// Helper class to allow dependency injection of the SyncManager in tests.
 class SYNC_EXPORT SyncManagerFactory {
  public:
-  enum MANAGER_TYPE {
-    NORMAL,     // Normal sync manager
-    BACKUP,     // Backup sync manager
-    ROLLBACK,   // Rollback sync manager
-  };
-
-  explicit SyncManagerFactory(MANAGER_TYPE type);
+  SyncManagerFactory();
   virtual ~SyncManagerFactory();
 
-  virtual scoped_ptr<SyncManager> CreateSyncManager(const std::string& name);
+  virtual std::unique_ptr<SyncManager> CreateSyncManager(
+      const std::string& name);
 
  private:
-  MANAGER_TYPE type_;
   DISALLOW_COPY_AND_ASSIGN(SyncManagerFactory);
 };
 

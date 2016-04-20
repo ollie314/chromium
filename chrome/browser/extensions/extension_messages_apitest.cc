@@ -62,22 +62,23 @@ class MessageSender : public content::NotificationObserver {
   }
 
  private:
-  static scoped_ptr<base::ListValue> BuildEventArguments(
+  static std::unique_ptr<base::ListValue> BuildEventArguments(
       const bool last_message,
       const std::string& data) {
     base::DictionaryValue* event = new base::DictionaryValue();
     event->SetBoolean("lastMessage", last_message);
     event->SetString("data", data);
-    scoped_ptr<base::ListValue> arguments(new base::ListValue());
+    std::unique_ptr<base::ListValue> arguments(new base::ListValue());
     arguments->Append(event);
     return arguments;
   }
 
-  static scoped_ptr<Event> BuildEvent(scoped_ptr<base::ListValue> event_args,
-                                      Profile* profile,
-                                      GURL event_url) {
-    scoped_ptr<Event> event(new Event(events::TEST_ON_MESSAGE, "test.onMessage",
-                                      std::move(event_args)));
+  static std::unique_ptr<Event> BuildEvent(
+      std::unique_ptr<base::ListValue> event_args,
+      Profile* profile,
+      GURL event_url) {
+    std::unique_ptr<Event> event(new Event(
+        events::TEST_ON_MESSAGE, "test.onMessage", std::move(event_args)));
     event->restrict_to_browser_context = profile;
     event->event_url = event_url;
     return event;
@@ -115,7 +116,13 @@ class MessageSender : public content::NotificationObserver {
 };
 
 // Tests that message passing between extensions and content scripts works.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Messaging) {
+#if defined(MEMORY_SANITIZER)
+// https://crbug.com/582185
+#define MAYBE_Messaging DISABLED_Messaging
+#else
+#define MAYBE_Messaging Messaging
+#endif
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_Messaging) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("messaging/connect")) << message_;
 }
@@ -165,6 +172,18 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingEventURL) {
 // Tests that messages cannot be received from the same frame.
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingBackgroundOnly) {
   ASSERT_TRUE(RunExtensionTest("messaging/background_only")) << message_;
+}
+
+// Tests whether an extension in an interstitial page can send messages to the
+// background page.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingInterstitial) {
+  net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
+  https_server.SetSSLConfig(net::EmbeddedTestServer::CERT_MISMATCHED_NAME);
+  ASSERT_TRUE(https_server.Start());
+
+  ASSERT_TRUE(RunExtensionSubtest("messaging/interstitial_component",
+                                  https_server.base_url().spec(),
+                                  kFlagLoadAsComponent)) << message_;
 }
 
 // Tests connecting from a panel to its extension.
@@ -504,10 +523,11 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest, NotInstalled) {
   scoped_refptr<const Extension> extension =
       ExtensionBuilder()
           .SetID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-          .SetManifest(std::move(DictionaryBuilder()
-                                     .Set("name", "Fake extension")
-                                     .Set("version", "1")
-                                     .Set("manifest_version", 2)))
+          .SetManifest(DictionaryBuilder()
+                           .Set("name", "Fake extension")
+                           .Set("version", "1")
+                           .Set("manifest_version", 2)
+                           .Build())
           .Build();
 
   ui_test_utils::NavigateToURL(browser(), chromium_org_url());
@@ -1008,7 +1028,7 @@ class ExternallyConnectableMessagingWithTlsChannelIdTest :
   std::string CreateTlsChannelId() {
     scoped_refptr<net::URLRequestContextGetter> request_context_getter(
         profile()->GetRequestContext());
-    scoped_ptr<crypto::ECPrivateKey> channel_id_key;
+    std::unique_ptr<crypto::ECPrivateKey> channel_id_key;
     net::ChannelIDService::Request request;
     content::BrowserThread::PostTask(
         content::BrowserThread::IO, FROM_HERE,
@@ -1032,7 +1052,7 @@ class ExternallyConnectableMessagingWithTlsChannelIdTest :
 
  private:
   void CreateDomainBoundCertOnIOThread(
-      scoped_ptr<crypto::ECPrivateKey>* channel_id_key,
+      std::unique_ptr<crypto::ECPrivateKey>* channel_id_key,
       net::ChannelIDService::Request* request,
       scoped_refptr<net::URLRequestContextGetter> request_context_getter) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
@@ -1220,10 +1240,11 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
       ExtensionBuilder()
           // A bit scary that this works...
           .SetID("invalid")
-          .SetManifest(std::move(DictionaryBuilder()
-                                     .Set("name", "Fake extension")
-                                     .Set("version", "1")
-                                     .Set("manifest_version", 2)))
+          .SetManifest(DictionaryBuilder()
+                           .Set("name", "Fake extension")
+                           .Set("version", "1")
+                           .Set("manifest_version", 2)
+                           .Build())
           .Build();
 
   ui_test_utils::NavigateToURL(browser(), chromium_org_url());

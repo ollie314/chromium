@@ -15,7 +15,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "cc/debug/micro_benchmark_controller.h"
-#include "cc/playback/display_list_recording_source.h"
+#include "cc/playback/recording_source.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace base {
@@ -29,7 +29,7 @@ class Layer;
 class RasterizeAndRecordBenchmark : public MicroBenchmark {
  public:
   explicit RasterizeAndRecordBenchmark(
-      scoped_ptr<base::Value> value,
+      std::unique_ptr<base::Value> value,
       const MicroBenchmark::DoneCallback& callback);
   ~RasterizeAndRecordBenchmark() override;
 
@@ -37,11 +37,11 @@ class RasterizeAndRecordBenchmark : public MicroBenchmark {
   void DidUpdateLayers(LayerTreeHost* host) override;
   void RunOnLayer(PictureLayer* layer) override;
 
-  scoped_ptr<MicroBenchmarkImpl> CreateBenchmarkImpl(
+  std::unique_ptr<MicroBenchmarkImpl> CreateBenchmarkImpl(
       scoped_refptr<base::SingleThreadTaskRunner> origin_task_runner) override;
 
  private:
-  void RecordRasterResults(scoped_ptr<base::Value> results);
+  void RecordRasterResults(std::unique_ptr<base::Value> results);
 
   struct RecordResults {
     RecordResults();
@@ -49,14 +49,13 @@ class RasterizeAndRecordBenchmark : public MicroBenchmark {
 
     int pixels_recorded;
     size_t bytes_used;
-    base::TimeDelta
-        total_best_time[DisplayListRecordingSource::RECORDING_MODE_COUNT];
+    base::TimeDelta total_best_time[RecordingSource::RECORDING_MODE_COUNT];
   };
 
   RecordResults record_results_;
   int record_repeat_count_;
-  scoped_ptr<base::Value> settings_;
-  scoped_ptr<base::DictionaryValue> results_;
+  std::unique_ptr<base::Value> settings_;
+  std::unique_ptr<base::DictionaryValue> results_;
 
   // The following is used in DCHECKs.
   bool main_thread_benchmark_done_;

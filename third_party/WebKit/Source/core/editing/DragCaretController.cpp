@@ -26,19 +26,19 @@
 #include "core/editing/DragCaretController.h"
 
 #include "core/editing/EditingUtilities.h"
-#include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "core/paint/PaintLayer.h"
 
 namespace blink {
 
 DragCaretController::DragCaretController()
-    : CaretBase(Visible)
+    : CaretBase(CaretVisibility::Visible)
 {
 }
 
-PassOwnPtrWillBeRawPtr<DragCaretController> DragCaretController::create()
+DragCaretController* DragCaretController::create()
 {
-    return adoptPtrWillBeNoop(new DragCaretController);
+    return new DragCaretController;
 }
 
 bool DragCaretController::isContentRichlyEditable() const
@@ -64,7 +64,7 @@ void DragCaretController::setCaretPosition(const PositionWithAffinity& position)
     if (m_position.isNull() || m_position.isOrphan()) {
         clearCaretRect();
     } else {
-        document->updateLayoutTreeIfNeeded();
+        document->updateLayoutTree();
         updateCaretRect(m_position);
     }
 }
@@ -81,7 +81,7 @@ static bool removingNodeRemovesPosition(Node& node, const Position& position)
         return false;
 
     Element& element = toElement(node);
-    return element.containsIncludingShadowDOM(position.anchorNode());
+    return element.isShadowIncludingInclusiveAncestorOf(position.anchorNode());
 }
 
 void DragCaretController::nodeWillBeRemoved(Node& node)
@@ -92,7 +92,7 @@ void DragCaretController::nodeWillBeRemoved(Node& node)
     if (!removingNodeRemovesPosition(node, m_position.deepEquivalent()))
         return;
 
-    m_position.deepEquivalent().document()->layoutView()->clearSelection();
+    m_position.deepEquivalent().document()->layoutViewItem().clearSelection();
     clear();
 }
 

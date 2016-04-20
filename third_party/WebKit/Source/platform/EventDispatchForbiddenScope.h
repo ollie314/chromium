@@ -8,12 +8,11 @@
 #include "platform/PlatformExport.h"
 #include "wtf/Allocator.h"
 #include "wtf/Assertions.h"
-#include "wtf/MainThread.h"
 #include "wtf/TemporaryChange.h"
 
 namespace blink {
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
 
 class EventDispatchForbiddenScope {
     STACK_ALLOCATED();
@@ -74,7 +73,7 @@ public:
     };
 };
 
-#endif // ENABLE(ASSERT)
+#endif // DCHECK_IS_ON()
 
 } // namespace blink
 

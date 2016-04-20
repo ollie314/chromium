@@ -26,11 +26,14 @@
 #define RTCDataChannel_h
 
 #include "base/gtest_prod_util.h"
+#include "bindings/core/v8/ActiveScriptWrappable.h"
+#include "core/dom/ActiveDOMObject.h"
 #include "modules/EventTargetModules.h"
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebRTCDataChannelHandler.h"
 #include "public/platform/WebRTCDataChannelHandlerClient.h"
+#include "wtf/Compiler.h"
 
 namespace blink {
 
@@ -44,13 +47,16 @@ class WebRTCPeerConnectionHandler;
 struct WebRTCDataChannelInit;
 
 class MODULES_EXPORT RTCDataChannel final
-    : public RefCountedGarbageCollectedEventTargetWithInlineData<RTCDataChannel>
-    , public WebRTCDataChannelHandlerClient {
-    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(RTCDataChannel);
+    : public EventTargetWithInlineData
+    , WTF_NON_EXPORTED_BASE(public WebRTCDataChannelHandlerClient)
+    , public ActiveScriptWrappable
+    , public ActiveDOMObject {
+    USING_GARBAGE_COLLECTED_MIXIN(RTCDataChannel);
     DEFINE_WRAPPERTYPEINFO();
+    USING_PRE_FINALIZER(RTCDataChannel, dispose);
 public:
-    static RTCDataChannel* create(ExecutionContext*, RTCPeerConnection*, PassOwnPtr<WebRTCDataChannelHandler>);
-    static RTCDataChannel* create(ExecutionContext*, RTCPeerConnection*, WebRTCPeerConnectionHandler*, const String& label, const WebRTCDataChannelInit&, ExceptionState&);
+    static RTCDataChannel* create(ExecutionContext*, PassOwnPtr<WebRTCDataChannelHandler>);
+    static RTCDataChannel* create(ExecutionContext*, WebRTCPeerConnectionHandler*, const String& label, const WebRTCDataChannelInit&, ExceptionState&);
     ~RTCDataChannel() override;
 
     ReadyState getHandlerState() const;
@@ -76,8 +82,8 @@ public:
     void setBinaryType(const String&, ExceptionState&);
 
     void send(const String&, ExceptionState&);
-    void send(PassRefPtr<DOMArrayBuffer>, ExceptionState&);
-    void send(PassRefPtr<DOMArrayBufferView>, ExceptionState&);
+    void send(DOMArrayBuffer*, ExceptionState&);
+    void send(DOMArrayBufferView*, ExceptionState&);
     void send(Blob*, ExceptionState&);
 
     void close();
@@ -88,16 +94,18 @@ public:
     DEFINE_ATTRIBUTE_EVENT_LISTENER(close);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(message);
 
-    void stop();
-
     // EventTarget
     const AtomicString& interfaceName() const override;
-    ExecutionContext* executionContext() const override;
+    ExecutionContext* getExecutionContext() const override;
 
-    void clearWeakMembers(Visitor*);
+    // ActiveDOMObject
+    void suspend() override;
+    void resume() override;
+    void stop() override;
 
-    // Oilpan: need to eagerly finalize m_handler
-    EAGERLY_FINALIZE();
+    // ActiveScriptWrappable
+    bool hasPendingActivity() const override;
+
     DECLARE_VIRTUAL_TRACE();
 
     // WebRTCDataChannelHandlerClient
@@ -108,16 +116,13 @@ public:
     void didDetectError() override;
 
 private:
-    RTCDataChannel(ExecutionContext*, RTCPeerConnection*, PassOwnPtr<WebRTCDataChannelHandler>);
+    RTCDataChannel(ExecutionContext*, PassOwnPtr<WebRTCDataChannelHandler>);
+    void dispose();
 
-    void scheduleDispatchEvent(PassRefPtrWillBeRawPtr<Event>);
+    void scheduleDispatchEvent(Event*);
     void scheduledEventTimerFired(Timer<RTCDataChannel>*);
 
-    RawPtrWillBeMember<ExecutionContext> m_executionContext;
-
     OwnPtr<WebRTCDataChannelHandler> m_handler;
-
-    bool m_stopped;
 
     WebRTCDataChannelHandlerClient::ReadyState m_readyState;
 
@@ -128,11 +133,11 @@ private:
     BinaryType m_binaryType;
 
     Timer<RTCDataChannel> m_scheduledEventTimer;
-    WillBeHeapVector<RefPtrWillBeMember<Event>> m_scheduledEvents;
-
-    WeakMember<RTCPeerConnection> m_connection;
+    HeapVector<Member<Event>> m_scheduledEvents;
 
     unsigned m_bufferedAmountLowThreshold;
+
+    bool m_stopped;
 
     FRIEND_TEST_ALL_PREFIXES(RTCDataChannelTest, BufferedAmountLow);
 };

@@ -46,6 +46,7 @@ function FullWindowVideoControls(
         break;
 
       case 'U+0020': // Space
+      case 'U+004B': // K
       case 'MediaPlayPause':
         if (!e.target.classList.contains('menu-button'))
           this.togglePlayStateWithFeedback();
@@ -55,13 +56,25 @@ function FullWindowVideoControls(
             chrome.app.window.current(),
             false);  // Leave the full screen mode.
         break;
-      case 'Right':
       case 'MediaNextTrack':
         player.advance_(1);
         break;
-      case 'Left':
       case 'MediaPreviousTrack':
         player.advance_(0);
+        break;
+      case 'Right':
+        if (!e.target.classList.contains('volume'))
+          this.smallSkip(true);
+        break;
+      case 'Left':
+        if (!e.target.classList.contains('volume'))
+          this.smallSkip(false);
+        break;
+      case 'U+004C': // L
+        this.bigSkip(true);
+        break;
+      case 'U+004A': // J
+        this.bigSkip(false);
         break;
       case 'MediaStop':
         // TODO: Define "Stop" behavior.
@@ -366,7 +379,6 @@ VideoPlayer.prototype.loadVideo_ = function(video, opt_callback) {
 
               this.currentSession_ = session;
               this.videoElement_ = new CastVideoElement(media, session);
-              this.controls.attachMedia(this.videoElement_);
             }.bind(this));
           }.bind(this));
     } else {
@@ -376,8 +388,10 @@ VideoPlayer.prototype.loadVideo_ = function(video, opt_callback) {
       this.videoElement_ = document.createElement('video');
       getRequiredElement('video-container').appendChild(this.videoElement_);
 
-      this.controls.attachMedia(this.videoElement_);
-      this.videoElement_.src = video.toURL();
+      var videoUrl = video.toURL();
+      var source = document.createElement('source');
+      source.src = videoUrl;
+      this.videoElement_.appendChild(source);
 
       media.isAvailableForCast().then(function(result) {
         if (result)
@@ -388,9 +402,17 @@ VideoPlayer.prototype.loadVideo_ = function(video, opt_callback) {
         videoPlayerElement.setAttribute('castable', true);
       });
 
-      videoElementInitializePromise = Promise.resolve();
+      videoElementInitializePromise = this.searchSubtitle_(videoUrl)
+          .then(function(subltitleUrl) {
+            if (subltitleUrl) {
+              var track = document.createElement('track');
+              track.src = subltitleUrl;
+              track.kind = 'subtitles';
+              track.default = true;
+              this.videoElement_.appendChild(track);
+            }
+          }.bind(this));
     }
-
     videoElementInitializePromise
         .then(function() {
           var handler = function(currentPos) {
@@ -413,7 +435,7 @@ VideoPlayer.prototype.loadVideo_ = function(video, opt_callback) {
             chrome.power.releaseKeepAwake();
             this.updateInactivityWatcherState_();
           }.wrap(this));
-
+          this.controls.attachMedia(this.videoElement_);
           this.videoElement_.load();
           callback();
         }.bind(this))
@@ -430,6 +452,24 @@ VideoPlayer.prototype.loadVideo_ = function(video, opt_callback) {
           callback();
         }.bind(this));
   }.wrap(this));
+};
+
+/**
+ * Search subtile file corresponding to a video.
+ * @param {string} url a url of a video.
+ * @return {string} a url of subtitle file, or an empty string.
+ */
+VideoPlayer.prototype.searchSubtitle_ = function(url) {
+  var baseUrl = util.splitExtension(url)[0];
+  var resolveLocalFileSystemWithExtension = function(extension) {
+    return new Promise(
+        window.webkitResolveLocalFileSystemURL.bind(null, baseUrl + extension));
+  };
+  return resolveLocalFileSystemWithExtension('.vtt').then(function(subtitle) {
+    return subtitle.toURL();
+  }).catch(function() {
+    return '';
+  });
 };
 
 /**
@@ -692,8 +732,7 @@ function initStrings(callback) {
 }
 
 function initVolumeManager(callback) {
-  var volumeManager = new VolumeManagerWrapper(
-      VolumeManagerWrapper.NonNativeVolumeStatus.ENABLED);
+  var volumeManager = new VolumeManagerWrapper(AllowedPaths.ANY_PATH);
   volumeManager.ensureInitialized(callback);
 }
 

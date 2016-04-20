@@ -38,7 +38,6 @@
 #include "wtf/Allocator.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
-#include "wtf/RefCounted.h"
 #include "wtf/ThreadingPrimitives.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
@@ -59,7 +58,7 @@ public:
         virtual ~ExtraData() { }
     };
 
-    enum Type {
+    enum StreamType {
         TypeAudio,
         TypeVideo
     };
@@ -70,20 +69,20 @@ public:
         ReadyStateEnded = 2
     };
 
-    static MediaStreamSource* create(const String& id, Type, const String& name, bool remote, bool readonly, ReadyState = ReadyStateLive, bool requiresConsumer = false);
+    static MediaStreamSource* create(const String& id, StreamType, const String& name, bool remote, bool readonly, ReadyState = ReadyStateLive, bool requiresConsumer = false);
 
     const String& id() const { return m_id; }
-    Type type() const { return m_type; }
+    StreamType type() const { return m_type; }
     const String& name() const { return m_name; }
     bool remote() const { return m_remote; }
     bool readonly() const { return m_readonly; }
 
     void setReadyState(ReadyState);
-    ReadyState readyState() const { return m_readyState; }
+    ReadyState getReadyState() const { return m_readyState; }
 
     void addObserver(Observer*);
 
-    ExtraData* extraData() const { return m_extraData.get(); }
+    ExtraData* getExtraData() const { return m_extraData.get(); }
     void setExtraData(PassOwnPtr<ExtraData> extraData) { m_extraData = std::move(extraData); }
 
     void setConstraints(WebMediaConstraints constraints) { m_constraints = constraints; }
@@ -97,13 +96,16 @@ public:
     bool removeAudioConsumer(AudioDestinationConsumer*);
     const HeapHashSet<Member<AudioDestinationConsumer>>& audioConsumers() { return m_audioConsumers; }
 
+    // |m_extraData| may hold pointers to GC objects, and it may touch them in destruction.
+    // So this class is eagerly finalized to finalize |m_extraData| promptly.
+    EAGERLY_FINALIZE();
     DECLARE_TRACE();
 
 private:
-    MediaStreamSource(const String& id, Type, const String& name, bool remote, bool readonly, ReadyState, bool requiresConsumer);
+    MediaStreamSource(const String& id, StreamType, const String& name, bool remote, bool readonly, ReadyState, bool requiresConsumer);
 
     String m_id;
-    Type m_type;
+    StreamType m_type;
     String m_name;
     bool m_remote;
     bool m_readonly;

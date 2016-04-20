@@ -9,6 +9,7 @@ import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.test.util.Feature;
 import org.chromium.net.CronetTestBase.OnlyRunNativeCronet;
+import org.chromium.net.test.EmbeddedTestServer;
 
 import java.io.File;
 import java.util.HashMap;
@@ -19,22 +20,31 @@ import java.util.regex.Pattern;
  */
 @SuppressWarnings("deprecation")
 public class HttpUrlRequestFactoryTest extends CronetTestBase {
-    // URL used for base tests.
-    private static final String URL = "http://127.0.0.1:8000";
+    private EmbeddedTestServer mTestServer;
+    private String mUrl;
+
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+        mTestServer = EmbeddedTestServer.createAndStartDefaultServer(getContext());
+        mUrl = mTestServer.getURL("/echo?status=200");
+    }
+
+    @Override
+    protected void tearDown() throws Exception {
+        mTestServer.stopAndDestroyServer();
+        super.tearDown();
+    }
 
     @SmallTest
     @Feature({"Cronet"})
     public void testCreateFactory() throws Throwable {
-        CronetEngine.Builder builder = new CronetEngine.Builder(getContext());
-        builder.enableQUIC(true);
-        builder.addQuicHint("www.google.com", 443, 443);
-        builder.addQuicHint("www.youtube.com", 443, 443);
-        builder.setLibraryName("cronet_tests");
-        String[] commandLineArgs = {
-                CronetTestFramework.LIBRARY_INIT_KEY, CronetTestFramework.LibraryInitType.LEGACY};
-        CronetTestFramework testFramework =
-                new CronetTestFramework(URL, commandLineArgs, getContext(), builder);
-        HttpUrlRequestFactory factory = testFramework.mRequestFactory;
+        HttpUrlRequestFactoryConfig config = new HttpUrlRequestFactoryConfig();
+        config.enableQUIC(true);
+        config.addQuicHint("www.google.com", 443, 443);
+        config.addQuicHint("www.youtube.com", 443, 443);
+        config.setLibraryName("cronet_tests");
+        HttpUrlRequestFactory factory = HttpUrlRequestFactory.createFactory(getContext(), config);
         assertNotNull("Factory should be created", factory);
         assertTrue("Factory should be Chromium/n.n.n.n@r but is "
                            + factory.getName(),
@@ -58,8 +68,7 @@ public class HttpUrlRequestFactoryTest extends CronetTestBase {
                            factory.getName()));
         HashMap<String, String> headers = new HashMap<String, String>();
         TestHttpUrlRequestListener listener = new TestHttpUrlRequestListener();
-        HttpUrlRequest request = factory.createRequest(
-                URL, 0, headers, listener);
+        HttpUrlRequest request = factory.createRequest(mUrl, 0, headers, listener);
         request.start();
         listener.blockForComplete();
         assertEquals(200, listener.mHttpStatusCode);
@@ -82,8 +91,7 @@ public class HttpUrlRequestFactoryTest extends CronetTestBase {
                            factory.getName()));
         HashMap<String, String> headers = new HashMap<String, String>();
         TestHttpUrlRequestListener listener = new TestHttpUrlRequestListener();
-        HttpUrlRequest request = factory.createRequest(
-                URL, 0, headers, listener);
+        HttpUrlRequest request = factory.createRequest(mUrl, 0, headers, listener);
         request.start();
         listener.blockForComplete();
         assertEquals(200, listener.mHttpStatusCode);

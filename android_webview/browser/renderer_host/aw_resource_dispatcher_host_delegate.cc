@@ -4,13 +4,13 @@
 
 #include "android_webview/browser/renderer_host/aw_resource_dispatcher_host_delegate.h"
 
+#include <memory>
 #include <string>
 
 #include "android_webview/browser/aw_contents_io_thread_client.h"
 #include "android_webview/browser/aw_login_delegate.h"
 #include "android_webview/browser/aw_resource_context.h"
 #include "android_webview/common/url_constants.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "components/auto_login_parser/auto_login_parser.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
@@ -80,6 +80,8 @@ class IoThreadClientThrottle : public content::ResourceThrottle {
   int render_frame_id() const { return render_frame_id_; }
 
  private:
+  std::unique_ptr<AwContentsIoThreadClient> GetIoThreadClient() const;
+
   int render_process_id_;
   int render_frame_id_;
   net::URLRequest* request_;
@@ -102,17 +104,23 @@ const char* IoThreadClientThrottle::GetNameForLogging() const {
   return "IoThreadClientThrottle";
 }
 
+std::unique_ptr<AwContentsIoThreadClient>
+IoThreadClientThrottle::GetIoThreadClient() const {
+  if (content::ResourceRequestInfo::OriginatedFromServiceWorker(request_))
+    return AwContentsIoThreadClient::GetServiceWorkerIoThreadClient();
+
+  return AwContentsIoThreadClient::FromID(render_process_id_, render_frame_id_);
+}
+
 void IoThreadClientThrottle::WillStartRequest(bool* defer) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (render_frame_id_ < 1)
-    return;
-  DCHECK(render_process_id_);
+  // valid render_frame_id_ implies nonzero render_processs_id_
+  DCHECK((render_frame_id_ < 1) || (render_process_id_ != 0));
   *defer = false;
 
   // Defer all requests of a pop up that is still not associated with Java
   // client so that the client will get a chance to override requests.
-  scoped_ptr<AwContentsIoThreadClient> io_client =
-      AwContentsIoThreadClient::FromID(render_process_id_, render_frame_id_);
+  std::unique_ptr<AwContentsIoThreadClient> io_client = GetIoThreadClient();
   if (io_client && io_client->PendingAssociation()) {
     *defer = true;
     AwResourceDispatcherHostDelegate::AddPendingThrottle(
@@ -146,8 +154,7 @@ bool IoThreadClientThrottle::MaybeBlockRequest() {
 }
 
 bool IoThreadClientThrottle::ShouldBlockRequest() {
-  scoped_ptr<AwContentsIoThreadClient> io_client =
-      AwContentsIoThreadClient::FromID(render_process_id_, render_frame_id_);
+  std::unique_ptr<AwContentsIoThreadClient> io_client = GetIoThreadClient();
   if (!io_client)
     return false;
 
@@ -238,7 +245,7 @@ void AwResourceDispatcherHostDelegate::RequestComplete(
   if (request && !request->status().is_success()) {
     const content::ResourceRequestInfo* request_info =
         content::ResourceRequestInfo::ForRequest(request);
-    scoped_ptr<AwContentsIoThreadClient> io_client =
+    std::unique_ptr<AwContentsIoThreadClient> io_client =
         AwContentsIoThreadClient::FromID(request_info->GetChildID(),
                                          request_info->GetRenderFrameID());
     if (io_client) {
@@ -282,9 +289,9 @@ void AwResourceDispatcherHostDelegate::DownloadStarting(
   const content::ResourceRequestInfo* request_info =
       content::ResourceRequestInfo::ForRequest(request);
 
-  scoped_ptr<AwContentsIoThreadClient> io_client =
-      AwContentsIoThreadClient::FromID(
-          child_id, request_info->GetRenderFrameID());
+  std::unique_ptr<AwContentsIoThreadClient> io_client =
+      AwContentsIoThreadClient::FromID(child_id,
+                                       request_info->GetRenderFrameID());
 
   // POST request cannot be repeated in general, so prevent client from
   // retrying the same request, even if it is with a GET.
@@ -335,7 +342,7 @@ void AwResourceDispatcherHostDelegate::OnResponseStarted(
     auto_login_parser::HeaderData header_data;
     if (auto_login_parser::ParserHeaderInResponse(
             request, auto_login_parser::ALLOW_ANY_REALM, &header_data)) {
-      scoped_ptr<AwContentsIoThreadClient> io_client =
+      std::unique_ptr<AwContentsIoThreadClient> io_client =
           AwContentsIoThreadClient::FromID(request_info->GetChildID(),
                                            request_info->GetRenderFrameID());
       if (io_client) {

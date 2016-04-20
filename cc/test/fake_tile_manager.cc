@@ -19,13 +19,14 @@ namespace cc {
 
 namespace {
 
-class FakeTileTaskRunnerImpl : public TileTaskRunner, public TileTaskClient {
+class FakeTileTaskRunnerImpl : public TileTaskRunner,
+                               public RasterBufferProvider {
  public:
   // Overridden from TileTaskRunner:
   void Shutdown() override {}
   void ScheduleTasks(TaskGraph* graph) override {
     for (const auto& node : graph->nodes) {
-      RasterTask* task = static_cast<RasterTask*>(node.task);
+      TileTask* task = static_cast<TileTask*>(node.task);
 
       task->WillSchedule();
       task->ScheduleOnOriginThread(this);
@@ -35,10 +36,9 @@ class FakeTileTaskRunnerImpl : public TileTaskRunner, public TileTaskClient {
     }
   }
   void CheckForCompletedTasks() override {
-    for (RasterTask::Vector::iterator it = completed_tasks_.begin();
-         it != completed_tasks_.end();
-         ++it) {
-      RasterTask* task = it->get();
+    for (TileTask::Vector::iterator it = completed_tasks_.begin();
+         it != completed_tasks_.end(); ++it) {
+      TileTask* task = it->get();
 
       task->WillComplete();
       task->CompleteOnOriginThread(this);
@@ -50,21 +50,21 @@ class FakeTileTaskRunnerImpl : public TileTaskRunner, public TileTaskClient {
     return RGBA_8888;
   }
   bool GetResourceRequiresSwizzle(bool must_support_alpha) const override {
-    return !PlatformColor::SameComponentOrder(
-        GetResourceFormat(must_support_alpha));
+    return ResourceFormatRequiresSwizzle(GetResourceFormat(must_support_alpha));
   }
+  RasterBufferProvider* AsRasterBufferProvider() override { return this; }
 
-  // Overridden from TileTaskClient:
-  scoped_ptr<RasterBuffer> AcquireBufferForRaster(
+  // Overridden from RasterBufferProvider:
+  std::unique_ptr<RasterBuffer> AcquireBufferForRaster(
       const Resource* resource,
       uint64_t resource_content_id,
       uint64_t previous_content_id) override {
     return nullptr;
   }
-  void ReleaseBufferForRaster(scoped_ptr<RasterBuffer> buffer) override {}
+  void ReleaseBufferForRaster(std::unique_ptr<RasterBuffer> buffer) override {}
 
  private:
-  RasterTask::Vector completed_tasks_;
+  TileTask::Vector completed_tasks_;
 };
 base::LazyInstance<FakeTileTaskRunnerImpl> g_fake_tile_task_runner =
     LAZY_INSTANCE_INITIALIZER;
@@ -77,7 +77,7 @@ FakeTileManager::FakeTileManager(TileManagerClient* client)
                   std::numeric_limits<size_t>::max(),
                   false /* use_partial_raster */) {
   SetResources(nullptr, g_fake_tile_task_runner.Pointer(),
-               std::numeric_limits<size_t>::max(),
+               &image_decode_controller_, std::numeric_limits<size_t>::max(),
                false /* use_gpu_rasterization */);
 }
 
@@ -88,7 +88,7 @@ FakeTileManager::FakeTileManager(TileManagerClient* client,
                   std::numeric_limits<size_t>::max(),
                   false /* use_partial_raster */) {
   SetResources(resource_pool, g_fake_tile_task_runner.Pointer(),
-               std::numeric_limits<size_t>::max(),
+               &image_decode_controller_, std::numeric_limits<size_t>::max(),
                false /* use_gpu_rasterization */);
 }
 

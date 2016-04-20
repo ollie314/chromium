@@ -13,6 +13,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "components/safe_browsing_db/util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/resource_controller.h"
@@ -41,13 +42,14 @@ void RecordHistogramResourceTypeSafe(content::ResourceType resource_type) {
 // Return a dictionary with "url"=|url-spec| and optionally
 // |name|=|value| (if not null), for netlogging.
 // This will also add a reference to the original request's net_log ID.
-scoped_ptr<base::Value> NetLogUrlCallback(
+std::unique_ptr<base::Value> NetLogUrlCallback(
     const net::URLRequest* request,
     const GURL& url,
     const char* name,
     const char* value,
     net::NetLogCaptureMode /* capture_mode */) {
-  scoped_ptr<base::DictionaryValue> event_params(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> event_params(
+      new base::DictionaryValue());
   event_params->SetString("url", url.spec());
   if (name && value)
     event_params->SetString(name, value);
@@ -56,11 +58,11 @@ scoped_ptr<base::Value> NetLogUrlCallback(
 }
 
 // Return a dictionary with |name|=|value|, for netlogging.
-scoped_ptr<base::Value> NetLogStringCallback(
-    const char* name,
-    const char* value,
-    net::NetLogCaptureMode) {
-  scoped_ptr<base::DictionaryValue> event_params(new base::DictionaryValue());
+std::unique_ptr<base::Value> NetLogStringCallback(const char* name,
+                                                  const char* value,
+                                                  net::NetLogCaptureMode) {
+  std::unique_ptr<base::DictionaryValue> event_params(
+      new base::DictionaryValue());
   if (name && value)
     event_params->SetString(name, value);
   return std::move(event_params);
@@ -206,7 +208,7 @@ const char* SafeBrowsingResourceThrottle::GetNameForLogging() const {
 void SafeBrowsingResourceThrottle::OnCheckBrowseUrlResult(
     const GURL& url,
     safe_browsing::SBThreatType threat_type,
-    const std::string& metadata) {
+    const safe_browsing::ThreatMetadata& metadata) {
   CHECK_EQ(state_, STATE_CHECKING_URL);
   CHECK_EQ(url, url_being_checked_);
 
@@ -363,8 +365,8 @@ void SafeBrowsingResourceThrottle::OnCheckUrlTimeout() {
   CHECK_EQ(state_, STATE_CHECKING_URL);
 
   database_manager_->CancelCheck(this);
-  OnCheckBrowseUrlResult(
-      url_being_checked_, safe_browsing::SB_THREAT_TYPE_SAFE, std::string());
+  OnCheckBrowseUrlResult(url_being_checked_, safe_browsing::SB_THREAT_TYPE_SAFE,
+                         safe_browsing::ThreatMetadata());
 }
 
 void SafeBrowsingResourceThrottle::ResumeRequest() {

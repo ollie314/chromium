@@ -35,19 +35,17 @@
 #include "core/events/EventTarget.h"
 #include "core/html/HTMLDivElement.h"
 #include "platform/heap/Handle.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
 class TextTrack;
 
-class TextTrackCue : public RefCountedGarbageCollectedEventTargetWithInlineData<TextTrackCue> {
+class TextTrackCue : public EventTargetWithInlineData {
     DEFINE_WRAPPERTYPEINFO();
-    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(TextTrackCue);
 public:
     static const AtomicString& cueShadowPseudoId()
     {
-        DEFINE_STATIC_LOCAL(const AtomicString, cue, ("cue", AtomicString::ConstructFromLiteral));
+        DEFINE_STATIC_LOCAL(const AtomicString, cue, ("cue"));
         return cue;
     }
 
@@ -109,7 +107,7 @@ protected:
 
     void cueWillChange();
     virtual void cueDidChange();
-    bool dispatchEventInternal(PassRefPtrWillBeRawPtr<Event>) override;
+    DispatchEventResult dispatchEventInternal(Event*) override;
 
 private:
     AtomicString m_id;

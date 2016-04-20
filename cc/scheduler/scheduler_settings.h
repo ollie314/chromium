@@ -5,6 +5,8 @@
 #ifndef CC_SCHEDULER_SCHEDULER_SETTINGS_H_
 #define CC_SCHEDULER_SCHEDULER_SETTINGS_H_
 
+#include <memory>
+
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -21,6 +23,7 @@ namespace cc {
 class CC_EXPORT SchedulerSettings {
  public:
   SchedulerSettings();
+  SchedulerSettings(const SchedulerSettings& other);
   ~SchedulerSettings();
 
   bool use_external_begin_frame_source;
@@ -30,11 +33,12 @@ class CC_EXPORT SchedulerSettings {
   bool timeout_and_draw_when_animation_checkerboards;
   bool using_synchronous_renderer_compositor;
   bool throttle_frame_production;
+  bool abort_commit_before_output_surface_creation;
 
   int maximum_number_of_failed_draws_before_draw_is_forced;
   base::TimeDelta background_frame_interval;
 
-  scoped_refptr<base::trace_event::ConvertableToTraceFormat> AsValue() const;
+  std::unique_ptr<base::trace_event::ConvertableToTraceFormat> AsValue() const;
 };
 
 }  // namespace cc

@@ -22,7 +22,8 @@ class AppBannerDataFetcherDesktop : public AppBannerDataFetcher {
   AppBannerDataFetcherDesktop(content::WebContents* web_contents,
                               base::WeakPtr<Delegate> weak_delegate,
                               int ideal_icon_size_in_dp,
-                              int minimum_icon_size_in_dp);
+                              int minimum_icon_size_in_dp,
+                              bool is_debug_mode);
 
   // Callback for finishing bookmark app creation
   void FinishCreateBookmarkApp(const extensions::Extension* extension,
@@ -41,7 +42,7 @@ class AppBannerDataFetcherDesktop : public AppBannerDataFetcher {
                   const base::string16& title,
                   const std::string& referrer) override;
 
-  scoped_ptr<extensions::BookmarkAppHelper> bookmark_app_helper_;
+  std::unique_ptr<extensions::BookmarkAppHelper> bookmark_app_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(AppBannerDataFetcherDesktop);
 };

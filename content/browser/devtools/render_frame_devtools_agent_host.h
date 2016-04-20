@@ -6,10 +6,10 @@
 #define CONTENT_BROWSER_DEVTOOLS_RENDER_FRAME_DEVTOOLS_AGENT_HOST_H_
 
 #include <map>
+#include <memory>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "content/browser/devtools/devtools_agent_host_impl.h"
 #include "content/common/content_export.h"
@@ -55,11 +55,14 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
                                         RenderFrameHost* current);
   static void OnBeforeNavigation(RenderFrameHost* current,
                                  RenderFrameHost* pending);
+  static void OnBeforeNavigation(NavigationHandle* navigation_handle);
 
   void SynchronousSwapCompositorFrame(
       const cc::CompositorFrameMetadata& frame_metadata);
 
   bool HasRenderFrameHost(RenderFrameHost* host);
+
+  FrameTreeNode* frame_tree_node() { return frame_tree_node_; }
 
   // DevTooolsAgentHost overrides.
   void DisconnectWebContents() override;
@@ -90,7 +93,6 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
   void InspectElement(int x, int y) override;
 
   // WebContentsObserver overrides.
-  void DidStartNavigation(NavigationHandle* navigation_handle) override;
   void ReadyToCommitNavigation(NavigationHandle* navigation_handle) override;
   void DidFinishNavigation(NavigationHandle* navigation_handle) override;
   void RenderFrameHostChanged(RenderFrameHost* old_host,
@@ -116,6 +118,7 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
 
   void AboutToNavigateRenderFrame(RenderFrameHost* old_host,
                                   RenderFrameHost* new_host);
+  void AboutToNavigate(NavigationHandle* navigation_handle);
 
   void DispatchBufferedProtocolMessagesIfNecessary();
 
@@ -131,34 +134,36 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
 
   void RenderFrameCrashed();
   void OnSwapCompositorFrame(const IPC::Message& message);
+  void OnDispatchOnInspectorFrontend(
+      RenderFrameHost* sender,
+      const DevToolsMessageChunk& message);
+  void OnRequestNewWindow(RenderFrameHost* sender, int new_routing_id);
   void DestroyOnRenderFrameGone();
-
-  bool MatchesMyTreeNode(NavigationHandle* navigation_handle);
 
   class FrameHostHolder;
 
-  scoped_ptr<FrameHostHolder> current_;
-  scoped_ptr<FrameHostHolder> pending_;
+  std::unique_ptr<FrameHostHolder> current_;
+  std::unique_ptr<FrameHostHolder> pending_;
 
   // Stores per-host state between DisconnectWebContents and ConnectWebContents.
-  scoped_ptr<FrameHostHolder> disconnected_;
+  std::unique_ptr<FrameHostHolder> disconnected_;
 
-  scoped_ptr<devtools::dom::DOMHandler> dom_handler_;
-  scoped_ptr<devtools::input::InputHandler> input_handler_;
-  scoped_ptr<devtools::inspector::InspectorHandler> inspector_handler_;
-  scoped_ptr<devtools::io::IOHandler> io_handler_;
-  scoped_ptr<devtools::network::NetworkHandler> network_handler_;
-  scoped_ptr<devtools::page::PageHandler> page_handler_;
-  scoped_ptr<devtools::security::SecurityHandler> security_handler_;
-  scoped_ptr<devtools::service_worker::ServiceWorkerHandler>
+  std::unique_ptr<devtools::dom::DOMHandler> dom_handler_;
+  std::unique_ptr<devtools::input::InputHandler> input_handler_;
+  std::unique_ptr<devtools::inspector::InspectorHandler> inspector_handler_;
+  std::unique_ptr<devtools::io::IOHandler> io_handler_;
+  std::unique_ptr<devtools::network::NetworkHandler> network_handler_;
+  std::unique_ptr<devtools::page::PageHandler> page_handler_;
+  std::unique_ptr<devtools::security::SecurityHandler> security_handler_;
+  std::unique_ptr<devtools::service_worker::ServiceWorkerHandler>
       service_worker_handler_;
-  scoped_ptr<devtools::tracing::TracingHandler> tracing_handler_;
-  scoped_ptr<devtools::emulation::EmulationHandler> emulation_handler_;
-  scoped_ptr<DevToolsFrameTraceRecorder> frame_trace_recorder_;
+  std::unique_ptr<devtools::tracing::TracingHandler> tracing_handler_;
+  std::unique_ptr<devtools::emulation::EmulationHandler> emulation_handler_;
+  std::unique_ptr<DevToolsFrameTraceRecorder> frame_trace_recorder_;
 #if defined(OS_ANDROID)
-  scoped_ptr<PowerSaveBlockerImpl> power_save_blocker_;
+  std::unique_ptr<PowerSaveBlockerImpl> power_save_blocker_;
 #endif
-  scoped_ptr<DevToolsProtocolHandler> protocol_handler_;
+  std::unique_ptr<DevToolsProtocolHandler> protocol_handler_;
   bool current_frame_crashed_;
 
   // PlzNavigate
@@ -166,9 +171,8 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
   // Handle that caused the setting of pending_.
   NavigationHandle* pending_handle_;
 
-  // Navigation counter and queue for buffering protocol messages during a
-  // navigation.
-  int in_navigation_;
+  // List of handles currently navigating.
+  std::set<NavigationHandle*> navigating_handles_;
 
   // <call_id> -> <session_id, message>
   std::map<int, std::pair<int, std::string>>

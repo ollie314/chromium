@@ -50,9 +50,6 @@ public:
 
     size_t trackElementIndex();
     HTMLTrackElement* trackElement() { return m_trackElement; }
-#if !ENABLE(OILPAN)
-    void clearTrackElement();
-#endif
 
     bool isDefault() const override;
 
@@ -61,7 +58,7 @@ public:
 private:
     explicit LoadableTextTrack(HTMLTrackElement*);
 
-    RawPtrWillBeMember<HTMLTrackElement> m_trackElement;
+    Member<HTMLTrackElement> m_trackElement;
 };
 
 } // namespace blink

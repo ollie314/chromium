@@ -33,7 +33,15 @@ void LayoutSVGHiddenContainer::layout()
 {
     ASSERT(needsLayout());
     LayoutAnalyzer::Scope analyzer(*this);
-    SVGLayoutSupport::layoutChildren(this, selfNeedsLayout());
+    // TODO(fs): In what cases do we need this?
+    bool transformChanged = SVGLayoutSupport::transformToRootChanged(this);
+
+    // When hasRelativeLengths() is false, no descendants have relative lengths
+    // (hence no one is interested in viewport size changes).
+    bool layoutSizeChanged = element()->hasRelativeLengths()
+        && SVGLayoutSupport::layoutSizeOfNearestViewportChanged(this);
+
+    SVGLayoutSupport::layoutChildren(firstChild(), selfNeedsLayout(), transformChanged, layoutSizeChanged);
     updateCachedBoundaries();
     clearNeedsLayout();
 }
@@ -43,7 +51,7 @@ void LayoutSVGHiddenContainer::paint(const PaintInfo&, const LayoutPoint&) const
     // This subtree does not paint.
 }
 
-void LayoutSVGHiddenContainer::absoluteQuads(Vector<FloatQuad>&, bool*) const
+void LayoutSVGHiddenContainer::absoluteQuads(Vector<FloatQuad>&) const
 {
     // This subtree does not take up space or paint
 }
@@ -53,4 +61,4 @@ bool LayoutSVGHiddenContainer::nodeAtFloatPoint(HitTestResult&, const FloatPoint
     return false;
 }
 
-}
+} // namespace blink

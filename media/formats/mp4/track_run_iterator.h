@@ -8,16 +8,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "media/base/media_export.h"
 #include "media/base/media_log.h"
 #include "media/base/stream_parser_buffer.h"
 #include "media/formats/mp4/box_definitions.h"
-#include "media/formats/mp4/cenc.h"
 
 namespace media {
 
@@ -88,7 +87,7 @@ class MEDIA_EXPORT TrackRunIterator {
 
   // Only call when is_encrypted() is true and AuxInfoNeedsToBeCached() is
   // false. Result is owned by caller.
-  scoped_ptr<DecryptConfig> GetDecryptConfig();
+  std::unique_ptr<DecryptConfig> GetDecryptConfig();
 
  private:
   void ResetRun();
@@ -107,8 +106,6 @@ class MEDIA_EXPORT TrackRunIterator {
   std::vector<TrackRunInfo> runs_;
   std::vector<TrackRunInfo>::const_iterator run_itr_;
   std::vector<SampleInfo>::const_iterator sample_itr_;
-
-  std::vector<FrameCENCInfo> cenc_info_;
 
   int64_t sample_dts_;
   int64_t sample_offset_;

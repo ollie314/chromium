@@ -20,8 +20,11 @@
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/site_instance.h"
+#include "content/public/browser/storage_partition.h"
 #include "ipc/ipc_message_macros.h"
+#include "ui/gfx/geometry/size_f.h"
 
 namespace autofill {
 
@@ -50,9 +53,9 @@ bool ContentAutofillDriver::IsOffTheRecord() const {
 }
 
 net::URLRequestContextGetter* ContentAutofillDriver::GetURLRequestContext() {
-  return render_frame_host_->GetSiteInstance()
-      ->GetBrowserContext()
-      ->GetRequestContext();
+  return content::BrowserContext::GetDefaultStoragePartition(
+      render_frame_host_->GetSiteInstance()->GetBrowserContext())->
+          GetURLRequestContext();
 }
 
 base::SequencedWorkerPool* ContentAutofillDriver::GetBlockingPool() {
@@ -147,6 +150,19 @@ void ContentAutofillDriver::PopupHidden() {
     RendererShouldClearPreviewedForm();
 }
 
+gfx::RectF ContentAutofillDriver::TransformBoundingBoxToViewportCoordinates(
+    const gfx::RectF& bounding_box) {
+  gfx::Point orig_point(bounding_box.x(), bounding_box.y());
+  gfx::Point transformed_point;
+  transformed_point =
+      render_frame_host_->GetView()->TransformPointToRootCoordSpace(orig_point);
+
+  gfx::RectF new_box;
+  new_box.SetRect(transformed_point.x(), transformed_point.y(),
+                  bounding_box.width(), bounding_box.height());
+  return new_box;
+}
+
 bool ContentAutofillDriver::HandleMessage(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ContentAutofillDriver, message)
@@ -203,7 +219,7 @@ void ContentAutofillDriver::DidNavigateFrame(
 }
 
 void ContentAutofillDriver::SetAutofillManager(
-    scoped_ptr<AutofillManager> manager) {
+    std::unique_ptr<AutofillManager> manager) {
   autofill_manager_ = std::move(manager);
   autofill_manager_->SetExternalDelegate(&autofill_external_delegate_);
 }

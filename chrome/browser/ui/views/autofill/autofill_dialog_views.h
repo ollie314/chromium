@@ -136,8 +136,9 @@ class AutofillDialogViews : public AutofillDialogView,
   void OnPerformAction(views::Combobox* combobox) override;
 
   // views::MenuButtonListener implementation.
-  void OnMenuButtonClicked(views::View* source,
-                           const gfx::Point& point) override;
+  void OnMenuButtonClicked(views::MenuButton* source,
+                           const gfx::Point& point,
+                           const ui::Event* event) override;
 
  protected:
   // Exposed for testing.
@@ -335,6 +336,7 @@ class AutofillDialogViews : public AutofillDialogView,
   // section. None of the member pointers are owned.
   struct DetailsGroup {
     explicit DetailsGroup(DialogSection section);
+    DetailsGroup(const DetailsGroup& other);
     ~DetailsGroup();
 
     // The section this group is associated with.
@@ -500,7 +502,7 @@ class AutofillDialogViews : public AutofillDialogView,
   NotificationArea* notification_area_;
 
   // Runs the suggestion menu (triggered by each section's |suggested_button|).
-  scoped_ptr<views::MenuRunner> menu_runner_;
+  std::unique_ptr<views::MenuRunner> menu_runner_;
 
   // View that wraps |details_container_| and makes it scroll vertically.
   views::ScrollView* scrollable_area_;
@@ -534,7 +536,7 @@ class AutofillDialogViews : public AutofillDialogView,
   ScopedObserver<views::Widget, AutofillDialogViews> observer_;
 
   // Used to tell the delegate when focus moves to hide the Autofill popup.
-  scoped_ptr<ui::EventHandler> event_handler_;
+  std::unique_ptr<ui::EventHandler> event_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(AutofillDialogViews);
 };

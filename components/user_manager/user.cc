@@ -69,7 +69,23 @@ class GuestUser : public User {
   DISALLOW_COPY_AND_ASSIGN(GuestUser);
 };
 
-class KioskAppUser : public User {
+class DeviceLocalAccountUserBase : public User {
+ public:
+  // User:
+  bool IsAffiliated() const override;
+
+ protected:
+  explicit DeviceLocalAccountUserBase(const AccountId& account_id);
+  ~DeviceLocalAccountUserBase() override;
+  // User:
+  void SetAffiliation(bool) override;
+  bool IsDeviceLocalAccount() const override;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(DeviceLocalAccountUserBase);
+};
+
+class KioskAppUser : public DeviceLocalAccountUserBase {
  public:
   explicit KioskAppUser(const AccountId& kiosk_app_account_id);
   ~KioskAppUser() override;
@@ -94,7 +110,7 @@ class SupervisedUser : public User {
   DISALLOW_COPY_AND_ASSIGN(SupervisedUser);
 };
 
-class PublicAccountUser : public User {
+class PublicAccountUser : public DeviceLocalAccountUserBase {
  public:
   explicit PublicAccountUser(const AccountId& account_id);
   ~PublicAccountUser() override;
@@ -105,6 +121,11 @@ class PublicAccountUser : public User {
  private:
   DISALLOW_COPY_AND_ASSIGN(PublicAccountUser);
 };
+
+User::User(const AccountId& account_id)
+    : account_id_(account_id), user_image_(new UserImage) {}
+
+User::~User() {}
 
 std::string User::GetEmail() const {
   return display_email();
@@ -121,7 +142,7 @@ base::string16 User::GetGivenName() const {
 }
 
 const gfx::ImageSkia& User::GetImage() const {
-  return user_image_.image();
+  return user_image_->image();
 }
 
 const AccountId& User::GetAccountId() const {
@@ -181,6 +202,18 @@ bool User::is_active() const {
   return is_active_;
 }
 
+bool User::IsAffiliated() const {
+  return is_affiliated_;
+}
+
+void User::SetAffiliation(bool is_affiliated) {
+  is_affiliated_ = is_affiliated;
+}
+
+bool User::IsDeviceLocalAccount() const {
+  return false;
+}
+
 User* User::CreateRegularUser(const AccountId& account_id) {
   return new RegularUser(account_id);
 }
@@ -201,31 +234,26 @@ User* User::CreatePublicAccountUser(const AccountId& account_id) {
   return new PublicAccountUser(account_id);
 }
 
-User::User(const AccountId& account_id) : account_id_(account_id) {}
-
-User::~User() {
-}
-
 void User::SetAccountLocale(const std::string& resolved_account_locale) {
   account_locale_.reset(new std::string(resolved_account_locale));
 }
 
-void User::SetImage(const UserImage& user_image, int image_index) {
-  user_image_ = user_image;
+void User::SetImage(scoped_ptr<UserImage> user_image, int image_index) {
+  user_image_ = std::move(user_image);
   image_index_ = image_index;
   image_is_stub_ = false;
   image_is_loading_ = false;
-  DCHECK(HasDefaultImage() || user_image.has_raw_image());
+  DCHECK(HasDefaultImage() || user_image_->has_image_bytes());
 }
 
 void User::SetImageURL(const GURL& image_url) {
-  user_image_.set_url(image_url);
+  user_image_->set_url(image_url);
 }
 
-void User::SetStubImage(const UserImage& stub_user_image,
+void User::SetStubImage(scoped_ptr<UserImage> stub_user_image,
                         int image_index,
                         bool is_loading) {
-  user_image_ = stub_user_image;
+  user_image_ = std::move(stub_user_image);
   image_index_ = image_index;
   image_is_stub_ = true;
   image_is_loading_ = is_loading;
@@ -265,8 +293,29 @@ UserType GuestUser::GetType() const {
   return user_manager::USER_TYPE_GUEST;
 }
 
+DeviceLocalAccountUserBase::DeviceLocalAccountUserBase(
+    const AccountId& account_id) : User(account_id) {
+}
+
+DeviceLocalAccountUserBase::~DeviceLocalAccountUserBase() {
+}
+
+bool DeviceLocalAccountUserBase::IsAffiliated() const {
+  return true;
+}
+
+void DeviceLocalAccountUserBase::SetAffiliation(bool) {
+  // Device local accounts are always affiliated. No affiliation modification
+  // must happen.
+  NOTREACHED();
+}
+
+bool DeviceLocalAccountUserBase::IsDeviceLocalAccount() const {
+  return true;
+}
+
 KioskAppUser::KioskAppUser(const AccountId& kiosk_app_account_id)
-    : User(kiosk_app_account_id) {
+    : DeviceLocalAccountUserBase(kiosk_app_account_id) {
   set_display_email(kiosk_app_account_id.GetUserEmail());
 }
 
@@ -293,7 +342,7 @@ std::string SupervisedUser::display_email() const {
 }
 
 PublicAccountUser::PublicAccountUser(const AccountId& account_id)
-    : User(account_id) {}
+    : DeviceLocalAccountUserBase(account_id) {}
 
 PublicAccountUser::~PublicAccountUser() {
 }

@@ -49,7 +49,9 @@ class CurrentThreadMock : public blink::WebThread {
     scheduler_->Shutdown();
   }
 
-  blink::WebTaskRunner* taskRunner() override { return web_task_runner_.get(); }
+  blink::WebTaskRunner* getWebTaskRunner() override {
+    return web_task_runner_.get();
+  }
 
   bool isCurrentThread() const override { return true; }
 
@@ -71,6 +73,9 @@ class TestBlinkPlatformSupport : NON_EXPORTED_BASE(public blink::Platform) {
   ~TestBlinkPlatformSupport() override;
 
   blink::WebThread* currentThread() override { return &m_currentThread; }
+  void registerMemoryDumpProvider(blink::WebMemoryDumpProvider*,
+                                  const char* name) override {}
+  void unregisterMemoryDumpProvider(blink::WebMemoryDumpProvider*) override {}
 
  private:
   CurrentThreadMock m_currentThread;

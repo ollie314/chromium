@@ -84,7 +84,7 @@ class CompositedScrollingBrowserTest : public ContentBrowserTest {
 
     RenderWidgetHostImpl* host = GetWidgetHost();
     scoped_refptr<FrameWatcher> frame_watcher(new FrameWatcher());
-    host->GetProcess()->AddFilter(frame_watcher.get());
+    frame_watcher->AttachTo(shell()->web_contents());
     host->GetView()->SetSize(gfx::Size(400, 400));
 
     base::string16 ready_title(base::ASCIIToUTF16("ready"));
@@ -129,7 +129,7 @@ class CompositedScrollingBrowserTest : public ContentBrowserTest {
 
     runner_ = new MessageLoopRunner();
 
-    scoped_ptr<SyntheticSmoothScrollGesture> gesture(
+    std::unique_ptr<SyntheticSmoothScrollGesture> gesture(
         new SyntheticSmoothScrollGesture(params));
     GetWidgetHost()->QueueSyntheticGesture(
         std::move(gesture),

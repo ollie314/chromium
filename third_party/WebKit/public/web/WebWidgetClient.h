@@ -48,6 +48,7 @@ class WebString;
 class WebWidget;
 struct WebCursorInfo;
 struct WebFloatPoint;
+struct WebFloatRect;
 struct WebFloatSize;
 struct WebSize;
 
@@ -58,13 +59,6 @@ public:
 
     // Called when the Widget has changed size as a result of an auto-resize.
     virtual void didAutoResize(const WebSize& newSize) { }
-
-    // Called when the Widget has a new layout size. As a result of
-    // setting the new layout size, the frame for this widget has possibly
-    // been marked as needing layout. Widgets must mark their containers
-    // for layout when the plguin container controls widget layout, otherwise
-    // the frame layout will not occur.
-    virtual void didUpdateLayoutSize(const WebSize& newSize) { }
 
     // Attempt to initialize compositing for this widget. If this is successful,
     // layerTreeView() will return a valid WebLayerTreeView.
@@ -139,8 +133,13 @@ public:
     // Called when a gesture event is handled.
     virtual void didHandleGestureEvent(const WebGestureEvent& event, bool eventCancelled) { }
 
-    // Called when overscrolled on main thread.
-    virtual void didOverscroll(const WebFloatSize& unusedDelta, const WebFloatSize& accumulatedRootOverScroll, const WebFloatPoint& position, const WebFloatSize& velocity) { }
+    // Called when overscrolled on main thread. All parameters are in
+    // viewport-space.
+    virtual void didOverscroll(
+        const WebFloatSize& overscrollDelta,
+        const WebFloatSize& accumulatedOverscroll,
+        const WebFloatPoint& positionInViewport,
+        const WebFloatSize& velocityInViewport) { }
 
     // Called to update if touch events should be sent.
     virtual void hasTouchEventHandlers(bool) { }
@@ -183,6 +182,13 @@ public:
     // becomes DSF times larger than window coordinates.
     // TODO(oshima): Update the comment when the migration is completed.
     virtual void convertViewportToWindow(WebRect* rect) {}
+
+    // Converts the |rect| from the coordinates in native window in
+    // DIP to Blink's Viewport coordinates. They're identical in
+    // tradional world, but will differ when use-zoom-for-dsf feature
+    // is eanbled.  TODO(oshima): Update the comment when the
+    // migration is completed.
+    virtual void convertWindowToViewport(WebFloatRect* rect) {}
 
 protected:
     ~WebWidgetClient() { }

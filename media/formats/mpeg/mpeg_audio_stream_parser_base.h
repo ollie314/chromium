@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -39,7 +40,7 @@ class MEDIA_EXPORT MPEGAudioStreamParserBase : public StreamParser {
             bool ignore_text_tracks,
             const EncryptedMediaInitDataCB& encrypted_media_init_data_cb,
             const NewMediaSegmentCB& new_segment_cb,
-            const base::Closure& end_of_segment_cb,
+            const EndMediaSegmentCB& end_of_segment_cb,
             const scoped_refptr<MediaLog>& media_log) override;
   void Flush() override;
   bool Parse(const uint8_t* buf, int size) override;
@@ -138,13 +139,13 @@ class MEDIA_EXPORT MPEGAudioStreamParserBase : public StreamParser {
   NewConfigCB config_cb_;
   NewBuffersCB new_buffers_cb_;
   NewMediaSegmentCB new_segment_cb_;
-  base::Closure end_of_segment_cb_;
+  EndMediaSegmentCB end_of_segment_cb_;
   scoped_refptr<MediaLog> media_log_;
 
   ByteQueue queue_;
 
   AudioDecoderConfig config_;
-  scoped_ptr<AudioTimestampHelper> timestamp_helper_;
+  std::unique_ptr<AudioTimestampHelper> timestamp_helper_;
   bool in_media_segment_;
   const uint32_t start_code_mask_;
   const AudioCodec audio_codec_;

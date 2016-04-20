@@ -119,6 +119,7 @@ int NativeWidgetMac::SheetPositionY() {
 
 void NativeWidgetMac::InitNativeWidget(const Widget::InitParams& params) {
   ownership_ = params.ownership;
+  name_ = params.name;
   base::scoped_nsobject<NSWindow> window([CreateNSWindow(params) retain]);
   [window setReleasedWhenClosed:NO];  // Owned by scoped_nsobject.
   bridge_->Init(window, params);
@@ -193,8 +194,10 @@ const ui::Layer* NativeWidgetMac::GetLayer() const {
 }
 
 void NativeWidgetMac::ReorderNativeViews() {
-  if (bridge_)
+  if (bridge_) {
     bridge_->SetRootView(GetWidget()->GetRootView());
+    bridge_->ReorderChildViews();
+  }
 }
 
 void NativeWidgetMac::ViewRemoved(View* view) {
@@ -369,7 +372,7 @@ void NativeWidgetMac::CloseNow() {
   // Notify observers while |bridged_| is still valid.
   delegate_->OnNativeWidgetDestroying();
   // Reset |bridge_| to NULL before destroying it.
-  scoped_ptr<BridgedNativeWidget> bridge(std::move(bridge_));
+  std::unique_ptr<BridgedNativeWidget> bridge(std::move(bridge_));
 }
 
 void NativeWidgetMac::Show() {
@@ -410,6 +413,10 @@ void NativeWidgetMac::ShowWithWindowState(ui::WindowShowState state) {
   bridge_->SetVisibilityState(state == ui::SHOW_STATE_INACTIVE
       ? BridgedNativeWidget::SHOW_INACTIVE
       : BridgedNativeWidget::SHOW_AND_ACTIVATE_WINDOW);
+
+  // Ignore the SetInitialFocus() result. BridgedContentView should get
+  // firstResponder status regardless.
+  delegate_->SetInitialFocus(state);
 }
 
 bool NativeWidgetMac::IsVisible() const {
@@ -484,11 +491,7 @@ bool NativeWidgetMac::IsFullscreen() const {
 }
 
 void NativeWidgetMac::SetOpacity(unsigned char opacity) {
-  NOTIMPLEMENTED();
-}
-
-void NativeWidgetMac::SetUseDragFrame(bool use_drag_frame) {
-  NOTIMPLEMENTED();
+  [GetNativeWindow() setAlphaValue:opacity / 255.0];
 }
 
 void NativeWidgetMac::FlashFrame(bool flash_frame) {
@@ -504,9 +507,15 @@ void NativeWidgetMac::RunShellDrag(View* view,
 }
 
 void NativeWidgetMac::SchedulePaintInRect(const gfx::Rect& rect) {
-  // TODO(tapted): This should use setNeedsDisplayInRect:, once the coordinate
-  // system of |rect| has been converted.
-  [GetNativeView() setNeedsDisplay:YES];
+  // |rect| is relative to client area of the window.
+  NSWindow* window = GetNativeWindow();
+  NSRect client_rect = [window contentRectForFrameRect:[window frame]];
+  NSRect target_rect = rect.ToCGRect();
+
+  // Convert to Appkit coordinate system (origin at bottom left).
+  target_rect.origin.y =
+      NSHeight(client_rect) - target_rect.origin.y - NSHeight(target_rect);
+  [GetNativeView() setNeedsDisplayInRect:target_rect];
   if (bridge_ && bridge_->layer())
     bridge_->layer()->SchedulePaint(rect);
 }
@@ -580,6 +589,10 @@ void NativeWidgetMac::OnSizeConstraintsChanged() {
 
 void NativeWidgetMac::RepostNativeEvent(gfx::NativeEvent native_event) {
   NOTIMPLEMENTED();
+}
+
+std::string NativeWidgetMac::GetName() const {
+  return name_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

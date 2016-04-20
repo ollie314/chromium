@@ -24,9 +24,8 @@
  */
 
 [
-    ActiveDOMObject,
-    RuntimeEnabled=EncryptedMedia,
-    GarbageCollected,
+    ActiveScriptWrappable,
+    DependentLifetime,
 ] interface MediaKeySession : EventTarget {
     // session properties
     readonly attribute DOMString sessionId;

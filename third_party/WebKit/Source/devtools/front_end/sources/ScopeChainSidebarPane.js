@@ -42,6 +42,16 @@ WebInspector.ScopeChainSidebarPane.prototype = {
      */
     update: function(callFrame)
     {
+        WebInspector.SourceMapNamesResolver.resolveThisObject(callFrame)
+            .then(this._innerUpdate.bind(this, callFrame));
+    },
+
+    /**
+     * @param {?WebInspector.DebuggerModel.CallFrame} callFrame
+     * @param {?WebInspector.RemoteObject} thisObject
+     */
+    _innerUpdate: function(callFrame, thisObject)
+    {
         this.element.removeChildren();
 
         if (!callFrame) {
@@ -65,16 +75,13 @@ WebInspector.ScopeChainSidebarPane.prototype = {
                 foundLocalScope = true;
                 title = WebInspector.UIString("Local");
                 emptyPlaceholder = WebInspector.UIString("No Variables");
-                var thisObject = callFrame.thisObject();
                 if (thisObject)
                     extraProperties.push(new WebInspector.RemoteObjectProperty("this", thisObject));
                 if (i == 0) {
                     var details = callFrame.debuggerModel.debuggerPausedDetails();
-                    if (!callFrame.isAsync()) {
-                        var exception = details.exception();
-                        if (exception)
-                            extraProperties.push(new WebInspector.RemoteObjectProperty(WebInspector.UIString.capitalize("Exception"), exception, undefined, undefined, undefined, undefined, undefined, true));
-                    }
+                    var exception = details.exception();
+                    if (exception)
+                        extraProperties.push(new WebInspector.RemoteObjectProperty(WebInspector.UIString.capitalize("Exception"), exception, undefined, undefined, undefined, undefined, undefined, true));
                     var returnValue = callFrame.returnValue();
                     if (returnValue)
                         extraProperties.push(new WebInspector.RemoteObjectProperty(WebInspector.UIString.capitalize("Return ^value"), returnValue, undefined, undefined, undefined, undefined, undefined, true));
@@ -113,7 +120,7 @@ WebInspector.ScopeChainSidebarPane.prototype = {
             titleElement.createChild("div", "scope-chain-sidebar-pane-section-subtitle").textContent = subtitle;
             titleElement.createChild("div", "scope-chain-sidebar-pane-section-title").textContent = title;
 
-            var section = new WebInspector.ObjectPropertiesSection(scope.object(), titleElement, emptyPlaceholder, true, extraProperties);
+            var section = new WebInspector.ObjectPropertiesSection(WebInspector.SourceMapNamesResolver.resolveScopeInObject(scope), titleElement, emptyPlaceholder, true, extraProperties);
             this._expandController.watchSection(title + (subtitle ? ":" + subtitle : ""), section);
 
             if (scope.type() === DebuggerAgent.ScopeType.Global)
@@ -124,7 +131,10 @@ WebInspector.ScopeChainSidebarPane.prototype = {
             section.element.classList.add("scope-chain-sidebar-pane-section");
             this.element.appendChild(section.element);
         }
+        this._sidebarPaneUpdatedForTest();
     },
+
+    _sidebarPaneUpdatedForTest: function() { },
 
     __proto__: WebInspector.SidebarPane.prototype
 }

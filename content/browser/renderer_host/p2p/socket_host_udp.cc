@@ -18,8 +18,7 @@
 #include "ipc/ipc_sender.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
-#include "third_party/libjingle/source/talk/media/base/rtputils.h"
+#include "third_party/webrtc/media/base/rtputils.h"
 
 namespace {
 
@@ -84,6 +83,9 @@ P2PSocketHostUdp::PendingPacket::PendingPacket(
       id(id) {
   memcpy(data->data(), &content[0], size);
 }
+
+P2PSocketHostUdp::PendingPacket::PendingPacket(const PendingPacket& other) =
+    default;
 
 P2PSocketHostUdp::PendingPacket::~PendingPacket() {
 }

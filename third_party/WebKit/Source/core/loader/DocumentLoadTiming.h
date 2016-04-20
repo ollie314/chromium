@@ -79,6 +79,7 @@ private:
     void setRedirectStart(double);
     void markRedirectEnd();
     void notifyDocumentTimingChanged();
+    void ensureReferenceTimesSet();
     LocalFrame* frame() const;
 
     double m_referenceMonotonicTime;
@@ -96,7 +97,7 @@ private:
     bool m_hasCrossOriginRedirect;
     bool m_hasSameOriginAsPreviousDocument;
 
-    RawPtrWillBeMember<DocumentLoader> m_documentLoader;
+    Member<DocumentLoader> m_documentLoader;
 };
 
 } // namespace blink

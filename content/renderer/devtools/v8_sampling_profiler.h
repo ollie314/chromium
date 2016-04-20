@@ -5,6 +5,8 @@
 #ifndef CONTENT_RENDERER_DEVTOOLS_V8_SAMPLING_PROFILER_H_
 #define CONTENT_RENDERER_DEVTOOLS_V8_SAMPLING_PROFILER_H_
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
@@ -35,9 +37,9 @@ class CONTENT_EXPORT V8SamplingProfiler final
   void StartSamplingThread();
   void StopSamplingThread();
 
-  scoped_ptr<base::WaitableEvent> waitable_event_for_testing_;
-  scoped_ptr<V8SamplingThread> sampling_thread_;
-  scoped_ptr<Sampler> render_thread_sampler_;
+  std::unique_ptr<base::WaitableEvent> waitable_event_for_testing_;
+  std::unique_ptr<V8SamplingThread> sampling_thread_;
+  std::unique_ptr<Sampler> render_thread_sampler_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(V8SamplingProfiler);

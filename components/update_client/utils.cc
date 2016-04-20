@@ -6,10 +6,15 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/files/memory_mapped_file.h"
 #include "base/guid.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -23,10 +28,13 @@
 #include "components/update_client/crx_update_item.h"
 #include "components/update_client/update_client.h"
 #include "components/update_client/update_query_params.h"
+#include "crypto/secure_hash.h"
+#include "crypto/sha2.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
+#include "url/gurl.h"
 
 namespace update_client {
 
@@ -64,6 +72,7 @@ std::string BuildProtocolRequest(const std::string& browser_version,
                                  const std::string& channel,
                                  const std::string& lang,
                                  const std::string& os_long_name,
+                                 const std::string& download_preference,
                                  const std::string& request_body,
                                  const std::string& additional_attributes) {
   const std::string prod_id(
@@ -98,6 +107,9 @@ std::string BuildProtocolRequest(const std::string& browser_version,
   if (is_wow64)
     base::StringAppendF(&request, " wow64=\"1\"");
 #endif
+  if (!download_preference.empty())
+    base::StringAppendF(&request, " dlpref=\"%s\"",
+                        download_preference.c_str());
   base::StringAppendF(&request, ">");
 
   // HW platform information.
@@ -124,6 +136,8 @@ scoped_ptr<net::URLFetcher> SendProtocolRequest(
     net::URLRequestContextGetter* url_request_context_getter) {
   scoped_ptr<net::URLFetcher> url_fetcher = net::URLFetcher::Create(
       0, url, net::URLFetcher::POST, url_fetcher_delegate);
+  if (!url_fetcher.get())
+    return url_fetcher;
 
   url_fetcher->SetUploadData("application/xml", protocol_request);
   url_fetcher->SetRequestContext(url_request_context_getter);
@@ -192,6 +206,64 @@ std::string GetCrxComponentID(const CrxComponent& component) {
   CHECK_GE(component.pk_hash.size(), kCrxIdSize);
   return HexStringToID(base::ToLowerASCII(
       base::HexEncode(&component.pk_hash[0], kCrxIdSize)));
+}
+
+bool VerifyFileHash256(const base::FilePath& filepath,
+                       const std::string& expected_hash_str) {
+  std::vector<uint8_t> expected_hash;
+  if (!base::HexStringToBytes(expected_hash_str, &expected_hash) ||
+      expected_hash.size() != crypto::kSHA256Length) {
+    return false;
+  }
+
+  base::MemoryMappedFile mmfile;
+  if (!mmfile.Initialize(filepath))
+    return false;
+
+  uint8_t actual_hash[crypto::kSHA256Length] = {0};
+  scoped_ptr<crypto::SecureHash> hasher(
+      crypto::SecureHash::Create(crypto::SecureHash::SHA256));
+  hasher->Update(mmfile.data(), mmfile.length());
+  hasher->Finish(actual_hash, sizeof(actual_hash));
+
+  return memcmp(actual_hash, &expected_hash[0], sizeof(actual_hash)) == 0;
+}
+
+bool IsValidBrand(const std::string& brand) {
+  const size_t kMaxBrandSize = 4;
+  if (!brand.empty() && brand.size() != kMaxBrandSize)
+    return false;
+
+  return std::find_if_not(brand.begin(), brand.end(), [](char ch) {
+           return base::IsAsciiAlpha(ch);
+         }) == brand.end();
+}
+
+bool IsValidAp(const std::string& ap) {
+  const size_t kMaxApSize = 256;
+  if (ap.size() > kMaxApSize)
+    return false;
+
+  return std::find_if_not(ap.begin(), ap.end(), [](char ch) {
+           if (base::IsAsciiAlpha(ch) || base::IsAsciiDigit(ch))
+             return true;
+
+           const char kSpecialChars[] = "+-_=";
+           for (auto c : kSpecialChars) {
+             if (c == ch)
+               return true;
+           }
+
+           return false;
+         }) == ap.end();
+}
+
+void RemoveUnsecureUrls(std::vector<GURL>* urls) {
+  DCHECK(urls);
+  urls->erase(std::remove_if(
+                  urls->begin(), urls->end(),
+                  [](const GURL& url) { return !url.SchemeIsCryptographic(); }),
+              urls->end());
 }
 
 }  // namespace update_client

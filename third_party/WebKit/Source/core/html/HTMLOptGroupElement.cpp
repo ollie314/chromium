@@ -45,11 +45,11 @@ inline HTMLOptGroupElement::HTMLOptGroupElement(Document& document)
     setHasCustomStyleCallbacks();
 }
 
-PassRefPtrWillBeRawPtr<HTMLOptGroupElement> HTMLOptGroupElement::create(Document& document)
+HTMLOptGroupElement* HTMLOptGroupElement::create(Document& document)
 {
-    RefPtrWillBeRawPtr<HTMLOptGroupElement> optGroupElement = adoptRefWillBeNoop(new HTMLOptGroupElement(document));
+    HTMLOptGroupElement* optGroupElement = new HTMLOptGroupElement(document);
     optGroupElement->ensureUserAgentShadowRoot();
-    return optGroupElement.release();
+    return optGroupElement;
 }
 
 bool HTMLOptGroupElement::isDisabledFormControl() const
@@ -100,7 +100,7 @@ void HTMLOptGroupElement::detach(const AttachContext& context)
 
 bool HTMLOptGroupElement::supportsFocus() const
 {
-    RefPtrWillBeRawPtr<HTMLSelectElement> select = ownerSelectElement();
+    HTMLSelectElement* select = ownerSelectElement();
     if (select && select->usesMenuList())
         return false;
     return HTMLElement::supportsFocus();
@@ -144,6 +144,13 @@ HTMLSelectElement* HTMLOptGroupElement::ownerSelectElement() const
     return Traversal<HTMLSelectElement>::firstAncestor(*this);
 }
 
+String HTMLOptGroupElement::defaultToolTip() const
+{
+    if (HTMLSelectElement* select = ownerSelectElement())
+        return select->defaultToolTip();
+    return String();
+}
+
 void HTMLOptGroupElement::accessKeyAction(bool)
 {
     HTMLSelectElement* select = ownerSelectElement();
@@ -154,17 +161,17 @@ void HTMLOptGroupElement::accessKeyAction(bool)
 
 void HTMLOptGroupElement::didAddUserAgentShadowRoot(ShadowRoot& root)
 {
-    DEFINE_STATIC_LOCAL(AtomicString, labelPadding, ("0 2px 1px 2px", AtomicString::ConstructFromLiteral));
-    DEFINE_STATIC_LOCAL(AtomicString, labelMinHeight, ("1.2em", AtomicString::ConstructFromLiteral));
-    RefPtrWillBeRawPtr<HTMLDivElement> label = HTMLDivElement::create(document());
-    label->setAttribute(roleAttr, AtomicString("group", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, labelPadding, ("0 2px 1px 2px"));
+    DEFINE_STATIC_LOCAL(AtomicString, labelMinHeight, ("1.2em"));
+    HTMLDivElement* label = HTMLDivElement::create(document());
+    label->setAttribute(roleAttr, AtomicString("group"));
     label->setAttribute(aria_labelAttr, AtomicString());
     label->setInlineStyleProperty(CSSPropertyPadding, labelPadding);
     label->setInlineStyleProperty(CSSPropertyMinHeight, labelMinHeight);
     label->setIdAttribute(ShadowElementNames::optGroupLabel());
     root.appendChild(label);
 
-    RefPtrWillBeRawPtr<HTMLContentElement> content = HTMLContentElement::create(document());
+    HTMLContentElement* content = HTMLContentElement::create(document());
     content->setAttribute(selectAttr, "option,hr");
     root.appendChild(content);
 }
@@ -182,4 +189,4 @@ HTMLDivElement& HTMLOptGroupElement::optGroupLabelElement() const
     return *toHTMLDivElement(userAgentShadowRoot()->getElementById(ShadowElementNames::optGroupLabel()));
 }
 
-} // namespace
+} // namespace blink

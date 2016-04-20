@@ -22,7 +22,6 @@
 #include "net/udp/udp_server_socket.h"
 
 namespace net {
-namespace tools {
 
 namespace {
 
@@ -100,7 +99,7 @@ void QuicSimpleServer::Initialize() {
         kInitialSessionFlowControlWindow);
   }
 
-  scoped_ptr<CryptoHandshakeMessage> scfg(crypto_config_.AddDefaultConfig(
+  std::unique_ptr<CryptoHandshakeMessage> scfg(crypto_config_.AddDefaultConfig(
       helper_->GetRandomGenerator(), helper_->GetClock(),
       QuicCryptoServerConfig::ConfigOptions()));
 }
@@ -108,7 +107,7 @@ void QuicSimpleServer::Initialize() {
 QuicSimpleServer::~QuicSimpleServer() {}
 
 int QuicSimpleServer::Listen(const IPEndPoint& address) {
-  scoped_ptr<UDPServerSocket> socket(
+  std::unique_ptr<UDPServerSocket> socket(
       new UDPServerSocket(&net_log_, NetLog::Source()));
 
   socket->AllowAddressReuse();
@@ -203,11 +202,11 @@ void QuicSimpleServer::OnReadComplete(int result) {
     return;
   }
 
-  QuicEncryptedPacket packet(read_buffer_->data(), result, false);
+  QuicReceivedPacket packet(read_buffer_->data(), result,
+                            helper_->GetClock()->Now(), false);
   dispatcher_->ProcessPacket(server_address_, client_address_, packet);
 
   StartReading();
 }
 
-}  // namespace tools
 }  // namespace net

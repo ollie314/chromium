@@ -7,8 +7,6 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -23,6 +21,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/media_capture_devices.h"
 #include "content/public/browser/notification_source.h"
@@ -32,7 +32,6 @@
 #include "content/public/common/media_stream_request.h"
 #include "extensions/common/constants.h"
 #include "media/base/media_switches.h"
-#include "net/base/net_util.h"
 
 #if defined(OS_CHROMEOS)
 #include "ash/shell.h"
@@ -82,15 +81,6 @@ MediaCaptureDevicesDispatcher::MediaCaptureDevicesDispatcher()
     : is_device_enumeration_disabled_(false),
       media_stream_capture_indicator_(new MediaStreamCaptureIndicator()) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-#if defined(OS_MACOSX)
-  // AVFoundation is used for video/audio device monitoring and video capture.
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kForceQTKit)) {
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableAVFoundation);
-  }
-#endif
 
 #if defined(ENABLE_EXTENSIONS)
   media_access_handlers_.push_back(new ExtensionMediaAccessHandler());

@@ -59,6 +59,7 @@ class FileChange {
     typedef std::deque<Change> List;
 
     ChangeList();
+    ChangeList(const ChangeList& other);
     ~ChangeList();
 
     // Updates the list with the |new_change|.
@@ -83,6 +84,7 @@ class FileChange {
   typedef std::map<base::FilePath, FileChange::ChangeList> Map;
 
   FileChange();
+  FileChange(const FileChange& other);
   ~FileChange();
 
   void Update(const base::FilePath file_path,

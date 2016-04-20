@@ -10,9 +10,6 @@
 // A concrete implementation of CRWWebController based on WKWebView.
 @interface CRWWKWebViewWebController : CRWWebController
 
-// Designated initializer.
-- (instancetype)initWithWebState:(scoped_ptr<web::WebStateImpl>)webState;
-
 @end
 
 #endif  // IOS_WEB_WEB_STATE_UI_CRW_WK_WEB_VIEW_WEB_CONTROLLER_H_

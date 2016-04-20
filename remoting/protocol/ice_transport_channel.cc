@@ -17,7 +17,7 @@
 #include "remoting/protocol/port_allocator_factory.h"
 #include "remoting/protocol/transport_context.h"
 #include "third_party/webrtc/base/network.h"
-#include "third_party/webrtc/p2p/base/constants.h"
+#include "third_party/webrtc/p2p/base/p2pconstants.h"
 #include "third_party/webrtc/p2p/base/p2ptransportchannel.h"
 #include "third_party/webrtc/p2p/base/port.h"
 #include "third_party/webrtc/p2p/client/httpportallocator.h"
@@ -26,10 +26,6 @@ namespace remoting {
 namespace protocol {
 
 namespace {
-
-// Try connecting ICE twice with timeout of 15 seconds for each attempt.
-const int kMaxReconnectAttempts = 2;
-const int kReconnectDelaySeconds = 15;
 
 // Utility function to map a cricket::Candidate string type to a
 // TransportRoute::RouteType enum value.
@@ -54,7 +50,8 @@ IceTransportChannel::IceTransportChannel(
     : transport_context_(transport_context),
       ice_username_fragment_(
           rtc::CreateRandomString(cricket::ICE_UFRAG_LENGTH)),
-      connect_attempts_left_(kMaxReconnectAttempts),
+      connect_attempts_left_(
+          transport_context->network_settings().ice_reconnect_attempts),
       weak_factory_(this) {
   DCHECK(!ice_username_fragment_.empty());
 }
@@ -91,7 +88,7 @@ void IceTransportChannel::Connect(const std::string& name,
   // Create P2PTransportChannel, attach signal handlers and connect it.
   // TODO(sergeyu): Specify correct component ID for the channel.
   channel_.reset(new cricket::P2PTransportChannel(
-      std::string(), 0, nullptr, port_allocator_.get()));
+      std::string(), 0, port_allocator_.get()));
   std::string ice_password = rtc::CreateRandomString(cricket::ICE_PWD_LENGTH);
   channel_->SetIceProtocolType(cricket::ICEPROTO_RFC5245);
   channel_->SetIceRole((transport_context_->role() == TransportRole::CLIENT)
@@ -126,9 +123,9 @@ void IceTransportChannel::Connect(const std::string& name,
   --connect_attempts_left_;
 
   // Start reconnection timer.
-  reconnect_timer_.Start(
-      FROM_HERE, base::TimeDelta::FromSeconds(kReconnectDelaySeconds),
-      this, &IceTransportChannel::TryReconnect);
+  reconnect_timer_.Start(FROM_HERE,
+                         transport_context_->network_settings().ice_timeout,
+                         this, &IceTransportChannel::TryReconnect);
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&IceTransportChannel::NotifyConnected,
@@ -137,7 +134,7 @@ void IceTransportChannel::Connect(const std::string& name,
 
 void IceTransportChannel::NotifyConnected() {
   // Create P2PDatagramSocket adapter for the P2PTransportChannel.
-  scoped_ptr<TransportChannelSocketAdapter> socket(
+  std::unique_ptr<TransportChannelSocketAdapter> socket(
       new TransportChannelSocketAdapter(channel_.get()));
   socket->SetOnDestroyedCallback(base::Bind(
       &IceTransportChannel::OnChannelDestroyed, base::Unretained(this)));
@@ -202,7 +199,8 @@ void IceTransportChannel::OnWritableState(cricket::TransportChannel* channel) {
   DCHECK_EQ(channel, static_cast<cricket::TransportChannel*>(channel_.get()));
 
   if (channel->writable()) {
-    connect_attempts_left_ = kMaxReconnectAttempts;
+    connect_attempts_left_ =
+        transport_context_->network_settings().ice_reconnect_attempts;
     reconnect_timer_.Stop();
 
     // Route change notifications are ignored when the |channel_| is not

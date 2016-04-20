@@ -4,6 +4,7 @@
 
 #include "core/frame/RemoteFrameView.h"
 
+#include "core/frame/FrameView.h"
 #include "core/frame/RemoteFrame.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/layout/LayoutPart.h"
@@ -20,11 +21,17 @@ RemoteFrameView::~RemoteFrameView()
 {
 }
 
-PassRefPtrWillBeRawPtr<RemoteFrameView> RemoteFrameView::create(RemoteFrame* remoteFrame)
+void RemoteFrameView::setParent(Widget* parent)
 {
-    RefPtrWillBeRawPtr<RemoteFrameView> view = adoptRefWillBeNoop(new RemoteFrameView(remoteFrame));
+    Widget::setParent(parent);
+    frameRectsChanged();
+}
+
+RemoteFrameView* RemoteFrameView::create(RemoteFrame* remoteFrame)
+{
+    RemoteFrameView* view = new RemoteFrameView(remoteFrame);
     view->show();
-    return view.release();
+    return view;
 }
 
 void RemoteFrameView::dispose()
@@ -63,7 +70,13 @@ void RemoteFrameView::setFrameRect(const IntRect& newRect)
 
 void RemoteFrameView::frameRectsChanged()
 {
-    m_remoteFrame->frameRectsChanged(frameRect());
+    // Update the rect to reflect the position of the frame relative to the
+    // containing local frame root. The position of the local root within
+    // any remote frames, if any, is accounted for by the embedder.
+    IntRect newRect = frameRect();
+    if (parent() && parent()->isFrameView())
+        newRect = parent()->convertToRootFrame(toFrameView(parent())->contentsToFrame(newRect));
+    m_remoteFrame->frameRectsChanged(newRect);
 }
 
 void RemoteFrameView::hide()

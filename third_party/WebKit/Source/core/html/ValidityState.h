@@ -30,21 +30,15 @@
 
 namespace blink {
 
-class ValidityState final : public NoBaseWillBeGarbageCollectedFinalized<ValidityState>, public ScriptWrappable {
+class ValidityState final : public GarbageCollectedFinalized<ValidityState>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
-    USING_FAST_MALLOC_WILL_BE_REMOVED(ValidityState);
     WTF_MAKE_NONCOPYABLE(ValidityState);
 public:
-    static PassOwnPtrWillBeRawPtr<ValidityState> create(FormAssociatedElement* control)
+    static ValidityState* create(FormAssociatedElement* control)
     {
-        return adoptPtrWillBeNoop(new ValidityState(control));
+        return new ValidityState(control);
     }
     DEFINE_INLINE_TRACE() { visitor->trace(m_control); }
-
-#if !ENABLE(OILPAN)
-    void ref() { m_control->ref(); }
-    void deref() { m_control->deref(); }
-#endif
 
     String validationMessage() const;
 
@@ -66,7 +60,7 @@ private:
     explicit ValidityState(FormAssociatedElement* control)
         : m_control(control) { }
 
-    RawPtrWillBeMember<FormAssociatedElement> m_control;
+    Member<FormAssociatedElement> m_control;
 };
 
 } // namespace blink

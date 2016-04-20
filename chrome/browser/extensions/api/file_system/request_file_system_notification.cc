@@ -11,7 +11,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager.h"
-#include "chrome/browser/extensions/app_icon_loader_impl.h"
+#include "chrome/browser/extensions/extension_app_icon_loader.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/common/extension.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -29,7 +29,7 @@ namespace {
 // Extension icon size for the notification.
 const int kIconSize = 48;
 
-scoped_ptr<Notification> CreateAutoGrantedNotification(
+std::unique_ptr<Notification> CreateAutoGrantedNotification(
     const extensions::Extension& extension,
     const base::WeakPtr<Volume>& volume,
     bool writable,
@@ -38,7 +38,7 @@ scoped_ptr<Notification> CreateAutoGrantedNotification(
 
   // If the volume is gone, then do not show the notification.
   if (!volume.get())
-    return scoped_ptr<Notification>(nullptr);
+    return std::unique_ptr<Notification>(nullptr);
 
   const std::string notification_id =
       extension.id() + "-" + volume->volume_id();
@@ -55,7 +55,7 @@ scoped_ptr<Notification> CreateAutoGrantedNotification(
           : IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_NOTIFICATION_MESSAGE,
       display_name);
 
-  scoped_ptr<Notification> notification(new Notification(
+  std::unique_ptr<Notification> notification(new Notification(
       message_center::NOTIFICATION_TYPE_SIMPLE, notification_id,
       base::UTF8ToUTF16(extension.name()), message,
       gfx::Image(),      // Updated asynchronously later.
@@ -80,7 +80,7 @@ void RequestFileSystemNotification::ShowAutoGrantedNotification(
   scoped_refptr<RequestFileSystemNotification>
       request_file_system_notification = make_scoped_refptr(
           new RequestFileSystemNotification(profile, extension));
-  scoped_ptr<message_center::Notification> notification(
+  std::unique_ptr<message_center::Notification> notification(
       CreateAutoGrantedNotification(
           extension, volume, writable,
           request_file_system_notification.get() /* delegate */));
@@ -88,8 +88,8 @@ void RequestFileSystemNotification::ShowAutoGrantedNotification(
     request_file_system_notification->Show(std::move(notification));
 }
 
-void RequestFileSystemNotification::SetAppImage(const std::string& id,
-                                                const gfx::ImageSkia& image) {
+void RequestFileSystemNotification::OnAppImageUpdated(
+    const std::string& id, const gfx::ImageSkia& image) {
   extension_icon_.reset(new gfx::Image(image));
 
   // If there is a pending notification, then show it now.
@@ -104,7 +104,7 @@ RequestFileSystemNotification::RequestFileSystemNotification(
     Profile* profile,
     const extensions::Extension& extension)
     : icon_loader_(
-          new extensions::AppIconLoaderImpl(profile, kIconSize, this)) {
+          new extensions::ExtensionAppIconLoader(profile, kIconSize, this)) {
   icon_loader_->FetchImage(extension.id());
 }
 
@@ -112,7 +112,7 @@ RequestFileSystemNotification::~RequestFileSystemNotification() {
 }
 
 void RequestFileSystemNotification::Show(
-    scoped_ptr<Notification> notification) {
+    std::unique_ptr<Notification> notification) {
   pending_notification_.reset(notification.release());
   // If the extension icon is not known yet, then defer showing the notification
   // until it is (from SetAppImage).

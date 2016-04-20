@@ -34,7 +34,6 @@ void DurableStoragePermissionContext::DecidePermission(
     const PermissionRequestID& id,
     const GURL& requesting_origin,
     const GURL& embedding_origin,
-    bool user_gesture,
     const BrowserPermissionCallback& callback) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
@@ -64,10 +63,10 @@ void DurableStoragePermissionContext::UpdateContentSetting(
   DCHECK(content_setting == CONTENT_SETTING_ALLOW ||
          content_setting == CONTENT_SETTING_BLOCK);
 
-  HostContentSettingsMapFactory::GetForProfile(profile())->SetContentSetting(
-      ContentSettingsPattern::FromURLNoWildcard(requesting_origin),
-      ContentSettingsPattern::Wildcard(), CONTENT_SETTINGS_TYPE_DURABLE_STORAGE,
-      std::string(), content_setting);
+  HostContentSettingsMapFactory::GetForProfile(profile())
+      ->SetContentSettingDefaultScope(requesting_origin, GURL(),
+                                      CONTENT_SETTINGS_TYPE_DURABLE_STORAGE,
+                                      std::string(), content_setting);
 }
 
 bool DurableStoragePermissionContext::IsRestrictedToSecureOrigins() const {

@@ -46,9 +46,6 @@ RadioNodeList::RadioNodeList(ContainerNode& rootNode, const AtomicString& name, 
 
 RadioNodeList::~RadioNodeList()
 {
-#if !ENABLE(OILPAN)
-    ownerNode().nodeLists()->removeCache(this, type(), m_name);
-#endif
 }
 
 static inline HTMLInputElement* toRadioButtonInputElement(Element& element)
@@ -128,4 +125,4 @@ bool RadioNodeList::elementMatches(const Element& element) const
     return checkElementMatchesRadioNodeListFilter(element);
 }
 
-} // namespace
+} // namespace blink

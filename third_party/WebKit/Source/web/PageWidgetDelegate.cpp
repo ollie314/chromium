@@ -169,6 +169,7 @@ WebInputEventResult PageWidgetDelegate::handleInputEvent(PageWidgetEventHandler&
     case WebInputEvent::TouchMove:
     case WebInputEvent::TouchEnd:
     case WebInputEvent::TouchCancel:
+    case WebInputEvent::TouchScrollStarted:
         if (!root || !root->view())
             return WebInputEventResult::NotHandled;
         return handler.handleTouchEvent(*root, static_cast<const WebTouchEvent&>(event));
@@ -253,8 +254,9 @@ const char* PageWidgetEventHandler::inputTypeToName(WebInputEvent::Type type)
         WEBINPUT_EVENT_CASE(TouchMove)
         WEBINPUT_EVENT_CASE(TouchEnd)
         WEBINPUT_EVENT_CASE(TouchCancel)
+        WEBINPUT_EVENT_CASE(TouchScrollStarted)
     default:
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         return "";
     }
 }

@@ -40,7 +40,6 @@
 
 // Define ourselves as the clientPtr.  Mozilla just hacked their C++ callback class into this old C decoder,
 // so we will too.
-#include "platform/SharedBuffer.h"
 #include "platform/image-decoders/FastSharedBufferReader.h"
 #include "platform/image-decoders/gif/GIFImageDecoder.h"
 #include "wtf/Allocator.h"
@@ -171,7 +170,7 @@ public:
 
     // Build RGBA table using the data stream.
     void buildTable(blink::FastSharedBufferReader*);
-    const Table& table() const { return m_table; }
+    const Table& getTable() const { return m_table; }
 
 private:
     bool m_isDefined;
@@ -229,7 +228,7 @@ public:
     unsigned height() const { return m_height; }
     size_t transparentPixel() const { return m_transparentPixel; }
     void setTransparentPixel(size_t pixel) { m_transparentPixel = pixel; }
-    blink::ImageFrame::DisposalMethod disposalMethod() const { return m_disposalMethod; }
+    blink::ImageFrame::DisposalMethod getDisposalMethod() const { return m_disposalMethod; }
     void setDisposalMethod(blink::ImageFrame::DisposalMethod disposalMethod) { m_disposalMethod = disposalMethod; }
     unsigned delayTime() const { return m_delayTime; }
     void setDelayTime(unsigned delay) { m_delayTime = delay; }
@@ -299,7 +298,7 @@ public:
     {
     }
 
-    void setData(PassRefPtr<blink::SharedBuffer> data) { m_data = data; }
+    void setData(PassRefPtr<blink::SegmentReader> data) { m_data = data; }
     bool parse(blink::GIFImageDecoder::GIFParseQuery);
     bool decode(size_t frameIndex);
 
@@ -356,7 +355,7 @@ private:
 
     Vector<OwnPtr<GIFFrameContext>> m_frames;
 
-    RefPtr<blink::SharedBuffer> m_data;
+    RefPtr<blink::SegmentReader> m_data;
     bool m_parseCompleted;
 };
 

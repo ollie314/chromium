@@ -12,7 +12,6 @@
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
@@ -26,6 +25,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -183,7 +183,7 @@ void ExtensionWelcomeNotification::OnIsSyncingChanged() {
       PrefServiceSyncableFromProfile(profile_);
   if (pref_service_syncable->IsSyncing()) {
     pref_service_syncable->RemoveObserver(this);
-    scoped_ptr<Notification> previous_notification(
+    std::unique_ptr<Notification> previous_notification(
         delayed_notification_.release());
     ShowWelcomeNotificationIfNecessary(*(previous_notification.get()));
   }
@@ -259,7 +259,7 @@ void ExtensionWelcomeNotification::ShowWelcomeNotification(
     welcome_notification_id_ = base::GenerateGUID();
 
   if (!welcome_notification_id_.empty()) {
-    scoped_ptr<message_center::Notification> message_center_notification(
+    std::unique_ptr<message_center::Notification> message_center_notification(
         new message_center::Notification(
             message_center::NOTIFICATION_TYPE_BASE_FORMAT,
             welcome_notification_id_,

@@ -19,14 +19,15 @@
             android:contentDescription="@string/accessibility_toolbar_btn_site_info"/>
         <ImageButton android:id="@+id/security_button"
             style="@style/LocationBarButton"
-            android:layout_height="match_parent"
             android:layout_width="match_parent"
+            android:layout_height="match_parent"
             android:scaleType="center"
             android:layout_gravity="center"
             android:alpha="0"
             android:visibility="invisible"
             android:contentDescription="@string/accessibility_toolbar_btn_site_info" />
     </FrameLayout>
+    <include layout="@layout/location_bar_status" />
     <include
         android:id="@+id/url_container"
         android:layout_width="match_parent"
@@ -37,12 +38,11 @@
         android:layout_marginEnd="80dp"
         android:layout_gravity="center_vertical"
         android:nextFocusForward="@+id/menu_button"
-        layout="@layout/url_container"
-        />
+        layout="@layout/url_container" />
     <org.chromium.chrome.browser.widget.TintedImageButton
         android:id="@+id/delete_button"
         style="@style/LocationBarButton"
-        android:layout_width="40dp"
+        android:layout_width="@dimen/location_bar_icon_width"
         android:layout_height="match_parent"
         android:scaleType="center"
         android:layout_marginEnd="44dp"
@@ -54,7 +54,7 @@
     <org.chromium.chrome.browser.widget.TintedImageButton
         android:id="@+id/bookmark_button"
         style="@style/LocationBarButton"
-        android:layout_width="40dp"
+        android:layout_width="@dimen/location_bar_icon_width"
         android:layout_height="match_parent"
         android:scaleType="center"
         android:layout_marginEnd="40dp"
@@ -65,7 +65,7 @@
     <org.chromium.chrome.browser.widget.TintedImageButton
         android:id="@+id/mic_button"
         style="@style/LocationBarButton"
-        android:layout_width="40dp"
+        android:layout_width="@dimen/location_bar_icon_width"
         android:layout_height="match_parent"
         android:scaleType="center"
         android:layout_gravity="end"

@@ -228,8 +228,8 @@ class NotificationView : public views::View,
       : data_(data),
         delegate_(delegate),
         checkbox_(NULL) {
-    scoped_ptr<views::View> label_view;
-    scoped_ptr<views::StyledLabel> label(
+    std::unique_ptr<views::View> label_view;
+    std::unique_ptr<views::StyledLabel> label(
         new views::StyledLabel(data.display_text(), this));
     label->set_auto_color_readability_enabled(false);
 
@@ -389,8 +389,8 @@ void AutofillDialogViews::NotificationArea::SetNotifications(
 
   for (size_t i = 0; i < notifications_.size(); ++i) {
     const DialogNotification& notification = notifications_[i];
-    scoped_ptr<NotificationView> view(new NotificationView(notification,
-                                                           delegate_));
+    std::unique_ptr<NotificationView> view(
+        new NotificationView(notification, delegate_));
 
     AddChildView(view.release());
   }
@@ -492,7 +492,7 @@ AutofillDialogViews::SectionContainer::SectionContainer(
   AddChildView(controls);
 
   SetEventTargeter(
-      scoped_ptr<views::ViewTargeter>(new views::ViewTargeter(this)));
+      std::unique_ptr<views::ViewTargeter>(new views::ViewTargeter(this)));
 }
 
 AutofillDialogViews::SectionContainer::~SectionContainer() {}
@@ -612,7 +612,7 @@ bool AutofillDialogViews::SectionContainer::ShouldForwardEvent(
 
 AutofillDialogViews::SuggestedButton::SuggestedButton(
     views::MenuButtonListener* listener)
-    : views::MenuButton(NULL, base::string16(), listener, false) {
+    : views::MenuButton(base::string16(), listener, false) {
   const int kFocusBorderWidth = 1;
   SetBorder(views::Border::CreateEmptyBorder(kMenuButtonTopInset,
                                              kFocusBorderWidth,
@@ -1188,8 +1188,9 @@ void AutofillDialogViews::OnPerformAction(views::Combobox* combobox) {
   ValidateGroup(*GroupForSection(section), VALIDATE_EDIT);
 }
 
-void AutofillDialogViews::OnMenuButtonClicked(views::View* source,
-                                              const gfx::Point& point) {
+void AutofillDialogViews::OnMenuButtonClicked(views::MenuButton* source,
+                                              const gfx::Point& point,
+                                              const ui::Event* event) {
   DCHECK_EQ(kSuggestedButtonClassName, source->GetClassName());
 
   DetailsGroup* group = NULL;
@@ -1376,7 +1377,7 @@ void AutofillDialogViews::InitInputsView(DialogSection section) {
 
     ui::ComboboxModel* input_model =
         delegate_->ComboboxModelForAutofillType(input.type);
-    scoped_ptr<views::View> view_to_add;
+    std::unique_ptr<views::View> view_to_add;
     if (input_model) {
       views::Combobox* combobox = new views::Combobox(input_model);
       combobox->set_listener(this);
@@ -1907,6 +1908,9 @@ AutofillDialogViews::DetailsGroup::DetailsGroup(DialogSection section)
       manual_input(NULL),
       suggested_info(NULL),
       suggested_button(NULL) {}
+
+AutofillDialogViews::DetailsGroup::DetailsGroup(const DetailsGroup& other) =
+    default;
 
 AutofillDialogViews::DetailsGroup::~DetailsGroup() {}
 

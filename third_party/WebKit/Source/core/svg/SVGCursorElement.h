@@ -34,16 +34,13 @@ class SVGCursorElement final : public SVGElement,
                                public SVGTests,
                                public SVGURIReference {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SVGCursorElement);
+    USING_GARBAGE_COLLECTED_MIXIN(SVGCursorElement);
 public:
     DECLARE_NODE_FACTORY(SVGCursorElement);
 
     ~SVGCursorElement() override;
 
     void addClient(SVGElement*);
-#if !ENABLE(OILPAN)
-    void removeClient(SVGElement*);
-#endif
     void removeReferencedElement(SVGElement*);
 
     SVGAnimatedLength* x() const { return m_x.get(); }
@@ -60,10 +57,10 @@ private:
 
     bool layoutObjectIsNeeded(const ComputedStyle&) override { return false; }
 
-    RefPtrWillBeMember<SVGAnimatedLength> m_x;
-    RefPtrWillBeMember<SVGAnimatedLength> m_y;
+    Member<SVGAnimatedLength> m_x;
+    Member<SVGAnimatedLength> m_y;
 
-    WillBeHeapHashSet<RawPtrWillBeWeakMember<SVGElement>> m_clients;
+    HeapHashSet<WeakMember<SVGElement>> m_clients;
 };
 
 } // namespace blink

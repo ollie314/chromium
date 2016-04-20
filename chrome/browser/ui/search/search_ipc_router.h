@@ -5,11 +5,11 @@
 #ifndef CHROME_BROWSER_UI_SEARCH_SEARCH_IPC_ROUTER_H_
 #define CHROME_BROWSER_UI_SEARCH_SEARCH_IPC_ROUTER_H_
 
+#include <memory>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "chrome/common/instant_types.h"
 #include "chrome/common/ntp_logging_events.h"
@@ -46,8 +46,7 @@ class SearchIPCRouter : public content::WebContentsObserver {
     // navigate to URLs that are hidden from the page using Restricted IDs (rid
     // in the API).
     virtual void NavigateToURL(const GURL& url,
-                               WindowOpenDisposition disposition,
-                               bool is_most_visited_item_url) = 0;
+                               WindowOpenDisposition disposition) = 0;
 
     // Called when the SearchBox wants to delete a Most Visited item.
     virtual void OnDeleteMostVisitedItem(const GURL& url) = 0;
@@ -117,8 +116,9 @@ class SearchIPCRouter : public content::WebContentsObserver {
     virtual bool ShouldSubmitQuery() = 0;
   };
 
-  SearchIPCRouter(content::WebContents* web_contents, Delegate* delegate,
-                  scoped_ptr<Policy> policy);
+  SearchIPCRouter(content::WebContents* web_contents,
+                  Delegate* delegate,
+                  std::unique_ptr<Policy> policy);
   ~SearchIPCRouter() override;
 
   // Tells the SearchIPCRouter that a new page in an Instant process committed.
@@ -190,8 +190,7 @@ class SearchIPCRouter : public content::WebContentsObserver {
   void OnFocusOmnibox(int page_id, OmniboxFocusState state) const;
   void OnSearchBoxNavigate(int page_id,
                            const GURL& url,
-                           WindowOpenDisposition disposition,
-                           bool is_most_visited_item_url) const;
+                           WindowOpenDisposition disposition) const;
   void OnDeleteMostVisitedItem(int page_seq_no, const GURL& url) const;
   void OnUndoMostVisitedDeletion(int page_seq_no, const GURL& url) const;
   void OnUndoAllMostVisitedDeletions(int page_seq_no) const;
@@ -214,7 +213,7 @@ class SearchIPCRouter : public content::WebContentsObserver {
   void set_delegate_for_testing(Delegate* delegate);
 
   // Used by unit tests.
-  void set_policy_for_testing(scoped_ptr<Policy> policy);
+  void set_policy_for_testing(std::unique_ptr<Policy> policy);
 
   // Used by unit tests.
   Policy* policy_for_testing() const { return policy_.get(); }
@@ -223,7 +222,7 @@ class SearchIPCRouter : public content::WebContentsObserver {
   int page_seq_no_for_testing() const { return commit_counter_; }
 
   Delegate* delegate_;
-  scoped_ptr<Policy> policy_;
+  std::unique_ptr<Policy> policy_;
 
   // Holds the number of main frame commits executed in this tab. Used by the
   // SearchIPCRouter to ensure that delayed IPC replies are ignored.

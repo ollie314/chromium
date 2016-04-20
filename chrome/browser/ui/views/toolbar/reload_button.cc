@@ -16,8 +16,8 @@
 #include "chrome/grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/models/simple_menu_model.h"
-#include "ui/base/resource/material_design/material_design_controller.h"
 #include "ui/base/theme_provider.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/paint_vector_icon.h"
@@ -149,7 +149,7 @@ void ReloadButton::ButtonPressed(views::Button* /* button */,
     int command;
     int flags = event.flags();
     if (event.IsShiftDown() || event.IsControlDown()) {
-      command = IDC_RELOAD_IGNORING_CACHE;
+      command = IDC_RELOAD_BYPASSING_CACHE;
       // Mask off Shift and Control so they don't affect the disposition below.
       flags &= ~(ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN);
     } else {
@@ -188,7 +188,7 @@ bool ReloadButton::GetAcceleratorForCommandId(int command_id,
       GetWidget()->GetAccelerator(IDC_RELOAD, accelerator);
       return true;
     case IDS_RELOAD_MENU_HARD_RELOAD_ITEM:
-      GetWidget()->GetAccelerator(IDC_RELOAD_IGNORING_CACHE, accelerator);
+      GetWidget()->GetAccelerator(IDC_RELOAD_BYPASSING_CACHE, accelerator);
       return true;
   }
   return GetWidget()->GetAccelerator(command_id, accelerator);
@@ -201,7 +201,7 @@ void ReloadButton::ExecuteCommand(int command_id, int event_flags) {
       browser_command = IDC_RELOAD;
       break;
     case IDS_RELOAD_MENU_HARD_RELOAD_ITEM:
-      browser_command = IDC_RELOAD_IGNORING_CACHE;
+      browser_command = IDC_RELOAD_BYPASSING_CACHE;
       break;
     case IDS_RELOAD_MENU_EMPTY_AND_HARD_RELOAD_ITEM:
       browser_command = IDC_RELOAD_CLEARING_CACHE;
@@ -244,6 +244,7 @@ void ReloadButton::ChangeModeInternal(Mode mode) {
                gfx::CreateVectorIcon(icon_id, kButtonSize, normal_color));
       SetImage(views::Button::STATE_DISABLED,
                gfx::CreateVectorIcon(icon_id, kButtonSize, disabled_color));
+      set_ink_drop_base_color(normal_color);
     } else {
       SetImage(views::Button::STATE_NORMAL,
                *(tp->GetImageSkiaNamed((mode == MODE_RELOAD) ? IDR_RELOAD

@@ -62,7 +62,7 @@ P256KeyExchange* P256KeyExchange::New(StringPiece key) {
 
   StringPiece public_piece(key);
 
-  scoped_ptr<crypto::ECPrivateKey> key_pair(
+  std::unique_ptr<crypto::ECPrivateKey> key_pair(
       crypto::ECPrivateKey::CreateFromEncryptedPrivateKeyInfo(
           kExportPassword,
           // TODO(thaidn): fix this interface to avoid copying secrets.
@@ -106,7 +106,8 @@ P256KeyExchange* P256KeyExchange::New(StringPiece key) {
 
 // static
 string P256KeyExchange::NewPrivateKey() {
-  scoped_ptr<crypto::ECPrivateKey> key_pair(crypto::ECPrivateKey::Create());
+  std::unique_ptr<crypto::ECPrivateKey> key_pair(
+      crypto::ECPrivateKey::Create());
 
   if (!key_pair.get()) {
     DVLOG(1) << "Can't generate new key pair.";
@@ -153,7 +154,7 @@ KeyExchange* P256KeyExchange::NewKeyPair(QuicRandom* /*rand*/) const {
   return P256KeyExchange::New(private_value);
 }
 
-bool P256KeyExchange::CalculateSharedKey(const StringPiece& peer_public_value,
+bool P256KeyExchange::CalculateSharedKey(StringPiece peer_public_value,
                                          string* out_result) const {
   if (peer_public_value.size() != kUncompressedP256PointBytes ||
       peer_public_value[0] != kUncompressedECPointForm) {

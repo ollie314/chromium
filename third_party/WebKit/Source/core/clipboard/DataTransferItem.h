@@ -35,8 +35,6 @@
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
-#include "wtf/RefCounted.h"
-#include "wtf/RefPtr.h"
 
 namespace blink {
 
@@ -58,8 +56,8 @@ public:
     void getAsString(ExecutionContext*, StringCallback*) const;
     Blob* getAsFile() const;
 
-    DataTransfer* dataTransfer() { return m_dataTransfer.get(); }
-    DataObjectItem* dataObjectItem() { return m_item.get(); }
+    DataTransfer* getDataTransfer() { return m_dataTransfer.get(); }
+    DataObjectItem* getDataObjectItem() { return m_item.get(); }
 
     DECLARE_TRACE();
 

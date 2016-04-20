@@ -17,6 +17,7 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "jni/DataReductionProxySettings_jni.h"
 #include "net/proxy/proxy_server.h"
@@ -43,12 +44,6 @@ jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyPromoAllowed(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   return Settings()->PromoAllowed();
-}
-
-jboolean DataReductionProxySettingsAndroid::IsIncludedInAltFieldTrial(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  return false;
 }
 
 jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyEnabled(
@@ -154,6 +149,14 @@ jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyUnreachable(
   return Settings()->IsDataReductionProxyUnreachable();
 }
 
+jboolean DataReductionProxySettingsAndroid::AreLoFiPreviewsEnabled(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  return data_reduction_proxy::params::IsIncludedInLoFiPreviewFieldTrial() ||
+      (data_reduction_proxy::params::IsLoFiOnViaFlags() &&
+          data_reduction_proxy::params::AreLoFiPreviewsEnabledViaFlags());
+}
+
 // static
 bool DataReductionProxySettingsAndroid::Register(JNIEnv* env) {
   return RegisterNativesImpl(env);
@@ -186,18 +189,6 @@ ScopedJavaLocalRef<jstring> DataReductionProxySettingsAndroid::GetHttpProxyList(
     return ConvertUTF8ToJavaString(env, std::string());
 
   return ConvertUTF8ToJavaString(env, event_store->GetHttpProxyList());
-}
-
-ScopedJavaLocalRef<jstring>
-DataReductionProxySettingsAndroid::GetHttpsProxyList(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  data_reduction_proxy::DataReductionProxyEventStore* event_store =
-      Settings()->GetEventStore();
-  if (!event_store)
-    return ConvertUTF8ToJavaString(env, std::string());
-
-  return ConvertUTF8ToJavaString(env, event_store->GetHttpsProxyList());
 }
 
 DataReductionProxySettings* DataReductionProxySettingsAndroid::Settings() {

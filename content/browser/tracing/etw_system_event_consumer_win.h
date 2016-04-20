@@ -5,6 +5,8 @@
 #ifndef CONTENT_BROWSER_TRACING_ETW_SYSTEM_EVENT_CONSUMER_WIN_H_
 #define CONTENT_BROWSER_TRACING_ETW_SYSTEM_EVENT_CONSUMER_WIN_H_
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
@@ -28,8 +30,8 @@ class EtwSystemEventConsumer
   // base::trace_event::TracingAgent implementation.
   std::string GetTracingAgentName() override;
   std::string GetTraceEventLabel() override;
-  bool StartAgentTracing(
-      const base::trace_event::TraceConfig& trace_config) override;
+  void StartAgentTracing(const base::trace_event::TraceConfig& trace_config,
+                         const StartAgentTracingCallback& callback) override;
   void StopAgentTracing(const StopAgentTracingCallback& callback) override;
 
   // Retrieve the ETW consumer instance.
@@ -68,7 +70,7 @@ class EtwSystemEventConsumer
   void TraceAndConsumeOnThread();
   void FlushOnThread(const StopAgentTracingCallback& callback);
 
-  scoped_ptr<base::ListValue> events_;
+  std::unique_ptr<base::ListValue> events_;
   base::Thread thread_;
   TRACEHANDLE session_handle_;
   base::win::EtwTraceProperties properties_;

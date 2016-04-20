@@ -30,8 +30,6 @@
 #include "core/events/EventQueue.h"
 #include "wtf/HashMap.h"
 #include "wtf/HashSet.h"
-#include "wtf/PassOwnPtr.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
@@ -39,15 +37,14 @@ class Event;
 class ExecutionContext;
 
 class WorkerEventQueue final : public EventQueue {
-    USING_FAST_MALLOC_WILL_BE_REMOVED(WorkerEventQueue);
 public:
 
-    static PassOwnPtrWillBeRawPtr<WorkerEventQueue> create(ExecutionContext*);
+    static WorkerEventQueue* create(ExecutionContext*);
     ~WorkerEventQueue() override;
     DECLARE_TRACE();
 
     // EventQueue
-    bool enqueueEvent(PassRefPtrWillBeRawPtr<Event>) override;
+    bool enqueueEvent(Event*) override;
     bool cancelEvent(Event*) override;
     void close() override;
 
@@ -55,14 +52,14 @@ private:
     explicit WorkerEventQueue(ExecutionContext*);
     void removeEvent(Event*);
 
-    RawPtrWillBeMember<ExecutionContext> m_executionContext;
+    Member<ExecutionContext> m_executionContext;
     bool m_isClosed;
 
     class EventDispatcherTask;
-    using EventTaskMap = WillBeHeapHashMap<RefPtrWillBeMember<Event>, EventDispatcherTask*>;
+    using EventTaskMap = HeapHashMap<Member<Event>, EventDispatcherTask*>;
     EventTaskMap m_eventTaskMap;
 };
 
-}
+} // namespace blink
 
 #endif // WorkerEventQueue_h

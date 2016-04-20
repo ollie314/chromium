@@ -45,7 +45,7 @@ public:
 
     DECLARE_TRACE();
 
-    RawPtrWillBeMember<StyleRule> rule;
+    Member<StyleRule> rule;
     unsigned selectorIndex;
     bool hasDocumentSecurityOrigin;
 };
@@ -59,7 +59,9 @@ public:
     void add(const RuleFeatureSet&);
     void clear();
 
-    void collectFeaturesFromRuleData(const RuleData&);
+    enum SelectorPreMatch { SelectorNeverMatches, SelectorMayMatch };
+
+    SelectorPreMatch collectFeaturesFromRuleData(const RuleData&);
 
     bool usesSiblingRules() const { return !siblingRules.isEmpty(); }
     bool usesFirstLineRules() const { return m_metadata.usesFirstLineRules; }
@@ -94,8 +96,8 @@ public:
 
     DECLARE_TRACE();
 
-    WillBeHeapVector<RuleFeature> siblingRules;
-    WillBeHeapVector<RuleFeature> uncommonAttributeRules;
+    HeapVector<RuleFeature> siblingRules;
+    HeapVector<RuleFeature> uncommonAttributeRules;
 
 protected:
     InvalidationSet* invalidationSetForSelector(const CSSSelector&, InvalidationType);
@@ -108,22 +110,17 @@ private:
 
     struct FeatureMetadata {
         DISALLOW_NEW();
-        FeatureMetadata()
-            : usesFirstLineRules(false)
-            , usesWindowInactiveSelector(false)
-            , foundSiblingSelector(false)
-            , maxDirectAdjacentSelectors(0)
-        { }
         void add(const FeatureMetadata& other);
         void clear();
 
-        bool usesFirstLineRules;
-        bool usesWindowInactiveSelector;
-        bool foundSiblingSelector;
-        unsigned maxDirectAdjacentSelectors;
+        bool usesFirstLineRules = false;
+        bool usesWindowInactiveSelector = false;
+        bool foundSiblingSelector = false;
+        bool foundInsertionPointCrossing = false;
+        unsigned maxDirectAdjacentSelectors = 0;
     };
 
-    void collectFeaturesFromSelector(const CSSSelector&, FeatureMetadata&);
+    SelectorPreMatch collectFeaturesFromSelector(const CSSSelector&, FeatureMetadata&);
 
     InvalidationSet& ensureClassInvalidationSet(const AtomicString& className, InvalidationType);
     InvalidationSet& ensureAttributeInvalidationSet(const AtomicString& attributeName, InvalidationType);
@@ -148,6 +145,7 @@ private:
         bool insertionPointCrossing = false;
         bool forceSubtree = false;
         bool contentPseudoCrossing = false;
+        bool invalidatesSlotted = false;
     };
 
     static bool extractInvalidationSetFeature(const CSSSelector&, InvalidationSetFeatures&);

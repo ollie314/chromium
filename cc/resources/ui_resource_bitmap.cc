@@ -6,8 +6,9 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkMallocPixelRef.h"
 #include "third_party/skia/include/core/SkPixelRef.h"
@@ -76,6 +77,8 @@ UIResourceBitmap::UIResourceBitmap(const skia::RefPtr<SkPixelRef>& pixel_ref,
                                    const gfx::Size& size) {
   Create(pixel_ref, size, UIResourceBitmap::ETC1);
 }
+
+UIResourceBitmap::UIResourceBitmap(const UIResourceBitmap& other) = default;
 
 UIResourceBitmap::~UIResourceBitmap() {}
 

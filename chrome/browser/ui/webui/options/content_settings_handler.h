@@ -7,11 +7,10 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_change_registrar.h"
 #include "base/scoped_observer.h"
 #include "base/values.h"
 #include "chrome/browser/pepper_flash_settings_manager.h"
@@ -20,6 +19,7 @@
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -157,9 +157,16 @@ class ContentSettingsHandler : public OptionsPageUIHandler,
   // Clobbers and rebuilds all chooser-based exception tables.
   void UpdateAllChooserExceptionsViewsFromModel();
 
+  // As above, but only OTR tables.
+  void UpdateAllOTRChooserExceptionsViewsFromModel();
+
   // Clobbers and rebuilds the exception table for a particular chooser-based
   // permission.
   void UpdateChooserExceptionsViewFromModel(
+      const ChooserTypeNameEntry& chooser_type);
+
+  // As above, but only OTR tables.
+  void UpdateOTRChooserExceptionsViewFromModel(
       const ChooserTypeNameEntry& chooser_type);
 
   // Modifies the zoom level exceptions list to display correct chrome
@@ -243,17 +250,10 @@ class ContentSettingsHandler : public OptionsPageUIHandler,
 
   void RefreshFlashMediaSettings();
 
-  // Returns exceptions constructed from the policy-set allowed URLs
-  // for the content settings |type| mic or camera.
-  void GetPolicyAllowedUrls(
-      ContentSettingsType type,
-      std::vector<scoped_ptr<base::DictionaryValue>>* exceptions);
-
   // Fills in |exceptions| with Values for the given |type| from |map|.
-  void GetExceptionsFromHostContentSettingsMap(
-      const HostContentSettingsMap* map,
-      ContentSettingsType type,
-      base::ListValue* exceptions);
+  void GetChooserExceptionsFromProfile(bool incognito,
+                                       const ChooserTypeNameEntry& type,
+                                       base::ListValue* exceptions);
 
   void OnPepperFlashPrefChanged();
 
@@ -273,10 +273,11 @@ class ContentSettingsHandler : public OptionsPageUIHandler,
 
   content::NotificationRegistrar notification_registrar_;
   PrefChangeRegistrar pref_change_registrar_;
-  scoped_ptr<PepperFlashSettingsManager> flash_settings_manager_;
-  scoped_ptr<MediaSettingsInfo> media_settings_;
-  scoped_ptr<content::HostZoomMap::Subscription> host_zoom_map_subscription_;
-  scoped_ptr<content::HostZoomMap::Subscription>
+  std::unique_ptr<PepperFlashSettingsManager> flash_settings_manager_;
+  std::unique_ptr<MediaSettingsInfo> media_settings_;
+  std::unique_ptr<content::HostZoomMap::Subscription>
+      host_zoom_map_subscription_;
+  std::unique_ptr<content::HostZoomMap::Subscription>
       signin_host_zoom_map_subscription_;
   ScopedObserver<HostContentSettingsMap, content_settings::Observer> observer_;
 

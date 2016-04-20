@@ -27,10 +27,16 @@ WebViewInfo::WebViewInfo(const std::string& id,
                          Type type)
     : id(id), debugger_url(debugger_url), url(url), type(type) {}
 
+WebViewInfo::WebViewInfo(const WebViewInfo& other) = default;
+
 WebViewInfo::~WebViewInfo() {}
 
 bool WebViewInfo::IsFrontend() const {
   return url.find("chrome-devtools://") == 0u;
+}
+
+bool WebViewInfo::IsInactiveBackgroundPage() const {
+  return type == WebViewInfo::kBackgroundPage && debugger_url.empty();
 }
 
 WebViewsInfo::WebViewsInfo() {}
@@ -60,8 +66,8 @@ DevToolsHttpClient::DevToolsHttpClient(
     const NetAddress& address,
     scoped_refptr<URLRequestContextGetter> context_getter,
     const SyncWebSocketFactory& socket_factory,
-    scoped_ptr<DeviceMetrics> device_metrics,
-    scoped_ptr<std::set<WebViewInfo::Type>> window_types)
+    std::unique_ptr<DeviceMetrics> device_metrics,
+    std::unique_ptr<std::set<WebViewInfo::Type>> window_types)
     : context_getter_(context_getter),
       socket_factory_(socket_factory),
       server_url_("http://" + address.ToString()),
@@ -98,14 +104,12 @@ Status DevToolsHttpClient::GetWebViewsInfo(WebViewsInfo* views_info) {
   return internal::ParseWebViewsInfo(data, views_info);
 }
 
-scoped_ptr<DevToolsClient> DevToolsHttpClient::CreateClient(
+std::unique_ptr<DevToolsClient> DevToolsHttpClient::CreateClient(
     const std::string& id) {
-  return scoped_ptr<DevToolsClient>(new DevToolsClientImpl(
-      socket_factory_,
-      web_socket_url_prefix_ + id,
-      id,
-      base::Bind(
-          &DevToolsHttpClient::CloseFrontends, base::Unretained(this), id)));
+  return std::unique_ptr<DevToolsClient>(
+      new DevToolsClientImpl(socket_factory_, web_socket_url_prefix_ + id, id,
+                             base::Bind(&DevToolsHttpClient::CloseFrontends,
+                                        base::Unretained(this), id)));
 }
 
 Status DevToolsHttpClient::CloseWebView(const std::string& id) {
@@ -148,8 +152,12 @@ const DeviceMetrics* DevToolsHttpClient::device_metrics() {
   return device_metrics_.get();
 }
 
-bool DevToolsHttpClient::IsBrowserWindow(WebViewInfo::Type window_type) const {
-  return window_types_->find(window_type) != window_types_->end();
+bool DevToolsHttpClient::IsBrowserWindow(const WebViewInfo& view) const {
+  return window_types_->find(view.type) != window_types_->end() ||
+      (view.type == WebViewInfo::kOther &&
+        (view.url.find("chrome-extension://") == 0 ||
+         view.url == "chrome://print/" ||
+         view.url == "chrome://media-router/"));
 }
 
 Status DevToolsHttpClient::CloseFrontends(const std::string& for_client_id) {
@@ -188,11 +196,9 @@ Status DevToolsHttpClient::CloseFrontends(const std::string& for_client_id) {
 
   for (std::list<std::string>::const_iterator it = docked_frontend_ids.begin();
        it != docked_frontend_ids.end(); ++it) {
-    scoped_ptr<DevToolsClient> client(new DevToolsClientImpl(
-        socket_factory_,
-        web_socket_url_prefix_ + *it,
-        *it));
-    scoped_ptr<WebViewImpl> web_view(
+    std::unique_ptr<DevToolsClient> client(new DevToolsClientImpl(
+        socket_factory_, web_socket_url_prefix_ + *it, *it));
+    std::unique_ptr<WebViewImpl> web_view(
         new WebViewImpl(*it, &browser_info_, std::move(client), NULL));
 
     status = web_view->ConnectIfNecessary();
@@ -201,7 +207,7 @@ Status DevToolsHttpClient::CloseFrontends(const std::string& for_client_id) {
     if (status.IsError() && status.code() != kDisconnected)
       return status;
 
-    scoped_ptr<base::Value> result;
+    std::unique_ptr<base::Value> result;
     status = CloseWebView(*it);
     // Ignore disconnected error, because it may be closed already.
     if (status.IsError() && status.code() != kDisconnected)
@@ -266,7 +272,7 @@ Status ParseType(const std::string& type_as_string, WebViewInfo::Type* type) {
 namespace internal {
 
 Status ParseWebViewsInfo(const std::string& data, WebViewsInfo* views_info) {
-  scoped_ptr<base::Value> value = base::JSONReader::Read(data);
+  std::unique_ptr<base::Value> value = base::JSONReader::Read(data);
   if (!value.get())
     return Status(kUnknownError, "DevTools returned invalid JSON");
   base::ListValue* list;

@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.physicalweb;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.preference.PreferenceManager;
 
 import org.chromium.chrome.browser.ChromeApplication;
@@ -20,6 +21,7 @@ public class PhysicalWeb {
     public static final int OPTIN_NOTIFY_MAX_TRIES = 1;
     private static final String PREF_PHYSICAL_WEB_NOTIFY_COUNT = "physical_web_notify_count";
     private static final String FEATURE_NAME = "PhysicalWeb";
+    private static final int MIN_ANDROID_VERSION = 18;
 
     /**
      * Evaluate whether the environment is one in which the Physical Web should
@@ -27,7 +29,8 @@ public class PhysicalWeb {
      * @return true if the PhysicalWeb should be enabled
      */
     public static boolean featureIsEnabled() {
-        return ChromeFeatureList.isEnabled(FEATURE_NAME);
+        return ChromeFeatureList.isEnabled(FEATURE_NAME)
+                && Build.VERSION.SDK_INT >= MIN_ANDROID_VERSION;
     }
 
     /**
@@ -52,17 +55,6 @@ public class PhysicalWeb {
     }
 
     /**
-     * Evaluate whether the Physical Web should be enabled when the application starts.
-     *
-     * @param context An instance of android.content.Context
-     * @return true if the Physical Web should be started at launch
-     */
-    public static boolean shouldStartOnLaunch(Context context) {
-        return featureIsEnabled()
-                && (isPhysicalWebPreferenceEnabled(context) || isOnboarding(context));
-    }
-
-    /**
      * Start the Physical Web feature.
      * At the moment, this only enables URL discovery over BLE.
      * @param application An instance of {@link ChromeApplication}, used to get the
@@ -70,7 +62,7 @@ public class PhysicalWeb {
      */
     public static void startPhysicalWeb(ChromeApplication application) {
         PhysicalWebBleClient physicalWebBleClient = PhysicalWebBleClient.getInstance(application);
-        physicalWebBleClient.subscribe();
+        physicalWebBleClient.backgroundSubscribe();
         clearUrlsAsync(application);
     }
 
@@ -81,17 +73,8 @@ public class PhysicalWeb {
      */
     public static void stopPhysicalWeb(ChromeApplication application) {
         PhysicalWebBleClient physicalWebBleClient = PhysicalWebBleClient.getInstance(application);
-        physicalWebBleClient.unsubscribe();
+        physicalWebBleClient.backgroundUnsubscribe();
         clearUrlsAsync(application);
-    }
-
-    /**
-     * Upload the collected UMA stats.
-     * This method should be called only when the native library is loaded.
-     * @param context A valid instance of Context.
-     */
-    public static void uploadDeferredMetrics(final Context context) {
-        PhysicalWebUma.uploadDeferredMetrics(context);
     }
 
     /**
@@ -118,6 +101,22 @@ public class PhysicalWeb {
         SharedPreferences sharedPreferences =
                 PreferenceManager.getDefaultSharedPreferences(context);
         return sharedPreferences.getInt(PREF_PHYSICAL_WEB_NOTIFY_COUNT, 0);
+    }
+
+    /**
+     * Perform various Physical Web operations that should happen on startup.
+     * @param application An instance of {@link ChromeApplication}.
+     */
+    public static void onChromeStart(ChromeApplication application) {
+        // The PhysicalWebUma calls in this method should be called only when the native library is
+        // loaded.  This is always the case on chrome startup.
+        if (featureIsEnabled()
+                && (isPhysicalWebPreferenceEnabled(application) || isOnboarding(application))) {
+            startPhysicalWeb(application);
+            PhysicalWebUma.uploadDeferredMetrics(application);
+        } else {
+            stopPhysicalWeb(application);
+        }
     }
 
     private static void clearUrlsAsync(final Context context) {

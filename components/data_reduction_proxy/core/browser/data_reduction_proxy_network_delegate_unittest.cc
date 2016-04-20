@@ -12,7 +12,7 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/numerics/safe_conversions.h"
@@ -91,7 +91,9 @@ class TestLoFiDecider : public LoFiDecider {
 
   bool MaybeAddLoFiDirectiveToHeaders(
       const net::URLRequest& request,
-      net::HttpRequestHeaders* headers) const override {
+      net::HttpRequestHeaders* headers,
+      const net::ProxyServer& proxy_server,
+      DataReductionProxyConfig* config) const override {
     if (should_request_lofi_resource_) {
       const char kChromeProxyHeader[] = "Chrome-Proxy";
       std::string header_value;
@@ -146,11 +148,11 @@ class DataReductionProxyNetworkDelegateTest : public testing::Test {
     context_.set_client_socket_factory(&mock_socket_factory_);
     test_context_->AttachToURLRequestContext(&context_storage_);
 
-    scoped_ptr<TestLoFiDecider> lofi_decider(new TestLoFiDecider());
+    std::unique_ptr<TestLoFiDecider> lofi_decider(new TestLoFiDecider());
     lofi_decider_ = lofi_decider.get();
     test_context_->io_data()->set_lofi_decider(std::move(lofi_decider));
 
-    scoped_ptr<TestLoFiUIService> lofi_ui_service(new TestLoFiUIService());
+    std::unique_ptr<TestLoFiUIService> lofi_ui_service(new TestLoFiUIService());
     lofi_ui_service_ = lofi_ui_service.get();
     test_context_->io_data()->set_lofi_ui_service(std::move(lofi_ui_service));
 
@@ -186,7 +188,7 @@ class DataReductionProxyNetworkDelegateTest : public testing::Test {
   // the last line should have a second "\r\n".
   // An empty |response_headers| is allowed. It works by making this look like
   // an HTTP/0.9 response, since HTTP/0.9 responses don't have headers.
-  scoped_ptr<net::URLRequest> FetchURLRequest(
+  std::unique_ptr<net::URLRequest> FetchURLRequest(
       const GURL& url,
       net::HttpRequestHeaders* request_headers,
       const std::string& response_headers,
@@ -200,7 +202,7 @@ class DataReductionProxyNetworkDelegateTest : public testing::Test {
     mock_socket_factory_.AddSocketDataProvider(&socket);
 
     net::TestDelegate delegate;
-    scoped_ptr<net::URLRequest> request =
+    std::unique_ptr<net::URLRequest> request =
         context_.CreateRequest(url, net::IDLE, &delegate);
     if (request_headers)
       request->SetExtraRequestHeaders(*request_headers);
@@ -244,8 +246,8 @@ class DataReductionProxyNetworkDelegateTest : public testing::Test {
         reinterpret_cast<const DataReductionProxyNetworkDelegate*>(
             context_.network_delegate());
 
-    scoped_ptr<base::DictionaryValue> session_network_stats_info =
-        base::DictionaryValue::From(make_scoped_ptr(
+    std::unique_ptr<base::DictionaryValue> session_network_stats_info =
+        base::DictionaryValue::From(base::WrapUnique(
             drp_network_delegate->SessionNetworkStatsInfoToValue()));
     EXPECT_TRUE(session_network_stats_info);
 
@@ -263,11 +265,11 @@ class DataReductionProxyNetworkDelegateTest : public testing::Test {
 
   TestLoFiDecider* lofi_decider_;
   TestLoFiUIService* lofi_ui_service_;
-  scoped_ptr<DataReductionProxyTestContext> test_context_;
+  std::unique_ptr<DataReductionProxyTestContext> test_context_;
 };
 
 TEST_F(DataReductionProxyNetworkDelegateTest, AuthenticationTest) {
-  scoped_ptr<net::URLRequest> fake_request(FetchURLRequest(
+  std::unique_ptr<net::URLRequest> fake_request(FetchURLRequest(
       GURL("http://www.google.com/"), nullptr, std::string(), 0));
 
   net::ProxyInfo data_reduction_proxy_info;
@@ -324,7 +326,7 @@ TEST_F(DataReductionProxyNetworkDelegateTest, LoFiTransitions) {
       // Main frame loaded. Lo-Fi should be used.
       net::HttpRequestHeaders headers;
 
-      scoped_ptr<net::URLRequest> fake_request(FetchURLRequest(
+      std::unique_ptr<net::URLRequest> fake_request(FetchURLRequest(
           GURL("http://www.google.com/"), nullptr, std::string(), 0));
       fake_request->SetLoadFlags(net::LOAD_MAIN_FRAME);
       lofi_decider()->SetIsUsingLoFiMode(
@@ -338,7 +340,7 @@ TEST_F(DataReductionProxyNetworkDelegateTest, LoFiTransitions) {
     {
       // Lo-Fi is already off. Lo-Fi should not be used.
       net::HttpRequestHeaders headers;
-      scoped_ptr<net::URLRequest> fake_request(FetchURLRequest(
+      std::unique_ptr<net::URLRequest> fake_request(FetchURLRequest(
           GURL("http://www.google.com/"), nullptr, std::string(), 0));
       lofi_decider()->SetIsUsingLoFiMode(false);
       network_delegate()->NotifyBeforeSendProxyHeaders(
@@ -352,7 +354,7 @@ TEST_F(DataReductionProxyNetworkDelegateTest, LoFiTransitions) {
     {
       // Lo-Fi is already on. Lo-Fi should be used.
       net::HttpRequestHeaders headers;
-      scoped_ptr<net::URLRequest> fake_request(FetchURLRequest(
+      std::unique_ptr<net::URLRequest> fake_request(FetchURLRequest(
           GURL("http://www.google.com/"), nullptr, std::string(), 0));
 
       lofi_decider()->SetIsUsingLoFiMode(true);
@@ -370,7 +372,7 @@ TEST_F(DataReductionProxyNetworkDelegateTest, LoFiTransitions) {
       // Main frame request with Lo-Fi off. Lo-Fi should not be used.
       // State of Lo-Fi should persist until next page load.
       net::HttpRequestHeaders headers;
-      scoped_ptr<net::URLRequest> fake_request(FetchURLRequest(
+      std::unique_ptr<net::URLRequest> fake_request(FetchURLRequest(
           GURL("http://www.google.com/"), nullptr, std::string(), 0));
       fake_request->SetLoadFlags(net::LOAD_MAIN_FRAME);
       lofi_decider()->SetIsUsingLoFiMode(false);
@@ -383,7 +385,7 @@ TEST_F(DataReductionProxyNetworkDelegateTest, LoFiTransitions) {
     {
       // Lo-Fi is off. Lo-Fi is still not used.
       net::HttpRequestHeaders headers;
-      scoped_ptr<net::URLRequest> fake_request(FetchURLRequest(
+      std::unique_ptr<net::URLRequest> fake_request(FetchURLRequest(
           GURL("http://www.google.com/"), nullptr, std::string(), 0));
       lofi_decider()->SetIsUsingLoFiMode(false);
       network_delegate()->NotifyBeforeSendProxyHeaders(
@@ -397,7 +399,7 @@ TEST_F(DataReductionProxyNetworkDelegateTest, LoFiTransitions) {
     {
       // Main frame request. Lo-Fi should be used.
       net::HttpRequestHeaders headers;
-      scoped_ptr<net::URLRequest> fake_request(FetchURLRequest(
+      std::unique_ptr<net::URLRequest> fake_request(FetchURLRequest(
           GURL("http://www.google.com/"), nullptr, std::string(), 0));
       fake_request->SetLoadFlags(net::LOAD_MAIN_FRAME);
       lofi_decider()->SetIsUsingLoFiMode(
@@ -450,9 +452,10 @@ TEST_F(DataReductionProxyNetworkDelegateTest, NetHistograms) {
       "x-original-content-length: " +
       base::Int64ToString(kOriginalContentLength) + "\r\n\r\n";
 
-  scoped_ptr<net::URLRequest> fake_request(
+  std::unique_ptr<net::URLRequest> fake_request(
       FetchURLRequest(GURL("http://www.google.com/"), nullptr, response_headers,
                       kResponseContentLength));
+  fake_request->SetLoadFlags(fake_request->load_flags() | net::LOAD_MAIN_FRAME);
 
   base::TimeDelta freshness_lifetime =
       fake_request->response_info().headers->GetFreshnessLifetimes(
@@ -529,6 +532,8 @@ TEST_F(DataReductionProxyNetworkDelegateTest, NetHistograms) {
 
     fake_request = (FetchURLRequest(GURL("http://www.example.com/"), nullptr,
                                     response_headers, kResponseContentLength));
+    fake_request->SetLoadFlags(fake_request->load_flags() |
+                               net::LOAD_MAIN_FRAME);
 
     // Histograms are accumulative, so get the sum of all the tests so far.
     int expected_count = 0;
@@ -554,100 +559,6 @@ TEST_F(DataReductionProxyNetworkDelegateTest, NetHistograms) {
           kOriginalContentLength - kResponseContentLength, expected_count);
     }
   }
-}
-
-TEST_F(DataReductionProxyNetworkDelegateTest, OnResolveProxyHandler) {
-  int load_flags = net::LOAD_NORMAL;
-  GURL url("http://www.google.com/");
-
-  // Data reduction proxy info
-  net::ProxyInfo data_reduction_proxy_info;
-  std::string data_reduction_proxy;
-  base::TrimString(params()->DefaultOrigin(), "/", &data_reduction_proxy);
-  data_reduction_proxy_info.UsePacString(
-      "PROXY " +
-      net::ProxyServer::FromURI(
-          params()->DefaultOrigin(),
-          net::ProxyServer::SCHEME_HTTP).host_port_pair().ToString() +
-      "; DIRECT");
-  EXPECT_FALSE(data_reduction_proxy_info.is_empty());
-
-  // Data reduction proxy config
-  net::ProxyConfig data_reduction_proxy_config;
-  data_reduction_proxy_config.proxy_rules().ParseFromString(
-      "http=" + data_reduction_proxy + ",direct://;");
-  data_reduction_proxy_config.set_id(1);
-
-  // Other proxy info
-  net::ProxyInfo other_proxy_info;
-  other_proxy_info.UseNamedProxy("proxy.com");
-  EXPECT_FALSE(other_proxy_info.is_empty());
-
-  // Direct
-  net::ProxyInfo direct_proxy_info;
-  direct_proxy_info.UseDirect();
-  EXPECT_TRUE(direct_proxy_info.is_direct());
-
-  // Empty retry info map
-  net::ProxyRetryInfoMap empty_proxy_retry_info;
-
-  // Retry info map with the data reduction proxy;
-  net::ProxyRetryInfoMap data_reduction_proxy_retry_info;
-  net::ProxyRetryInfo retry_info;
-  retry_info.current_delay = base::TimeDelta::FromSeconds(1000);
-  retry_info.bad_until = base::TimeTicks().Now() + retry_info.current_delay;
-  retry_info.try_while_bad = false;
-  data_reduction_proxy_retry_info[data_reduction_proxy_info.proxy_server()
-                                      .ToURI()] = retry_info;
-
-  net::ProxyInfo result;
-  // Another proxy is used. It should be used afterwards.
-  result.Use(other_proxy_info);
-  OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, config(), &result);
-  EXPECT_EQ(other_proxy_info.proxy_server(), result.proxy_server());
-
-  // A direct connection is used. The data reduction proxy should be used
-  // afterwards.
-  // Another proxy is used. It should be used afterwards.
-  result.Use(direct_proxy_info);
-  net::ProxyConfig::ID prev_id = result.config_id();
-  OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, config(), &result);
-  EXPECT_EQ(data_reduction_proxy_info.proxy_server(), result.proxy_server());
-  // Only the proxy list should be updated, not he proxy info.
-  EXPECT_EQ(result.config_id(), prev_id);
-
-  // A direct connection is used, but the data reduction proxy is on the retry
-  // list. A direct connection should be used afterwards.
-  result.Use(direct_proxy_info);
-  prev_id = result.config_id();
-  OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        data_reduction_proxy_retry_info, config(), &result);
-  EXPECT_TRUE(result.proxy_server().is_direct());
-  EXPECT_EQ(result.config_id(), prev_id);
-
-  // Test that ws:// and wss:// URLs bypass the data reduction proxy.
-  result.UseDirect();
-  OnResolveProxyHandler(GURL("ws://echo.websocket.org/"),
-                        load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, config(), &result);
-  EXPECT_TRUE(result.is_direct());
-
-  OnResolveProxyHandler(GURL("wss://echo.websocket.org/"),
-                        load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, config(), &result);
-  EXPECT_TRUE(result.is_direct());
-
-  // Without DataCompressionProxyCriticalBypass Finch trial set, the
-  // BYPASS_DATA_REDUCTION_PROXY load flag should be ignored.
-  OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, config(), &result);
-  EXPECT_FALSE(result.is_direct());
-
-  OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, config(), &other_proxy_info);
-  EXPECT_FALSE(other_proxy_info.is_direct());
 }
 
 // Notify network delegate with a NULL request.
@@ -752,104 +663,6 @@ TEST_F(DataReductionProxyNetworkDelegateTest,
 
   histogram_tester.ExpectBucketCount(kLoFiTransformationTypeHistogram, PREVIEW,
                                      1);
-}
-
-TEST_F(DataReductionProxyNetworkDelegateTest, OnCompletedSizeFor200) {
-  int64_t baseline_received_bytes = total_received_bytes();
-  int64_t baseline_original_received_bytes = total_original_received_bytes();
-
-  const char kDrpResponseHeaders[] =
-      "HTTP/1.1 200 OK\r\n"
-      "Date: Wed, 28 Nov 2007 09:40:09 GMT\r\n"
-      "Warning: 199 Misc-Agent \"some warning text\"\r\n"
-      "Via:\r\n"
-      "Via: 1.1 Chrome-Compression-Proxy-Suffix, 9.9 other-proxy\r\n"
-      "Via: 2.2 Chrome-Compression-Proxy\r\n"
-      "Warning: 214 Chrome-Compression-Proxy \"Transformation Applied\"\r\n"
-      "X-Original-Content-Length: 10000\r\n"
-      "Chrome-Proxy: q=low\r\n"
-      "Content-Length: 1000\r\n\r\n";
-
-  scoped_ptr<net::URLRequest> request = FetchURLRequest(
-      GURL("http://example.com/path/"), nullptr, kDrpResponseHeaders, 1000);
-
-  EXPECT_EQ(request->GetTotalReceivedBytes(),
-            total_received_bytes() - baseline_received_bytes);
-
-  const std::string raw_headers = net::HttpUtil::AssembleRawHeaders(
-      kDrpResponseHeaders, arraysize(kDrpResponseHeaders) - 1);
-  EXPECT_EQ(static_cast<int64_t>(raw_headers.size() +
-                                 10000 /* original_response_body */),
-            total_original_received_bytes() - baseline_original_received_bytes);
-}
-
-TEST_F(DataReductionProxyNetworkDelegateTest, OnCompletedSizeFor304) {
-  int64_t baseline_received_bytes = total_received_bytes();
-  int64_t baseline_original_received_bytes = total_original_received_bytes();
-
-  const char kDrpResponseHeaders[] =
-      "HTTP/1.1 304 Not Modified\r\n"
-      "Via: 1.1 Chrome-Compression-Proxy\r\n"
-      "X-Original-Content-Length: 10000\r\n\r\n";
-
-  scoped_ptr<net::URLRequest> request = FetchURLRequest(
-      GURL("http://example.com/path/"), nullptr, kDrpResponseHeaders, 0);
-
-  EXPECT_EQ(request->GetTotalReceivedBytes(),
-            total_received_bytes() - baseline_received_bytes);
-
-  const std::string raw_headers = net::HttpUtil::AssembleRawHeaders(
-      kDrpResponseHeaders, arraysize(kDrpResponseHeaders) - 1);
-  EXPECT_EQ(static_cast<int64_t>(raw_headers.size() +
-                                 10000 /* original_response_body */),
-            total_original_received_bytes() - baseline_original_received_bytes);
-}
-
-TEST_F(DataReductionProxyNetworkDelegateTest, OnCompletedSizeForWriteError) {
-  int64_t baseline_received_bytes = total_received_bytes();
-  int64_t baseline_original_received_bytes = total_original_received_bytes();
-
-  net::MockWrite writes[] = {
-      net::MockWrite("GET http://example.com/path/ HTTP/1.1\r\n"
-                     "Host: example.com\r\n"),
-      net::MockWrite(net::ASYNC, net::ERR_ABORTED)};
-  net::StaticSocketDataProvider socket(nullptr, 0, writes, arraysize(writes));
-  mock_socket_factory()->AddSocketDataProvider(&socket);
-
-  net::TestDelegate delegate;
-  scoped_ptr<net::URLRequest> request = context()->CreateRequest(
-      GURL("http://example.com/path/"), net::IDLE, &delegate);
-  request->Start();
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_EQ(request->GetTotalReceivedBytes(),
-            total_received_bytes() - baseline_received_bytes);
-  EXPECT_EQ(request->GetTotalReceivedBytes(),
-            total_original_received_bytes() - baseline_original_received_bytes);
-}
-
-TEST_F(DataReductionProxyNetworkDelegateTest, OnCompletedSizeForReadError) {
-  int64_t baseline_received_bytes = total_received_bytes();
-  int64_t baseline_original_received_bytes = total_original_received_bytes();
-
-  net::MockRead reads[] = {net::MockRead("HTTP/1.1 200 OK\r\n"
-                                         "Via: 1.1 Chrome-Compression-Proxy\r\n"
-                                         "X-Original-Content-Length: 10000\r\n"
-                                         "Content-Length: 1000\r\n\r\n"),
-                           net::MockRead(net::ASYNC, net::ERR_ABORTED)};
-  net::StaticSocketDataProvider socket(reads, arraysize(reads), nullptr, 0);
-  mock_socket_factory()->AddSocketDataProvider(&socket);
-
-  net::TestDelegate delegate;
-  scoped_ptr<net::URLRequest> request = context()->CreateRequest(
-      GURL("http://example.com/path/"), net::IDLE, &delegate);
-  request->Start();
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_EQ(request->GetTotalReceivedBytes(),
-            total_received_bytes() - baseline_received_bytes);
-  EXPECT_EQ(request->GetTotalReceivedBytes(),
-            total_original_received_bytes() - baseline_original_received_bytes);
 }
 
 }  // namespace

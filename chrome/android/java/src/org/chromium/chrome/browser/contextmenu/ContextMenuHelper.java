@@ -15,6 +15,7 @@ import android.view.View.OnCreateContextMenuListener;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.share.ShareHelper;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content_public.browser.WebContents;
@@ -24,9 +25,6 @@ import org.chromium.ui.base.WindowAndroid;
  * A helper class that handles generating context menus for {@link ContentViewCore}s.
  */
 public class ContextMenuHelper implements OnCreateContextMenuListener, OnMenuItemClickListener {
-    private static final String DATA_REDUCTION_PROXY_PASSTHROUGH_HEADER =
-            "Chrome-Proxy: pass-through\r\n";
-
     private long mNativeContextMenuHelper;
 
     private ContextMenuPopulator mPopulator;
@@ -77,6 +75,8 @@ public class ContextMenuHelper implements OnCreateContextMenuListener, OnMenuIte
         view.setOnCreateContextMenuListener(this);
         if (view.showContextMenu()) {
             WebContents webContents = contentViewCore.getWebContents();
+            RecordHistogram.recordBooleanHistogram(
+                    "ContextMenu.Shown", webContents != null);
             if (webContents != null) webContents.onContextMenuOpened();
             return true;
         }
@@ -89,8 +89,7 @@ public class ContextMenuHelper implements OnCreateContextMenuListener, OnMenuIte
      */
     public void startContextMenuDownload(boolean isLink, boolean isDataReductionProxyEnabled) {
         if (mNativeContextMenuHelper != 0) {
-            nativeOnStartDownload(mNativeContextMenuHelper, isLink,
-                    isDataReductionProxyEnabled ? DATA_REDUCTION_PROXY_PASSTHROUGH_HEADER : null);
+            nativeOnStartDownload(mNativeContextMenuHelper, isLink, isDataReductionProxyEnabled);
         }
     }
 
@@ -149,7 +148,7 @@ public class ContextMenuHelper implements OnCreateContextMenuListener, OnMenuIte
     }
 
     private native void nativeOnStartDownload(
-            long nativeContextMenuHelper, boolean isLink, String headers);
+            long nativeContextMenuHelper, boolean isLink, boolean isDataReductionProxyEnabled);
     private native void nativeSearchForImage(long nativeContextMenuHelper);
     private native void nativeShareImage(long nativeContextMenuHelper);
 }

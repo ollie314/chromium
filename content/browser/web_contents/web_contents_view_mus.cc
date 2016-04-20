@@ -12,7 +12,7 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents_view_delegate.h"
-#include "third_party/WebKit/public/web/WebDragOperation.h"
+#include "third_party/WebKit/public/platform/WebDragOperation.h"
 #include "ui/aura/client/window_tree_client.h"
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
@@ -104,7 +104,6 @@ void WebContentsViewMus::CreateView(const gfx::Size& initial_size,
   aura_window_.reset(new aura::Window(this));
   aura_window_->set_owned_by_parent(false);
   aura_window_->SetType(ui::wm::WINDOW_TYPE_CONTROL);
-  aura_window_->SetTransparent(false);
   aura_window_->Init(ui::LAYER_NOT_DRAWN);
   aura::Window* root_window = context ? context->GetRootWindow() : nullptr;
   if (root_window) {

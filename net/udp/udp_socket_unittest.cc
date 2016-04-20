@@ -16,9 +16,9 @@
 #include "base/stl_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "net/base/io_buffer.h"
+#include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/base/test_completion_callback.h"
 #include "net/log/test_net_log.h"
 #include "net/log/test_net_log_entry.h"
@@ -129,11 +129,10 @@ class UDPSocketTest : public PlatformTest {
   void CreateUDPAddress(const std::string& ip_str,
                         uint16_t port,
                         IPEndPoint* address) {
-    IPAddressNumber ip_number;
-    bool rv = ParseIPLiteralToNumber(ip_str, &ip_number);
-    if (!rv)
+    IPAddress ip_address;
+    if (!ip_address.AssignFromIPLiteral(ip_str))
       return;
-    *address = IPEndPoint(ip_number, port);
+    *address = IPEndPoint(ip_address, port);
   }
 
   // Run unit test for a connection test.
@@ -160,7 +159,7 @@ void UDPSocketTest::ConnectTest(bool use_nonblocking_io) {
   IPEndPoint bind_address;
   CreateUDPAddress("127.0.0.1", kPort, &bind_address);
   TestNetLog server_log;
-  scoped_ptr<UDPServerSocket> server(
+  std::unique_ptr<UDPServerSocket> server(
       new UDPServerSocket(&server_log, NetLog::Source()));
 #if defined(OS_WIN)
   if (use_nonblocking_io)
@@ -174,7 +173,7 @@ void UDPSocketTest::ConnectTest(bool use_nonblocking_io) {
   IPEndPoint server_address;
   CreateUDPAddress("127.0.0.1", kPort, &server_address);
   TestNetLog client_log;
-  scoped_ptr<UDPClientSocket> client(
+  std::unique_ptr<UDPClientSocket> client(
       new UDPClientSocket(DatagramSocket::DEFAULT_BIND, RandIntCallback(),
                           &client_log, NetLog::Source()));
 #if defined(OS_WIN)
@@ -288,9 +287,9 @@ TEST_F(UDPSocketTest, Broadcast) {
   CreateUDPAddress("0.0.0.0", kPort, &listen_address);
 
   TestNetLog server1_log, server2_log;
-  scoped_ptr<UDPServerSocket> server1(
+  std::unique_ptr<UDPServerSocket> server1(
       new UDPServerSocket(&server1_log, NetLog::Source()));
-  scoped_ptr<UDPServerSocket> server2(
+  std::unique_ptr<UDPServerSocket> server2(
       new UDPServerSocket(&server2_log, NetLog::Source()));
   server1->AllowAddressReuse();
   server1->AllowBroadcast();
@@ -381,11 +380,8 @@ TEST_F(UDPSocketTest, ConnectRandomBind) {
       base::Bind(&TestPrng::GetNext, base::Unretained(&test_prng));
 
   // Create a socket with random binding policy and connect.
-  scoped_ptr<UDPClientSocket> test_socket(
-      new UDPClientSocket(DatagramSocket::RANDOM_BIND,
-                          rand_int_cb,
-                          NULL,
-                          NetLog::Source()));
+  std::unique_ptr<UDPClientSocket> test_socket(new UDPClientSocket(
+      DatagramSocket::RANDOM_BIND, rand_int_cb, NULL, NetLog::Source()));
   EXPECT_EQ(OK, test_socket->Connect(peer_address));
 
   // Make sure that the last port number in the |used_ports| was used.
@@ -413,11 +409,9 @@ TEST_F(UDPSocketTest, MAYBE_ConnectFail) {
   IPEndPoint peer_address;
   CreateUDPAddress("0.0.0.0", 53, &peer_address);
 
-  scoped_ptr<UDPSocket> socket(
-      new UDPSocket(DatagramSocket::RANDOM_BIND,
-                    base::Bind(&PrivilegedRand),
-                    NULL,
-                    NetLog::Source()));
+  std::unique_ptr<UDPSocket> socket(new UDPSocket(DatagramSocket::RANDOM_BIND,
+                                                  base::Bind(&PrivilegedRand),
+                                                  NULL, NetLog::Source()));
   int rv = socket->Open(peer_address.GetFamily());
   EXPECT_EQ(OK, rv);
   rv = socket->Connect(peer_address);
@@ -513,11 +507,11 @@ TEST_F(UDPSocketTest, ClientGetLocalPeerAddresses) {
     SCOPED_TRACE(std::string("Connecting from ") +  tests[i].local_address +
                  std::string(" to ") + tests[i].remote_address);
 
-    IPAddressNumber ip_number;
-    ParseIPLiteralToNumber(tests[i].remote_address, &ip_number);
-    IPEndPoint remote_address(ip_number, 80);
-    ParseIPLiteralToNumber(tests[i].local_address, &ip_number);
-    IPEndPoint local_address(ip_number, 80);
+    IPAddress ip_address;
+    EXPECT_TRUE(ip_address.AssignFromIPLiteral(tests[i].remote_address));
+    IPEndPoint remote_address(ip_address, 80);
+    EXPECT_TRUE(ip_address.AssignFromIPLiteral(tests[i].local_address));
+    IPEndPoint local_address(ip_address, 80);
 
     UDPClientSocket client(DatagramSocket::DEFAULT_BIND,
                            RandIntCallback(),
@@ -611,8 +605,8 @@ TEST_F(UDPSocketTest, MAYBE_JoinMulticastGroup) {
 
   IPEndPoint bind_address;
   CreateUDPAddress("0.0.0.0", kPort, &bind_address);
-  IPAddressNumber group_ip;
-  EXPECT_TRUE(ParseIPLiteralToNumber(kGroup, &group_ip));
+  IPAddress group_ip;
+  EXPECT_TRUE(group_ip.AssignFromIPLiteral(kGroup));
 
   UDPSocket socket(DatagramSocket::DEFAULT_BIND,
                    RandIntCallback(),

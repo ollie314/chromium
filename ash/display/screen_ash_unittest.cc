@@ -15,8 +15,6 @@ class ScreenAshTest : public test::AshTestBase {
   ScreenAshTest() {}
   ~ScreenAshTest() override {}
 
-  static gfx::Screen* Screen() { return Shell::GetScreen(); }
-
  private:
   DISALLOW_COPY_AND_ASSIGN(ScreenAshTest);
 };
@@ -30,16 +28,18 @@ TEST_F(ScreenAshTest, TestGetWindowAtScreenPoint) {
   UpdateDisplay("200x200,400x400");
 
   aura::test::TestWindowDelegate delegate;
-  scoped_ptr<aura::Window> win1(CreateTestWindowInShellWithDelegate(
+  std::unique_ptr<aura::Window> win1(CreateTestWindowInShellWithDelegate(
       &delegate, 0, gfx::Rect(0, 0, 200, 200)));
 
-  scoped_ptr<aura::Window> win2(CreateTestWindowInShellWithDelegate(
+  std::unique_ptr<aura::Window> win2(CreateTestWindowInShellWithDelegate(
       &delegate, 1, gfx::Rect(200, 200, 100, 100)));
 
   ASSERT_NE(win1->GetRootWindow(), win2->GetRootWindow());
 
-  EXPECT_EQ(win1.get(), Screen()->GetWindowAtScreenPoint(gfx::Point(50, 60)));
-  EXPECT_EQ(win2.get(), Screen()->GetWindowAtScreenPoint(gfx::Point(250, 260)));
+  EXPECT_EQ(win1.get(), gfx::Screen::GetScreen()->GetWindowAtScreenPoint(
+                            gfx::Point(50, 60)));
+  EXPECT_EQ(win2.get(), gfx::Screen::GetScreen()->GetWindowAtScreenPoint(
+                            gfx::Point(250, 260)));
 }
 
 }  // namespace ash

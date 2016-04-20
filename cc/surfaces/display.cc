@@ -24,49 +24,94 @@
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "ui/gfx/buffer_types.h"
 
+namespace {
+
+class EmptyBeginFrameSource : public cc::BeginFrameSource {
+ public:
+  void DidFinishFrame(size_t remaining_frames) override{};
+  void AddObserver(cc::BeginFrameObserver* obs) override{};
+  void RemoveObserver(cc::BeginFrameObserver* obs) override{};
+  void AsValueInto(base::trace_event::TracedValue* dict) const override{};
+};
+
+}  // namespace
+
 namespace cc {
 
 Display::Display(DisplayClient* client,
                  SurfaceManager* manager,
                  SharedBitmapManager* bitmap_manager,
                  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-                 const RendererSettings& settings)
+                 const RendererSettings& settings,
+                 uint32_t compositor_surface_namespace)
     : client_(client),
-      manager_(manager),
+      surface_manager_(manager),
       bitmap_manager_(bitmap_manager),
       gpu_memory_buffer_manager_(gpu_memory_buffer_manager),
       settings_(settings),
+      compositor_surface_namespace_(compositor_surface_namespace),
       device_scale_factor_(1.f),
       swapped_since_resize_(false),
-      scheduler_(nullptr),
+      vsync_begin_frame_source_(nullptr),
+      observed_begin_frame_source_(nullptr),
       texture_mailbox_deleter_(new TextureMailboxDeleter(nullptr)) {
-  manager_->AddObserver(this);
+  surface_manager_->AddObserver(this);
 }
 
 Display::~Display() {
-  manager_->RemoveObserver(this);
+  if (observed_begin_frame_source_)
+    surface_manager_->UnregisterBeginFrameSource(observed_begin_frame_source_);
+  surface_manager_->RemoveObserver(this);
   if (aggregator_) {
     for (const auto& id_entry : aggregator_->previous_contained_surfaces()) {
-      Surface* surface = manager_->GetSurfaceForId(id_entry.first);
+      Surface* surface = surface_manager_->GetSurfaceForId(id_entry.first);
       if (surface)
         surface->RunDrawCallbacks(SurfaceDrawStatus::DRAW_SKIPPED);
     }
   }
 }
 
-bool Display::Initialize(scoped_ptr<OutputSurface> output_surface,
-                         DisplayScheduler* scheduler) {
+void Display::CreateScheduler(base::SingleThreadTaskRunner* task_runner) {
+  DCHECK(!scheduler_);
+  if (!task_runner) {
+    // WebView doesn't have a task runner or a real begin frame source,
+    // so just create something fake here.
+    internal_begin_frame_source_.reset(new EmptyBeginFrameSource());
+    vsync_begin_frame_source_ = internal_begin_frame_source_.get();
+    observed_begin_frame_source_ = vsync_begin_frame_source_;
+  } else {
+    DCHECK(vsync_begin_frame_source_);
+
+    observed_begin_frame_source_ = vsync_begin_frame_source_;
+    if (settings_.disable_display_vsync) {
+      internal_begin_frame_source_.reset(
+          new BackToBackBeginFrameSource(task_runner));
+      observed_begin_frame_source_ = internal_begin_frame_source_.get();
+    }
+  }
+
+  scheduler_.reset(
+      new DisplayScheduler(this, observed_begin_frame_source_, task_runner,
+                           output_surface_->capabilities().max_frames_pending));
+  surface_manager_->RegisterBeginFrameSource(observed_begin_frame_source_,
+                                             compositor_surface_namespace_);
+}
+
+bool Display::Initialize(std::unique_ptr<OutputSurface> output_surface,
+                         base::SingleThreadTaskRunner* task_runner) {
   output_surface_ = std::move(output_surface);
-  scheduler_ = scheduler;
-  return output_surface_->BindToClient(this);
+  if (!output_surface_->BindToClient(this))
+    return false;
+  CreateScheduler(task_runner);
+  return true;
 }
 
 void Display::SetSurfaceId(SurfaceId id, float device_scale_factor) {
+  DCHECK_EQ(id.id_namespace(), compositor_surface_namespace_);
   if (current_surface_id_ == id && device_scale_factor_ == device_scale_factor)
     return;
 
   TRACE_EVENT0("cc", "Display::SetSurfaceId");
-
   current_surface_id_ = id;
   device_scale_factor_ = device_scale_factor;
 
@@ -104,25 +149,26 @@ void Display::InitializeRenderer() {
   if (resource_provider_)
     return;
 
-  scoped_ptr<ResourceProvider> resource_provider = ResourceProvider::Create(
-      output_surface_.get(), bitmap_manager_, gpu_memory_buffer_manager_,
-      nullptr, settings_.highp_threshold_min,
-      settings_.texture_id_allocation_chunk_size,
-      settings_.use_gpu_memory_buffer_resources,
-      std::vector<unsigned>(static_cast<size_t>(gfx::BufferFormat::LAST) + 1,
-                            GL_TEXTURE_2D));
+  std::unique_ptr<ResourceProvider> resource_provider =
+      ResourceProvider::Create(
+          output_surface_.get(), bitmap_manager_, gpu_memory_buffer_manager_,
+          nullptr, settings_.highp_threshold_min,
+          settings_.texture_id_allocation_chunk_size,
+          settings_.use_gpu_memory_buffer_resources,
+          std::vector<unsigned>(
+              static_cast<size_t>(gfx::BufferFormat::LAST) + 1, GL_TEXTURE_2D));
   if (!resource_provider)
     return;
 
   if (output_surface_->context_provider()) {
-    scoped_ptr<GLRenderer> renderer = GLRenderer::Create(
+    std::unique_ptr<GLRenderer> renderer = GLRenderer::Create(
         this, &settings_, output_surface_.get(), resource_provider.get(),
         texture_mailbox_deleter_.get(), settings_.highp_threshold_min);
     if (!renderer)
       return;
     renderer_ = std::move(renderer);
   } else {
-    scoped_ptr<SoftwareRenderer> renderer = SoftwareRenderer::Create(
+    std::unique_ptr<SoftwareRenderer> renderer = SoftwareRenderer::Create(
         this, &settings_, output_surface_.get(), resource_provider.get());
     if (!renderer)
       return;
@@ -135,7 +181,7 @@ void Display::InitializeRenderer() {
   bool output_partial_list = renderer_->Capabilities().using_partial_swap &&
                              !output_surface_->GetOverlayCandidateValidator();
   aggregator_.reset(new SurfaceAggregator(
-      this, manager_, resource_provider_.get(), output_partial_list));
+      surface_manager_, resource_provider_.get(), output_partial_list));
 }
 
 void Display::DidLoseOutputSurface() {
@@ -147,35 +193,10 @@ void Display::DidLoseOutputSurface() {
 }
 
 void Display::UpdateRootSurfaceResourcesLocked() {
-  Surface* surface = manager_->GetSurfaceForId(current_surface_id_);
+  Surface* surface = surface_manager_->GetSurfaceForId(current_surface_id_);
   bool root_surface_resources_locked = !surface || !surface->GetEligibleFrame();
   if (scheduler_)
     scheduler_->SetRootSurfaceResourcesLocked(root_surface_resources_locked);
-}
-
-void Display::AddSurface(Surface* surface) {
-  // Checking for the output_surface ensures Display::Initialize has been
-  // called and that scheduler_ won't change its value.
-  DCHECK(output_surface_);
-
-  // WebView's HardwareRenderer will never have a scheduler.
-  if (!scheduler_)
-    return;
-
-  surface->AddBeginFrameSource(scheduler_->begin_frame_source_for_children());
-}
-
-void Display::RemoveSurface(Surface* surface) {
-  // Checking for the output_surface ensures Display::Initialize has been
-  // called and that scheduler_ won't change its value.
-  DCHECK(output_surface_);
-
-  // WebView's HardwareRenderer will never have a scheduler.
-  if (!scheduler_)
-    return;
-
-  surface->RemoveBeginFrameSource(
-      scheduler_->begin_frame_source_for_children());
 }
 
 bool Display::DrawAndSwap() {
@@ -192,7 +213,7 @@ bool Display::DrawAndSwap() {
     return false;
   }
 
-  scoped_ptr<CompositorFrame> frame =
+  std::unique_ptr<CompositorFrame> frame =
       aggregator_->Aggregate(current_surface_id_);
   if (!frame) {
     TRACE_EVENT_INSTANT0("cc", "Empty aggregated frame.",
@@ -202,7 +223,7 @@ bool Display::DrawAndSwap() {
 
   // Run callbacks early to allow pipelining.
   for (const auto& id_entry : aggregator_->previous_contained_surfaces()) {
-    Surface* surface = manager_->GetSurfaceForId(id_entry.first);
+    Surface* surface = surface_manager_->GetSurfaceForId(id_entry.first);
     if (surface)
       surface->RunDrawCallbacks(SurfaceDrawStatus::DRAWN);
   }
@@ -238,8 +259,7 @@ bool Display::DrawAndSwap() {
   if (!size_matches)
     TRACE_EVENT_INSTANT0("cc", "Size mismatch.", TRACE_EVENT_SCOPE_THREAD);
 
-  bool should_draw = !frame->metadata.latency_info.empty() ||
-                     have_copy_requests || (have_damage && size_matches);
+  bool should_draw = have_copy_requests || (have_damage && size_matches);
 
   // If the surface is suspended then the resources to be used by the draw are
   // likely destroyed.
@@ -301,9 +321,15 @@ void Display::DidSwapBuffersComplete() {
     renderer_->SwapBuffersComplete();
 }
 
-void Display::CommitVSyncParameters(base::TimeTicks timebase,
-                                    base::TimeDelta interval) {
-  client_->CommitVSyncParameters(timebase, interval);
+void Display::SetBeginFrameSource(BeginFrameSource* source) {
+  // It's expected that there's only a single source from the
+  // BrowserCompositorOutputSurface that corresponds to vsync.  The BFS is
+  // passed BrowserCompositorOutputSurface -> Display -> DisplayScheduler as an
+  // input.  DisplayScheduler makes a decision about which BFS to use and
+  // calls back to Display as DisplaySchedulerClient to register for that
+  // surface id.
+  DCHECK(!vsync_begin_frame_source_);
+  vsync_begin_frame_source_ = source;
 }
 
 void Display::SetMemoryPolicy(const ManagedMemoryPolicy& policy) {
@@ -345,7 +371,7 @@ void Display::SetFullRootLayerDamage() {
 void Display::OnSurfaceDamaged(SurfaceId surface_id, bool* changed) {
   if (aggregator_ &&
       aggregator_->previous_contained_surfaces().count(surface_id)) {
-    Surface* surface = manager_->GetSurfaceForId(surface_id);
+    Surface* surface = surface_manager_->GetSurfaceForId(surface_id);
     if (surface) {
       const CompositorFrame* current_frame = surface->GetEligibleFrame();
       if (!current_frame || !current_frame->delegated_frame_data ||

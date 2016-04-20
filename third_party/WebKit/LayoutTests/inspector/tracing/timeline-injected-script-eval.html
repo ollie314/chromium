@@ -10,6 +10,7 @@ function performActions()
 
 function test()
 {
+    WebInspector.panels.timeline._captureJSProfileSetting.set(false);
     InspectorTest.performActionsAndPrint("performActions()", "FunctionCall");
 }
 
@@ -18,7 +19,7 @@ function test()
 
 <body onload="runTest()">
 <p>
-Tests the Timeline API function call record for InjectedScript.eval call feature.
+Tests the Timeline API function call is not recorded for InjectedScript.eval.
 </p>
 
 </body>

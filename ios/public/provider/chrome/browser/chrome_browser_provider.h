@@ -7,12 +7,13 @@
 
 #include <CoreGraphics/CoreGraphics.h>
 #include <stddef.h>
+
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "components/favicon_base/favicon_callback.h"
 
 class AutocompleteProvider;
@@ -39,23 +40,14 @@ namespace user_prefs {
 class PrefRegistrySyncable;
 }
 
-// TODO(ios): Determine the best way to interface with Obj-C code through
-// the ChromeBrowserProvider. crbug/298181
-#ifdef __OBJC__
 @class UIView;
 @protocol InfoBarViewProtocol;
 typedef UIView<InfoBarViewProtocol>* InfoBarViewPlaceholder;
-#else
-class InfoBarViewPlaceholderClass;
-typedef InfoBarViewPlaceholderClass* InfoBarViewPlaceholder;
-class UIView;
-#endif
 
 namespace ios {
 
 class ChromeBrowserProvider;
 class ChromeBrowserState;
-class ChromeBrowserStateManager;
 class ChromeIdentityService;
 class GeolocationUpdaterProvider;
 class SigninResourcesProvider;
@@ -84,9 +76,6 @@ class ChromeBrowserProvider {
   GetProfileOAuth2TokenServiceIOSProvider();
   // Returns an UpdatableResourceProvider instance.
   virtual UpdatableResourceProvider* GetUpdatableResourceProvider();
-  // Creates a new ChromeBrowserStateManager instance.
-  virtual scoped_ptr<ChromeBrowserStateManager>
-  CreateChromeBrowserStateManager();
   // Returns an infobar view conforming to the InfoBarViewProtocol. The returned
   // object is retained.
   virtual InfoBarViewPlaceholder CreateInfoBarView(
@@ -125,17 +114,9 @@ class ChromeBrowserProvider {
   // metrics_services_manager_client.h for details on |on_update_callback|.
   virtual bool IsSafeBrowsingEnabled(const base::Closure& on_update_callback);
 
-  // Called when the IOSChromeMetricsServiceClientManager instance is
-  // destroyed.
-  virtual void OnMetricsServicesManagerClientDestroyed();
-
   // Returns the SyncedWindowDelegatesGetter implementation.
-  virtual scoped_ptr<browser_sync::SyncedWindowDelegatesGetter>
+  virtual std::unique_ptr<browser_sync::SyncedWindowDelegatesGetter>
   CreateSyncedWindowDelegatesGetter(ios::ChromeBrowserState* browser_state);
-
-  // Gets the URLRequestContextGetter used by the SafeBrowsing service. Returns
-  // null if there is no SafeBrowsing service.
-  virtual net::URLRequestContextGetter* GetSafeBrowsingURLRequestContext();
 };
 
 }  // namespace ios

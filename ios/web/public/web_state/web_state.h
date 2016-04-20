@@ -15,7 +15,6 @@
 #include "base/supports_user_data.h"
 #include "ios/web/public/referrer.h"
 #include "ios/web/public/web_state/url_verification_constants.h"
-#include "ios/web/public/web_view_type.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/geometry/size.h"
@@ -24,22 +23,16 @@
 class GURL;
 class SkBitmap;
 
-#if defined(__OBJC__)
 @class CRWJSInjectionReceiver;
 @protocol CRWScrollableContent;
 @protocol CRWWebViewProxy;
 typedef id<CRWWebViewProxy> CRWWebViewProxyType;
 @class UIView;
 typedef UIView<CRWScrollableContent> CRWContentView;
-#else
-class CRWJSInjectionReceiver;
-typedef void CRWContentView;
-typedef void* CRWWebViewProxyType;
-class UIView;
-#endif  // defined(__OBJC__)
 
 namespace base {
 class DictionaryValue;
+class Value;
 }
 
 namespace web {
@@ -47,6 +40,7 @@ namespace web {
 class BrowserState;
 class NavigationManager;
 class WebInterstitial;
+class WebStateDelegate;
 class WebStateObserver;
 class WebStatePolicyDecider;
 class WebStateWeakPtrFactory;
@@ -92,13 +86,19 @@ class WebState : public base::SupportsUserData {
 
   ~WebState() override {}
 
+  // Gets/Sets the delegate.
+  virtual WebStateDelegate* GetDelegate() = 0;
+  virtual void SetDelegate(WebStateDelegate* delegate) = 0;
+
+  // Whether or not a web view is allowed to exist in this WebState. Defaults
+  // to false; this should be enabled before attempting to access the view.
+  virtual bool IsWebUsageEnabled() const = 0;
+  virtual void SetWebUsageEnabled(bool enabled) = 0;
+
   // The view containing the contents of the current web page. If the view has
   // been purged due to low memory, this will recreate it. It is up to the
   // caller to size the view.
   virtual UIView* GetView() = 0;
-
-  // Returns the type of the web view associated with this WebState.
-  virtual WebViewType GetWebViewType() const = 0;
 
   // Gets the BrowserState associated with this WebState. Can never return null.
   virtual BrowserState* GetBrowserState() const = 0;
@@ -113,6 +113,16 @@ class WebState : public base::SupportsUserData {
 
   // Gets the CRWJSInjectionReceiver associated with this WebState.
   virtual CRWJSInjectionReceiver* GetJSInjectionReceiver() const = 0;
+
+  // Runs JavaScript in the main frame's context. If a callback is provided, it
+  // will be used to return the result, when the result is available or script
+  // execution has failed due to an error.
+  // NOTE: Integer values will be returned as TYPE_DOUBLE because of underlying
+  // library limitation.
+  typedef base::Callback<void(const base::Value*)> JavaScriptResultCallback;
+  virtual void ExecuteJavaScript(const base::string16& javascript) = 0;
+  virtual void ExecuteJavaScript(const base::string16& javascript,
+                                 const JavaScriptResultCallback& callback) = 0;
 
   // Gets the contents MIME type.
   virtual const std::string& GetContentsMimeType() const = 0;
@@ -161,6 +171,9 @@ class WebState : public base::SupportsUserData {
 
   // Returns the currently visible WebInterstitial if one is shown.
   virtual WebInterstitial* GetWebInterstitial() const = 0;
+
+  // Returns the unique ID to use with web::CertStore.
+  virtual int GetCertGroupId() const = 0;
 
   // Callback used to handle script commands.
   // The callback must return true if the command was handled, and false

@@ -17,8 +17,8 @@
 #include "base/sync_socket.h"
 #include "build/build_config.h"
 #include "chrome/test/chromedriver/chrome/status.h"
+#include "net/base/ip_address.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/base/sys_addrinfo.h"
 #include "net/log/net_log.h"
 #include "net/socket/tcp_server_socket.h"
@@ -50,7 +50,7 @@ PortServer::PortServer(const std::string& path) : path_(path) {
 PortServer::~PortServer() {}
 
 Status PortServer::ReservePort(uint16_t* port,
-                               scoped_ptr<PortReservation>* reservation) {
+                               std::unique_ptr<PortReservation>* reservation) {
   uint16_t port_to_use = 0;
   {
     base::AutoLock lock(free_lock_);
@@ -163,18 +163,18 @@ uint16_t PortManager::FindAvailablePort() const {
     if (taken_.count(try_port_uint16))
       continue;
 
-    char parts[] = {127, 0, 0, 1};
-    net::IPAddressNumber address(parts, parts + arraysize(parts));
     net::NetLog::Source source;
     net::TCPServerSocket sock(NULL, source);
-    if (sock.Listen(net::IPEndPoint(address, try_port_uint16), 1) == net::OK)
+    if (sock.Listen(
+            net::IPEndPoint(net::IPAddress::IPv4Localhost(), try_port_uint16),
+            1) == net::OK)
       return try_port_uint16;
   }
   return 0;
 }
 
 Status PortManager::ReservePort(uint16_t* port,
-                                scoped_ptr<PortReservation>* reservation) {
+                                std::unique_ptr<PortReservation>* reservation) {
   base::AutoLock lock(lock_);
   uint16_t port_to_use = FindAvailablePort();
   if (!port_to_use)
@@ -191,7 +191,7 @@ Status PortManager::ReservePort(uint16_t* port,
 
 Status PortManager::ReservePortFromPool(
     uint16_t* port,
-    scoped_ptr<PortReservation>* reservation) {
+    std::unique_ptr<PortReservation>* reservation) {
   base::AutoLock lock(lock_);
   uint16_t port_to_use = 0;
   if (unused_forwarded_port_.size()) {

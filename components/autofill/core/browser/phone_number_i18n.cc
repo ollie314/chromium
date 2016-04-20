@@ -11,7 +11,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_country.h"
-#include "third_party/libphonenumber/src/phonenumber_api.h"
+#include "third_party/libphonenumber/phonenumber_api.h"
 
 using i18n::phonenumbers::PhoneNumber;
 using i18n::phonenumbers::PhoneNumberUtil;
@@ -68,12 +68,14 @@ void FormatValidatedNumber(const PhoneNumber& number,
   std::string region_code;
   phone_util->GetRegionCodeForNumber(number, &region_code);
 
-  // Drop the leading '+' for US numbers as some US sites can't handle the "+",
-  // and in the US dialing "+1..." is the same as dialing "1...".
+  // Drop the leading '+' for US/CA numbers as some sites can't handle the "+",
+  // and in these regions dialing "+1..." is the same as dialing "1...".
+  // TODO(crbug/226778): Investigate whether the leading "+" is desirable in
+  // other regions. Closed bug crbug/98911 contains additional context.
   std::string prefix;
   if (processed_number[0] == '+') {
     processed_number = processed_number.substr(1);
-    if (region_code != "US")
+    if (region_code != "US" && region_code != "CA")
       prefix = "+";
   }
 
@@ -244,7 +246,7 @@ PhoneObject::PhoneObject(const base::string16& number,
   // [ http://crbug.com/100845 ].  Once the bug is fixed, add a DCHECK here to
   // verify.
 
-  scoped_ptr<PhoneNumber> i18n_number(new PhoneNumber);
+  std::unique_ptr<PhoneNumber> i18n_number(new PhoneNumber);
   if (ParsePhoneNumber(number, region, &country_code_, &city_code_, &number_,
                        &region_, i18n_number.get())) {
     // The phone number was successfully parsed, so store the parsed version.

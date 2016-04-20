@@ -26,7 +26,7 @@ class InstantUnitTestBase : public BrowserWithTestWindowTest {
   void SetUp() override;
   void TearDown() override;
 
-#if !defined(OS_IOS) && !defined(OS_ANDROID)
+#if !defined(OS_ANDROID)
   // Query extraction is always enabled on Android and iOS.
   void SetUpWithoutQueryExtraction();
 #endif
@@ -47,7 +47,7 @@ class InstantUnitTestBase : public BrowserWithTestWindowTest {
 
   InstantService* instant_service_;
   TemplateURLService* template_url_service_;
-  scoped_ptr<base::FieldTrialList> field_trial_list_;
+  std::unique_ptr<base::FieldTrialList> field_trial_list_;
 
  private:
   // BrowserWithTestWindowTest override:

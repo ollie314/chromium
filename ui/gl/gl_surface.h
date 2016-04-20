@@ -36,11 +36,22 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
  public:
   GLSurface();
 
+  // Minimum bit depth of surface.
+  enum Format {
+    SURFACE_ARGB8888,
+    SURFACE_RGB565,
+    SURFACE_OSMESA_BGRA,
+    SURFACE_OSMESA_RGBA,
+    SURFACE_SURFACELESS,
+    SURFACE_DEFAULT = SURFACE_ARGB8888
+  };
+
   // (Re)create the surface. TODO(apatrick): This is an ugly hack to allow the
   // EGL surface associated to be recreated without destroying the associated
   // context. The implementation of this function for other GLSurface derived
   // classes is in a pending changelist.
   virtual bool Initialize();
+  virtual bool Initialize(GLSurface::Format format);
 
   // Destroys the surface.
   virtual void Destroy() = 0;
@@ -52,8 +63,8 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // Recreate the surface without changing the size.
   virtual bool Recreate();
 
-  // Unschedule the GpuScheduler and return true to abort the processing of
-  // a GL draw call to this surface and defer it until the GpuScheduler is
+  // Unschedule the CommandExecutor and return true to abort the processing of
+  // a GL draw call to this surface and defer it until the CommandExecutor is
   // rescheduled.
   virtual bool DeferDraws();
 
@@ -144,7 +155,7 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   virtual void* GetConfig();
 
   // Get the GL pixel format of the surface, if available.
-  virtual unsigned GetFormat();
+  virtual GLSurface::Format GetFormat();
 
   // Get access to a helper providing time of recent refresh and period
   // of screen refresh. If unavailable, returns NULL.
@@ -174,10 +185,12 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
                                float opacity,
                                unsigned background_color,
                                unsigned edge_aa_mask,
-                               const RectF& bounds_rect,
+                               const RectF& rect,
                                bool is_clipped,
                                const RectF& clip_rect,
-                               const Transform& transform);
+                               const Transform& transform,
+                               int sorting_content_id,
+                               unsigned filter);
 
   virtual bool IsSurfaceless() const;
 
@@ -234,7 +247,7 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
  public:
   explicit GLSurfaceAdapter(GLSurface* surface);
 
-  bool Initialize() override;
+  bool Initialize(GLSurface::Format format) override;
   void Destroy() override;
   bool Resize(const gfx::Size& size,
               float scale_factor,
@@ -265,7 +278,7 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
   void* GetShareHandle() override;
   void* GetDisplay() override;
   void* GetConfig() override;
-  unsigned GetFormat() override;
+  GLSurface::Format GetFormat() override;
   VSyncProvider* GetVSyncProvider() override;
   bool ScheduleOverlayPlane(int z_order,
                             OverlayTransform transform,

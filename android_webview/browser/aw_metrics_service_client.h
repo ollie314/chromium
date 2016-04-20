@@ -5,13 +5,12 @@
 #ifndef ANDROID_WEBVIEW_BROWSER_AW_METRICS_SERVICE_CLIENT_IMPL_H_
 #define ANDROID_WEBVIEW_BROWSER_AW_METRICS_SERVICE_CLIENT_IMPL_H_
 
-#include "android_webview/browser/aw_metrics_service_client.h"
-
+#include <memory>
 #include <string>
 
+#include "android_webview/browser/aw_metrics_service_client.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "components/metrics/metrics_service_client.h"
 
 class PrefService;
@@ -31,25 +30,26 @@ class URLRequestContextGetter;
 
 namespace android_webview {
 
-// This singleton manages metrics for an app using any number of WebViews.
-// Metrics is turned on and off by the homonymous Java class. It should only be
-// used on the main thread. In particular, Initialize, Finalize, and
-// SetMetricsEnabled must be called from the same thread, in order to prevent
-// enable/disable race conditions, and because MetricsService is
-// single-threaded.
+// This singleton manages metrics for an app using any number of WebViews. The
+// homonymous Java class is responsible for turning metrics on and off. This
+// singleton must always be used on the same thread. (Currently the UI thread
+// is enforced, but it could be any thread.) This is to prevent enable/disable
+// race conditions, and because MetricsService is single-threaded.
+// Initialization is asynchronous; even after Initialize has returned, some
+// methods may not be ready to use (see below).
 class AwMetricsServiceClient : public metrics::MetricsServiceClient {
   friend struct base::DefaultLazyInstanceTraits<AwMetricsServiceClient>;
 
  public:
+  // These may be called at any time.
   static AwMetricsServiceClient* GetInstance();
-
   void Initialize(PrefService* pref_service,
                   net::URLRequestContextGetter* request_context,
                   const base::FilePath guid_file_path);
-  void Finalize();
   void SetMetricsEnabled(bool enabled);
 
-  // metrics::MetricsServiceClient implementation
+  // These implement metrics::MetricsServiceClient. They must not be called
+  // until initialization has asynchronously finished.
   metrics::MetricsService* GetMetricsService() override;
   void SetMetricsClientId(const std::string& client_id) override;
   void OnRecordingDisabled() override;
@@ -63,7 +63,7 @@ class AwMetricsServiceClient : public metrics::MetricsServiceClient {
   void InitializeSystemProfileMetrics(
       const base::Closure& done_callback) override;
   void CollectFinalMetricsForLog(const base::Closure& done_callback) override;
-  scoped_ptr<metrics::MetricsLogUploader> CreateUploader(
+  std::unique_ptr<metrics::MetricsLogUploader> CreateUploader(
       const base::Callback<void(int)>& on_upload_complete) override;
   base::TimeDelta GetStandardUploadInterval() override;
 
@@ -80,8 +80,8 @@ class AwMetricsServiceClient : public metrics::MetricsServiceClient {
   bool is_enabled_;
   PrefService* pref_service_;
   net::URLRequestContextGetter* request_context_;
-  scoped_ptr<metrics::MetricsStateManager> metrics_state_manager_;
-  scoped_ptr<metrics::MetricsService> metrics_service_;
+  std::unique_ptr<metrics::MetricsStateManager> metrics_state_manager_;
+  std::unique_ptr<metrics::MetricsService> metrics_service_;
 
   DISALLOW_COPY_AND_ASSIGN(AwMetricsServiceClient);
 };

@@ -8,9 +8,9 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/Settings.h"
 #include "core/page/Page.h"
+#include "core/style/ComputedStyle.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "public/platform/WebLayerTreeView.h"
-#include "web/InspectorEmulationAgent.h"
 #include "web/WebInputEventConversion.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebSettingsImpl.h"
@@ -49,16 +49,17 @@ namespace blink {
 
 DevToolsEmulator::DevToolsEmulator(WebViewImpl* webViewImpl)
     : m_webViewImpl(webViewImpl)
-    , m_emulationAgent(nullptr)
     , m_deviceMetricsEnabled(false)
     , m_emulateMobileEnabled(false)
     , m_isOverlayScrollbarsEnabled(false)
+    , m_isOrientationEventEnabled(false)
+    , m_isMobileLayoutThemeEnabled(false)
     , m_originalDefaultMinimumPageScaleFactor(0)
     , m_originalDefaultMaximumPageScaleFactor(0)
     , m_embedderTextAutosizingEnabled(webViewImpl->page()->settings().textAutosizingEnabled())
     , m_embedderDeviceScaleAdjustment(webViewImpl->page()->settings().deviceScaleAdjustment())
     , m_embedderPreferCompositingToLCDTextEnabled(webViewImpl->page()->settings().preferCompositingToLCDTextEnabled())
-    , m_embedderUseMobileViewport(webViewImpl->page()->settings().useMobileViewportStyle())
+    , m_embedderViewportStyle(webViewImpl->page()->settings().viewportStyle())
     , m_embedderPluginsEnabled(webViewImpl->page()->settings().pluginsEnabled())
     , m_embedderAvailablePointerTypes(webViewImpl->page()->settings().availablePointerTypes())
     , m_embedderPrimaryPointerType(webViewImpl->page()->settings().primaryPointerType())
@@ -66,6 +67,7 @@ DevToolsEmulator::DevToolsEmulator(WebViewImpl* webViewImpl)
     , m_embedderPrimaryHoverType(webViewImpl->page()->settings().primaryHoverType())
     , m_touchEventEmulationEnabled(false)
     , m_doubleTapToZoomEnabled(false)
+    , m_mainFrameResizesAreOrientationChanges(false)
     , m_originalTouchEnabled(false)
     , m_originalDeviceSupportsMouse(false)
     , m_originalDeviceSupportsTouch(false)
@@ -79,25 +81,13 @@ DevToolsEmulator::~DevToolsEmulator()
 {
 }
 
-PassOwnPtrWillBeRawPtr<DevToolsEmulator> DevToolsEmulator::create(WebViewImpl* webViewImpl)
+DevToolsEmulator* DevToolsEmulator::create(WebViewImpl* webViewImpl)
 {
-    return adoptPtrWillBeNoop(new DevToolsEmulator(webViewImpl));
+    return new DevToolsEmulator(webViewImpl);
 }
 
 DEFINE_TRACE(DevToolsEmulator)
 {
-    visitor->trace(m_emulationAgent);
-}
-
-void DevToolsEmulator::setEmulationAgent(InspectorEmulationAgent* agent)
-{
-    m_emulationAgent = agent;
-}
-
-void DevToolsEmulator::viewportChanged()
-{
-    if (m_emulationAgent)
-        m_emulationAgent->viewportChanged();
 }
 
 void DevToolsEmulator::setTextAutosizingEnabled(bool enabled)
@@ -124,12 +114,12 @@ void DevToolsEmulator::setPreferCompositingToLCDTextEnabled(bool enabled)
         m_webViewImpl->page()->settings().setPreferCompositingToLCDTextEnabled(enabled);
 }
 
-void DevToolsEmulator::setUseMobileViewportStyle(bool enabled)
+void DevToolsEmulator::setViewportStyle(WebViewportStyle style)
 {
-    m_embedderUseMobileViewport = enabled;
+    m_embedderViewportStyle = style;
     bool emulateMobileEnabled = m_deviceMetricsEnabled && m_emulateMobileEnabled;
     if (!emulateMobileEnabled)
-        m_webViewImpl->page()->settings().setUseMobileViewportStyle(enabled);
+        m_webViewImpl->page()->settings().setViewportStyle(style);
 }
 
 void DevToolsEmulator::setPluginsEnabled(bool enabled)
@@ -155,6 +145,17 @@ void DevToolsEmulator::setDoubleTapToZoomEnabled(bool enabled)
 bool DevToolsEmulator::doubleTapToZoomEnabled() const
 {
     return m_touchEventEmulationEnabled ? true : m_doubleTapToZoomEnabled;
+}
+
+void DevToolsEmulator::setMainFrameResizesAreOrientationChanges(bool enabled)
+{
+    m_mainFrameResizesAreOrientationChanges = enabled;
+}
+
+bool DevToolsEmulator::mainFrameResizesAreOrientationChanges() const
+{
+    bool emulateMobileEnabled = m_deviceMetricsEnabled && m_emulateMobileEnabled;
+    return emulateMobileEnabled ? true : m_mainFrameResizesAreOrientationChanges;
 }
 
 void DevToolsEmulator::setAvailablePointerTypes(int types)
@@ -218,8 +219,12 @@ void DevToolsEmulator::enableDeviceEmulation(const WebDeviceEmulationParams& par
 
     m_webViewImpl->setCompositorDeviceScaleFactorOverride(params.deviceScaleFactor);
     m_webViewImpl->setRootLayerTransform(WebSize(params.offset.x, params.offset.y), params.scale);
-    if (Document* document = m_webViewImpl->mainFrameImpl()->frame()->document())
-        document->mediaQueryAffectingValueChanged();
+    // TODO(dgozman): mainFrameImpl() is null when it's remote. Figure out how
+    // we end up with enabling emulation in this case.
+    if (m_webViewImpl->mainFrameImpl()) {
+        if (Document* document = m_webViewImpl->mainFrameImpl()->frame()->document())
+            document->mediaQueryAffectingValueChanged();
+    }
 }
 
 void DevToolsEmulator::disableDeviceEmulation()
@@ -235,8 +240,11 @@ void DevToolsEmulator::disableDeviceEmulation()
     m_webViewImpl->setCompositorDeviceScaleFactorOverride(0.f);
     m_webViewImpl->setRootLayerTransform(WebSize(0.f, 0.f), 1.f);
     m_webViewImpl->setPageScaleFactor(1.f);
-    if (Document* document = m_webViewImpl->mainFrameImpl()->frame()->document())
-        document->mediaQueryAffectingValueChanged();
+    // mainFrameImpl() could be null during cleanup or remote <-> local swap.
+    if (m_webViewImpl->mainFrameImpl()) {
+        if (Document* document = m_webViewImpl->mainFrameImpl()->frame()->document())
+            document->mediaQueryAffectingValueChanged();
+    }
 }
 
 bool DevToolsEmulator::resizeIsDeviceSizeChange()
@@ -251,9 +259,14 @@ void DevToolsEmulator::enableMobileEmulation()
     m_emulateMobileEnabled = true;
     m_isOverlayScrollbarsEnabled = RuntimeEnabledFeatures::overlayScrollbarsEnabled();
     RuntimeEnabledFeatures::setOverlayScrollbarsEnabled(true);
-    m_webViewImpl->page()->settings().setUseMobileViewportStyle(true);
-    m_webViewImpl->enableViewport();
-    m_webViewImpl->settings()->setViewportMetaEnabled(true);
+    m_isOrientationEventEnabled = RuntimeEnabledFeatures::orientationEventEnabled();
+    RuntimeEnabledFeatures::setOrientationEventEnabled(true);
+    m_isMobileLayoutThemeEnabled = RuntimeEnabledFeatures::mobileLayoutThemeEnabled();
+    RuntimeEnabledFeatures::setMobileLayoutThemeEnabled(true);
+    ComputedStyle::invalidateInitialStyle();
+    m_webViewImpl->page()->settings().setViewportStyle(WebViewportStyle::Mobile);
+    m_webViewImpl->page()->settings().setViewportEnabled(true);
+    m_webViewImpl->page()->settings().setViewportMetaEnabled(true);
     m_webViewImpl->page()->frameHost().visualViewport().initializeScrollbars();
     m_webViewImpl->settings()->setShrinksViewportContentToFit(true);
     m_webViewImpl->page()->settings().setTextAutosizingEnabled(true);
@@ -269,7 +282,10 @@ void DevToolsEmulator::enableMobileEmulation()
     m_originalDefaultMinimumPageScaleFactor = m_webViewImpl->defaultMinimumPageScaleFactor();
     m_originalDefaultMaximumPageScaleFactor = m_webViewImpl->defaultMaximumPageScaleFactor();
     m_webViewImpl->setDefaultPageScaleLimits(0.25f, 5);
-    m_webViewImpl->mainFrameImpl()->frameView()->layout();
+    // TODO(dgozman): mainFrameImpl() is null when it's remote. Figure out how
+    // we end up with enabling emulation in this case.
+    if (m_webViewImpl->mainFrameImpl())
+        m_webViewImpl->mainFrameImpl()->frameView()->layout();
 }
 
 void DevToolsEmulator::disableMobileEmulation()
@@ -277,13 +293,16 @@ void DevToolsEmulator::disableMobileEmulation()
     if (!m_emulateMobileEnabled)
         return;
     RuntimeEnabledFeatures::setOverlayScrollbarsEnabled(m_isOverlayScrollbarsEnabled);
-    m_webViewImpl->disableViewport();
-    m_webViewImpl->settings()->setViewportMetaEnabled(false);
+    RuntimeEnabledFeatures::setOrientationEventEnabled(m_isOrientationEventEnabled);
+    RuntimeEnabledFeatures::setMobileLayoutThemeEnabled(m_isMobileLayoutThemeEnabled);
+    ComputedStyle::invalidateInitialStyle();
+    m_webViewImpl->page()->settings().setViewportEnabled(false);
+    m_webViewImpl->page()->settings().setViewportMetaEnabled(false);
     m_webViewImpl->page()->frameHost().visualViewport().initializeScrollbars();
     m_webViewImpl->settings()->setShrinksViewportContentToFit(false);
     m_webViewImpl->page()->settings().setTextAutosizingEnabled(m_embedderTextAutosizingEnabled);
     m_webViewImpl->page()->settings().setPreferCompositingToLCDTextEnabled(m_embedderPreferCompositingToLCDTextEnabled);
-    m_webViewImpl->page()->settings().setUseMobileViewportStyle(m_embedderUseMobileViewport);
+    m_webViewImpl->page()->settings().setViewportStyle(m_embedderViewportStyle);
     m_webViewImpl->page()->settings().setPluginsEnabled(m_embedderPluginsEnabled);
     m_webViewImpl->page()->settings().setAvailablePointerTypes(m_embedderAvailablePointerTypes);
     m_webViewImpl->page()->settings().setPrimaryPointerType(m_embedderPrimaryPointerType);
@@ -295,7 +314,9 @@ void DevToolsEmulator::disableMobileEmulation()
     m_webViewImpl->setDefaultPageScaleLimits(
         m_originalDefaultMinimumPageScaleFactor,
         m_originalDefaultMaximumPageScaleFactor);
-    m_webViewImpl->mainFrameImpl()->frameView()->layout();
+    // mainFrameImpl() could be null during cleanup or remote <-> local swap.
+    if (m_webViewImpl->mainFrameImpl())
+        m_webViewImpl->mainFrameImpl()->frameView()->layout();
 }
 
 void DevToolsEmulator::setTouchEventEmulationEnabled(bool enabled)
@@ -316,7 +337,14 @@ void DevToolsEmulator::setTouchEventEmulationEnabled(bool enabled)
         m_webViewImpl->page()->settings().setMaxTouchPoints(enabled ? 1 : m_originalMaxTouchPoints);
     }
     m_touchEventEmulationEnabled = enabled;
-    m_webViewImpl->mainFrameImpl()->frameView()->layout();
+    // TODO(dgozman): mainFrameImpl() check in this class should be unnecessary.
+    // It is only needed when we reattach and restore InspectorEmulationAgent,
+    // which happens before everything has been setup correctly, and therefore
+    // fails during remote -> local main frame transition.
+    // We should instead route emulation from browser through the WebViewImpl
+    // to the local main frame, and remove InspectorEmulationAgent entirely.
+    if (m_webViewImpl->mainFrameImpl())
+        m_webViewImpl->mainFrameImpl()->frameView()->layout();
 }
 
 void DevToolsEmulator::setScriptExecutionDisabled(bool scriptExecutionDisabled)

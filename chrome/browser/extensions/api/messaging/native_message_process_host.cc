@@ -22,7 +22,6 @@
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "url/gurl.h"
 
 namespace {
@@ -45,7 +44,7 @@ namespace extensions {
 NativeMessageProcessHost::NativeMessageProcessHost(
     const std::string& source_extension_id,
     const std::string& native_host_name,
-    scoped_ptr<NativeProcessLauncher> launcher)
+    std::unique_ptr<NativeProcessLauncher> launcher)
     : client_(NULL),
       source_extension_id_(source_extension_id),
       native_host_name_(native_host_name),
@@ -81,7 +80,7 @@ NativeMessageProcessHost::~NativeMessageProcessHost() {
 }
 
 // static
-scoped_ptr<NativeMessageHost> NativeMessageHost::Create(
+std::unique_ptr<NativeMessageHost> NativeMessageHost::Create(
     gfx::NativeView native_view,
     const std::string& source_extension_id,
     const std::string& native_host_name,
@@ -94,13 +93,13 @@ scoped_ptr<NativeMessageHost> NativeMessageHost::Create(
 }
 
 // static
-scoped_ptr<NativeMessageHost> NativeMessageProcessHost::CreateWithLauncher(
+std::unique_ptr<NativeMessageHost> NativeMessageProcessHost::CreateWithLauncher(
     const std::string& source_extension_id,
     const std::string& native_host_name,
-    scoped_ptr<NativeProcessLauncher> launcher) {
+    std::unique_ptr<NativeProcessLauncher> launcher) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  scoped_ptr<NativeMessageHost> process(new NativeMessageProcessHost(
+  std::unique_ptr<NativeMessageHost> process(new NativeMessageProcessHost(
       source_extension_id, native_host_name, std::move(launcher)));
 
   return process;

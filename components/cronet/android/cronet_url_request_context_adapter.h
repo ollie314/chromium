@@ -16,8 +16,8 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/prefs/json_pref_store.h"
 #include "base/threading/thread.h"
+#include "components/prefs/json_pref_store.h"
 #include "net/base/network_quality_estimator.h"
 
 class PrefService;
@@ -166,7 +166,6 @@ class CronetURLRequestContextAdapter
   // |pref_service_| should outlive the HttpServerPropertiesManager owned by
   // |context_|.
   scoped_ptr<PrefService> pref_service_;
-  scoped_ptr<net::NetLog> net_log_;
   scoped_ptr<net::URLRequestContext> context_;
   scoped_ptr<net::ProxyConfigService> proxy_config_service_;
   scoped_refptr<JsonPrefStore> json_pref_store_;

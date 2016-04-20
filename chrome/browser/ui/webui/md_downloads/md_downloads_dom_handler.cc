@@ -12,7 +12,6 @@
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
@@ -34,6 +33,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
@@ -82,6 +82,7 @@ MdDownloadsDOMHandler::MdDownloadsDOMHandler(
   Profile* profile = Profile::FromBrowserContext(
       download_manager->GetBrowserContext());
   content::URLDataSource::Add(profile, new FileIconSource());
+  CheckForRemovedFiles();
 }
 
 MdDownloadsDOMHandler::~MdDownloadsDOMHandler() {
@@ -132,10 +133,10 @@ void MdDownloadsDOMHandler::RegisterMessages() {
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
-void MdDownloadsDOMHandler::RenderViewReused(
-    content::RenderViewHost* render_view_host) {
+void MdDownloadsDOMHandler::RenderViewReused() {
   list_tracker_.Stop();
   list_tracker_.Reset();
+  CheckForRemovedFiles();
 }
 
 void MdDownloadsDOMHandler::HandleGetDownloads(const base::ListValue* args) {
@@ -408,4 +409,11 @@ content::DownloadItem* MdDownloadsDOMHandler::GetDownloadById(uint32_t id) {
 
 content::WebContents* MdDownloadsDOMHandler::GetWebUIWebContents() {
   return web_ui()->GetWebContents();
+}
+
+void MdDownloadsDOMHandler::CheckForRemovedFiles() {
+  if (GetMainNotifierManager())
+    GetMainNotifierManager()->CheckForHistoryFilesRemoval();
+  if (GetOriginalNotifierManager())
+    GetOriginalNotifierManager()->CheckForHistoryFilesRemoval();
 }

@@ -97,9 +97,9 @@
       },
 
       /**
-       * Whether the expanded button is ON.
+       * Whether the playlist is expanded or not.
        */
-      expanded: {
+      playlistExpanded: {
         type: Boolean,
         value: false,
         notify: true
@@ -186,6 +186,41 @@
     },
 
     /**
+     * Skips min(5 seconds, 10% of duration).
+     * @param {boolean} forward Whether to skip forward/backword.
+     */
+    smallSkip: function(forward) {
+      var millisecondsToSkip = Math.min(5000, this.duration / 10);
+      if (!forward) {
+        millisecondsToSkip *= -1;
+      }
+      this.skip_(millisecondsToSkip);
+    },
+
+    /**
+     * Skips min(10 seconds, 20% of duration).
+     * @param {boolean} forward Whether to skip forward/backword.
+     */
+    bigSkip: function(forward) {
+      var millisecondsToSkip = Math.min(10000, this.duration / 5);
+      if (!forward) {
+        millisecondsToSkip *= -1;
+      }
+      this.skip_(millisecondsToSkip);
+    },
+
+    /**
+     * Skips forward/backword.
+     * @param {number} millis Milliseconds to skip. Set negative value to skip
+     *     backword.
+     * @private
+     */
+    skip_: function(millis) {
+      if (this.duration > 0)
+        this.time = Math.max(Math.min(this.time + millis, this.duration), 0);
+    },
+
+    /**
      * Converts the time into human friendly string.
      * @param {number} time Time to be converted.
      * @return {string} String representation of the given time
@@ -269,6 +304,6 @@
       this.$.volumeButton.setAttribute('aria-label',
           this.volume !== 0 ? ariaLabels.mute : ariaLabels.unmute);
       this.$.volumeSlider.setAttribute('aria-label', ariaLabels.volumeSlider);
-    }
+    },
   });
 })();  // Anonymous closure

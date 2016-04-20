@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "gpu/command_buffer/client/program_info_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -165,7 +167,7 @@ class ProgramInfoManagerTest : public testing::Test {
     memcpy(data->name1, kName[1], arraysize(data->name1));
   }
 
-  scoped_ptr<ProgramInfoManager> program_info_manager_;
+  std::unique_ptr<ProgramInfoManager> program_info_manager_;
   Program* program_;
 };
 
@@ -206,7 +208,7 @@ TEST_F(ProgramInfoManagerTest, UpdateES2) {
     EXPECT_LT(kNames[0].length(),
               static_cast<size_t>(active_uniform_max_length));
     EXPECT_EQ(kNames[ii], info->name);
-    EXPECT_EQ(kNames[ii][kNames[ii].length() - 1] == ']', info->is_array);
+    EXPECT_EQ(kNames[ii].back() == ']', info->is_array);
     EXPECT_EQ(data.uniforms[ii].size,
               static_cast<int32_t>(info->element_locations.size()));
     for (int32_t uu = 0; uu < data.uniforms[ii].size; ++uu) {

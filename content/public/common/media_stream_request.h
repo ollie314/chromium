@@ -8,11 +8,11 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
 #include "media/audio/audio_parameters.h"
 #include "ui/gfx/native_widget_types.h"
@@ -106,6 +106,8 @@ struct CONTENT_EXPORT MediaStreamDevice {
       int channel_layout,
       int frames_per_buffer);
 
+  MediaStreamDevice(const MediaStreamDevice& other);
+
   ~MediaStreamDevice();
 
   bool IsEqual(const MediaStreamDevice& second) const;
@@ -134,6 +136,7 @@ struct CONTENT_EXPORT MediaStreamDevice {
     AudioDeviceParameters(int sample_rate,
                           int channel_layout,
                           int frames_per_buffer);
+    AudioDeviceParameters(const AudioDeviceParameters& other);
 
     ~AudioDeviceParameters();
 
@@ -203,6 +206,8 @@ struct CONTENT_EXPORT MediaStreamRequest {
       MediaStreamType audio_type,
       MediaStreamType video_type);
 
+  MediaStreamRequest(const MediaStreamRequest& other);
+
   ~MediaStreamRequest();
 
   // This is the render process id for the renderer associated with generating
@@ -259,10 +264,10 @@ class MediaStreamUI {
 };
 
 // Callback used return results of media access requests.
-typedef base::Callback<void(
-    const MediaStreamDevices& devices,
-    content::MediaStreamRequestResult result,
-    scoped_ptr<MediaStreamUI> ui)> MediaResponseCallback;
+typedef base::Callback<void(const MediaStreamDevices& devices,
+                            content::MediaStreamRequestResult result,
+                            std::unique_ptr<MediaStreamUI> ui)>
+    MediaResponseCallback;
 
 }  // namespace content
 

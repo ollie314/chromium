@@ -32,6 +32,7 @@
 
 #include "core/css/StyleSheetList.h"
 #include "core/dom/Document.h"
+#include "core/dom/StyleEngine.h"
 #include "core/dom/custom/CustomElement.h"
 #include "core/dom/custom/CustomElementMicrotaskImportStep.h"
 #include "core/dom/custom/CustomElementSyncMicrotaskQueue.h"
@@ -46,9 +47,6 @@ namespace blink {
 HTMLImportChild::HTMLImportChild(const KURL& url, HTMLImportLoader* loader, SyncMode sync)
     : HTMLImport(sync)
     , m_url(url)
-#if !ENABLE(OILPAN)
-    , m_weakFactory(this)
-#endif
     , m_loader(loader)
     , m_client(nullptr)
 {
@@ -56,17 +54,13 @@ HTMLImportChild::HTMLImportChild(const KURL& url, HTMLImportLoader* loader, Sync
 
 HTMLImportChild::~HTMLImportChild()
 {
-#if !ENABLE(OILPAN)
-    // dispose() should be called before the destruction.
-    ASSERT(!m_loader);
-#endif
 }
 
 void HTMLImportChild::ownerInserted()
 {
     if (!m_loader->isDone())
         return;
-    root()->document()->styleResolverChanged();
+    root()->document()->styleEngine().resolverChanged(FullStyleUpdate);
 }
 
 void HTMLImportChild::didShareLoader()
@@ -148,11 +142,7 @@ void HTMLImportChild::createCustomElementMicrotaskStepIfNeeded()
     ASSERT(!m_customElementMicrotaskStep);
 
     if (!hasFinishedLoading() && !formsCycle()) {
-#if ENABLE(OILPAN)
         m_customElementMicrotaskStep = CustomElement::didCreateImport(this);
-#else
-        m_customElementMicrotaskStep = CustomElement::didCreateImport(this)->weakPtr();
-#endif
     }
 }
 
@@ -176,15 +166,6 @@ void HTMLImportChild::setClient(HTMLImportChildClient* client)
     ASSERT(!m_client);
     m_client = client;
 }
-
-#if !ENABLE(OILPAN)
-void HTMLImportChild::clearClient()
-{
-    // Doesn't check m_client nullity because we allow
-    // clearClient() to reenter.
-    m_client = nullptr;
-}
-#endif
 
 HTMLLinkElement* HTMLImportChild::link() const
 {
@@ -221,7 +202,7 @@ void HTMLImportChild::showThis()
         isFirst,
         m_customElementMicrotaskStep.get(),
         isSync() ? "Y" : "N",
-        url().string().utf8().data());
+        url().getString().utf8().data());
 }
 #endif
 

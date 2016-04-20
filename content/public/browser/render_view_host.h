@@ -12,7 +12,7 @@
 #include "content/public/common/page_zoom.h"
 #include "ipc/ipc_sender.h"
 #include "mojo/public/cpp/system/core.h"
-#include "third_party/WebKit/public/web/WebDragOperation.h"
+#include "third_party/WebKit/public/platform/WebDragOperation.h"
 
 class GURL;
 
@@ -215,15 +215,6 @@ class CONTENT_EXPORT RenderViewHost : public IPC::Sender {
 
   // Notify the render view host to select the word around the caret.
   virtual void SelectWordAroundCaret() = 0;
-
-#if defined(OS_ANDROID)
-  // Selects and zooms to the find result nearest to the point (x,y)
-  // defined in find-in-page coordinates.
-  virtual void ActivateNearestFindResult(int request_id, float x, float y) = 0;
-
-  // Asks the renderer to send the rects of the current find matches.
-  virtual void RequestFindMatchRects(int current_version) = 0;
-#endif
 
  private:
   // This interface should only be implemented inside content.

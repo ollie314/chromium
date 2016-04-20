@@ -4,6 +4,7 @@
 
 #include "ui/aura/env.h"
 
+#include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/threading/thread_local.h"
 #include "ui/aura/env_observer.h"
@@ -23,15 +24,29 @@ namespace {
 base::LazyInstance<base::ThreadLocalPointer<Env> >::Leaky lazy_tls_ptr =
     LAZY_INSTANCE_INITIALIZER;
 
+// Returns true if running inside of mus. Checks for mojo specific flag.
+bool RunningInsideMus() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      "primordial-pipe-token");
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // Env, public:
 
+Env::~Env() {
+  FOR_EACH_OBSERVER(EnvObserver, observers_, OnWillDestroyEnv());
+  DCHECK_EQ(this, lazy_tls_ptr.Pointer()->Get());
+  lazy_tls_ptr.Pointer()->Set(NULL);
+}
+
 // static
-void Env::CreateInstance(bool create_event_source) {
-  if (!lazy_tls_ptr.Pointer()->Get())
-    (new Env())->Init(create_event_source);
+std::unique_ptr<Env> Env::CreateInstance() {
+  DCHECK(!lazy_tls_ptr.Pointer()->Get());
+  std::unique_ptr<Env> env(new Env());
+  env->Init();
+  return env;
 }
 
 // static
@@ -45,11 +60,6 @@ Env* Env::GetInstance() {
 // static
 Env* Env::GetInstanceDontCreate() {
   return lazy_tls_ptr.Pointer()->Get();
-}
-
-// static
-void Env::DeleteInstance() {
-  delete lazy_tls_ptr.Pointer()->Get();
 }
 
 void Env::AddObserver(EnvObserver* observer) {
@@ -77,19 +87,16 @@ Env::Env()
   lazy_tls_ptr.Pointer()->Set(this);
 }
 
-Env::~Env() {
-  FOR_EACH_OBSERVER(EnvObserver, observers_, OnWillDestroyEnv());
-  DCHECK_EQ(this, lazy_tls_ptr.Pointer()->Get());
-  lazy_tls_ptr.Pointer()->Set(NULL);
-}
-
-void Env::Init(bool create_event_source) {
+void Env::Init() {
+  if (RunningInsideMus())
+    return;
 #if defined(USE_OZONE)
   // The ozone platform can provide its own event source. So initialize the
-  // platform before creating the default event source.
+  // platform before creating the default event source. If running inside mus
+  // let the mus process initialize ozone instead.
   ui::OzonePlatform::InitializeForUI();
 #endif
-  if (create_event_source && !ui::PlatformEventSource::GetInstance())
+  if (!ui::PlatformEventSource::GetInstance())
     event_source_ = ui::PlatformEventSource::CreateDefault();
 }
 
@@ -116,7 +123,7 @@ ui::EventTarget* Env::GetParentTarget() {
   return NULL;
 }
 
-scoped_ptr<ui::EventTargetIterator> Env::GetChildIterator() const {
+std::unique_ptr<ui::EventTargetIterator> Env::GetChildIterator() const {
   return nullptr;
 }
 

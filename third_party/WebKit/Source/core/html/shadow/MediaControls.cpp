@@ -34,6 +34,7 @@
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/track/TextTrackContainer.h"
 #include "core/layout/LayoutTheme.h"
+#include "platform/EventDispatchForbiddenScope.h"
 
 namespace blink {
 
@@ -90,7 +91,7 @@ public:
     }
 
 private:
-    RawPtrWillBeMember<MediaControls> m_controls;
+    Member<MediaControls> m_controls;
     static int s_batchDepth;
 };
 
@@ -124,12 +125,12 @@ MediaControls::MediaControls(HTMLMediaElement& mediaElement)
 {
 }
 
-PassRefPtrWillBeRawPtr<MediaControls> MediaControls::create(HTMLMediaElement& mediaElement)
+MediaControls* MediaControls::create(HTMLMediaElement& mediaElement)
 {
-    RefPtrWillBeRawPtr<MediaControls> controls = adoptRefWillBeNoop(new MediaControls(mediaElement));
-    controls->setShadowPseudoId(AtomicString("-webkit-media-controls", AtomicString::ConstructFromLiteral));
+    MediaControls* controls = new MediaControls(mediaElement);
+    controls->setShadowPseudoId(AtomicString("-webkit-media-controls"));
     controls->initializeControls();
-    return controls.release();
+    return controls;
 }
 
 // The media controls DOM structure looks like:
@@ -156,88 +157,89 @@ PassRefPtrWillBeRawPtr<MediaControls> MediaControls::create(HTMLMediaElement& me
 void MediaControls::initializeControls()
 {
     const bool useNewUi = RuntimeEnabledFeatures::newMediaPlaybackUiEnabled();
-    RefPtrWillBeRawPtr<MediaControlOverlayEnclosureElement> overlayEnclosure = MediaControlOverlayEnclosureElement::create(*this);
+    MediaControlOverlayEnclosureElement* overlayEnclosure = MediaControlOverlayEnclosureElement::create(*this);
 
     if (document().settings() && document().settings()->mediaControlsOverlayPlayButtonEnabled()) {
-        RefPtrWillBeRawPtr<MediaControlOverlayPlayButtonElement> overlayPlayButton = MediaControlOverlayPlayButtonElement::create(*this);
-        m_overlayPlayButton = overlayPlayButton.get();
-        overlayEnclosure->appendChild(overlayPlayButton.release());
+        MediaControlOverlayPlayButtonElement* overlayPlayButton = MediaControlOverlayPlayButtonElement::create(*this);
+        m_overlayPlayButton = overlayPlayButton;
+        overlayEnclosure->appendChild(overlayPlayButton);
     }
 
-    RefPtrWillBeRawPtr<MediaControlCastButtonElement> overlayCastButton = MediaControlCastButtonElement::create(*this, true);
-    m_overlayCastButton = overlayCastButton.get();
-    overlayEnclosure->appendChild(overlayCastButton.release());
+    MediaControlCastButtonElement* overlayCastButton = MediaControlCastButtonElement::create(*this, true);
+    m_overlayCastButton = overlayCastButton;
+    overlayEnclosure->appendChild(overlayCastButton);
 
-    m_overlayEnclosure = overlayEnclosure.get();
-    appendChild(overlayEnclosure.release());
+    m_overlayEnclosure = overlayEnclosure;
+    appendChild(overlayEnclosure);
 
     // Create an enclosing element for the panel so we can visually offset the controls correctly.
-    RefPtrWillBeRawPtr<MediaControlPanelEnclosureElement> enclosure = MediaControlPanelEnclosureElement::create(*this);
+    MediaControlPanelEnclosureElement* enclosure = MediaControlPanelEnclosureElement::create(*this);
 
-    RefPtrWillBeRawPtr<MediaControlPanelElement> panel = MediaControlPanelElement::create(*this);
+    MediaControlPanelElement* panel = MediaControlPanelElement::create(*this);
 
-    RefPtrWillBeRawPtr<MediaControlPlayButtonElement> playButton = MediaControlPlayButtonElement::create(*this);
-    m_playButton = playButton.get();
-    panel->appendChild(playButton.release());
+    MediaControlPlayButtonElement* playButton = MediaControlPlayButtonElement::create(*this);
+    m_playButton = playButton;
+    panel->appendChild(playButton);
 
-    RefPtrWillBeRawPtr<MediaControlTimelineElement> timeline = MediaControlTimelineElement::create(*this);
-    m_timeline = timeline.get();
+    MediaControlTimelineElement* timeline = MediaControlTimelineElement::create(*this);
+    m_timeline = timeline;
     // In old UX, timeline is before the time / duration text.
     if (!useNewUi)
-        panel->appendChild(timeline.release());
+        panel->appendChild(timeline);
     // else we will attach it later.
 
-    RefPtrWillBeRawPtr<MediaControlCurrentTimeDisplayElement> currentTimeDisplay = MediaControlCurrentTimeDisplayElement::create(*this);
-    m_currentTimeDisplay = currentTimeDisplay.get();
+    MediaControlCurrentTimeDisplayElement* currentTimeDisplay = MediaControlCurrentTimeDisplayElement::create(*this);
+    m_currentTimeDisplay = currentTimeDisplay;
     m_currentTimeDisplay->setIsWanted(useNewUi);
-    panel->appendChild(currentTimeDisplay.release());
+    panel->appendChild(currentTimeDisplay);
 
-    RefPtrWillBeRawPtr<MediaControlTimeRemainingDisplayElement> durationDisplay = MediaControlTimeRemainingDisplayElement::create(*this);
-    m_durationDisplay = durationDisplay.get();
-    panel->appendChild(durationDisplay.release());
+    MediaControlTimeRemainingDisplayElement* durationDisplay = MediaControlTimeRemainingDisplayElement::create(*this);
+    m_durationDisplay = durationDisplay;
+    panel->appendChild(durationDisplay);
 
     // Timeline is after the time / duration text if newMediaPlaybackUiEnabled.
     if (useNewUi)
-        panel->appendChild(timeline.release());
+        panel->appendChild(timeline);
 
-    RefPtrWillBeRawPtr<MediaControlMuteButtonElement> muteButton = MediaControlMuteButtonElement::create(*this);
-    m_muteButton = muteButton.get();
-    panel->appendChild(muteButton.release());
+    MediaControlMuteButtonElement* muteButton = MediaControlMuteButtonElement::create(*this);
+    m_muteButton = muteButton;
+    panel->appendChild(muteButton);
 
-    RefPtrWillBeRawPtr<MediaControlVolumeSliderElement> slider = MediaControlVolumeSliderElement::create(*this);
-    m_volumeSlider = slider.get();
-    panel->appendChild(slider.release());
+    MediaControlVolumeSliderElement* slider = MediaControlVolumeSliderElement::create(*this);
+    m_volumeSlider = slider;
+    panel->appendChild(slider);
     if (m_allowHiddenVolumeControls && preferHiddenVolumeControls(document()))
         m_volumeSlider->setIsWanted(false);
 
-    RefPtrWillBeRawPtr<MediaControlToggleClosedCaptionsButtonElement> toggleClosedCaptionsButton = MediaControlToggleClosedCaptionsButtonElement::create(*this);
-    m_toggleClosedCaptionsButton = toggleClosedCaptionsButton.get();
-    panel->appendChild(toggleClosedCaptionsButton.release());
+    MediaControlToggleClosedCaptionsButtonElement* toggleClosedCaptionsButton = MediaControlToggleClosedCaptionsButtonElement::create(*this);
+    m_toggleClosedCaptionsButton = toggleClosedCaptionsButton;
+    panel->appendChild(toggleClosedCaptionsButton);
 
-    RefPtrWillBeRawPtr<MediaControlCastButtonElement> castButton = MediaControlCastButtonElement::create(*this, false);
-    m_castButton = castButton.get();
-    panel->appendChild(castButton.release());
+    MediaControlCastButtonElement* castButton = MediaControlCastButtonElement::create(*this, false);
+    m_castButton = castButton;
+    panel->appendChild(castButton);
 
-    RefPtrWillBeRawPtr<MediaControlFullscreenButtonElement> fullscreenButton = MediaControlFullscreenButtonElement::create(*this);
-    m_fullScreenButton = fullscreenButton.get();
-    panel->appendChild(fullscreenButton.release());
+    MediaControlFullscreenButtonElement* fullscreenButton = MediaControlFullscreenButtonElement::create(*this);
+    m_fullScreenButton = fullscreenButton;
+    panel->appendChild(fullscreenButton);
 
-    m_panel = panel.get();
-    enclosure->appendChild(panel.release());
+    m_panel = panel;
+    enclosure->appendChild(panel);
 
-    m_enclosure = enclosure.get();
-    appendChild(enclosure.release());
+    m_enclosure = enclosure;
+    appendChild(enclosure);
 }
 
 void MediaControls::reset()
 {
+    EventDispatchForbiddenScope::AllowUserAgentEvents allowEventsInShadow;
     const bool useNewUi = RuntimeEnabledFeatures::newMediaPlaybackUiEnabled();
     BatchedControlUpdate batch(this);
 
     m_allowHiddenVolumeControls = useNewUi;
 
     const double duration = mediaElement().duration();
-    m_durationDisplay->setInnerText(LayoutTheme::theme().formatMediaControlsTime(duration), ASSERT_NO_EXCEPTION);
+    m_durationDisplay->setTextContent(LayoutTheme::theme().formatMediaControlsTime(duration));
     m_durationDisplay->setCurrentValue(duration);
 
     if (useNewUi) {
@@ -249,6 +251,10 @@ void MediaControls::reset()
         m_currentTimeDisplay->setIsWanted(true);
         m_timeline->setIsWanted(true);
     }
+
+    // If the player has entered an error state, force it into the paused state.
+    if (mediaElement().error())
+        mediaElement().pause();
 
     updatePlayState();
 
@@ -755,4 +761,4 @@ DEFINE_TRACE(MediaControls)
     HTMLDivElement::trace(visitor);
 }
 
-}
+} // namespace blink

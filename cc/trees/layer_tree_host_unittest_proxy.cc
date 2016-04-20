@@ -30,7 +30,7 @@ class ProxyTest : public LayerTreeTest {
     bool delegating_renderer = true;
 
     CompositorMode mode =
-        threaded ? CompositorMode::Threaded : CompositorMode::SingleThreaded;
+        threaded ? CompositorMode::THREADED : CompositorMode::SINGLE_THREADED;
     RunTest(mode, delegating_renderer);
   }
 
@@ -77,8 +77,7 @@ PROXY_TEST_SCHEDULED_ACTION(ProxyTestScheduledActionsBasic);
 class ProxyMainThreaded : public ProxyTest {
  protected:
   ProxyMainThreaded()
-      : update_check_layer_(
-            FakePictureLayer::Create(layer_settings(), &client_)) {}
+      : update_check_layer_(FakePictureLayer::Create(&client_)) {}
   ~ProxyMainThreaded() override {}
 
   void SetupTree() override {

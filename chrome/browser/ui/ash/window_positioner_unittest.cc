@@ -6,15 +6,14 @@
 
 #include <utility>
 
-#include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/test_shell_delegate.h"
+#include "ash/wm/aura/wm_globals_aura.h"
 #include "ash/wm/window_resizer.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/test/base/test_browser_window_aura.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/render_view_test.h"
@@ -47,12 +46,12 @@ class WindowPositionerTest : public AshTestBase {
   const int grid_size_;
 
  private:
-  scoped_ptr<WindowPositioner> window_positioner_;
+  std::unique_ptr<WindowPositioner> window_positioner_;
 
   TestingProfile profile_;
 
-  scoped_ptr<Browser> browser_;
-  scoped_ptr<Browser> browser_popup_;
+  std::unique_ptr<Browser> browser_;
+  std::unique_ptr<Browser> browser_popup_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowPositionerTest);
 };
@@ -63,20 +62,18 @@ WindowPositionerTest::WindowPositionerTest()
 void WindowPositionerTest::SetUp() {
   AshTestBase::SetUp();
   // Create some default dummy windows.
-  scoped_ptr<aura::Window> dummy_window(CreateTestWindowInShellWithId(0));
+  std::unique_ptr<aura::Window> dummy_window(CreateTestWindowInShellWithId(0));
   dummy_window->SetBounds(gfx::Rect(16, 32, 640, 320));
-  scoped_ptr<aura::Window> dummy_popup(CreateTestWindowInShellWithId(1));
+  std::unique_ptr<aura::Window> dummy_popup(CreateTestWindowInShellWithId(1));
   dummy_popup->SetBounds(gfx::Rect(16, 32, 128, 256));
 
   // Create a browser for the window.
-  Browser::CreateParams window_params(&profile_,
-                                      chrome::HOST_DESKTOP_TYPE_ASH);
+  Browser::CreateParams window_params(&profile_);
   browser_ = chrome::CreateBrowserWithAuraTestWindowForParams(
       std::move(dummy_window), &window_params);
 
   // Creating a browser for the popup.
-  Browser::CreateParams popup_params(Browser::TYPE_POPUP, &profile_,
-                                     chrome::HOST_DESKTOP_TYPE_ASH);
+  Browser::CreateParams popup_params(Browser::TYPE_POPUP, &profile_);
   browser_popup_ = chrome::CreateBrowserWithAuraTestWindowForParams(
       std::move(dummy_popup), &popup_params);
 
@@ -84,7 +81,7 @@ void WindowPositionerTest::SetUp() {
   // as he needs it.
   window()->Hide();
   popup()->Hide();
-  window_positioner_.reset(new WindowPositioner());
+  window_positioner_.reset(new WindowPositioner(wm::WmGlobalsAura::Get()));
 }
 
 void WindowPositionerTest::TearDown() {
@@ -104,7 +101,7 @@ int AlignToGridRoundDown(int location, int grid_size) {
 
 TEST_F(WindowPositionerTest, cascading) {
   const gfx::Rect work_area =
-      Shell::GetScreen()->GetPrimaryDisplay().work_area();
+      gfx::Screen::GetScreen()->GetPrimaryDisplay().work_area();
 
   // First see that the window will cascade down when there is no space.
   window()->SetBounds(work_area);
@@ -165,7 +162,7 @@ TEST_F(WindowPositionerTest, cascading) {
 
 TEST_F(WindowPositionerTest, filling) {
   const gfx::Rect work_area =
-      Shell::GetScreen()->GetPrimaryDisplay().work_area();
+      gfx::Screen::GetScreen()->GetPrimaryDisplay().work_area();
   gfx::Rect popup_position(0, 0, 256, 128);
   // Leave space on the left and the right and see if we fill top to bottom.
   window()->SetBounds(gfx::Rect(work_area.x() + popup_position.width(),
@@ -220,7 +217,7 @@ TEST_F(WindowPositionerTest, filling) {
 
 TEST_F(WindowPositionerTest, biggerThenBorder) {
   const gfx::Rect work_area =
-      Shell::GetScreen()->GetPrimaryDisplay().work_area();
+      gfx::Screen::GetScreen()->GetPrimaryDisplay().work_area();
 
   gfx::Rect pop_position(0, 0, work_area.width(), work_area.height());
 

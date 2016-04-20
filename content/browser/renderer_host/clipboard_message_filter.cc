@@ -4,11 +4,12 @@
 
 #include "content/browser/renderer_host/clipboard_message_filter.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/pickle.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -249,12 +250,8 @@ void ClipboardMessageFilter::OnWriteImage(ui::ClipboardType clipboard_type,
     return;
   }
 
-  scoped_ptr<base::SharedMemory> bitmap_buffer(
-#if defined(OS_WIN)
-      new base::SharedMemory(handle, true, PeerHandle()));
-#else
+  std::unique_ptr<base::SharedMemory> bitmap_buffer(
       new base::SharedMemory(handle, true));
-#endif
 
   SkBitmap bitmap;
   // Let Skia do some sanity checking for (no negative widths/heights, no

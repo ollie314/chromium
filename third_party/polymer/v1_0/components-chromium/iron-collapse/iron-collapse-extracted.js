@@ -2,6 +2,10 @@ Polymer({
 
     is: 'iron-collapse',
 
+    behaviors: [
+      Polymer.IronResizableBehavior
+    ],
+
     properties: {
 
       /**
@@ -36,6 +40,10 @@ Polymer({
         type: Boolean
       },
 
+    },
+
+    get dimension() {
+      return this.horizontal ? 'width' : 'height';
     },
 
     hostAttributes: {
@@ -78,7 +86,7 @@ Polymer({
 
       this._updateTransition(false);
       // If we can animate, must do some prep work.
-      if (animated && !this.noAnimation) {
+      if (animated && !this.noAnimation && this._isDisplayed) {
         // Animation will start at the current size.
         var startSize = this._calcSize();
         // For `auto` we must calculate what is the final size for the animation.
@@ -116,8 +124,10 @@ Polymer({
     },
 
     _horizontalChanged: function() {
-      this.dimension = this.horizontal ? 'width' : 'height';
       this.style.transitionProperty = this.dimension;
+      var otherDimension = this.dimension === 'width' ? 'height' : 'width';
+      this.style[otherDimension] = '';
+      this.updateSize(this.opened ? 'auto' : '0px', false);
     },
 
     _openedChanged: function() {
@@ -144,6 +154,20 @@ Polymer({
       this.toggleClass('iron-collapse-closed', !this.opened);
       this.toggleClass('iron-collapse-opened', this.opened);
       this._updateTransition(false);
+      this.notifyResize();
+    },
+
+    /**
+     * Simplistic heuristic to detect if element has a parent with display: none
+     *
+     * @private
+     */
+    get _isDisplayed() {
+      var rect = this.getBoundingClientRect();
+      for (var prop in rect) {
+        if (rect[prop] !== 0) return true;
+      }
+      return false;
     },
 
     _calcSize: function() {

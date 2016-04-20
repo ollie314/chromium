@@ -14,7 +14,6 @@ assert(is_android)
 config("compiler") {
   cflags = [
     "-ffunction-sections",
-    "-funwind-tables",
     "-fno-short-enums",
   ]
   defines = [
@@ -64,6 +63,7 @@ config("compiler") {
   }
 
   ldflags += [
+    "-Wl,--build-id=sha1",
     "-Wl,--no-undefined",
 
     # Don't allow visible symbols from libgcc or libc++ to be
@@ -79,7 +79,7 @@ config("compiler") {
   if (current_cpu == "arm" && !use_order_profiling) {
     ldflags += [
       # Enable identical code folding to reduce size.
-      "-Wl,--icf=safe",
+      "-Wl,--icf=all",
     ]
   }
 
@@ -104,14 +104,8 @@ config("compiler") {
     } else {
       assert(false, "Architecture not supported")
     }
-    cflags += [
-      "-target",
-      abi_target,
-    ]
-    ldflags += [
-      "-target",
-      abi_target,
-    ]
+    cflags += [ "--target=$abi_target" ]
+    ldflags += [ "--target=$abi_target" ]
   }
 
   # Assign any flags set for the C compiler to asmflags so that they are sent
@@ -124,13 +118,13 @@ config("compiler") {
 # that is Android-only. Please see that target for advice on what should go in
 # :runtime_library vs. :compiler.
 config("runtime_library") {
-  # NOTE: The libc++ header include paths below are specified in cflags
+  # NOTE: The libc++ header include paths below are specified in cflags_cc
   # rather than include_dirs because they need to come after include_dirs.
   # Think of them like system headers, but don't use '-isystem' because the
   # arm-linux-androideabi-4.4.3 toolchain (circa Gingerbread) will exhibit
   # strange errors. The include ordering here is important; change with
   # caution.
-  cflags = [
+  cflags_cc = [
     "-isystem" +
         rebase_path("$android_libcpp_root/libcxx/include", root_build_dir),
     "-isystem" + rebase_path(
@@ -143,7 +137,7 @@ config("runtime_library") {
 
   defines = [ "__GNU_SOURCE=1" ]  # Necessary for clone().
   ldflags = [ "-nostdlib" ]
-  lib_dirs = [ "$android_libcpp_root/libs/$android_app_abi" ]
+  lib_dirs = [ android_libcpp_lib_dir ]
 
   # The libc++ runtime library (must come first).
   # ASan needs to dynamically link to libc++ even in static builds so

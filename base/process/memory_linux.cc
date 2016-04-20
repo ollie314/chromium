@@ -8,6 +8,8 @@
 
 #include <new>
 
+#include "base/allocator/allocator_shim.h"
+#include "base/allocator/features.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
@@ -16,19 +18,7 @@
 #include "build/build_config.h"
 
 #if defined(USE_TCMALLOC)
-// Used by UncheckedMalloc. If tcmalloc is linked to the executable
-// this will be replaced by a strong symbol that actually implement
-// the semantics and don't call new handler in case the allocation fails.
-extern "C" {
-
-__attribute__((weak, visibility("default")))
-void* tc_malloc_skip_new_handler_weak(size_t size);
-
-void* tc_malloc_skip_new_handler_weak(size_t size) {
-  return malloc(size);
-}
-
-}
+#include "third_party/tcmalloc/chromium/src/gperftools/tcmalloc.h"
 #endif
 
 namespace base {
@@ -53,8 +43,12 @@ void OnNoMemory() {
 
 }  // namespace
 
+// TODO(primiano): Once the unified shim is on by default (crbug.com/550886)
+// get rid of the code in this entire #if section. The whole termination-on-OOM
+// logic is implemented in the shim.
 #if !defined(ADDRESS_SANITIZER) && !defined(MEMORY_SANITIZER) && \
-    !defined(THREAD_SANITIZER) && !defined(LEAK_SANITIZER)
+    !defined(THREAD_SANITIZER) && !defined(LEAK_SANITIZER) &&    \
+    !BUILDFLAG(USE_EXPERIMENTAL_ALLOCATOR_SHIM)
 
 #if defined(LIBC_GLIBC) && !defined(USE_TCMALLOC)
 
@@ -162,6 +156,13 @@ void EnableTerminationOnOutOfMemory() {
   // If we're using glibc's allocator, the above functions will override
   // malloc and friends and make them die on out of memory.
 #endif
+
+#if BUILDFLAG(USE_EXPERIMENTAL_ALLOCATOR_SHIM)
+  allocator::SetCallNewHandlerOnMallocFailure(true);
+#elif defined(USE_TCMALLOC)
+  // For tcmalloc, we need to tell it to behave like new.
+  tc_set_new_mode(1);
+#endif
 }
 
 // NOTE: This is not the only version of this function in the source:
@@ -202,13 +203,15 @@ bool AdjustOOMScore(ProcessId process, int score) {
 }
 
 bool UncheckedMalloc(size_t size, void** result) {
-#if defined(MEMORY_TOOL_REPLACES_ALLOCATOR) || \
+#if BUILDFLAG(USE_EXPERIMENTAL_ALLOCATOR_SHIM)
+  *result = allocator::UncheckedAlloc(size);
+#elif defined(MEMORY_TOOL_REPLACES_ALLOCATOR) || \
     (!defined(LIBC_GLIBC) && !defined(USE_TCMALLOC))
   *result = malloc(size);
 #elif defined(LIBC_GLIBC) && !defined(USE_TCMALLOC)
   *result = __libc_malloc(size);
 #elif defined(USE_TCMALLOC)
-  *result = tc_malloc_skip_new_handler_weak(size);
+  *result = tc_malloc_skip_new_handler(size);
 #endif
   return *result != NULL;
 }

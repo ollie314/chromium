@@ -11,7 +11,6 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/bookmarks/bookmark_stats.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_instructions_delegate.h"
@@ -19,6 +18,7 @@
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_controller_observer.h"
 #include "components/bookmarks/browser/bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_node_data.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/views/accessible_pane_view.h"
@@ -150,8 +150,7 @@ class BookmarkBarView : public views::AccessiblePaneView,
   static base::string16 CreateToolTipForURLAndTitle(const views::Widget* widget,
                                               const gfx::Point& screen_loc,
                                               const GURL& url,
-                                              const base::string16& title,
-                                              Profile* profile);
+                                              const base::string16& title);
 
   // Returns true if Bookmarks Bar is currently detached from the Toolbar.
   bool IsDetached() const;
@@ -236,7 +235,9 @@ class BookmarkBarView : public views::AccessiblePaneView,
                            const gfx::Point& p) override;
 
   // views::MenuButtonListener:
-  void OnMenuButtonClicked(views::View* view, const gfx::Point& point) override;
+  void OnMenuButtonClicked(views::MenuButton* source,
+                           const gfx::Point& point,
+                           const ui::Event* event) override;
 
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
@@ -408,7 +409,7 @@ class BookmarkBarView : public views::AccessiblePaneView,
 
   // If non-NULL we're showing a context menu for one of the items on the
   // bookmark bar.
-  scoped_ptr<BookmarkContextMenu> context_menu_;
+  std::unique_ptr<BookmarkContextMenu> context_menu_;
 
   // Shows the "Other Bookmarks" folder button.
   views::MenuButton* other_bookmarks_button_;
@@ -423,7 +424,7 @@ class BookmarkBarView : public views::AccessiblePaneView,
   views::LabelButton* apps_page_shortcut_;
 
   // Used to track drops on the bookmark bar view.
-  scoped_ptr<DropInfo> drop_info_;
+  std::unique_ptr<DropInfo> drop_info_;
 
   // Visible if not all the bookmark buttons fit.
   views::MenuButton* overflow_button_;

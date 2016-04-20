@@ -11,13 +11,14 @@
 
 #include "base/mac/bundle_locations.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #import "chrome/browser/ui/cocoa/window_size_autosaver.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_service.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/image/image_skia.h"
@@ -174,10 +175,6 @@ class SortHelper {
 
   [tableView_ reloadData];
   [self adjustSelectionAndEndProcessButton];
-}
-
-- (IBAction)statsLinkClicked:(id)sender {
-  TaskManager::GetInstance()->OpenAboutMemory(chrome::HOST_DESKTOP_TYPE_NATIVE);
 }
 
 - (IBAction)killSelectedProcesses:(id)sender {
@@ -415,7 +412,8 @@ class SortHelper {
     [tableView_ selectRowIndexes:indexSet byExtendingSelection:YES];
   }
 
-  bool enabled = [selection count] > 0 && !selectionContainsBrowserProcess;
+  bool enabled = [selection count] > 0 && !selectionContainsBrowserProcess &&
+    TaskManager::IsEndProcessEnabled();
   [endProcessButton_ setEnabled:enabled];
 }
 
@@ -598,10 +596,20 @@ namespace chrome {
 
 // Declared in browser_dialogs.h.
 void ShowTaskManager(Browser* browser) {
+  if (chrome::ToolkitViewsDialogsEnabled()) {
+    chrome::ShowTaskManagerViews(browser);
+    return;
+  }
+
   TaskManagerMac::Show();
 }
 
 void HideTaskManager() {
+  if (chrome::ToolkitViewsDialogsEnabled()) {
+    chrome::HideTaskManagerViews();
+    return;
+  }
+
   TaskManagerMac::Hide();
 }
 

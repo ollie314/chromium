@@ -9,7 +9,7 @@
 #include "ios/web/navigation/crw_session_controller.h"
 #include "ios/web/navigation/navigation_manager_impl.h"
 #include "ios/web/public/interstitials/web_interstitial_delegate.h"
-#include "ios/web/public/navigation_manager.h"
+#import "ios/web/public/navigation_manager.h"
 #include "ios/web/web_state/web_state_impl.h"
 
 namespace web {
@@ -61,6 +61,9 @@ void WebInterstitialImpl::Show() {
     CRWSessionController* sessionController =
         navigation_manager_->GetSessionController();
     [sessionController addTransientEntryWithURL:url_];
+
+    // Give delegates a chance to set some states on the navigation item.
+    GetDelegate()->OverrideItem(navigation_manager_->GetTransientItem());
   }
 }
 

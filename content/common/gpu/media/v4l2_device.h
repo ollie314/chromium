@@ -12,6 +12,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <linux/videodev2.h>
+
+#include "base/files/scoped_file.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
 #include "media/base/video_decoder_config.h"
@@ -49,7 +52,8 @@ class CONTENT_EXPORT V4L2Device
   };
 
   // Creates and initializes an appropriate V4L2Device of |type| for the
-  // current platform and returns a scoped_ptr<V4L2Device> on success, or NULL.
+  // current platform and returns a scoped_refptr<V4L2Device> on success, or
+  // NULL.
   static scoped_refptr<V4L2Device> Create(Type type);
 
   // Parameters and return value are the same as for the standard ioctl() system
@@ -86,22 +90,34 @@ class CONTENT_EXPORT V4L2Device
   // Returns true on success.
   virtual bool Initialize() = 0;
 
+  // Return a vector of dmabuf file descriptors, exported for V4L2 buffer with
+  // |index|, assuming the buffer contains |num_planes| V4L2 planes and is of
+  // |type|. Return an empty vector on failure.
+  // The caller is responsible for closing the file descriptors after use.
+  virtual std::vector<base::ScopedFD> GetDmabufsForV4L2Buffer(
+      int index,
+      size_t num_planes,
+      enum v4l2_buf_type type) = 0;
+
   // Return true if the given V4L2 pixfmt can be used in CreateEGLImage()
   // for the current platform.
   virtual bool CanCreateEGLImageFrom(uint32_t v4l2_pixfmt) = 0;
 
-  // Creates an EGLImageKHR since each V4L2Device may use a different method of
-  // acquiring one and associating it to the given texture. The texture_id is
-  // used to bind the texture to the returned EGLImageKHR. buffer_index can be
-  // used to associate the returned EGLImageKHR by the underlying V4L2Device
-  // implementation.
-  virtual EGLImageKHR CreateEGLImage(EGLDisplay egl_display,
-                                     EGLContext egl_context,
-                                     GLuint texture_id,
-                                     gfx::Size frame_buffer_size,
-                                     unsigned int buffer_index,
-                                     uint32_t v4l2_pixfmt,
-                                     size_t num_v4l2_planes) = 0;
+  // Create an EGLImage from provided |dmabuf_fds| and bind |texture_id| to it.
+  // Some implementations may also require the V4L2 |buffer_index| of the buffer
+  // for which |dmabuf_fds| have been exported.
+  // The caller may choose to close the file descriptors after this method
+  // returns, and may expect the buffers to remain valid for the lifetime of
+  // the created EGLImage.
+  // Return EGL_NO_IMAGE_KHR on failure.
+  virtual EGLImageKHR CreateEGLImage(
+      EGLDisplay egl_display,
+      EGLContext egl_context,
+      GLuint texture_id,
+      const gfx::Size& size,
+      unsigned int buffer_index,
+      uint32_t v4l2_pixfmt,
+      const std::vector<base::ScopedFD>& dmabuf_fds) = 0;
 
   // Destroys the EGLImageKHR.
   virtual EGLBoolean DestroyEGLImage(EGLDisplay egl_display,

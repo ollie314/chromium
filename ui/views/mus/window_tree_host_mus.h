@@ -6,27 +6,17 @@
 #define UI_VIEWS_MUS_WINDOW_TREE_HOST_MUS_H_
 
 #include "base/macros.h"
-#include "components/mus/public/interfaces/window_tree.mojom.h"
 #include "ui/aura/window_tree_host_platform.h"
 #include "ui/views/mus/mus_export.h"
 
 class SkBitmap;
 
-namespace bitmap_uploader {
-class BitmapUploader;
-}
-
-namespace mojo {
-class Shell;
-}
-
 namespace mus {
 class Window;
 }
 
-namespace ui {
-class Compositor;
-class ViewProp;
+namespace shell {
+class Connector;
 }
 
 namespace views {
@@ -37,16 +27,12 @@ class PlatformWindowMus;
 
 class VIEWS_MUS_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
  public:
-  WindowTreeHostMus(mojo::Shell* shell,
-                    NativeWidgetMus* native_widget_,
-                    mus::Window* window,
-                    mus::mojom::SurfaceType surface_type);
+  WindowTreeHostMus(shell::Connector* connector,
+                    NativeWidgetMus* native_widget,
+                    mus::Window* window);
   ~WindowTreeHostMus() override;
 
   PlatformWindowMus* platform_window();
-  bitmap_uploader::BitmapUploader* bitmap_uploader() {
-    return bitmap_uploader_.get();
-  }
   ui::PlatformWindowState show_state() const { return show_state_; }
 
  private:
@@ -58,10 +44,8 @@ class VIEWS_MUS_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
   void OnCloseRequest() override;
 
   NativeWidgetMus* native_widget_;
-  scoped_ptr<InputMethodMUS> input_method_;
+  std::unique_ptr<InputMethodMUS> input_method_;
   ui::PlatformWindowState show_state_;
-  scoped_ptr<bitmap_uploader::BitmapUploader> bitmap_uploader_;
-  scoped_ptr<ui::ViewProp> prop_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowTreeHostMus);
 };

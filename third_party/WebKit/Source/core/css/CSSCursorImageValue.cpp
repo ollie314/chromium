@@ -42,7 +42,7 @@ static inline SVGCursorElement* resourceReferencedByCursorElement(const String& 
     return isSVGCursorElement(element) ? toSVGCursorElement(element) : nullptr;
 }
 
-CSSCursorImageValue::CSSCursorImageValue(PassRefPtrWillBeRawPtr<CSSValue> imageValue, bool hotSpotSpecified, const IntPoint& hotSpot)
+CSSCursorImageValue::CSSCursorImageValue(CSSValue* imageValue, bool hotSpotSpecified, const IntPoint& hotSpot)
     : CSSValue(CursorImageClass)
     , m_imageValue(imageValue)
     , m_hotSpotSpecified(hotSpotSpecified)
@@ -53,19 +53,6 @@ CSSCursorImageValue::CSSCursorImageValue(PassRefPtrWillBeRawPtr<CSSValue> imageV
 
 CSSCursorImageValue::~CSSCursorImageValue()
 {
-    // The below teardown is all handled by weak pointer processing in oilpan.
-#if !ENABLE(OILPAN)
-    if (!isSVGCursor())
-        return;
-
-    String url = toCSSImageValue(m_imageValue.get())->url();
-
-    for (SVGElement* referencedElement : m_referencedElements) {
-        referencedElement->cursorImageValueRemoved();
-        if (SVGCursorElement* cursorElement = resourceReferencedByCursorElement(url, referencedElement->treeScope()))
-            cursorElement->removeClient(referencedElement);
-    }
-#endif
 }
 
 String CSSCursorImageValue::customCSSText() const
@@ -104,9 +91,6 @@ bool CSSCursorImageValue::updateIfSVGCursorIsUsed(Element* element)
             clearImageResource();
 
         SVGElement* svgElement = toSVGElement(element);
-#if !ENABLE(OILPAN)
-        m_referencedElements.add(svgElement);
-#endif
         svgElement->setCursorImageValue(this);
         cursorElement->addClient(svgElement);
         return true;
@@ -128,14 +112,14 @@ StyleImage* CSSCursorImageValue::cachedImage(float deviceScaleFactor) const
     ASSERT(!isCachePending(deviceScaleFactor));
 
     if (m_imageValue->isImageSetValue())
-        return toCSSImageSetValue(*m_imageValue).cachedImageSet(deviceScaleFactor);
+        return toCSSImageSetValue(*m_imageValue).cachedImage(deviceScaleFactor);
     return m_cachedImage.get();
 }
 
 StyleImage* CSSCursorImageValue::cacheImage(Document* document, float deviceScaleFactor)
 {
     if (m_imageValue->isImageSetValue())
-        return toCSSImageSetValue(*m_imageValue).cacheImageSet(document, deviceScaleFactor);
+        return toCSSImageSetValue(*m_imageValue).cacheImage(document, deviceScaleFactor);
 
     if (m_isCachePending) {
         m_isCachePending = false;
@@ -144,11 +128,10 @@ StyleImage* CSSCursorImageValue::cacheImage(Document* document, float deviceScal
         // to change the URL of the CSSImageValue (which would then change behavior like cssText),
         // we create an alternate CSSImageValue to use.
         if (isSVGCursor() && document) {
-            RefPtrWillBeRawPtr<CSSImageValue> imageValue = toCSSImageValue(m_imageValue.get());
+            CSSImageValue* imageValue = toCSSImageValue(m_imageValue.get());
             // FIXME: This will fail if the <cursor> element is in a shadow DOM (bug 59827)
             if (SVGCursorElement* cursorElement = resourceReferencedByCursorElement(imageValue->url(), *document)) {
-                RefPtrWillBeRawPtr<CSSImageValue> svgImageValue = CSSImageValue::create(document->completeURL(cursorElement->href()->currentValue()->value()));
-                svgImageValue->setReferrer(imageValue->referrer());
+                CSSImageValue* svgImageValue = CSSImageValue::create(document->completeURL(cursorElement->href()->currentValue()->value()));
                 m_cachedImage = svgImageValue->cacheImage(document);
                 return m_cachedImage.get();
             }
@@ -166,7 +149,7 @@ StyleImage* CSSCursorImageValue::cacheImage(Document* document, float deviceScal
 bool CSSCursorImageValue::isSVGCursor() const
 {
     if (m_imageValue->isImageValue()) {
-        RefPtrWillBeRawPtr<CSSImageValue> imageValue = toCSSImageValue(m_imageValue.get());
+        CSSImageValue* imageValue = toCSSImageValue(m_imageValue.get());
         KURL kurl(ParsedURLString, imageValue->url());
         return kurl.hasFragmentIdentifier();
     }
@@ -177,7 +160,7 @@ String CSSCursorImageValue::cachedImageURL()
 {
     if (!m_cachedImage || !m_cachedImage->isImageResource())
         return String();
-    return toStyleFetchedImage(m_cachedImage)->cachedImage()->url().string();
+    return toStyleFetchedImage(m_cachedImage)->cachedImage()->url().getString();
 }
 
 void CSSCursorImageValue::clearImageResource()
@@ -185,13 +168,6 @@ void CSSCursorImageValue::clearImageResource()
     m_cachedImage = nullptr;
     m_isCachePending = true;
 }
-
-#if !ENABLE(OILPAN)
-void CSSCursorImageValue::removeReferencedElement(SVGElement* element)
-{
-    m_referencedElements.remove(element);
-}
-#endif
 
 bool CSSCursorImageValue::equals(const CSSCursorImageValue& other) const
 {

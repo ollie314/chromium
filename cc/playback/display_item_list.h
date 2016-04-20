@@ -6,12 +6,13 @@
 #define CC_PLAYBACK_DISPLAY_ITEM_LIST_H_
 
 #include <stddef.h>
+
+#include <memory>
 #include <utility>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/base/cc_export.h"
 #include "cc/base/contiguous_container.h"
@@ -28,6 +29,7 @@ class SkPictureRecorder;
 namespace cc {
 class DisplayItem;
 class DrawingDisplayItem;
+class ImageSerializationProcessor;
 
 namespace proto {
 class DisplayItemList;
@@ -49,12 +51,14 @@ class CC_EXPORT DisplayItemList
   // TODO(dtrainor): Pass in a list of possible DisplayItems to reuse
   // (crbug.com/548434).
   static scoped_refptr<DisplayItemList> CreateFromProto(
-      const proto::DisplayItemList& proto);
+      const proto::DisplayItemList& proto,
+      ImageSerializationProcessor* image_serialization_processor);
 
   // Creates a Protobuf representing the state of this DisplayItemList.
   // TODO(dtrainor): Don't resend DisplayItems that were already serialized
   // (crbug.com/548434).
-  void ToProtobuf(proto::DisplayItemList* proto);
+  void ToProtobuf(proto::DisplayItemList* proto,
+                  ImageSerializationProcessor* image_serialization_processor);
 
   void Raster(SkCanvas* canvas,
               SkPicture::AbortCallback* callback,
@@ -95,7 +99,7 @@ class CC_EXPORT DisplayItemList
 
   bool RetainsIndividualDisplayItems() const;
 
-  scoped_refptr<base::trace_event::ConvertableToTraceFormat> AsValue(
+  std::unique_ptr<base::trace_event::ConvertableToTraceFormat> AsValue(
       bool include_items) const;
 
   void EmitTraceSnapshot() const;
@@ -104,8 +108,6 @@ class CC_EXPORT DisplayItemList
   void GetDiscardableImagesInRect(const gfx::Rect& rect,
                                   float raster_scale,
                                   std::vector<DrawImage>* images);
-
-  bool HasDiscardableImageInRect(const gfx::Rect& layer_rect) const;
 
   gfx::Rect VisualRectForTesting(int index) { return visual_rects_[index]; }
 
@@ -124,9 +126,9 @@ class CC_EXPORT DisplayItemList
   // |items_| . These rects are intentionally kept separate
   // because they are not needed while walking the |items_| for raster.
   std::vector<gfx::Rect> visual_rects_;
-  skia::RefPtr<SkPicture> picture_;
+  sk_sp<SkPicture> picture_;
 
-  scoped_ptr<SkPictureRecorder> recorder_;
+  std::unique_ptr<SkPictureRecorder> recorder_;
   skia::RefPtr<SkCanvas> canvas_;
   const DisplayItemListSettings settings_;
   bool retain_individual_display_items_;

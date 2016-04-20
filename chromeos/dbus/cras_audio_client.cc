@@ -186,6 +186,23 @@ class CrasAudioClientImpl : public CrasAudioClient {
                             dbus::ObjectProxy::EmptyResponseCallback());
   }
 
+  void SetGlobalOutputChannelRemix(int32_t channels,
+                                   const std::vector<double>& mixer) override {
+    dbus::MethodCall method_call(cras::kCrasControlInterface,
+                                 cras::kSetGlobalOutputChannelRemix);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendInt32(channels);
+    writer.AppendArrayOfDoubles(mixer.data(), mixer.size());
+    cras_proxy_->CallMethod(&method_call,
+                            dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+                            dbus::ObjectProxy::EmptyResponseCallback());
+  }
+
+  void WaitForServiceToBeAvailable(
+      const WaitForServiceToBeAvailableCallback& callback) override {
+    cras_proxy_->WaitForServiceToBeAvailable(callback);
+  }
+
  protected:
   void Init(dbus::Bus* bus) override {
     cras_proxy_ = bus->GetObjectProxy(cras::kCrasServiceName,

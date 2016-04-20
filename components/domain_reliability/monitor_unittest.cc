@@ -133,6 +133,18 @@ TEST_F(DomainReliabilityMonitorTest, NetworkFailure) {
   EXPECT_EQ(1u, CountQueuedBeacons(context));
 }
 
+TEST_F(DomainReliabilityMonitorTest, GoAwayWithPortMigrationDetected) {
+  DomainReliabilityContext* context = CreateAndAddContext();
+
+  RequestInfo request = MakeRequestInfo();
+  request.url = GURL("http://example/");
+  request.details.quic_port_migration_detected = true;
+  request.response_info.headers = nullptr;
+  OnRequestLegComplete(request);
+
+  EXPECT_EQ(1u, CountQueuedBeacons(context));
+}
+
 TEST_F(DomainReliabilityMonitorTest, ServerFailure) {
   DomainReliabilityContext* context = CreateAndAddContext();
 
@@ -243,7 +255,7 @@ TEST_F(DomainReliabilityMonitorTest, AtLeastOneBakedInConfig) {
 }
 
 // Will fail when baked-in configs expire, as a reminder to update them.
-// (Contact ttuttle@chromium.org if this starts failing.)
+// (Contact juliatuttle@chromium.org if this starts failing.)
 TEST_F(DomainReliabilityMonitorTest, AddBakedInConfigs) {
   // AddBakedInConfigs DCHECKs that the baked-in configs parse correctly, so
   // this unittest will fail if someone tries to add an invalid config to the
@@ -335,21 +347,6 @@ TEST_F(DomainReliabilityMonitorTest, WildcardDoesntMatchSubsubdomain) {
   OnRequestLegComplete(request);
 
   EXPECT_EQ(0u, CountQueuedBeacons(context));
-}
-
-TEST_F(DomainReliabilityMonitorTest, WildcardPrefersSelfToSelfWildcard) {
-  DomainReliabilityContext* context1 =
-      CreateAndAddContextForOrigin(GURL("https://wildcard/"), false);
-  DomainReliabilityContext* context2 =
-      CreateAndAddContextForOrigin(GURL("https://wildcard/"), true);
-
-  RequestInfo request = MakeRequestInfo();
-  request.url = GURL("http://wildcard/");
-  request.status = net::URLRequestStatus::FromError(net::ERR_CONNECTION_RESET);
-  OnRequestLegComplete(request);
-
-  EXPECT_EQ(1u, CountQueuedBeacons(context1));
-  EXPECT_EQ(0u, CountQueuedBeacons(context2));
 }
 
 TEST_F(DomainReliabilityMonitorTest, WildcardPrefersSelfToParentWildcard) {

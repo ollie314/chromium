@@ -13,7 +13,6 @@
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/media/media_internals.h"
 #include "content/browser/speech/audio_buffer.h"
-#include "content/browser/speech/google_one_shot_remote_engine.h"
 #include "content/public/browser/speech_recognition_event_listener.h"
 #include "media/base/audio_converter.h"
 
@@ -55,8 +54,8 @@ class SpeechRecognizerImpl::OnDataConverter
   // parameters.
   AudioConverter audio_converter_;
 
-  scoped_ptr<AudioBus> input_bus_;
-  scoped_ptr<AudioBus> output_bus_;
+  std::unique_ptr<AudioBus> input_bus_;
+  std::unique_ptr<AudioBus> output_bus_;
   const AudioParameters input_parameters_;
   const AudioParameters output_parameters_;
   bool data_was_converted_;
@@ -793,7 +792,8 @@ void SpeechRecognizerImpl::CloseAudioControllerAsynchronously() {
   // Close has completed (in the audio thread) and automatically destroy it
   // afterwards (upon return from OnAudioClosed).
   audio_controller_->Close(base::Bind(&SpeechRecognizerImpl::OnAudioClosed,
-                                      this, audio_controller_));
+                                      this,
+                                      base::RetainedRef(audio_controller_)));
   audio_controller_ = NULL;  // The controller is still refcounted by Bind.
   audio_log_->OnClosed(0);
 }
@@ -834,6 +834,9 @@ SpeechRecognizerImpl::FSMEventArgs::FSMEventArgs(FSMEvent event_value)
       audio_data(NULL),
       engine_error(SPEECH_RECOGNITION_ERROR_NONE) {
 }
+
+SpeechRecognizerImpl::FSMEventArgs::FSMEventArgs(const FSMEventArgs& other) =
+    default;
 
 SpeechRecognizerImpl::FSMEventArgs::~FSMEventArgs() {
 }

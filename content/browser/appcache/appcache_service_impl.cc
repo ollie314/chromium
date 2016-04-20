@@ -294,7 +294,7 @@ class AppCacheServiceImpl::CheckResponseHelper : AsyncHelper {
   // Internals used to perform the checks.
   const int kIOBufferSize;
   scoped_refptr<AppCache> cache_;
-  scoped_ptr<AppCacheResponseReader> response_reader_;
+  std::unique_ptr<AppCacheResponseReader> response_reader_;
   scoped_refptr<HttpResponseInfoIOBuffer> info_buffer_;
   scoped_refptr<net::IOBuffer> data_buffer_;
   int64_t expected_total_size_;
@@ -331,8 +331,8 @@ void AppCacheServiceImpl::CheckResponseHelper::OnGroupLoaded(
 
   // Verify that we can read the response info and data.
   expected_total_size_ = entry->response_size();
-  response_reader_.reset(service_->storage()->CreateResponseReader(
-      manifest_url_, group->group_id(), response_id_));
+  response_reader_.reset(
+      service_->storage()->CreateResponseReader(manifest_url_, response_id_));
   info_buffer_ = new HttpResponseInfoIOBuffer();
   response_reader_->ReadInfo(
       info_buffer_.get(),
@@ -389,7 +389,7 @@ void AppCacheServiceImpl::CheckResponseHelper::OnReadDataComplete(int result) {
 // AppCacheStorageReference ------
 
 AppCacheStorageReference::AppCacheStorageReference(
-    scoped_ptr<AppCacheStorage> storage)
+    std::unique_ptr<AppCacheStorage> storage)
     : storage_(std::move(storage)) {}
 AppCacheStorageReference::~AppCacheStorageReference() {}
 
@@ -412,9 +412,8 @@ AppCacheServiceImpl::AppCacheServiceImpl(
 
 AppCacheServiceImpl::~AppCacheServiceImpl() {
   DCHECK(backends_.empty());
-  std::for_each(pending_helpers_.begin(),
-                pending_helpers_.end(),
-                std::mem_fun(&AsyncHelper::Cancel));
+  for (auto* helper : pending_helpers_)
+    helper->Cancel();
   STLDeleteElements(&pending_helpers_);
   if (quota_client_)
     quota_client_->NotifyAppCacheDestroyed();

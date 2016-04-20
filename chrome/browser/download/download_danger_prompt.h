@@ -25,8 +25,11 @@ class DownloadDangerPrompt {
  public:
   // Actions resulting from showing the danger prompt.
   enum Action {
+    // The user chose to proceed down the dangerous path.
     ACCEPT,
+    // The user chose not to proceed down the dangerous path.
     CANCEL,
+    // The user dismissed the dialog without making an explicit choice.
     DISMISS,
   };
   typedef base::Callback<void(Action)> OnDone;
@@ -58,6 +61,10 @@ class DownloadDangerPrompt {
   static void SendSafeBrowsingDownloadRecoveryReport(
       bool did_proceed,
       const content::DownloadItem& download);
+
+  // Records UMA stats for a download danger prompt event.
+  static void RecordDownloadDangerPrompt(bool did_proceed,
+                                         const content::DownloadItem& download);
 };
 
 #endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_DANGER_PROMPT_H_

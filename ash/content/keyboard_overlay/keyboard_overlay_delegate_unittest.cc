@@ -48,7 +48,8 @@ TEST_P(KeyboardOverlayDelegateTest, ShowAndClose) {
             widget->GetNativeWindow()->GetRootWindow());
 
   // The widget is horizontally centered at the bottom of the work area.
-  gfx::Rect work_area = Shell::GetScreen()->GetPrimaryDisplay().work_area();
+  gfx::Rect work_area =
+      gfx::Screen::GetScreen()->GetPrimaryDisplay().work_area();
   gfx::Rect bounds = widget->GetRestoredBounds();
   EXPECT_EQ(work_area.CenterPoint().x(), bounds.CenterPoint().x());
   EXPECT_EQ(work_area.bottom(), bounds.bottom());
@@ -63,6 +64,6 @@ INSTANTIATE_TEST_CASE_P(ShelfAlignmentAny,
                         testing::Values(SHELF_ALIGNMENT_BOTTOM,
                                         SHELF_ALIGNMENT_LEFT,
                                         SHELF_ALIGNMENT_RIGHT,
-                                        SHELF_ALIGNMENT_TOP));
+                                        SHELF_ALIGNMENT_BOTTOM_LOCKED));
 
 }  // namespace ash

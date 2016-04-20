@@ -9,17 +9,25 @@ import android.os.RemoteException;
 import android.test.InstrumentationTestCase;
 import android.test.suitebuilder.annotation.MediumTest;
 
+import org.chromium.base.BaseSwitches;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
-import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
+
+import java.util.concurrent.Callable;
 
 /**
  * Instrumentation tests for ChildProcessLauncher.
  */
 public class ChildProcessLauncherTest extends InstrumentationTestCase {
+    // Pseudo command line arguments to instruct the child process to wait until being killed.
+    // Allowing the process to continue would lead to a crash when attempting to initialize IPC
+    // channels that are not being set up in this test.
+    private static final String[] sProcessWaitArguments = {
+        "_", "--" + BaseSwitches.RENDERER_WAIT_FOR_JAVA_DEBUGGER };
+
     /**
      *  Tests cleanup for a connection that fails to connect in the first place.
      */
@@ -37,22 +45,20 @@ public class ChildProcessLauncherTest extends InstrumentationTestCase {
         ChildProcessLauncher.allocateBoundConnectionForTesting(context);
 
         // Verify that the connection is not considered as allocated.
-        CriteriaHelper.pollForCriteria(new Criteria(
-                "Failed connection wasn't released from the allocator.") {
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(0, new Callable<Integer>() {
             @Override
-            public boolean isSatisfied() {
+            public Integer call() {
                 return ChildProcessLauncher.allocatedConnectionsCountForTesting(
-                        appContext) == 0;
+                        appContext);
             }
-        });
+        }));
 
-        CriteriaHelper.pollForCriteria(new Criteria(
-                "Failed connection wasn't released from ChildProcessLauncher.") {
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(0, new Callable<Integer>() {
             @Override
-            public boolean isSatisfied() {
-                return ChildProcessLauncher.connectedServicesCountForTesting() == 0;
+            public Integer call() {
+                return ChildProcessLauncher.connectedServicesCountForTesting();
             }
-        });
+        }));
     }
 
     /**
@@ -77,22 +83,20 @@ public class ChildProcessLauncherTest extends InstrumentationTestCase {
         assertTrue(connection.crashServiceForTesting());
 
         // Verify that the connection gets cleaned-up.
-        CriteriaHelper.pollForCriteria(new Criteria(
-                "Crashed connection wasn't released from the allocator.") {
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(0, new Callable<Integer>() {
             @Override
-            public boolean isSatisfied() {
+            public Integer call() {
                 return ChildProcessLauncher.allocatedConnectionsCountForTesting(
-                        appContext) == 0;
+                        appContext);
             }
-        });
+        }));
 
-        CriteriaHelper.pollForCriteria(new Criteria(
-                "Crashed connection wasn't released from ChildProcessLauncher.") {
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(0, new Callable<Integer>() {
             @Override
-            public boolean isSatisfied() {
-                return ChildProcessLauncher.connectedServicesCountForTesting() == 0;
+            public Integer call() {
+                return ChildProcessLauncher.connectedServicesCountForTesting();
             }
-        });
+        }));
     }
 
     /**
@@ -109,19 +113,17 @@ public class ChildProcessLauncherTest extends InstrumentationTestCase {
         assertEquals(1, ChildProcessLauncher.allocatedConnectionsCountForTesting(appContext));
 
         // Initiate the connection setup.
-        ChildProcessLauncher.triggerConnectionSetup(connection, new String[0], 1,
-                new FileDescriptorInfo[0], ChildProcessLauncher.CALLBACK_FOR_RENDERER_PROCESS, 0);
+        triggerConnectionSetup(connection);
 
         // Verify that the connection completes the setup.
-        CriteriaHelper.pollForCriteria(new Criteria(
-                "The connection wasn't registered in ChildProcessLauncher after setup.") {
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(1, new Callable<Integer>() {
             @Override
-            public boolean isSatisfied() {
-                return ChildProcessLauncher.connectedServicesCountForTesting() == 1;
+            public Integer call() {
+                return ChildProcessLauncher.connectedServicesCountForTesting();
             }
-        });
+        }));
 
-        CriteriaHelper.pollForCriteria(
+        CriteriaHelper.pollInstrumentationThread(
                 new Criteria("The connection failed to get a pid in setup.") {
                     @Override
                     public boolean isSatisfied() {
@@ -133,22 +135,20 @@ public class ChildProcessLauncherTest extends InstrumentationTestCase {
         assertTrue(connection.crashServiceForTesting());
 
         // Verify that the connection gets cleaned-up.
-        CriteriaHelper.pollForCriteria(new Criteria(
-                "Crashed connection wasn't released from the allocator.") {
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(0, new Callable<Integer>() {
             @Override
-            public boolean isSatisfied() {
+            public Integer call() {
                 return ChildProcessLauncher.allocatedConnectionsCountForTesting(
-                        appContext) == 0;
+                        appContext);
             }
-        });
+        }));
 
-        CriteriaHelper.pollForCriteria(new Criteria(
-                "Crashed connection wasn't released from ChildProcessLauncher.") {
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(0, new Callable<Integer>() {
             @Override
-            public boolean isSatisfied() {
-                return ChildProcessLauncher.connectedServicesCountForTesting() == 0;
+            public Integer call() {
+                return ChildProcessLauncher.connectedServicesCountForTesting();
             }
-        });
+        }));
 
         // Verify that the connection pid remains set after termination.
         assertTrue(connection.getPid() != 0);
@@ -157,12 +157,8 @@ public class ChildProcessLauncherTest extends InstrumentationTestCase {
     /**
      * Tests spawning a pending process from queue.
      */
-    /*
     @MediumTest
     @Feature({"ProcessManagement"})
-    crbug.com/483089
-    */
-    @DisabledTest
     public void testPendingSpawnQueue() throws InterruptedException, RemoteException {
         final Context appContext = getInstrumentation().getTargetContext();
         assertEquals(0, ChildProcessLauncher.allocatedConnectionsCountForTesting(appContext));
@@ -171,25 +167,24 @@ public class ChildProcessLauncherTest extends InstrumentationTestCase {
         final ChildProcessConnectionImpl connection = startConnection();
         assertEquals(1, ChildProcessLauncher.allocatedConnectionsCountForTesting(appContext));
 
-        // Queue up a a new spawn request.
-        ChildProcessLauncher.enqueuePendingSpawnForTesting(appContext);
+        // Queue up a new spawn request. There is no way to kill the pending connection, leak it
+        // until the browser restart.
+        ChildProcessLauncher.enqueuePendingSpawnForTesting(appContext, sProcessWaitArguments);
         assertEquals(1, ChildProcessLauncher.pendingSpawnsCountForTesting());
 
         // Initiate the connection setup.
-        ChildProcessLauncher.triggerConnectionSetup(connection, new String[0], 1,
-                new FileDescriptorInfo[0], ChildProcessLauncher.CALLBACK_FOR_RENDERER_PROCESS, 0);
+        triggerConnectionSetup(connection);
 
         // Verify that the connection completes the setup.
-        CriteriaHelper.pollForCriteria(
-                new Criteria(
-                        "The connection wasn't registered in ChildProcessLauncher after setup.") {
+        CriteriaHelper.pollInstrumentationThread(
+                Criteria.equals(1, new Callable<Integer>() {
                     @Override
-                    public boolean isSatisfied() {
-                        return ChildProcessLauncher.connectedServicesCountForTesting() == 1;
+                    public Integer call() {
+                        return ChildProcessLauncher.connectedServicesCountForTesting();
                     }
-                });
+                }));
 
-        CriteriaHelper.pollForCriteria(
+        CriteriaHelper.pollInstrumentationThread(
                 new Criteria("The connection failed to get a pid in setup.") {
                     @Override
                     public boolean isSatisfied() {
@@ -201,30 +196,29 @@ public class ChildProcessLauncherTest extends InstrumentationTestCase {
         assertTrue(connection.crashServiceForTesting());
 
         // Verify that a new service is started for the pending spawn.
-        CriteriaHelper.pollForCriteria(new Criteria("Failed to spawn from queue.") {
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(0, new Callable<Integer>() {
             @Override
-            public boolean isSatisfied() {
-                return ChildProcessLauncher.pendingSpawnsCountForTesting() == 0;
+            public Integer call() {
+                return ChildProcessLauncher.pendingSpawnsCountForTesting();
             }
-        });
+        }));
 
-        CriteriaHelper.pollForCriteria(
-                new Criteria("The connection wasn't allocated for the pending spawn.") {
+        CriteriaHelper.pollInstrumentationThread(
+                Criteria.equals(1, new Callable<Integer>() {
                     @Override
-                    public boolean isSatisfied() {
+                    public Integer call() {
                         return ChildProcessLauncher.allocatedConnectionsCountForTesting(
-                                appContext) == 1;
+                                appContext);
                     }
-                });
+                }));
 
         // Verify that the connection completes the setup for the pending spawn.
-        CriteriaHelper.pollForCriteria(new Criteria(
-                "The connection wasn't registered in ChildProcessLauncher after setup.") {
+        CriteriaHelper.pollInstrumentationThread(Criteria.equals(1, new Callable<Integer>() {
             @Override
-            public boolean isSatisfied() {
-                return ChildProcessLauncher.connectedServicesCountForTesting() == 1;
+            public Integer call() {
+                return ChildProcessLauncher.connectedServicesCountForTesting();
             }
-        });
+        }));
     }
 
     private ChildProcessConnectionImpl startConnection() throws InterruptedException {
@@ -234,13 +228,19 @@ public class ChildProcessLauncherTest extends InstrumentationTestCase {
                 ChildProcessLauncher.allocateBoundConnectionForTesting(context);
 
         // Wait for the service to connect.
-        CriteriaHelper.pollForCriteria(new Criteria("The connection wasn't established.") {
-            @Override
-            public boolean isSatisfied() {
-                return connection.isConnected();
-            }
-        });
+        CriteriaHelper.pollInstrumentationThread(
+                new Criteria("The connection wasn't established.") {
+                    @Override
+                    public boolean isSatisfied() {
+                        return connection.isConnected();
+                    }
+                });
         return connection;
+    }
+
+    private void triggerConnectionSetup(ChildProcessConnectionImpl connection) {
+        ChildProcessLauncher.triggerConnectionSetup(connection, sProcessWaitArguments, 1,
+                new FileDescriptorInfo[0], ChildProcessLauncher.CALLBACK_FOR_RENDERER_PROCESS, 0);
     }
 
     @Override

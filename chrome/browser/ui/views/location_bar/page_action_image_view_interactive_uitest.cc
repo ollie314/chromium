@@ -13,7 +13,7 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/location_bar/page_action_with_badge_view.h"
-#include "chrome/browser/ui/views/tabs/tab_drag_controller_interactive_uitest.h"
+#include "chrome/test/base/interactive_test_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/feature_switch.h"
 #include "extensions/test/extension_test_message_listener.h"
@@ -30,13 +30,19 @@ class PageActionImageViewInteractiveUITest : public ExtensionBrowserTest {
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
+    // We need to disable Media Router since having Media Router enabled will
+    // result in auto-enabling the redesign and breaking the test.
+    disable_media_router_.reset(new extensions::FeatureSwitch::ScopedOverride(
+        extensions::FeatureSwitch::media_router(), false));
     // Testing page action-specific UI means we need to disable the redesign.
     disable_redesign_.reset(new extensions::FeatureSwitch::ScopedOverride(
         extensions::FeatureSwitch::extension_action_redesign(), false));
   }
 
  private:
-  scoped_ptr<extensions::FeatureSwitch::ScopedOverride> disable_redesign_;
+  std::unique_ptr<extensions::FeatureSwitch::ScopedOverride> disable_redesign_;
+  std::unique_ptr<extensions::FeatureSwitch::ScopedOverride>
+      disable_media_router_;
 
   DISALLOW_COPY_AND_ASSIGN(PageActionImageViewInteractiveUITest);
 };
@@ -132,7 +138,7 @@ IN_PROC_BROWSER_TEST_F(PageActionImageViewInteractiveUITest,
   {
     base::RunLoop run_loop;
     gfx::Point page_action_center =
-        test::GetCenterInScreenCoordinates(page_action_view);
+        ui_test_utils::GetCenterInScreenCoordinates(page_action_view);
     ui_controls::SendMouseMoveNotifyWhenDone(page_action_center.x(),
                                              page_action_center.y(),
                                              run_loop.QuitClosure());
@@ -162,7 +168,7 @@ IN_PROC_BROWSER_TEST_F(PageActionImageViewInteractiveUITest,
   {
     base::RunLoop run_loop;
     gfx::Point page_action_center =
-        test::GetCenterInScreenCoordinates(page_action_view);
+        ui_test_utils::GetCenterInScreenCoordinates(page_action_view);
     ui_controls::SendMouseMoveNotifyWhenDone(page_action_center.x(),
                                              page_action_center.y(),
                                              run_loop.QuitClosure());

@@ -50,7 +50,7 @@ class BaseMultipleFieldsDateAndTimeInputType
     , protected PickerIndicatorElement::PickerIndicatorOwner
     , protected SpinButtonElement::SpinButtonOwner
     , protected ClearButtonElement::ClearButtonOwner {
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(BaseMultipleFieldsDateAndTimeInputType);
+    USING_GARBAGE_COLLECTED_MIXIN(BaseMultipleFieldsDateAndTimeInputType);
 
 public:
     virtual bool isValidFormat(bool hasYear, bool hasMonth, bool hasWeek, bool hasDay, bool hasAMPM, bool hasHour, bool hasMinute, bool hasSecond) const = 0;
@@ -111,7 +111,7 @@ private:
     void requiredAttributeChanged() final;
     void restoreFormControlState(const FormControlState&) final;
     FormControlState saveFormControlState() const final;
-    void setValue(const String&, bool valueChanged, TextFieldEventBehavior) final;
+    void didSetValue(const String&, bool valueChanged) final;
     void stepAttributeChanged() final;
     void updateView() final;
     void valueAttributeChanged() override;

@@ -19,7 +19,6 @@ group("nacl") {
     ":irt_exception_test($newlib)",
     ":irt_exception_test($pnacl)",
     ":irt_manifest_file($newlib)",
-    ":partly_invalid($newlib)",
     ":pnacl_debug_url_test($pnacl)",
     ":pnacl_dyncode_syscall_disabled_test($pnacl)",
     ":pnacl_error_handling_test($pnacl)",
@@ -28,6 +27,7 @@ group("nacl") {
     ":pnacl_mime_type_test($newlib)",
     ":pnacl_mime_type_test($pnacl)",
     ":pnacl_options_test($pnacl)",
+    ":pnacl_url_loader_test($pnacl)",
     ":ppapi_bad_get_ppp_instance_crash($newlib)",
     ":ppapi_bad_no_ppp_instance($newlib)",
     ":ppapi_bad_ppp_initialize($newlib)",
@@ -72,6 +72,9 @@ group("nacl") {
     ":sysconf_nprocessors_onln_test($newlib)",
     ":sysconf_nprocessors_onln_test($pnacl)",
   ]
+  if (target_cpu != "arm") {
+    data_deps += [ ":partly_invalid($newlib)" ]
+  }
   if (is_linux) {
     nonsfi = "//build/toolchain/nacl:newlib_pnacl_nonsfi"
     data_deps += [
@@ -119,16 +122,15 @@ if (is_nacl) {
 
   source_set("ppapi_test_lib") {
     sources = [
-      # TODO(ncbray) move these files once SCons no longer depends on them.
-      "//ppapi/native_client/tests/ppapi_test_lib/get_browser_interface.cc",
-      "//ppapi/native_client/tests/ppapi_test_lib/get_browser_interface.h",
-      "//ppapi/native_client/tests/ppapi_test_lib/internal_utils.cc",
-      "//ppapi/native_client/tests/ppapi_test_lib/internal_utils.h",
-      "//ppapi/native_client/tests/ppapi_test_lib/module_instance.cc",
-      "//ppapi/native_client/tests/ppapi_test_lib/test_interface.cc",
-      "//ppapi/native_client/tests/ppapi_test_lib/test_interface.h",
-      "//ppapi/native_client/tests/ppapi_test_lib/testable_callback.cc",
-      "//ppapi/native_client/tests/ppapi_test_lib/testable_callback.h",
+      "ppapi_test_lib/get_browser_interface.cc",
+      "ppapi_test_lib/get_browser_interface.h",
+      "ppapi_test_lib/internal_utils.cc",
+      "ppapi_test_lib/internal_utils.h",
+      "ppapi_test_lib/module_instance.cc",
+      "ppapi_test_lib/test_interface.cc",
+      "ppapi_test_lib/test_interface.h",
+      "ppapi_test_lib/testable_callback.cc",
+      "ppapi_test_lib/testable_callback.h",
     ]
     deps = [
       "//native_client/src/shared/gio",
@@ -430,6 +432,19 @@ if (is_nacl && !is_nacl_nonsfi) {
       "pnacl_nmf_options/pnacl_o_2.nmf",
       "pnacl_nmf_options/pnacl_o_large.nmf",
     ]
+  }
+
+  nacl_test_data("pnacl_url_loader_test") {
+    output_name = "pnacl_url_loader"
+    sources = [
+      "pnacl_url_loader/pnacl_url_loader.cc",
+    ]
+    deps = [
+      "//ppapi:ppapi_cpp_lib",
+    ]
+    generate_nmf = true
+    destination_dir = "nacl_test_data"
+    test_files = [ "pnacl_url_loader/pnacl_url_loader.html" ]
   }
 
   nacl_test_data("pnacl_dyncode_syscall_disabled_test") {

@@ -109,6 +109,23 @@ TEST_F(CompositedLayerMappingTest, TallLayerWholeDocumentInterestRect)
     EXPECT_RECT_EQ(IntRect(0, 0, 200, 10000), computeInterestRect(paintLayer->compositedLayerMapping(), paintLayer->graphicsLayerBacking(), IntRect()));
 }
 
+TEST_F(CompositedLayerMappingTest, VerticalRightLeftWritingModeDocument)
+{
+    setBodyInnerHTML("<style>html,body { margin: 0px } html { -webkit-writing-mode: vertical-rl}</style> <div id='target' style='width: 10000px; height: 200px;'></div>");
+
+    document().settings()->setMainFrameClipsContent(false);
+
+    document().view()->updateAllLifecyclePhases();
+    document().view()->setScrollPosition(DoublePoint(-5000, 0), ProgrammaticScroll);
+    document().view()->updateAllLifecyclePhases();
+
+    PaintLayer* paintLayer = document().layoutView()->layer();
+    ASSERT_TRUE(paintLayer->graphicsLayerBacking());
+    ASSERT_TRUE(paintLayer->compositedLayerMapping());
+    // A scroll by -5000px is equivalent to a scroll by (10000 - 5000 - 800)px = 4200px in non-RTL mode. Expanding
+    // the resulting rect by 4000px in each direction yields this result.
+    EXPECT_RECT_EQ(IntRect(200, 0, 8800, 600), recomputeInterestRect(paintLayer->graphicsLayerBacking()));
+}
 
 TEST_F(CompositedLayerMappingTest, RotatedInterestRect)
 {
@@ -120,6 +137,20 @@ TEST_F(CompositedLayerMappingTest, RotatedInterestRect)
     PaintLayer* paintLayer = toLayoutBoxModelObject(element->layoutObject())->layer();
     ASSERT_TRUE(!!paintLayer->graphicsLayerBacking());
     EXPECT_RECT_EQ(IntRect(0, 0, 200, 200), recomputeInterestRect(paintLayer->graphicsLayerBacking()));
+}
+
+TEST_F(CompositedLayerMappingTest, RotatedInterestRectNear90Degrees)
+{
+    setBodyInnerHTML(
+        "<div id='target' style='width: 10000px; height: 200px; will-change: transform; transform: rotateY(89.9999deg)'></div>");
+
+    document().view()->updateAllLifecyclePhases();
+    Element* element = document().getElementById("target");
+    PaintLayer* paintLayer = toLayoutBoxModelObject(element->layoutObject())->layer();
+    ASSERT_TRUE(!!paintLayer->graphicsLayerBacking());
+    // Because the layer is rotated to almost 90 degrees, floating-point error leads to a reverse-projected rect that is much much larger
+    // than the original layer size in certain dimensions. In such cases, we often fall back to the 4000px interest rect padding amount.
+    EXPECT_RECT_EQ(IntRect(0, 0, 4000, 200), recomputeInterestRect(paintLayer->graphicsLayerBacking()));
 }
 
 TEST_F(CompositedLayerMappingTest, 3D90DegRotatedTallInterestRect)
@@ -568,6 +599,31 @@ TEST_F(CompositedLayerMappingTest, InterestRectOfIframeWithContentBoxOffset)
     ASSERT_TRUE(frameDocument.view()->layoutView()->hasLayer());
     // The width is 485 pixels due to the size of the scrollbar.
     EXPECT_RECT_EQ(IntRect(0, 0, 500, 7500), recomputeInterestRect(frameDocument.view()->layoutView()->enclosingLayer()->graphicsLayerBacking()));
+}
+
+TEST_F(CompositedLayerMappingTest, ScrollingContentsAndForegroundLayerPaintingPhase)
+{
+    document().frame()->settings()->setPreferCompositingToLCDTextEnabled(true);
+    setBodyInnerHTML(
+        "<div id='container' style='position: relative; z-index: 1; overflow: scroll; width: 300px; height: 300px'>"
+        "    <div id='negative-composited-child' style='background-color: red; width: 1px; height: 1px; position: absolute; backface-visibility: hidden; z-index: -1'></div>"
+        "    <div style='background-color: blue; width: 2000px; height: 2000px; position: relative; top: 10px'></div>"
+        "</div>");
+
+    CompositedLayerMapping* mapping = toLayoutBlock(getLayoutObjectByElementId("container"))->layer()->compositedLayerMapping();
+    ASSERT_TRUE(mapping->scrollingContentsLayer());
+    EXPECT_EQ(static_cast<GraphicsLayerPaintingPhase>(GraphicsLayerPaintOverflowContents | GraphicsLayerPaintCompositedScroll), mapping->scrollingContentsLayer()->paintingPhase());
+    ASSERT_TRUE(mapping->foregroundLayer());
+    EXPECT_EQ(static_cast<GraphicsLayerPaintingPhase>(GraphicsLayerPaintForeground | GraphicsLayerPaintOverflowContents), mapping->foregroundLayer()->paintingPhase());
+
+    Element* negativeCompositedChild = document().getElementById("negative-composited-child");
+    negativeCompositedChild->parentNode()->removeChild(negativeCompositedChild);
+    document().view()->updateAllLifecyclePhases();
+
+    mapping = toLayoutBlock(getLayoutObjectByElementId("container"))->layer()->compositedLayerMapping();
+    ASSERT_TRUE(mapping->scrollingContentsLayer());
+    EXPECT_EQ(static_cast<GraphicsLayerPaintingPhase>(GraphicsLayerPaintOverflowContents | GraphicsLayerPaintCompositedScroll | GraphicsLayerPaintForeground), mapping->scrollingContentsLayer()->paintingPhase());
+    EXPECT_FALSE(mapping->foregroundLayer());
 }
 
 } // namespace blink

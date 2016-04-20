@@ -10,27 +10,31 @@
 #include "cc/trees/threaded_channel.h"
 
 namespace cc {
+class ProxyImplForTest;
 
 // ThreadedChannel that notifies |test_hooks| of internal actions by ProxyImpl.
 class ThreadedChannelForTest : public ThreadedChannel {
  public:
-  static scoped_ptr<ThreadedChannel> Create(
+  static std::unique_ptr<ThreadedChannelForTest> Create(
       TestHooks* test_hooks,
       ProxyMain* proxy_main,
       TaskRunnerProvider* task_runner_provider);
+
+  ProxyImplForTest* proxy_impl_for_test() { return proxy_impl_for_test_; }
 
  private:
   ThreadedChannelForTest(TestHooks* test_hooks,
                          ProxyMain* proxy_main,
                          TaskRunnerProvider* task_runner_provider);
 
-  scoped_ptr<ProxyImpl> CreateProxyImpl(
+  std::unique_ptr<ProxyImpl> CreateProxyImpl(
       ChannelImpl* channel_impl,
       LayerTreeHost* layer_tree_host,
       TaskRunnerProvider* task_runner_provider,
-      scoped_ptr<BeginFrameSource> external_begin_frame_source) override;
+      std::unique_ptr<BeginFrameSource> external_begin_frame_source) override;
 
   TestHooks* test_hooks_;
+  ProxyImplForTest* proxy_impl_for_test_;
 };
 
 }  // namespace cc

@@ -6,6 +6,7 @@
 #ifndef SYNC_ENGINE_SYNC_SCHEDULER_H_
 #define SYNC_ENGINE_SYNC_SCHEDULER_H_
 
+#include <memory>
 #include <string>
 
 #include "base/callback.h"
@@ -32,6 +33,7 @@ struct SYNC_EXPORT ConfigurationParams {
       const ModelSafeRoutingInfo& routing_info,
       const base::Closure& ready_task,
       const base::Closure& retry_task);
+  ConfigurationParams(const ConfigurationParams& other);
   ~ConfigurationParams();
 
   // Source for the configuration.
@@ -48,6 +50,7 @@ struct SYNC_EXPORT ConfigurationParams {
 
 struct SYNC_EXPORT ClearParams {
   explicit ClearParams(const base::Closure& report_success_task);
+  ClearParams(const ClearParams& other);
   ~ClearParams();
 
   // Callback to invoke on successful completion.
@@ -130,7 +133,7 @@ class SYNC_EXPORT SyncScheduler : public sessions::SyncSession::Delegate {
   // order to fetch the update.
   virtual void ScheduleInvalidationNudge(
       syncer::ModelType type,
-      scoped_ptr<InvalidationInterface> invalidation,
+      std::unique_ptr<InvalidationInterface> invalidation,
       const tracked_objects::Location& nudge_location) = 0;
 
   // Requests a non-blocking initial sync request for the specified type.

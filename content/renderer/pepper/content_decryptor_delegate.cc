@@ -169,7 +169,10 @@ PP_VideoCodecProfile MediaVideoCodecProfileToPpVideoCodecProfile(
     media::VideoCodecProfile profile) {
   switch (profile) {
     case media::VP8PROFILE_ANY:
-    case media::VP9PROFILE_ANY:
+    case media::VP9PROFILE_PROFILE0:
+    case media::VP9PROFILE_PROFILE1:
+    case media::VP9PROFILE_PROFILE2:
+    case media::VP9PROFILE_PROFILE3:
       return PP_VIDEOCODECPROFILE_NOT_NEEDED;
     case media::H264PROFILE_BASELINE:
       return PP_VIDEOCODECPROFILE_H264_BASELINE;
@@ -386,7 +389,7 @@ void ContentDecryptorDelegate::Initialize(
     const media::SessionKeysChangeCB& session_keys_change_cb,
     const media::SessionExpirationUpdateCB& session_expiration_update_cb,
     const base::Closure& fatal_plugin_error_cb,
-    scoped_ptr<media::SimpleCdmPromise> promise) {
+    std::unique_ptr<media::SimpleCdmPromise> promise) {
   DCHECK(!key_system.empty());
   DCHECK(key_system_.empty());
   key_system_ = key_system;
@@ -412,7 +415,7 @@ void ContentDecryptorDelegate::InstanceCrashed() {
 
 void ContentDecryptorDelegate::SetServerCertificate(
     const std::vector<uint8_t>& certificate,
-    scoped_ptr<media::SimpleCdmPromise> promise) {
+    std::unique_ptr<media::SimpleCdmPromise> promise) {
   if (certificate.size() < media::limits::kMinCertificateLength ||
       certificate.size() > media::limits::kMaxCertificateLength) {
     promise->reject(
@@ -432,7 +435,7 @@ void ContentDecryptorDelegate::CreateSessionAndGenerateRequest(
     MediaKeys::SessionType session_type,
     media::EmeInitDataType init_data_type,
     const std::vector<uint8_t>& init_data,
-    scoped_ptr<NewSessionCdmPromise> promise) {
+    std::unique_ptr<NewSessionCdmPromise> promise) {
   uint32_t promise_id = cdm_promise_adapter_.SavePromise(std::move(promise));
   PP_Var init_data_array =
       PpapiGlobals::Get()->GetVarTracker()->MakeArrayBufferPPVar(
@@ -445,7 +448,7 @@ void ContentDecryptorDelegate::CreateSessionAndGenerateRequest(
 void ContentDecryptorDelegate::LoadSession(
     media::MediaKeys::SessionType session_type,
     const std::string& session_id,
-    scoped_ptr<NewSessionCdmPromise> promise) {
+    std::unique_ptr<NewSessionCdmPromise> promise) {
   uint32_t promise_id = cdm_promise_adapter_.SavePromise(std::move(promise));
   plugin_decryption_interface_->LoadSession(
       pp_instance_, promise_id, MediaSessionTypeToPpSessionType(session_type),
@@ -455,7 +458,7 @@ void ContentDecryptorDelegate::LoadSession(
 void ContentDecryptorDelegate::UpdateSession(
     const std::string& session_id,
     const std::vector<uint8_t>& response,
-    scoped_ptr<SimpleCdmPromise> promise) {
+    std::unique_ptr<SimpleCdmPromise> promise) {
   uint32_t promise_id = cdm_promise_adapter_.SavePromise(std::move(promise));
   PP_Var response_array =
       PpapiGlobals::Get()->GetVarTracker()->MakeArrayBufferPPVar(
@@ -467,7 +470,7 @@ void ContentDecryptorDelegate::UpdateSession(
 
 void ContentDecryptorDelegate::CloseSession(
     const std::string& session_id,
-    scoped_ptr<SimpleCdmPromise> promise) {
+    std::unique_ptr<SimpleCdmPromise> promise) {
   if (session_id.length() > media::limits::kMaxSessionIdLength) {
     promise->reject(
         media::MediaKeys::INVALID_ACCESS_ERROR, 0, "Incorrect session.");
@@ -481,7 +484,7 @@ void ContentDecryptorDelegate::CloseSession(
 
 void ContentDecryptorDelegate::RemoveSession(
     const std::string& session_id,
-    scoped_ptr<SimpleCdmPromise> promise) {
+    std::unique_ptr<SimpleCdmPromise> promise) {
   if (session_id.length() > media::limits::kMaxSessionIdLength) {
     promise->reject(
         media::MediaKeys::INVALID_ACCESS_ERROR, 0, "Incorrect session.");

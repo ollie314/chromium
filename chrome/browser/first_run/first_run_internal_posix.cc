@@ -7,15 +7,17 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/first_run/first_run_dialog.h"
+#include "chrome/browser/metrics/metrics_reporting_state.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "components/metrics/metrics_pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
 
 namespace first_run {
@@ -29,8 +31,11 @@ void DoPostImportPlatformSpecificTasks(Profile* profile) {
   // Launch the first run dialog only for certain builds, and only if the user
   // has not already set preferences.
   if (internal::IsOrganicFirstRun() && !local_state_file_exists) {
-    if (ShowFirstRunDialog(profile))
+    if (ShowFirstRunDialog(profile)) {
+      RecordMetricsReportingDefaultOptIn(g_browser_process->local_state(),
+                                         first_run::IsMetricsReportingOptIn());
       startup_metric_utils::SetNonBrowserUIDisplayed();
+    }
   }
 
   // If stats reporting was turned on by the first run dialog then toggle

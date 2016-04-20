@@ -16,6 +16,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -53,7 +54,8 @@ void UpdateToggleStateWithTag(NSInteger tag, id item, NSWindow* window) {
   }
 
   if (tag == IDC_TOGGLE_FULLSCREEN_TOOLBAR) {
-    SetToggleState(browser->window()->ShouldHideFullscreenToolbar(), item);
+    PrefService* prefs = browser->profile()->GetPrefs();
+    SetToggleState(prefs->GetBoolean(prefs::kShowFullscreenToolbar), item);
     return;
   }
 
@@ -95,18 +97,6 @@ NSString* GetTitleForFullscreenMenuItem(Browser* browser) {
   }
 
   return GetTitleForViewsFullscreenMenuItem(browser);
-}
-
-// Get the text for the "Enter/Exit Presentation Mode" menu item.
-// TODO(jackhou): Remove the dependency on BrowserWindowController(Private).
-NSString* GetTitleForPresentationModeMenuItem(Browser* browser) {
-  NSWindow* ns_window = browser->window()->GetNativeWindow();
-  if (BrowserWindowController* controller = [ns_window windowController]) {
-    return l10n_util::GetNSString([controller inPresentationMode]
-                                      ? IDS_EXIT_PRESENTATION_MAC
-                                      : IDS_ENTER_PRESENTATION_MAC);
-  }
-  return GetTitleForFullscreenMenuItem(browser);
 }
 
 // Identify the actual Browser to which the command should be dispatched. It
@@ -161,18 +151,8 @@ Browser* FindBrowserForSender(id sender, NSWindow* window) {
         enable &= !![[menuItem keyEquivalent] length];
       break;
     case IDC_FULLSCREEN: {
-      if (NSMenuItem* menuItem = base::mac::ObjCCast<NSMenuItem>(item)) {
-        if (chrome::mac::SupportsSystemFullscreen())
-          [menuItem setTitle:GetTitleForFullscreenMenuItem(browser)];
-        else
-          [menuItem setHidden:YES];
-      }
-      break;
-    }
-    case IDC_PRESENTATION_MODE: {
-      if (NSMenuItem* menuItem = base::mac::ObjCCast<NSMenuItem>(item)) {
-        [menuItem setTitle:GetTitleForPresentationModeMenuItem(browser)];
-      }
+      if (NSMenuItem* menuItem = base::mac::ObjCCast<NSMenuItem>(item))
+        [menuItem setTitle:GetTitleForFullscreenMenuItem(browser)];
       break;
     }
     case IDC_SHOW_SIGNIN: {
@@ -206,13 +186,11 @@ Browser* FindBrowserForSender(id sender, NSWindow* window) {
       [menuItem setHidden:shouldHide];
       break;
     }
-    case IDC_TOGGLE_FULLSCREEN_TOOLBAR: {
-      // TODO(spqchan): Implement a preferences for this command and replace
-      // the Presentation Mode menu item with item.
-      if (NSMenuItem* menuItem = base::mac::ObjCCast<NSMenuItem>(item)) {
-        [menuItem setHidden:YES];
-        enable = false;
-      }
+    case IDC_SHOW_AS_TAB: {
+      // Hide this menu option if the window is tabbed or is the devtools
+      // window.
+      NSMenuItem* menuItem = base::mac::ObjCCast<NSMenuItem>(item);
+      [menuItem setHidden:browser->is_type_tabbed() || browser->is_devtools()];
       break;
     }
     default:
@@ -252,7 +230,7 @@ Browser* FindBrowserForSender(id sender, NSWindow* window) {
   NSUInteger modifierFlags = [[NSApp currentEvent] modifierFlags];
   if ((command == IDC_RELOAD) &&
       (modifierFlags & (NSShiftKeyMask | NSControlKeyMask))) {
-    command = IDC_RELOAD_IGNORING_CACHE;
+    command = IDC_RELOAD_BYPASSING_CACHE;
     // Mask off Shift and Control so they don't affect the disposition below.
     modifierFlags &= ~(NSShiftKeyMask | NSControlKeyMask);
   }

@@ -6,9 +6,10 @@
 
 #include <errno.h>
 
+#include <memory>
+
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
 #include "net/base/ip_endpoint.h"
 #include "net/quic/crypto/crypto_protocol.h"
@@ -24,7 +25,6 @@
 using base::StringPiece;
 
 namespace net {
-namespace tools {
 
 // A very simple alarm that just informs the QuicTimeWaitListManager to clean
 // up old connection_ids. This alarm should be cancelled  and deleted before
@@ -35,10 +35,8 @@ class ConnectionIdCleanUpAlarm : public QuicAlarm::Delegate {
       QuicTimeWaitListManager* time_wait_list_manager)
       : time_wait_list_manager_(time_wait_list_manager) {}
 
-  QuicTime OnAlarm() override {
+  void OnAlarm() override {
     time_wait_list_manager_->CleanUpOldConnectionIds();
-    // Let the time wait manager register the alarm at appropriate time.
-    return QuicTime::Zero();
   }
 
  private:
@@ -71,7 +69,7 @@ class QuicTimeWaitListManager::QueuedPacket {
  private:
   const IPEndPoint server_address_;
   const IPEndPoint client_address_;
-  scoped_ptr<QuicEncryptedPacket> packet_;
+  std::unique_ptr<QuicEncryptedPacket> packet_;
 
   DISALLOW_COPY_AND_ASSIGN(QueuedPacket);
 };
@@ -191,6 +189,17 @@ void QuicTimeWaitListManager::ProcessPacket(
   SendPublicReset(server_address, client_address, connection_id, packet_number);
 }
 
+void QuicTimeWaitListManager::SendVersionNegotiationPacket(
+    QuicConnectionId connection_id,
+    const QuicVersionVector& supported_versions,
+    const IPEndPoint& server_address,
+    const IPEndPoint& client_address) {
+  QueuedPacket* packet = new QueuedPacket(
+      server_address, client_address, QuicFramer::BuildVersionNegotiationPacket(
+                                          connection_id, supported_versions));
+  SendOrQueuePacket(packet);
+}
+
 // Returns true if the number of packets received for this connection_id is a
 // power of 2 to throttle the number of public reset packets we send to a
 // client.
@@ -241,7 +250,7 @@ bool QuicTimeWaitListManager::WriteToWire(QueuedPacket* queued_packet) {
   WriteResult result = writer_->WritePacket(
       queued_packet->packet()->data(), queued_packet->packet()->length(),
       queued_packet->server_address().address(),
-      queued_packet->client_address());
+      queued_packet->client_address(), nullptr);
   if (result.status == WRITE_STATUS_BLOCKED) {
     // If blocked and unbuffered, return false to retry sending.
     DCHECK(writer_->IsWriteBlocked());
@@ -326,7 +335,9 @@ QuicTimeWaitListManager::ConnectionIdData::ConnectionIdData(
       time_added(time_added_),
       connection_rejected_statelessly(connection_rejected_statelessly) {}
 
+QuicTimeWaitListManager::ConnectionIdData::ConnectionIdData(
+    const ConnectionIdData& other) = default;
+
 QuicTimeWaitListManager::ConnectionIdData::~ConnectionIdData() {}
 
-}  // namespace tools
 }  // namespace net

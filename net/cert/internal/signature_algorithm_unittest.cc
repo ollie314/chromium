@@ -4,6 +4,8 @@
 
 #include "net/cert/internal/signature_algorithm.h"
 
+#include <memory>
+
 #include "base/files/file_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "net/base/test_data_directory.h"
@@ -19,14 +21,15 @@ namespace {
 // Creates a SignatureAlgorithm given the DER as a byte array. Returns true on
 // success and fills |*out| with a non-null pointer.
 template <size_t N>
-bool ParseDer(const uint8_t(&data)[N], scoped_ptr<SignatureAlgorithm>* out) {
+bool ParseDer(const uint8_t (&data)[N],
+              std::unique_ptr<SignatureAlgorithm>* out) {
   *out = SignatureAlgorithm::CreateFromDer(der::Input(data, N));
-  return *out;
+  return !!*out;
 }
 
 // Parses a SignatureAlgorithm given an empty DER input.
 TEST(SignatureAlgorithmTest, ParseDerEmpty) {
-  scoped_ptr<SignatureAlgorithm> algorithm =
+  std::unique_ptr<SignatureAlgorithm> algorithm =
       SignatureAlgorithm::CreateFromDer(der::Input());
   ASSERT_FALSE(algorithm);
 }
@@ -34,7 +37,7 @@ TEST(SignatureAlgorithmTest, ParseDerEmpty) {
 // Parses a SignatureAlgorithm given invalid DER input.
 TEST(SignatureAlgorithmTest, ParseDerBogus) {
   const uint8_t kData[] = {0x00};
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -52,7 +55,7 @@ TEST(SignatureAlgorithmTest, ParseDerSha1WithRSAEncryptionNullParams) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   EXPECT_EQ(SignatureAlgorithmId::RsaPkcs1, algorithm->algorithm());
@@ -71,8 +74,11 @@ TEST(SignatureAlgorithmTest, ParseDerSha1WithRSAEncryptionNoParams) {
       0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x05,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
-  ASSERT_FALSE(ParseDer(kData, &algorithm));
+  std::unique_ptr<SignatureAlgorithm> algorithm;
+  ASSERT_TRUE(ParseDer(kData, &algorithm));
+
+  EXPECT_EQ(SignatureAlgorithmId::RsaPkcs1, algorithm->algorithm());
+  EXPECT_EQ(DigestAlgorithm::Sha1, algorithm->digest());
 }
 
 // Parses a sha1WithRSAEncryption which contains an unexpected parameters
@@ -90,7 +96,7 @@ TEST(SignatureAlgorithmTest, ParseDerSha1WithRSAEncryptionNonNullParams) {
       0x02, 0x01, 0x00,  // INTEGER (1 byte)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -108,7 +114,7 @@ TEST(SignatureAlgorithmTest, ParseDerSha1WithRSASignatureNullParams) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   EXPECT_EQ(SignatureAlgorithmId::RsaPkcs1, algorithm->algorithm());
@@ -127,8 +133,11 @@ TEST(SignatureAlgorithmTest, ParseDerSha1WithRSASignatureNoParams) {
       0x2b, 0x0e, 0x03, 0x02, 0x1d,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
-  ASSERT_FALSE(ParseDer(kData, &algorithm));
+  std::unique_ptr<SignatureAlgorithm> algorithm;
+  ASSERT_TRUE(ParseDer(kData, &algorithm));
+
+  EXPECT_EQ(SignatureAlgorithmId::RsaPkcs1, algorithm->algorithm());
+  EXPECT_EQ(DigestAlgorithm::Sha1, algorithm->digest());
 }
 
 // Parses a sha1WithRSAEncryption which contains values after the sequence.
@@ -147,7 +156,7 @@ TEST(SignatureAlgorithmTest, ParseDerSha1WithRsaEncryptionDataAfterSequence) {
       0x02, 0x01, 0x00,  // INTEGER (1 byte)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -167,7 +176,7 @@ TEST(SignatureAlgorithmTest, ParseDerSha1WithRSAEncryptionBadNullParams) {
       0x05, 0x01, 0x09,  // NULL (1 byte)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -189,7 +198,7 @@ TEST(SignatureAlgorithmTest,
       0x02, 0x01, 0x00,  // INTEGER (1 byte)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -202,7 +211,7 @@ TEST(SignatureAlgorithmTest, ParseDerNotASequence) {
       0x02, 0x01, 0x00,  // INTEGER (1 byte)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -220,7 +229,7 @@ TEST(SignatureAlgorithmTest, ParseDerSha256WithRSAEncryptionNullParams) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   EXPECT_EQ(SignatureAlgorithmId::RsaPkcs1, algorithm->algorithm());
@@ -239,8 +248,11 @@ TEST(SignatureAlgorithmTest, ParseDerSha256WithRSAEncryptionNoParams) {
       0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
-  ASSERT_FALSE(ParseDer(kData, &algorithm));
+  std::unique_ptr<SignatureAlgorithm> algorithm;
+  ASSERT_TRUE(ParseDer(kData, &algorithm));
+
+  EXPECT_EQ(SignatureAlgorithmId::RsaPkcs1, algorithm->algorithm());
+  EXPECT_EQ(DigestAlgorithm::Sha256, algorithm->digest());
 }
 
 // Parses a sha384WithRSAEncryption which contains a NULL parameters field.
@@ -257,7 +269,7 @@ TEST(SignatureAlgorithmTest, ParseDerSha384WithRSAEncryptionNullParams) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   EXPECT_EQ(SignatureAlgorithmId::RsaPkcs1, algorithm->algorithm());
@@ -276,8 +288,11 @@ TEST(SignatureAlgorithmTest, ParseDerSha384WithRSAEncryptionNoParams) {
       0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0c,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
-  ASSERT_FALSE(ParseDer(kData, &algorithm));
+  std::unique_ptr<SignatureAlgorithm> algorithm;
+  ASSERT_TRUE(ParseDer(kData, &algorithm));
+
+  EXPECT_EQ(SignatureAlgorithmId::RsaPkcs1, algorithm->algorithm());
+  EXPECT_EQ(DigestAlgorithm::Sha384, algorithm->digest());
 }
 
 // Parses a sha512WithRSAEncryption which contains a NULL parameters field.
@@ -294,7 +309,7 @@ TEST(SignatureAlgorithmTest, ParseDerSha512WithRSAEncryptionNullParams) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   EXPECT_EQ(SignatureAlgorithmId::RsaPkcs1, algorithm->algorithm());
@@ -313,8 +328,11 @@ TEST(SignatureAlgorithmTest, ParseDerSha512WithRSAEncryptionNoParams) {
       0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0d,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
-  ASSERT_FALSE(ParseDer(kData, &algorithm));
+  std::unique_ptr<SignatureAlgorithm> algorithm;
+  ASSERT_TRUE(ParseDer(kData, &algorithm));
+
+  EXPECT_EQ(SignatureAlgorithmId::RsaPkcs1, algorithm->algorithm());
+  EXPECT_EQ(DigestAlgorithm::Sha512, algorithm->digest());
 }
 
 // Parses a sha224WithRSAEncryption which contains a NULL parameters field.
@@ -333,7 +351,7 @@ TEST(SignatureAlgorithmTest, ParseDerSha224WithRSAEncryptionNullParams) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -349,7 +367,7 @@ TEST(SignatureAlgorithmTest, ParseDerEcdsaWithSHA1NoParams) {
       0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x01,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   EXPECT_EQ(SignatureAlgorithmId::Ecdsa, algorithm->algorithm());
@@ -370,7 +388,7 @@ TEST(SignatureAlgorithmTest, ParseDerEcdsaWithSHA1NullParams) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -386,7 +404,7 @@ TEST(SignatureAlgorithmTest, ParseDerEcdsaWithSHA256NoParams) {
       0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   EXPECT_EQ(SignatureAlgorithmId::Ecdsa, algorithm->algorithm());
@@ -407,7 +425,7 @@ TEST(SignatureAlgorithmTest, ParseDerEcdsaWithSHA256NullParams) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -423,7 +441,7 @@ TEST(SignatureAlgorithmTest, ParseDerEcdsaWithSHA384NoParams) {
       0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x03,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   EXPECT_EQ(SignatureAlgorithmId::Ecdsa, algorithm->algorithm());
@@ -444,7 +462,7 @@ TEST(SignatureAlgorithmTest, ParseDerEcdsaWithSHA384NullParams) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -460,7 +478,7 @@ TEST(SignatureAlgorithmTest, ParseDerEcdsaWithSHA512NoParams) {
       0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x04,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   EXPECT_EQ(SignatureAlgorithmId::Ecdsa, algorithm->algorithm());
@@ -481,14 +499,14 @@ TEST(SignatureAlgorithmTest, ParseDerEcdsaWithSHA512NullParams) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
 // Tests that the parmeters returned for an ECDSA algorithm are null for
 // non-ECDSA algorithms.
 TEST(SignatureAlgorithmTest, ParamsAreNullForWrongTypeEcdsa) {
-  scoped_ptr<SignatureAlgorithm> alg1 =
+  std::unique_ptr<SignatureAlgorithm> alg1 =
       SignatureAlgorithm::CreateEcdsa(DigestAlgorithm::Sha1);
 
   EXPECT_FALSE(alg1->ParamsForRsaPss());
@@ -497,7 +515,7 @@ TEST(SignatureAlgorithmTest, ParamsAreNullForWrongTypeEcdsa) {
 // Tests that the parmeters returned for an RSA PKCS#1 v1.5 algorithm are null
 // for non-RSA PKCS#1 v1.5 algorithms.
 TEST(SignatureAlgorithmTest, ParamsAreNullForWrongTypeRsaPkcs1) {
-  scoped_ptr<SignatureAlgorithm> alg1 =
+  std::unique_ptr<SignatureAlgorithm> alg1 =
       SignatureAlgorithm::CreateRsaPkcs1(DigestAlgorithm::Sha1);
 
   EXPECT_FALSE(alg1->ParamsForRsaPss());
@@ -550,7 +568,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPss) {
       0x01,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   ASSERT_EQ(SignatureAlgorithmId::RsaPss, algorithm->algorithm());
@@ -578,7 +596,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssEmptyParams) {
       0x30, 0x00,  // SEQUENCE (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   ASSERT_EQ(SignatureAlgorithmId::RsaPss, algorithm->algorithm());
@@ -605,7 +623,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssNullParams) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -621,7 +639,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssNoParams) {
       0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0A,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -641,7 +659,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssDataAfterParams) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -665,7 +683,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssDefaultsExceptForSaltLength) {
       0x17,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   ASSERT_EQ(SignatureAlgorithmId::RsaPss, algorithm->algorithm());
@@ -700,7 +718,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssNullInsideParams) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -724,7 +742,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssUnsupportedTrailer) {
       0x02,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -750,7 +768,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssBadTrailer) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -778,7 +796,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssNonDefaultHash) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   ASSERT_EQ(SignatureAlgorithmId::RsaPss, algorithm->algorithm());
@@ -814,7 +832,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssNonDefaultHashAbsentParams) {
       0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   ASSERT_EQ(SignatureAlgorithmId::RsaPss, algorithm->algorithm());
@@ -849,7 +867,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssUnsupportedHashOid) {
       0x60, 0x86, 0x48, 0x02, 0x67, 0x13, 0x04, 0x02, 0x02,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -882,7 +900,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssNonDefaultMaskGen) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   ASSERT_EQ(SignatureAlgorithmId::RsaPss, algorithm->algorithm());
@@ -924,7 +942,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssUnsupportedMaskGen) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_FALSE(ParseDer(kData, &algorithm));
 }
 
@@ -966,7 +984,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssNonDefaultHashAndMaskGen) {
       0x05, 0x00,  // NULL (0 bytes)
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   ASSERT_EQ(SignatureAlgorithmId::RsaPss, algorithm->algorithm());
@@ -1022,7 +1040,7 @@ TEST(SignatureAlgorithmTest, ParseDerRsaPssNonDefaultHashAndMaskGenAndSalt) {
       0x0A,
   };
   // clang-format on
-  scoped_ptr<SignatureAlgorithm> algorithm;
+  std::unique_ptr<SignatureAlgorithm> algorithm;
   ASSERT_TRUE(ParseDer(kData, &algorithm));
 
   ASSERT_EQ(SignatureAlgorithmId::RsaPss, algorithm->algorithm());

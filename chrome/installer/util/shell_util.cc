@@ -14,6 +14,7 @@
 #include <shobjidl.h>
 
 #include <limits>
+#include <memory>
 #include <string>
 
 #include "base/bind.h"
@@ -25,8 +26,8 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/md5.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/metrics/sparse_histogram.h"
 #include "base/path_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -539,7 +540,7 @@ void GetAppDefaultRegistrationEntries(const base::string16& prog_id,
   base::string16 key_name(ShellUtil::kRegClasses);
   key_name.push_back(base::FilePath::kSeparators[0]);
   key_name.append(ext);
-  scoped_ptr<RegistryEntry> default_association(
+  std::unique_ptr<RegistryEntry> default_association(
       new RegistryEntry(key_name, prog_id));
   if (overwrite_existing ||
       !default_association->KeyExistsInRegistry(RegistryEntry::LOOK_IN_HKCU)) {
@@ -720,7 +721,17 @@ bool LaunchDefaultAppsSettingsModernDialog() {
         L"windows.immersivecontrolpanel_cw5n1h2txyewy"
         L"!microsoft.windows.immersivecontrolpanel",
         L"page=SettingsPageAppsDefaults", AO_NONE, &pid);
-    return SUCCEEDED(hr);
+    if (SUCCEEDED(hr)) {
+      hr = activator->ActivateApplication(
+          L"windows.immersivecontrolpanel_cw5n1h2txyewy"
+          L"!microsoft.windows.immersivecontrolpanel",
+          L"page=SettingsPageAppsDefaults"
+          L"&target=SystemSettings_DefaultApps_Browser", AO_NONE, &pid);
+    }
+    if (SUCCEEDED(hr))
+      return true;
+    UMA_HISTOGRAM_SPARSE_SLOWLY("DefaultBrowser.ActivateSettings.ErrorHresult",
+                                hr);
   }
   return false;
 }
@@ -1379,6 +1390,9 @@ ShellUtil::ShortcutProperties::ShortcutProperties(ShellChange level_in)
       icon_index(0),
       pin_to_taskbar(false),
       options(0U) {}
+
+ShellUtil::ShortcutProperties::ShortcutProperties(
+    const ShortcutProperties& other) = default;
 
 ShellUtil::ShortcutProperties::~ShortcutProperties() {
 }
@@ -2323,7 +2337,7 @@ bool ShellUtil::DeleteFileAssociations(const base::string16& prog_id) {
 // static
 bool ShellUtil::AddRegistryEntries(HKEY root,
                                    const ScopedVector<RegistryEntry>& entries) {
-  scoped_ptr<WorkItemList> items(WorkItem::CreateWorkItemList());
+  std::unique_ptr<WorkItemList> items(WorkItem::CreateWorkItemList());
 
   for (ScopedVector<RegistryEntry>::const_iterator itr = entries.begin();
        itr != entries.end(); ++itr)

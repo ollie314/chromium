@@ -5,6 +5,7 @@
 #include "components/cronet/android/cronet_library_loader.h"
 
 #include <jni.h>
+#include <vector>
 
 #include "base/android/base_jni_onload.h"
 #include "base/android/base_jni_registrar.h"
@@ -18,6 +19,7 @@
 #include "base/message_loop/message_loop.h"
 #include "components/cronet/android/chromium_url_request.h"
 #include "components/cronet/android/chromium_url_request_context.h"
+#include "components/cronet/android/cronet_bidirectional_stream_adapter.h"
 #include "components/cronet/android/cronet_upload_data_stream_adapter.h"
 #include "components/cronet/android/cronet_url_request_adapter.h"
 #include "components/cronet/android/cronet_url_request_context_adapter.h"
@@ -26,9 +28,10 @@
 #include "net/android/net_jni_registrar.h"
 #include "net/android/network_change_notifier_factory_android.h"
 #include "net/base/network_change_notifier.h"
+#include "url/url_features.h"
 #include "url/url_util.h"
 
-#if defined(USE_ICU_ALTERNATIVES_ON_ANDROID)
+#if BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
 #include "url/android/url_jni_registrar.h"  // nogncheck
 #else
 #include "base/i18n/icu_util.h"
@@ -41,13 +44,15 @@ const base::android::RegistrationMethod kCronetRegisteredMethods[] = {
     {"BaseAndroid", base::android::RegisterJni},
     {"ChromiumUrlRequest", ChromiumUrlRequestRegisterJni},
     {"ChromiumUrlRequestContext", ChromiumUrlRequestContextRegisterJni},
+    {"CronetBidirectionalStreamAdapter",
+     CronetBidirectionalStreamAdapter::RegisterJni},
     {"CronetLibraryLoader", RegisterNativesImpl},
     {"CronetUploadDataStreamAdapter", CronetUploadDataStreamAdapterRegisterJni},
     {"CronetUrlRequestAdapter", CronetUrlRequestAdapterRegisterJni},
     {"CronetUrlRequestContextAdapter",
      CronetUrlRequestContextAdapterRegisterJni},
     {"NetAndroid", net::android::RegisterJni},
-#if defined(USE_ICU_ALTERNATIVES_ON_ANDROID)
+#if BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
     {"UrlAndroid", url::android::RegisterJni},
 #endif
 };
@@ -88,7 +93,7 @@ void CronetOnUnLoad(JavaVM* jvm, void* reserved) {
 }
 
 void CronetInitOnMainThread(JNIEnv* env, const JavaParamRef<jclass>& jcaller) {
-#if !defined(USE_ICU_ALTERNATIVES_ON_ANDROID)
+#if !BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
   base::i18n::InitializeICU();
 #endif
 

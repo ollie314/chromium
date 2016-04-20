@@ -31,11 +31,10 @@
 #include "modules/filesystem/FileSystemCallbacks.h"
 
 #include "core/dom/ExecutionContext.h"
+#include "core/fileapi/BlobCallback.h"
 #include "core/fileapi/File.h"
-#include "core/fileapi/FileCallback.h"
 #include "core/fileapi/FileError.h"
 #include "core/html/VoidCallback.h"
-#include "core/inspector/InspectorInstrumentation.h"
 #include "modules/filesystem/DOMFilePath.h"
 #include "modules/filesystem/DOMFileSystem.h"
 #include "modules/filesystem/DOMFileSystemBase.h"
@@ -59,20 +58,15 @@ FileSystemCallbacksBase::FileSystemCallbacksBase(ErrorCallback* errorCallback, D
     : m_errorCallback(errorCallback)
     , m_fileSystem(fileSystem)
     , m_executionContext(context)
-    , m_asyncOperationId(0)
 {
     if (m_fileSystem)
         m_fileSystem->addPendingCallbacks();
-    if (m_executionContext)
-        m_asyncOperationId = InspectorInstrumentation::traceAsyncOperationStarting(m_executionContext.get(), "FileSystem");
 }
 
 FileSystemCallbacksBase::~FileSystemCallbacksBase()
 {
     if (m_fileSystem)
         m_fileSystem->removePendingCallbacks();
-    if (m_asyncOperationId && m_executionContext)
-        InspectorInstrumentation::traceAsyncOperationCompleted(m_executionContext.get(), m_asyncOperationId);
 }
 
 void FileSystemCallbacksBase::didFail(int code)
@@ -87,29 +81,25 @@ bool FileSystemCallbacksBase::shouldScheduleCallback() const
 }
 
 template <typename CB, typename CBArg>
-void FileSystemCallbacksBase::handleEventOrScheduleCallback(RawPtr<CB> callback, CBArg* arg)
+void FileSystemCallbacksBase::handleEventOrScheduleCallback(CB* callback, CBArg* arg)
 {
     ASSERT(callback);
-    InspectorInstrumentationCookie cookie = InspectorInstrumentation::traceAsyncOperationCompletedCallbackStarting(m_executionContext.get(), m_asyncOperationId);
     if (shouldScheduleCallback())
-        DOMFileSystem::scheduleCallback(m_executionContext.get(), callback.get(), arg);
+        DOMFileSystem::scheduleCallback(m_executionContext.get(), callback, arg);
     else if (callback)
         callback->handleEvent(arg);
     m_executionContext.clear();
-    InspectorInstrumentation::traceAsyncCallbackCompleted(cookie);
 }
 
 template <typename CB>
-void FileSystemCallbacksBase::handleEventOrScheduleCallback(RawPtr<CB> callback)
+void FileSystemCallbacksBase::handleEventOrScheduleCallback(CB* callback)
 {
     ASSERT(callback);
-    InspectorInstrumentationCookie cookie = InspectorInstrumentation::traceAsyncOperationCompletedCallbackStarting(m_executionContext.get(), m_asyncOperationId);
     if (shouldScheduleCallback())
-        DOMFileSystem::scheduleCallback(m_executionContext.get(), callback.get());
+        DOMFileSystem::scheduleCallback(m_executionContext.get(), callback);
     else if (callback)
         callback->handleEvent();
     m_executionContext.clear();
-    InspectorInstrumentation::traceAsyncCallbackCompleted(cookie);
 }
 
 // EntryCallbacks -------------------------------------------------------------
@@ -167,12 +157,8 @@ void EntriesCallbacks::didReadDirectoryEntries(bool hasMore)
     EntryHeapVector entries;
     entries.swap(m_entries);
     // FIXME: delay the callback iff shouldScheduleCallback() is true.
-    InspectorInstrumentationCookie cookie = InspectorInstrumentation::traceAsyncCallbackStarting(m_executionContext.get(), m_asyncOperationId);
     if (m_successCallback)
         m_successCallback->handleEvent(entries);
-    InspectorInstrumentation::traceAsyncCallbackCompleted(cookie);
-    if (!hasMore)
-        InspectorInstrumentation::traceAsyncOperationCompleted(m_executionContext.get(), m_asyncOperationId);
 }
 
 // FileSystemCallbacks --------------------------------------------------------
@@ -262,17 +248,17 @@ void FileWriterBaseCallbacks::didCreateFileWriter(PassOwnPtr<WebFileWriter> file
 {
     m_fileWriter->initialize(fileWriter, length);
     if (m_successCallback)
-        handleEventOrScheduleCallback(m_successCallback.release(), m_fileWriter.release().get());
+        handleEventOrScheduleCallback(m_successCallback.release(), m_fileWriter.release());
 }
 
 // SnapshotFileCallback -------------------------------------------------------
 
-PassOwnPtr<AsyncFileSystemCallbacks> SnapshotFileCallback::create(DOMFileSystemBase* filesystem, const String& name, const KURL& url, FileCallback* successCallback, ErrorCallback* errorCallback, ExecutionContext* context)
+PassOwnPtr<AsyncFileSystemCallbacks> SnapshotFileCallback::create(DOMFileSystemBase* filesystem, const String& name, const KURL& url, BlobCallback* successCallback, ErrorCallback* errorCallback, ExecutionContext* context)
 {
     return adoptPtr(new SnapshotFileCallback(filesystem, name, url, successCallback, errorCallback, context));
 }
 
-SnapshotFileCallback::SnapshotFileCallback(DOMFileSystemBase* filesystem, const String& name, const KURL& url, FileCallback* successCallback, ErrorCallback* errorCallback, ExecutionContext* context)
+SnapshotFileCallback::SnapshotFileCallback(DOMFileSystemBase* filesystem, const String& name, const KURL& url, BlobCallback* successCallback, ErrorCallback* errorCallback, ExecutionContext* context)
     : FileSystemCallbacksBase(errorCallback, filesystem, context)
     , m_name(name)
     , m_url(url)

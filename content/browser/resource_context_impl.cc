@@ -6,7 +6,9 @@
 
 #include <stdint.h>
 
+#include "base/bind.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "content/browser/fileapi/chrome_blob_storage_context.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/loader/resource_request_info_impl.h"
@@ -37,8 +39,13 @@ std::string ReturnEmptySalt() {
 
 
 ResourceContext::ResourceContext() {
-  if (ResourceDispatcherHostImpl::Get())
-    ResourceDispatcherHostImpl::Get()->AddResourceContext(this);
+  ResourceDispatcherHostImpl* rdhi = ResourceDispatcherHostImpl::Get();
+  if (rdhi) {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&ResourceDispatcherHostImpl::AddResourceContext,
+                   base::Unretained(rdhi), this));
+  }
 }
 
 ResourceContext::~ResourceContext() {
@@ -56,16 +63,16 @@ ResourceContext::SaltCallback ResourceContext::GetMediaDeviceIDSalt() {
   return base::Bind(&ReturnEmptySalt);
 }
 
-scoped_ptr<net::ClientCertStore> ResourceContext::CreateClientCertStore() {
-  return scoped_ptr<net::ClientCertStore>();
+std::unique_ptr<net::ClientCertStore> ResourceContext::CreateClientCertStore() {
+  return std::unique_ptr<net::ClientCertStore>();
 }
 
 void ResourceContext::CreateKeygenHandler(
     uint32_t key_size_in_bits,
     const std::string& challenge_string,
     const GURL& url,
-    const base::Callback<void(scoped_ptr<net::KeygenHandler>)>& callback) {
-  callback.Run(make_scoped_ptr(
+    const base::Callback<void(std::unique_ptr<net::KeygenHandler>)>& callback) {
+  callback.Run(base::WrapUnique(
       new net::KeygenHandler(key_size_in_bits, challenge_string, url)));
 }
 

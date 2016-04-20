@@ -10,6 +10,8 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+#include <memory>
+
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/mac/foundation_util.h"
@@ -23,10 +25,6 @@
 #include "chrome/common/service_process_util.h"
 #include "components/version_info/version_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-static sockaddr_un* throwaway_sockaddr_un;
-static const size_t kMaxPipeNameLength =
-    sizeof(throwaway_sockaddr_un->sun_path);
 
 // static
 bool MockLaunchd::MakeABundle(const base::FilePath& dst,
@@ -113,7 +111,7 @@ MockLaunchd::~MockLaunchd() {
 
 CFDictionaryRef MockLaunchd::CopyJobDictionary(CFStringRef label) {
   if (!as_service_) {
-    scoped_ptr<MultiProcessLock> running_lock(
+    std::unique_ptr<MultiProcessLock> running_lock(
         TakeNamedLock(pipe_name_, false));
     if (running_lock.get())
       return NULL;
@@ -168,8 +166,8 @@ CFDictionaryRef MockLaunchd::CopyDictionaryByCheckingIn(CFErrorRef* error) {
   // Create unix_addr structure.
   struct sockaddr_un unix_addr = {0};
   unix_addr.sun_family = AF_UNIX;
-  size_t path_len =
-      base::strlcpy(unix_addr.sun_path, pipe_name_.c_str(), kMaxPipeNameLength);
+  size_t path_len = base::strlcpy(unix_addr.sun_path, pipe_name_.c_str(),
+                                  sizeof(unix_addr.sun_path));
   DCHECK_EQ(pipe_name_.length(), path_len);
   unix_addr.sun_len = SUN_LEN(&unix_addr);
 

@@ -44,6 +44,11 @@ void addEventListenerMethodPrologueCustom(const v8::FunctionCallbackInfo<v8::Val
         UseCounter::countIfNotPrivateScript(info.GetIsolate(), currentExecutionContext(info.GetIsolate()),
             UseCounter::AddEventListenerThirdArgumentIsObject);
     }
+    if (info.Length() >= 4) {
+        UseCounter::countIfNotPrivateScript(info.GetIsolate(), currentExecutionContext(info.GetIsolate()),
+            UseCounter::AddEventListenerFourArguments);
+
+    }
 }
 
 void addEventListenerMethodEpilogueCustom(const v8::FunctionCallbackInfo<v8::Value>& info, EventTarget* impl)
@@ -57,6 +62,11 @@ void removeEventListenerMethodPrologueCustom(const v8::FunctionCallbackInfo<v8::
     if (info.Length() >= 3 && info[2]->IsObject()) {
         UseCounter::countIfNotPrivateScript(info.GetIsolate(), currentExecutionContext(info.GetIsolate()),
             UseCounter::RemoveEventListenerThirdArgumentIsObject);
+    }
+    if (info.Length() >= 4) {
+        UseCounter::countIfNotPrivateScript(info.GetIsolate(), currentExecutionContext(info.GetIsolate()),
+            UseCounter::RemoveEventListenerFourArguments);
+
     }
 }
 
@@ -81,27 +91,23 @@ void V8EventTarget::addEventListenerMethodCustom(const v8::FunctionCallbackInfo<
         exceptionState.throwIfNeeded();
         return;
     }
-    V8StringResource<> type;
-    RefPtrWillBeRawPtr<EventListener> listener;
+    V8StringResource<> type = info[0];
+    if (!type.prepare())
+        return;
+    EventListener* listener = V8EventListenerList::getEventListener(ScriptState::current(info.GetIsolate()), info[1], false, ListenerFindOrCreate);
     EventListenerOptionsOrBoolean options;
-    {
-        type = info[0];
-        if (!type.prepare())
-            return;
-        listener = V8EventListenerList::getEventListener(ScriptState::current(info.GetIsolate()), info[1], false, ListenerFindOrCreate);
-        // TODO(dtapuska): This custom binding code can be eliminated once
-        // EventListenerOptions runtime enabled feature is removed.
-        // http://crbug.com/545163
-        if (UNLIKELY(info.Length() <= 2) || isUndefinedOrNull(info[2])) {
-            addEventListenerMethodPrologueCustom(info, impl);
-            impl->addEventListener(type, listener);
-            addEventListenerMethodEpilogueCustom(info, impl);
-            return;
-        }
-        V8EventListenerOptionsOrBoolean::toImpl(info.GetIsolate(), info[2], options, UnionTypeConversionMode::NotNullable, exceptionState);
-        if (exceptionState.throwIfNeeded())
-            return;
+    // TODO(dtapuska): This custom binding code can be eliminated once
+    // EventListenerOptions runtime enabled feature is removed.
+    // http://crbug.com/545163
+    if (UNLIKELY(info.Length() <= 2) || isUndefinedOrNull(info[2])) {
+        addEventListenerMethodPrologueCustom(info, impl);
+        impl->addEventListener(type, listener);
+        addEventListenerMethodEpilogueCustom(info, impl);
+        return;
     }
+    V8EventListenerOptionsOrBoolean::toImpl(info.GetIsolate(), info[2], options, UnionTypeConversionMode::NotNullable, exceptionState);
+    if (exceptionState.throwIfNeeded())
+        return;
     addEventListenerMethodPrologueCustom(info, impl);
     impl->addEventListener(type, listener, options);
     addEventListenerMethodEpilogueCustom(info, impl);
@@ -120,27 +126,23 @@ void V8EventTarget::removeEventListenerMethodCustom(const v8::FunctionCallbackIn
         exceptionState.throwIfNeeded();
         return;
     }
-    V8StringResource<> type;
-    RefPtrWillBeRawPtr<EventListener> listener;
+    V8StringResource<> type = info[0];
+    if (!type.prepare())
+        return;
+    EventListener* listener = V8EventListenerList::getEventListener(ScriptState::current(info.GetIsolate()), info[1], false, ListenerFindOnly);
     EventListenerOptionsOrBoolean options;
-    {
-        type = info[0];
-        if (!type.prepare())
-            return;
-        listener = V8EventListenerList::getEventListener(ScriptState::current(info.GetIsolate()), info[1], false, ListenerFindOnly);
-        // TODO(dtapuska): This custom binding code can be eliminated once
-        // EventListenerOptions runtime enabled feature is removed.
-        // http://crbug.com/545163
-        if (UNLIKELY(info.Length() <= 2) || isUndefinedOrNull(info[2])) {
-            removeEventListenerMethodPrologueCustom(info, impl);
-            impl->removeEventListener(type, listener);
-            removeEventListenerMethodEpilogueCustom(info, impl);
-            return;
-        }
-        V8EventListenerOptionsOrBoolean::toImpl(info.GetIsolate(), info[2], options, UnionTypeConversionMode::NotNullable, exceptionState);
-        if (exceptionState.throwIfNeeded())
-            return;
+    // TODO(dtapuska): This custom binding code can be eliminated once
+    // EventListenerOptions runtime enabled feature is removed.
+    // http://crbug.com/545163
+    if (UNLIKELY(info.Length() <= 2) || isUndefinedOrNull(info[2])) {
+        removeEventListenerMethodPrologueCustom(info, impl);
+        impl->removeEventListener(type, listener);
+        removeEventListenerMethodEpilogueCustom(info, impl);
+        return;
     }
+    V8EventListenerOptionsOrBoolean::toImpl(info.GetIsolate(), info[2], options, UnionTypeConversionMode::NotNullable, exceptionState);
+    if (exceptionState.throwIfNeeded())
+        return;
     removeEventListenerMethodPrologueCustom(info, impl);
     impl->removeEventListener(type, listener, options);
     removeEventListenerMethodEpilogueCustom(info, impl);

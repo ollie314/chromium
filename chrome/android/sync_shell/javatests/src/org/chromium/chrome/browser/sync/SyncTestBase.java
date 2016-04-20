@@ -13,7 +13,6 @@ import org.chromium.chrome.browser.identity.UniqueIdentificationGenerator;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGeneratorFactory;
 import org.chromium.chrome.browser.identity.UuidBasedUniqueIdentificationGenerator;
 import org.chromium.chrome.browser.signin.SigninManager;
-import org.chromium.chrome.browser.signin.SigninManager.SignInFlowObserver;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 import org.chromium.chrome.test.util.browser.signin.SigninTestUtil;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
@@ -179,16 +178,7 @@ public class SyncTestBase extends ChromeActivityTestCaseBase<ChromeActivity> {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                SigninManager signinManager = SigninManager.get(mContext);
-                signinManager.startSignIn(null, account, false, new SignInFlowObserver() {
-                    @Override
-                    public void onSigninComplete() {
-                        mProfileSyncService.requestStart();
-                    }
-
-                    @Override
-                    public void onSigninCancelled() {}
-                });
+                SigninManager.get(mContext).signIn(account, null, null);
             }
         });
         SyncTestUtil.verifySyncIsActiveForAccount(mContext, account);
@@ -214,7 +204,7 @@ public class SyncTestBase extends ChromeActivityTestCaseBase<ChromeActivity> {
     protected void clearServerData() throws InterruptedException {
         mFakeServerHelper.clearServerData();
         SyncTestUtil.triggerSync();
-        CriteriaHelper.pollForUIThreadCriteria(new Criteria("Timed out waiting for sync to stop.") {
+        CriteriaHelper.pollUiThread(new Criteria("Timed out waiting for sync to stop.") {
             @Override
             public boolean isSatisfied() {
                 return !ProfileSyncService.get().isSyncRequested();
@@ -234,7 +224,8 @@ public class SyncTestBase extends ChromeActivityTestCaseBase<ChromeActivity> {
         });
     }
 
-    protected void pollForCriteria(Criteria criteria) throws InterruptedException {
-        CriteriaHelper.pollForCriteria(criteria, SyncTestUtil.TIMEOUT_MS, SyncTestUtil.INTERVAL_MS);
+    protected void pollInstrumentationThread(Criteria criteria) throws InterruptedException {
+        CriteriaHelper.pollInstrumentationThread(
+                criteria, SyncTestUtil.TIMEOUT_MS, SyncTestUtil.INTERVAL_MS);
     }
 }

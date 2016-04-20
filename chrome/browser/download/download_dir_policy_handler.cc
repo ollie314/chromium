@@ -6,9 +6,10 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/files/file_path.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_value_map.h"
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/download_prefs.h"
@@ -19,6 +20,7 @@
 #include "components/policy/core/browser/policy_error_map.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/prefs/pref_value_map.h"
 #include "grit/components_strings.h"
 #include "policy/policy_constants.h"
 
@@ -103,7 +105,7 @@ void DownloadDirPolicyHandler::ApplyPolicySettingsWithParameters(
   if (expanded_value.empty())
     expanded_value = DownloadPrefs::GetDefaultDownloadDirectory().value();
   prefs->SetValue(prefs::kDownloadDefaultDirectory,
-                  make_scoped_ptr(new base::StringValue(expanded_value)));
+                  base::WrapUnique(new base::StringValue(expanded_value)));
 
   // If the policy is mandatory, prompt for download should be disabled.
   // Otherwise, it would enable a user to bypass the mandatory policy.

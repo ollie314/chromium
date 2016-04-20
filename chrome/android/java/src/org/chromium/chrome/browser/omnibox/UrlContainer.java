@@ -20,6 +20,7 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.ui.interpolators.BakedBezierInterpolator;
@@ -172,6 +173,15 @@ public class UrlContainer extends ViewGroup {
     }
 
     /**
+     * Return the complete text shown in the URL container.  Even if the trailing text has faded
+     * away, this will be included in the returned string.
+     */
+    @VisibleForTesting
+    public String getText() {
+        return mUrlBarView.getText().toString() + mTrailingTextView.getText().toString();
+    }
+
+    /**
      * Specifies whether the trailing URL text should use dark text colors or light colors.
      * @param useDarkColors Whether the text colors should be dark (i.e. appropriate for use
      *                      on a light background).
@@ -189,6 +199,18 @@ public class UrlContainer extends ViewGroup {
     }
 
     /**
+     * Return whether the trailing text animations should be run.
+     *
+     * If there is no actual trailing text or the width of the leading URL bar view did not allow
+     * for any space to be allocated to the trailing text view (i.e. width == 0), then jump to the
+     * end of the animation to avoid the unnecessary draw churn.
+     */
+    private boolean shouldRunTrailingTextAnimations() {
+        return mTrailingTextView.getMeasuredWidth() > 0
+                && !TextUtils.isEmpty(mTrailingTextView.getText());
+    }
+
+    /**
      * Updates the visibility of the trailing text view.
      * @param visible Whether the trailing text view should be visible.
      */
@@ -198,8 +220,7 @@ public class UrlContainer extends ViewGroup {
                 mTrailingTextShownWhileFocused = true;
                 mTrailingTextHiddenWhileFocused = false;
             } else {
-                assert mTrailingTextShownWhileFocused;
-                mTrailingTextHiddenWhileFocused = true;
+                mTrailingTextHiddenWhileFocused = mTrailingTextShownWhileFocused;
             }
             return;
         }
@@ -243,6 +264,7 @@ public class UrlContainer extends ViewGroup {
                 }
             });
             set.start();
+            if (!shouldRunTrailingTextAnimations()) set.end();
             mTrailingTextAnimator = set;
 
             postDelayed(mTriggerHideRunnable, MAX_TRAILING_TEXT_SHOW_DURATION_MS);
@@ -282,6 +304,7 @@ public class UrlContainer extends ViewGroup {
             }
         });
         set.start();
+        if (!shouldRunTrailingTextAnimations()) set.end();
         mTrailingTextAnimator = set;
     }
 

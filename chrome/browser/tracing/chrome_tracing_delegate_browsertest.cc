@@ -7,7 +7,6 @@
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/prefs/pref_service.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
@@ -18,6 +17,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/metrics/metrics_pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/background_tracing_config.h"
 #include "content/public/browser/background_tracing_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -50,16 +50,17 @@ class ChromeTracingDelegateBrowserTest : public InProcessBrowserTest {
     dict.SetString("mode", "PREEMPTIVE_TRACING_MODE");
     dict.SetString("category", "BENCHMARK");
 
-    scoped_ptr<base::ListValue> rules_list(new base::ListValue());
+    std::unique_ptr<base::ListValue> rules_list(new base::ListValue());
     {
-      scoped_ptr<base::DictionaryValue> rules_dict(new base::DictionaryValue());
+      std::unique_ptr<base::DictionaryValue> rules_dict(
+          new base::DictionaryValue());
       rules_dict->SetString("rule", "MONITOR_AND_DUMP_WHEN_TRIGGER_NAMED");
       rules_dict->SetString("trigger_name", "test");
       rules_list->Append(std::move(rules_dict));
     }
     dict.Set("configs", std::move(rules_list));
 
-    scoped_ptr<content::BackgroundTracingConfig> config(
+    std::unique_ptr<content::BackgroundTracingConfig> config(
         content::BackgroundTracingConfig::FromDict(&dict));
 
     DCHECK(config);
@@ -96,7 +97,7 @@ class ChromeTracingDelegateBrowserTest : public InProcessBrowserTest {
 
  private:
   void OnUpload(const scoped_refptr<base::RefCountedString>& file_contents,
-                scoped_ptr<const base::DictionaryValue> metadata,
+                std::unique_ptr<const base::DictionaryValue> metadata,
                 base::Callback<void()> done_callback) {
     receive_count_ += 1;
 

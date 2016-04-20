@@ -5,6 +5,7 @@
 #ifndef CONTENT_BROWSER_SHARED_WORKER_SHARED_WORKER_SERVICE_IMPL_H_
 #define CONTENT_BROWSER_SHARED_WORKER_SHARED_WORKER_SERVICE_IMPL_H_
 
+#include <memory>
 #include <set>
 
 #include "base/compiler_specific.h"
@@ -70,13 +71,6 @@ class CONTENT_EXPORT SharedWorkerServiceImpl
   void WorkerConnected(int message_port_id,
                        int worker_route_id,
                        SharedWorkerMessageFilter* filter);
-  void AllowDatabase(int worker_route_id,
-                     const GURL& url,
-                     const base::string16& name,
-                     const base::string16& display_name,
-                     unsigned long estimated_size,
-                     bool* result,
-                     SharedWorkerMessageFilter* filter);
   void AllowFileSystem(int worker_route_id,
                        const GURL& url,
                        IPC::Message* reply_msg,
@@ -110,8 +104,10 @@ class CONTENT_EXPORT SharedWorkerServiceImpl
   // Pair of render_process_id and worker_route_id.
   typedef std::pair<int, int> ProcessRouteIdPair;
   typedef base::ScopedPtrHashMap<ProcessRouteIdPair,
-                                 scoped_ptr<SharedWorkerHost>> WorkerHostMap;
-  typedef base::ScopedPtrHashMap<int, scoped_ptr<SharedWorkerPendingInstance>>
+                                 std::unique_ptr<SharedWorkerHost>>
+      WorkerHostMap;
+  typedef base::ScopedPtrHashMap<int,
+                                 std::unique_ptr<SharedWorkerPendingInstance>>
       PendingInstanceMap;
 
   SharedWorkerServiceImpl();
@@ -124,7 +120,7 @@ class CONTENT_EXPORT SharedWorkerServiceImpl
   // RenderProcessReservedCallback() or RenderProcessReserveFailedCallback()
   // will be called on IO thread.
   void ReserveRenderProcessToCreateWorker(
-      scoped_ptr<SharedWorkerPendingInstance> pending_instance,
+      std::unique_ptr<SharedWorkerPendingInstance> pending_instance,
       blink::WebWorkerCreationError* creation_error);
 
   // Called after the render process is reserved to create Shared Worker in it.

@@ -5,6 +5,7 @@
 package org.chromium.net;
 
 import android.content.Context;
+import android.net.http.HttpResponseCache;
 import android.support.annotation.IntDef;
 import android.support.annotation.Nullable;
 import android.util.Log;
@@ -30,6 +31,8 @@ import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.regex.Pattern;
 
+import javax.net.ssl.HttpsURLConnection;
+
 /**
  * An engine to process {@link UrlRequest}s, which uses the best HTTP stack
  * available on the current platform.
@@ -41,6 +44,21 @@ public abstract class CronetEngine {
      * then {@link #build} is called to create the {@code CronetEngine}.
      */
     public static class Builder {
+        /**
+         * A class which provides a method for loading the cronet native library. Apps needing to
+         * implement custom library loading logic can inherit from this class and pass an instance
+         * to {@link CronetEngine.Builder#setLibraryLoader}. For example, this might be required
+         * to work around {@code UnsatisfiedLinkError}s caused by flaky installation on certain
+         * older devices.
+         */
+        public abstract static class LibraryLoader {
+            /**
+             * Loads the native library.
+             * @param libName name of the library to load
+             */
+            public abstract void loadLibrary(String libName);
+        }
+
         // A hint that a host supports QUIC.
         static class QuicHint {
             // The host.
@@ -86,6 +104,7 @@ public abstract class CronetEngine {
         private String mUserAgent;
         private String mStoragePath;
         private boolean mLegacyModeEnabled;
+        private LibraryLoader mLibraryLoader;
         private String mLibraryName;
         private boolean mQuicEnabled;
         private boolean mHttp2Enabled;
@@ -115,8 +134,8 @@ public abstract class CronetEngine {
         }
 
         /**
-         * Constructs a User-Agent string including Cronet version, and
-         * application name and version.
+         * Constructs a User-Agent string including application name and version,
+         * system build version, model and id, and Cronet version.
          *
          * @return User-Agent string.
          */
@@ -125,7 +144,12 @@ public abstract class CronetEngine {
         }
 
         /**
-         * Overrides the User-Agent header for all requests.
+         * Overrides the User-Agent header for all requests. An explicitly
+         * set User-Agent header (set using
+         * {@link UrlRequest.Builder#addHeader}) will override a value set
+         * using this function.
+         *
+         * @param userAgent the User-Agent string to use for all requests.
          * @return the builder to facilitate chaining.
          */
         public Builder setUserAgent(String userAgent) {
@@ -162,11 +186,22 @@ public abstract class CronetEngine {
         }
 
         /**
-         * Sets whether falling back to implementation based on system's
-         * {@link java.net.HttpURLConnection} implementation is enabled.
+         * Sets whether the resulting {@link CronetEngine} uses an
+         * implementation based on the system's
+         * {@link java.net.HttpURLConnection} implementation, or if this is
+         * only done as a backup if the native implementation fails to load.
          * Defaults to disabled.
+         * @param value {@code true} makes the resulting {@link CronetEngine}
+         *              use an implementation based on the system's
+         *              {@link java.net.HttpURLConnection} implementation
+         *              without trying to load the native implementation.
+         *              {@code false} makes the resulting {@code CronetEngine}
+         *              use the native implementation, or if that fails to load,
+         *              falls back to an implementation based on the system's
+         *              {@link java.net.HttpURLConnection} implementation.
          * @return the builder to facilitate chaining.
          * @deprecated Not supported by the new API.
+         * @hide
          */
         @Deprecated
         public Builder enableLegacyMode(boolean value) {
@@ -180,6 +215,7 @@ public abstract class CronetEngine {
 
         /**
          * Overrides the name of the native library backing Cronet.
+         * @param libName the name of the native library backing Cronet.
          * @return the builder to facilitate chaining.
          */
         Builder setLibraryName(String libName) {
@@ -187,13 +223,30 @@ public abstract class CronetEngine {
             return this;
         }
 
-        String libraryName() {
-            return mLibraryName;
+        /**
+         * Sets a {@link LibraryLoader} to be used to load the native library.
+         * If not set, the library will be loaded using {@link System#loadLibrary}.
+         * @param loader {@code LibraryLoader} to be used to load the native library.
+         * @return the builder to facilitate chaining.
+         */
+        public Builder setLibraryLoader(LibraryLoader loader) {
+            mLibraryLoader = loader;
+            return this;
+        }
+
+        void loadLibrary() {
+            if (mLibraryLoader == null) {
+                System.loadLibrary(mLibraryName);
+            } else {
+                mLibraryLoader.loadLibrary(mLibraryName);
+            }
         }
 
         /**
          * Sets whether <a href="https://www.chromium.org/quic">QUIC</a> protocol
-         * is enabled. Defaults to disabled.
+         * is enabled. Defaults to disabled. If QUIC is enabled, then QUIC User Agent Id
+         * containing application name and Cronet version is sent to the server.
+         * @param value {@code true} to enable QUIC, {@code false} to disable.
          * @return the builder to facilitate chaining.
          */
         public Builder enableQUIC(boolean value) {
@@ -206,8 +259,21 @@ public abstract class CronetEngine {
         }
 
         /**
+         * Constructs default QUIC User Agent Id string including application name
+         * and Cronet version. Returns empty string if QUIC is not enabled.
+         *
+         * @param context Android {@link Context} to get package name from.
+         * @return QUIC User Agent ID string.
+         */
+        // TODO(mef): remove |context| parameter when legacy ChromiumUrlRequestContext is removed.
+        String getDefaultQuicUserAgentId(Context context) {
+            return mQuicEnabled ? UserAgent.getQuicUserAgentIdFrom(context) : "";
+        }
+
+        /**
          * Sets whether <a href="https://tools.ietf.org/html/rfc7540">HTTP/2</a>
          * protocol is enabled. Defaults to enabled.
+         * @param value {@code true} to enable HTTP/2, {@code false} to disable.
          * @return the builder to facilitate chaining.
          */
         public Builder enableHTTP2(boolean value) {
@@ -224,6 +290,7 @@ public abstract class CronetEngine {
          * <a
          * href="https://lists.w3.org/Archives/Public/ietf-http-wg/2008JulSep/att-0441/Shared_Dictionary_Compression_over_HTTP.pdf">
          * SDCH</a> compression is enabled. Defaults to disabled.
+         * @param value {@code true} to enable SDCH, {@code false} to disable.
          * @return the builder to facilitate chaining.
          */
         public Builder enableSDCH(boolean value) {
@@ -262,12 +329,8 @@ public abstract class CronetEngine {
          * @param secureProxyCheckUrl a URL to fetch to determine if using a secure
          * proxy is allowed.
          * @return the builder to facilitate chaining.
-         * @hide
-         * @deprecated Marked as deprecated because @hide doesn't properly hide but
-         *         javadocs are built with nodeprecated="yes".
+         * @hide as it's a prototype.
          */
-        @Deprecated
-        @SuppressWarnings("DepAnn")
         public Builder setDataReductionProxyOptions(
                 String primaryProxy, String fallbackProxy, String secureProxyCheckUrl) {
             if (primaryProxy.isEmpty() || fallbackProxy.isEmpty()
@@ -293,12 +356,11 @@ public abstract class CronetEngine {
             return mDataReductionProxySecureProxyCheckUrl;
         }
 
-        /** @deprecated not really deprecated but hidden. */
+        /** @hide */
         @IntDef({
                 HTTP_CACHE_DISABLED, HTTP_CACHE_IN_MEMORY, HTTP_CACHE_DISK_NO_HTTP, HTTP_CACHE_DISK,
         })
         @Retention(RetentionPolicy.SOURCE)
-        @SuppressWarnings("DepAnn")
         public @interface HttpCacheSetting {}
 
         /**
@@ -471,6 +533,7 @@ public abstract class CronetEngine {
 
         /**
          * Returns list of public key pins.
+         * @return list of public key pins.
          */
         List<Pkp> publicKeyPins() {
             return mPkps;
@@ -521,7 +584,11 @@ public abstract class CronetEngine {
         }
 
         /**
-         * Sets a native MockCertVerifier for testing.
+         * Sets a native MockCertVerifier for testing. See
+         * {@code MockCertVerifier.createMockCertVerifier} for a method that
+         * can be used to create a MockCertVerifier.
+         * @param mockCertVerifier pointer to native MockCertVerifier.
+         * @return the builder to facilitate chaining.
          */
         Builder setMockCertVerifierForTesting(long mockCertVerifier) {
             mMockCertVerifier = mockCertVerifier;
@@ -543,6 +610,7 @@ public abstract class CronetEngine {
 
         /**
          * Build a {@link CronetEngine} using this builder's configuration.
+         * @return constructed {@link CronetEngine}.
          */
         public CronetEngine build() {
             CronetEngine engine = createContext(this);
@@ -571,6 +639,7 @@ public abstract class CronetEngine {
      * @param executor {@link Executor} on which all callbacks will be invoked.
      * @return new request.
      * @deprecated Use {@link UrlRequest.Builder#build}.
+     * @hide
      */
     @Deprecated
     public final UrlRequest createRequest(
@@ -592,6 +661,7 @@ public abstract class CronetEngine {
      *         values.
      * @return new request.
      * @deprecated Use {@link UrlRequest.Builder#build}.
+     * @hide
      */
     @Deprecated
     public final UrlRequest createRequest(String url, UrlRequest.Callback callback,
@@ -613,7 +683,10 @@ public abstract class CronetEngine {
      *         values.
      * @param requestAnnotations Objects to pass on to {@link CronetEngine.RequestFinishedListener}.
      * @return new request.
+     * @deprecated Use {@link UrlRequest.Builder#build}.
+     * @hide as it references hidden CronetEngine.RequestFinishedListener
      */
+    @Deprecated
     protected abstract UrlRequest createRequest(String url, UrlRequest.Callback callback,
             Executor executor, int priority, Collection<Object> requestAnnotations);
 
@@ -660,7 +733,8 @@ public abstract class CronetEngine {
     public abstract void shutdown();
 
     /**
-     * Starts NetLog logging to a file. The NetLog is useful for debugging.
+     * Starts NetLog logging to a file. The NetLog will contain events emitted
+     * by all live CronetEngines. The NetLog is useful for debugging.
      * The file can be viewed using a Chrome browser navigated to
      * chrome://net-internals/#import
      * @param fileName the complete file path. It must not be empty. If the file
@@ -713,9 +787,9 @@ public abstract class CronetEngine {
      * only when enabled.
      * @param executor an executor that will be used to notified all
      *            added RTT and throughput listeners.
-     * @deprecated not really deprecated but hidden for now as it's a prototype.
+     * @hide as it's a prototype.
      */
-    @Deprecated public abstract void enableNetworkQualityEstimator(Executor executor);
+    public abstract void enableNetworkQualityEstimator(Executor executor);
 
     /**
      * Enables the network quality estimator for testing. This must be called
@@ -725,9 +799,8 @@ public abstract class CronetEngine {
      * @param useSmallerResponses include small responses in throughput estimates.
      * @param executor an {@link java.util.concurrent.Executor} on which all
      *            listeners will be called.
-     * @deprecated not really deprecated but hidden for now as it's a prototype.
+     * @hide as it's a prototype.
      */
-    @Deprecated
     abstract void enableNetworkQualityEstimatorForTesting(
             boolean useLocalHostRequests, boolean useSmallerResponses, Executor executor);
 
@@ -740,9 +813,9 @@ public abstract class CronetEngine {
      * The listener is called on the {@link java.util.concurrent.Executor} that
      * is passed to {@link #enableNetworkQualityEstimator}.
      * @param listener the listener of round trip times.
-     * @deprecated not really deprecated but hidden for now as it's a prototype.
+     * @hide as it's a prototype.
      */
-    @Deprecated public abstract void addRttListener(NetworkQualityRttListener listener);
+    public abstract void addRttListener(NetworkQualityRttListener listener);
 
     /**
      * Removes a listener of round trip times if previously registered with
@@ -750,9 +823,9 @@ public abstract class CronetEngine {
      * {@link NetworkQualityRttListener} is added in order to stop receiving
      * observations.
      * @param listener the listener of round trip times.
-     * @deprecated not really deprecated but hidden for now as it's a prototype.
+     * @hide as it's a prototype.
      */
-    @Deprecated public abstract void removeRttListener(NetworkQualityRttListener listener);
+    public abstract void removeRttListener(NetworkQualityRttListener listener);
 
     /**
      * Registers a listener that gets called whenever the network quality
@@ -763,9 +836,8 @@ public abstract class CronetEngine {
      * is called on the {@link java.util.concurrent.Executor} that is passed to
      * {@link #enableNetworkQualityEstimator}.
      * @param listener the listener of throughput.
-     * @deprecated not really deprecated but hidden for now as it's a prototype.
+     * @hide as it's a prototype.
      */
-    @Deprecated
     public abstract void addThroughputListener(NetworkQualityThroughputListener listener);
 
     /**
@@ -773,9 +845,8 @@ public abstract class CronetEngine {
      * {@link NetworkQualityThroughputListener} is added with
      * {@link #addThroughputListener} in order to stop receiving observations.
      * @param listener the listener of throughput.
-     * @deprecated not really deprecated but hidden for now as it's a prototype.
+     * @hide as it's a prototype.
      */
-    @Deprecated
     public abstract void removeThroughputListener(NetworkQualityThroughputListener listener);
 
     /**
@@ -786,6 +857,7 @@ public abstract class CronetEngine {
      *
      * @param url URL of resource to connect to.
      * @return an {@link java.net.HttpURLConnection} instance implemented by this CronetEngine.
+     * @throws IOException if an error occurs while opening the connection.
      */
     public abstract URLConnection openConnection(URL url) throws IOException;
 
@@ -799,13 +871,9 @@ public abstract class CronetEngine {
      * @param url URL of resource to connect to.
      * @param proxy proxy to use when establishing connection.
      * @return an {@link java.net.HttpURLConnection} instance implemented by this CronetEngine.
-     * @hide
-     * @deprecated Marked as deprecated because @hide doesn't properly hide but
-     *         javadocs are built with nodeprecated="yes".
-     *         TODO(pauljensen): Expose once implemented, http://crbug.com/418111
+     * @throws IOException if an error occurs while opening the connection.
+     * @hide TODO(pauljensen): Expose once implemented, http://crbug.com/418111
      */
-    @Deprecated
-    @SuppressWarnings("DepAnn")
     public abstract URLConnection openConnection(URL url, Proxy proxy) throws IOException;
 
     /**
@@ -817,8 +885,7 @@ public abstract class CronetEngine {
      * Cronet does not use certain HTTP features provided via the system:
      * <ul>
      * <li>the HTTP cache installed via
-     *     {@link android.net.http.HttpResponseCache#install(java.io.File, long)
-     *            HttpResponseCache.install()}</li>
+     *     {@link HttpResponseCache#install(java.io.File, long) HttpResponseCache.install()}</li>
      * <li>the HTTP authentication method installed via
      *     {@link java.net.Authenticator#setDefault}</li>
      * <li>the HTTP cookie storage installed via {@link java.net.CookieHandler#setDefault}</li>
@@ -826,14 +893,14 @@ public abstract class CronetEngine {
      * <p>
      * While Cronet supports and encourages requests using the HTTPS protocol,
      * Cronet does not provide support for the
-     * {@link javax.net.ssl.HttpsURLConnection} API. This lack of support also
+     * {@link HttpsURLConnection} API. This lack of support also
      * includes not using certain HTTPS features provided via the system:
      * <ul>
      * <li>the HTTPS hostname verifier installed via {@link
-     *   javax.net.ssl.HttpsURLConnection#setDefaultHostnameVerifier(javax.net.ssl.HostnameVerifier)
+     *   HttpsURLConnection#setDefaultHostnameVerifier(javax.net.ssl.HostnameVerifier)
      *     HttpsURLConnection.setDefaultHostnameVerifier()}</li>
      * <li>the HTTPS socket factory installed via {@link
-     *   javax.net.ssl.HttpsURLConnection#setDefaultSSLSocketFactory(javax.net.ssl.SSLSocketFactory)
+     *   HttpsURLConnection#setDefaultSSLSocketFactory(javax.net.ssl.SSLSocketFactory)
      *     HttpsURLConnection.setDefaultSSLSocketFactory()}</li>
      * </ul>
      *
@@ -848,6 +915,7 @@ public abstract class CronetEngine {
      * @param builder builder to used for creating the CronetEngine instance.
      * @return the created CronetEngine instance.
      * @deprecated Use {@link CronetEngine.Builder}.
+     * @hide
      */
     @Deprecated
     public static CronetEngine createContext(Builder builder) {
@@ -897,26 +965,24 @@ public abstract class CronetEngine {
      *
      * @param listener the listener for finished requests.
      *
-     * @deprecated not really deprecated but hidden for now as it's a prototype.
+     * @hide as it's a prototype.
      */
-    @Deprecated public abstract void addRequestFinishedListener(RequestFinishedListener listener);
+    public abstract void addRequestFinishedListener(RequestFinishedListener listener);
 
     /**
      * Removes a finished request listener.
      *
      * @param listener the listener to remove.
      *
-     * @deprecated not really deprecated but hidden for now as it's a prototype.
+     * @hide it's a prototype.
      */
-    @Deprecated
     public abstract void removeRequestFinishedListener(RequestFinishedListener listener);
 
     /**
      * Information about a finished request. Passed to {@link RequestFinishedListener}.
      *
-     * @deprecated not really deprecated but hidden for now as it's a prototype.
+     * @hide as it's a prototype.
      */
-    @Deprecated
     public static final class UrlRequestInfo {
         private final String mUrl;
         private final Collection<Object> mAnnotations;
@@ -953,12 +1019,16 @@ public abstract class CronetEngine {
          * for user-facing latency analysis.
          *
          * <p>Must call {@link #enableNetworkQualityEstimator} to enable request metrics collection.
+         * @return metrics collected for this request.
          */
         public UrlRequestMetrics getMetrics() {
             return mMetrics;
         }
 
-        /** Returns a UrlResponseInfo for the request, if its response had started. */
+        /**
+         * Returns a {@link UrlResponseInfo} for the request, if its response had started.
+         * @return {@link UrlResponseInfo} for the request, if its response had started.
+         */
         @Nullable
         public UrlResponseInfo getResponseInfo() {
             return mResponseInfo;
@@ -970,9 +1040,8 @@ public abstract class CronetEngine {
      *
      * <p>Must call {@link #enableNetworkQualityEstimator} to enable request metrics collection.
      *
-     * @deprecated not really deprecated but hidden for now as it's a prototype.
+     * @hide as it's a prototype.
      */
-    @Deprecated
     public static final class UrlRequestMetrics {
         @Nullable private final Long mTtfbMs;
         @Nullable private final Long mTotalTimeMs;
@@ -1025,11 +1094,13 @@ public abstract class CronetEngine {
     /**
      * Interface to listen for finished requests that were created via this CronetEngine instance.
      *
-     * @deprecated not really deprecated but hidden for now as it's a prototype.
+     * @hide as it's a prototype.
      */
-    @Deprecated
     public interface RequestFinishedListener { // TODO(klm): Add a convenience abstract class.
-        /** Invoked with request info. */
+        /**
+         * Invoked with request info.
+         * @param requestInfo {@link UrlRequestInfo} for finished request.
+         */
         void onRequestFinished(UrlRequestInfo requestInfo);
     }
 }

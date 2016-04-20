@@ -30,7 +30,7 @@ IceConnectionToHost::IceConnectionToHost() {}
 IceConnectionToHost::~IceConnectionToHost() {}
 
 void IceConnectionToHost::Connect(
-    scoped_ptr<Session> session,
+    std::unique_ptr<Session> session,
     scoped_refptr<TransportContext> transport_context,
     HostEventCallback* event_callback) {
   DCHECK(client_stub_);
@@ -119,8 +119,8 @@ void IceConnectionToHost::OnSessionStateChange(Session::State state) {
           base::Bind(&IceConnectionToHost::OnVideoChannelStatus,
                      base::Unretained(this))));
       video_dispatcher_.reset(
-          new ClientVideoDispatcher(monitored_video_stub_.get()));
-      video_dispatcher_->Init(transport_->GetStreamChannelFactory(), this);
+          new ClientVideoDispatcher(monitored_video_stub_.get(), client_stub_));
+      video_dispatcher_->Init(transport_->GetChannelFactory(), this);
 
       // Configure audio pipeline if necessary.
       if (session_->config().is_audio_enabled()) {
@@ -143,11 +143,11 @@ void IceConnectionToHost::OnSessionStateChange(Session::State state) {
       // would be hard to add it because client plugin and webapp
       // versions may not be in sync. It should be easy to do after we
       // are finished moving the client plugin to NaCl.
+      CloseChannels();
       if (state_ == CONNECTED && session_->error() == SIGNALING_TIMEOUT) {
-        CloseChannels();
         SetState(CLOSED, OK);
       } else {
-        CloseOnError(session_->error());
+        SetState(FAILED, session_->error());
       }
       break;
   }
@@ -166,14 +166,6 @@ void IceConnectionToHost::OnIceTransportError(ErrorCode error) {
 void IceConnectionToHost::OnChannelInitialized(
     ChannelDispatcherBase* channel_dispatcher) {
   NotifyIfChannelsReady();
-}
-
-void IceConnectionToHost::OnChannelError(
-    ChannelDispatcherBase* channel_dispatcher,
-    ErrorCode error) {
-  LOG(ERROR) << "Failed to connect channel "
-             << channel_dispatcher->channel_name();
-  CloseOnError(CHANNEL_CONNECTION_ERROR);
 }
 
 void IceConnectionToHost::OnVideoChannelStatus(bool active) {
@@ -202,11 +194,6 @@ void IceConnectionToHost::NotifyIfChannelsReady() {
   clipboard_forwarder_.set_clipboard_stub(control_dispatcher_.get());
   event_forwarder_.set_input_stub(event_dispatcher_.get());
   SetState(CONNECTED, OK);
-}
-
-void IceConnectionToHost::CloseOnError(ErrorCode error) {
-  CloseChannels();
-  SetState(FAILED, error);
 }
 
 void IceConnectionToHost::CloseChannels() {

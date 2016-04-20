@@ -7,13 +7,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/files/file.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -272,8 +273,9 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
       if (itr != favicons_map_->end()) {
         scoped_refptr<base::RefCountedMemory> data(itr->second.get());
         std::string favicon_base64_encoded;
-        base::Base64Encode(std::string(data->front_as<char>(), data->size()),
-                           &favicon_base64_encoded);
+        base::Base64Encode(
+            base::StringPiece(data->front_as<char>(), data->size()),
+            &favicon_base64_encoded);
         GURL favicon_url("data:image/png;base64," + favicon_base64_encoded);
         favicon_string = favicon_url.spec();
       }
@@ -365,19 +367,19 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
 
   // The BookmarkModel as a base::Value. This value was generated from the
   // BookmarkCodec.
-  scoped_ptr<base::Value> bookmarks_;
+  std::unique_ptr<base::Value> bookmarks_;
 
   // Path we're writing to.
   base::FilePath path_;
 
   // Map that stores favicon per URL.
-  scoped_ptr<BookmarkFaviconFetcher::URLFaviconMap> favicons_map_;
+  std::unique_ptr<BookmarkFaviconFetcher::URLFaviconMap> favicons_map_;
 
   // Observer to be notified on finish.
   BookmarksExportObserver* observer_;
 
   // File we're writing to.
-  scoped_ptr<base::File> file_;
+  std::unique_ptr<base::File> file_;
 
   // How much we indent when writing a bookmark/folder. This is modified
   // via IncrementIndent and DecrementIndent.

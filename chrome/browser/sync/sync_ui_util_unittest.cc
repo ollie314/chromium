@@ -61,8 +61,8 @@ void VerifySyncGlobalErrorResult(ProfileSyncServiceMock* service,
                                  GoogleServiceAuthError::State error_state,
                                  bool is_signed_in,
                                  bool is_error) {
-  EXPECT_CALL(*service, HasSyncSetupCompleted())
-              .WillRepeatedly(Return(is_signed_in));
+  EXPECT_CALL(*service, IsFirstSetupComplete())
+      .WillRepeatedly(Return(is_signed_in));
 
   GoogleServiceAuthError auth_error(error_state);
   EXPECT_CALL(*service, GetAuthError()).WillRepeatedly(ReturnRef(auth_error));
@@ -87,7 +87,7 @@ class SyncUIUtilTest : public testing::Test {
 // Test that GetStatusLabelsForSyncGlobalError returns an error if a
 // passphrase is required.
 TEST_F(SyncUIUtilTest, PassphraseGlobalError) {
-  scoped_ptr<Profile> profile = MakeSignedInTestingProfile();
+  std::unique_ptr<Profile> profile = MakeSignedInTestingProfile();
   ProfileSyncServiceMock service(
       CreateProfileSyncServiceParamsForTest(profile.get()));
   browser_sync::SyncBackendHost::Status status;
@@ -107,7 +107,7 @@ TEST_F(SyncUIUtilTest, PassphraseGlobalError) {
 // Test that GetStatusLabelsForSyncGlobalError returns an error if a
 // passphrase is required and not for auth errors.
 TEST_F(SyncUIUtilTest, AuthAndPassphraseGlobalError) {
-  scoped_ptr<Profile> profile(MakeSignedInTestingProfile());
+  std::unique_ptr<Profile> profile(MakeSignedInTestingProfile());
   ProfileSyncServiceMock service(
       CreateProfileSyncServiceParamsForTest(profile.get()));
   browser_sync::SyncBackendHost::Status status;
@@ -118,8 +118,7 @@ TEST_F(SyncUIUtilTest, AuthAndPassphraseGlobalError) {
               .WillRepeatedly(Return(true));
   EXPECT_CALL(service, IsPassphraseRequiredForDecryption())
               .WillRepeatedly(Return(true));
-  EXPECT_CALL(service, HasSyncSetupCompleted())
-              .WillRepeatedly(Return(true));
+  EXPECT_CALL(service, IsFirstSetupComplete()).WillRepeatedly(Return(true));
 
   GoogleServiceAuthError auth_error(
       GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
@@ -136,7 +135,7 @@ TEST_F(SyncUIUtilTest, AuthAndPassphraseGlobalError) {
 // Test that GetStatusLabelsForSyncGlobalError does not indicate errors for
 // auth errors (these are reported through SigninGlobalError).
 TEST_F(SyncUIUtilTest, AuthStateGlobalError) {
-  scoped_ptr<Profile> profile(MakeSignedInTestingProfile());
+  std::unique_ptr<Profile> profile(MakeSignedInTestingProfile());
   ProfileSyncService::InitParams init_params =
       CreateProfileSyncServiceParamsForTest(profile.get());
   NiceMock<ProfileSyncServiceMock> service(&init_params);
@@ -216,7 +215,7 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
   // immutable so can only be allocated in this method.
   switch (caseNumber) {
     case STATUS_CASE_SETUP_IN_PROGRESS: {
-      EXPECT_CALL(*service, HasSyncSetupCompleted())
+      EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(false));
       EXPECT_CALL(*service, IsFirstSetupInProgress())
           .WillRepeatedly(Return(true));
@@ -226,7 +225,7 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
       return;
     }
     case STATUS_CASE_SETUP_ERROR: {
-      EXPECT_CALL(*service, HasSyncSetupCompleted())
+      EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(false));
       EXPECT_CALL(*service, IsFirstSetupInProgress())
           .WillRepeatedly(Return(false));
@@ -238,7 +237,7 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
       return;
     }
     case STATUS_CASE_AUTHENTICATING: {
-      EXPECT_CALL(*service, HasSyncSetupCompleted())
+      EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(true));
       EXPECT_CALL(*service, IsSyncActive()).WillRepeatedly(Return(true));
       EXPECT_CALL(*service, IsPassphraseRequired())
@@ -252,7 +251,7 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
       return;
     }
     case STATUS_CASE_AUTH_ERROR: {
-      EXPECT_CALL(*service, HasSyncSetupCompleted())
+      EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(true));
       EXPECT_CALL(*service, IsSyncActive()).WillRepeatedly(Return(true));
       EXPECT_CALL(*service, IsPassphraseRequired())
@@ -268,7 +267,7 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
       return;
     }
     case STATUS_CASE_PROTOCOL_ERROR: {
-      EXPECT_CALL(*service, HasSyncSetupCompleted())
+      EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(true));
       EXPECT_CALL(*service, IsSyncActive()).WillRepeatedly(Return(true));
       EXPECT_CALL(*service, IsPassphraseRequired())
@@ -284,7 +283,7 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
       return;
     }
     case STATUS_CASE_PASSPHRASE_ERROR: {
-      EXPECT_CALL(*service, HasSyncSetupCompleted())
+      EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(true));
       EXPECT_CALL(*service, IsSyncActive()).WillRepeatedly(Return(true));
       browser_sync::SyncBackendHost::Status status;
@@ -299,7 +298,7 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
       return;
     }
     case STATUS_CASE_SYNCED: {
-      EXPECT_CALL(*service, HasSyncSetupCompleted())
+      EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(true));
       EXPECT_CALL(*service, IsSyncActive()).WillRepeatedly(Return(true));
       EXPECT_CALL(*service, IsPassphraseRequired())
@@ -315,7 +314,7 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
     }
     case STATUS_CASE_SYNC_DISABLED_BY_POLICY: {
       EXPECT_CALL(*service, IsManaged()).WillRepeatedly(Return(true));
-      EXPECT_CALL(*service, HasSyncSetupCompleted())
+      EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(false));
       EXPECT_CALL(*service, IsSyncActive()).WillRepeatedly(Return(false));
       EXPECT_CALL(*service, IsPassphraseRequired())
@@ -338,7 +337,7 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
 TEST_F(SyncUIUtilTest, DistinctCasesReportUniqueMessageSets) {
   std::set<base::string16> messages;
   for (int idx = 0; idx != NUMBER_OF_STATUS_CASES; idx++) {
-    scoped_ptr<Profile> profile(new TestingProfile());
+    std::unique_ptr<Profile> profile(new TestingProfile());
     ProfileSyncService::InitParams init_params =
         CreateProfileSyncServiceParamsForTest(profile.get());
     NiceMock<ProfileSyncServiceMock> service(&init_params);
@@ -346,7 +345,7 @@ TEST_F(SyncUIUtilTest, DistinctCasesReportUniqueMessageSets) {
     EXPECT_CALL(service, GetAuthError()).WillRepeatedly(ReturnRef(error));
     FakeSigninManagerForSyncUIUtilTest signin(profile.get());
     signin.SetAuthenticatedAccountInfo(kTestGaiaId, kTestUser);
-    scoped_ptr<FakeAuthStatusProvider> provider(new FakeAuthStatusProvider(
+    std::unique_ptr<FakeAuthStatusProvider> provider(new FakeAuthStatusProvider(
         SigninErrorControllerFactory::GetForProfile(profile.get())));
     GetDistinctCase(&service, &signin, provider.get(), idx);
     base::string16 status_label;
@@ -376,7 +375,7 @@ TEST_F(SyncUIUtilTest, DistinctCasesReportUniqueMessageSets) {
 // honored.
 TEST_F(SyncUIUtilTest, HtmlNotIncludedInStatusIfNotRequested) {
   for (int idx = 0; idx != NUMBER_OF_STATUS_CASES; idx++) {
-    scoped_ptr<Profile> profile(MakeSignedInTestingProfile());
+    std::unique_ptr<Profile> profile(MakeSignedInTestingProfile());
     ProfileSyncService::InitParams init_params =
         CreateProfileSyncServiceParamsForTest(profile.get());
     NiceMock<ProfileSyncServiceMock> service(&init_params);
@@ -384,7 +383,7 @@ TEST_F(SyncUIUtilTest, HtmlNotIncludedInStatusIfNotRequested) {
     EXPECT_CALL(service, GetAuthError()).WillRepeatedly(ReturnRef(error));
     FakeSigninManagerForSyncUIUtilTest signin(profile.get());
     signin.SetAuthenticatedAccountInfo(kTestGaiaId, kTestUser);
-    scoped_ptr<FakeAuthStatusProvider> provider(new FakeAuthStatusProvider(
+    std::unique_ptr<FakeAuthStatusProvider> provider(new FakeAuthStatusProvider(
         SigninErrorControllerFactory::GetForProfile(profile.get())));
     GetDistinctCase(&service, &signin, provider.get(), idx);
     base::string16 status_label;

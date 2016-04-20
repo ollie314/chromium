@@ -111,7 +111,7 @@ void AshWindowTreeHostX11::UnConfineCursor() {
 }
 
 void AshWindowTreeHostX11::SetRootWindowTransformer(
-    scoped_ptr<RootWindowTransformer> transformer) {
+    std::unique_ptr<RootWindowTransformer> transformer) {
   transformer_helper_.SetRootWindowTransformer(std::move(transformer));
   if (pointer_barriers_) {
     UnConfineCursor();
@@ -131,7 +131,7 @@ void AshWindowTreeHostX11::PrepareForShutdown() {
   // ui::EventHandlers to be unable to convert the event's location to screen
   // coordinates.
   window()->SetEventTargeter(
-      scoped_ptr<ui::EventTargeter>(new ui::NullEventTargeter));
+      std::unique_ptr<ui::EventTargeter>(new ui::NullEventTargeter));
 
   if (ui::PlatformEventSource::GetInstance()) {
     // Block X events which are not turned into ui::Events from getting
@@ -218,7 +218,7 @@ bool AshWindowTreeHostX11::CanDispatchEvent(const ui::PlatformEvent& event) {
             !bounds().Contains(ui::EventLocationFromNative(xev)))
           return false;
       } else {
-        gfx::Screen* screen = gfx::Screen::GetScreenFor(window());
+        gfx::Screen* screen = gfx::Screen::GetScreen();
         gfx::Display display = screen->GetDisplayNearestWindow(window());
         return touch_display_id == display.id();
       }
@@ -288,13 +288,6 @@ void AshWindowTreeHostX11::SetCrOSTapPaused(bool state) {
     }
   }
 }
-#endif
-
-AshWindowTreeHost* AshWindowTreeHost::Create(
-    const AshWindowTreeHostInitParams& init_params) {
-  if (init_params.offscreen)
-    return new AshWindowTreeHostUnified(init_params.initial_bounds);
-  return new AshWindowTreeHostX11(init_params.initial_bounds);
-}
+#endif  // defined(OS_CHROMEOS)
 
 }  // namespace ash

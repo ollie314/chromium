@@ -83,11 +83,36 @@ private:
     FileReaderLoader m_loader;
 };
 
+class DocumentWebSocketChannel::Message : public GarbageCollectedFinalized<DocumentWebSocketChannel::Message> {
+public:
+    explicit Message(const CString&);
+    explicit Message(PassRefPtr<BlobDataHandle>);
+    explicit Message(DOMArrayBuffer*);
+    // For WorkerWebSocketChannel
+    explicit Message(PassOwnPtr<Vector<char>>, MessageType);
+    // Close message
+    Message(unsigned short code, const String& reason);
+
+    DEFINE_INLINE_TRACE()
+    {
+        visitor->trace(arrayBuffer);
+    }
+
+    MessageType type;
+
+    CString text;
+    RefPtr<BlobDataHandle> blobDataHandle;
+    Member<DOMArrayBuffer> arrayBuffer;
+    OwnPtr<Vector<char>> vectorData;
+    unsigned short code;
+    String reason;
+};
+
 DocumentWebSocketChannel::BlobLoader::BlobLoader(PassRefPtr<BlobDataHandle> blobDataHandle, DocumentWebSocketChannel* channel)
     : m_channel(channel)
     , m_loader(FileReaderLoader::ReadAsArrayBuffer, this)
 {
-    m_loader.start(channel->executionContext(), blobDataHandle);
+    m_loader.start(channel->getExecutionContext(), blobDataHandle);
 }
 
 void DocumentWebSocketChannel::BlobLoader::cancel()
@@ -137,7 +162,7 @@ bool DocumentWebSocketChannel::connect(const KURL& url, const String& protocol)
         if (MixedContentChecker::shouldBlockWebSocket(document()->frame(), url))
             return false;
     }
-    if (MixedContentChecker::isMixedContent(document()->securityOrigin(), url)) {
+    if (MixedContentChecker::isMixedContent(document()->getSecurityOrigin(), url)) {
         String message = "Connecting to a non-secure WebSocket server from a secure origin is deprecated.";
         document()->addConsoleMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel, message));
     }
@@ -158,7 +183,7 @@ bool DocumentWebSocketChannel::connect(const KURL& url, const String& protocol)
 
     if (document()->frame())
         document()->frame()->loader().client()->dispatchWillOpenWebSocket(m_handle.get());
-    m_handle->connect(url, webProtocols, WebSecurityOrigin(executionContext()->securityOrigin()), this);
+    m_handle->connect(url, webProtocols, WebSecurityOrigin(getExecutionContext()->getSecurityOrigin()), this);
 
     flowControlIfNecessary();
     TRACE_EVENT_INSTANT1("devtools.timeline", "WebSocketCreate", TRACE_EVENT_SCOPE_THREAD, "data", InspectorWebSocketCreateEvent::data(document(), m_identifier, url, protocol));
@@ -172,7 +197,7 @@ void DocumentWebSocketChannel::send(const CString& message)
     // FIXME: Change the inspector API to show the entire message instead
     // of individual frames.
     InspectorInstrumentation::didSendWebSocketFrame(document(), m_identifier, WebSocketFrame::OpCodeText, true, message.data(), message.length());
-    m_messages.append(adoptPtr(new Message(message)));
+    m_messages.append(new Message(message));
     processSendQueue();
 }
 
@@ -185,7 +210,7 @@ void DocumentWebSocketChannel::send(PassRefPtr<BlobDataHandle> blobDataHandle)
     // Since Binary data are not displayed in Inspector, this does not
     // affect actual behavior.
     InspectorInstrumentation::didSendWebSocketFrame(document(), m_identifier, WebSocketFrame::OpCodeBinary, true, "", 0);
-    m_messages.append(adoptPtr(new Message(blobDataHandle)));
+    m_messages.append(new Message(blobDataHandle));
     processSendQueue();
 }
 
@@ -198,7 +223,7 @@ void DocumentWebSocketChannel::send(const DOMArrayBuffer& buffer, unsigned byteO
     // buffer.slice copies its contents.
     // FIXME: Reduce copy by sending the data immediately when we don't need to
     // queue the data.
-    m_messages.append(adoptPtr(new Message(buffer.slice(byteOffset, byteOffset + byteLength))));
+    m_messages.append(new Message(buffer.slice(byteOffset, byteOffset + byteLength)));
     processSendQueue();
 }
 
@@ -208,7 +233,7 @@ void DocumentWebSocketChannel::sendTextAsCharVector(PassOwnPtr<Vector<char>> dat
     // FIXME: Change the inspector API to show the entire message instead
     // of individual frames.
     InspectorInstrumentation::didSendWebSocketFrame(document(), m_identifier, WebSocketFrame::OpCodeText, true, data->data(), data->size());
-    m_messages.append(adoptPtr(new Message(data, MessageTypeTextAsCharVector)));
+    m_messages.append(new Message(data, MessageTypeTextAsCharVector));
     processSendQueue();
 }
 
@@ -218,7 +243,7 @@ void DocumentWebSocketChannel::sendBinaryAsCharVector(PassOwnPtr<Vector<char>> d
     // FIXME: Change the inspector API to show the entire message instead
     // of individual frames.
     InspectorInstrumentation::didSendWebSocketFrame(document(), m_identifier, WebSocketFrame::OpCodeBinary, true, data->data(), data->size());
-    m_messages.append(adoptPtr(new Message(data, MessageTypeBinaryAsCharVector)));
+    m_messages.append(new Message(data, MessageTypeBinaryAsCharVector));
     processSendQueue();
 }
 
@@ -227,7 +252,7 @@ void DocumentWebSocketChannel::close(int code, const String& reason)
     WTF_LOG(Network, "DocumentWebSocketChannel %p close(%d, %s)", this, code, reason.utf8().data());
     ASSERT(m_handle);
     unsigned short codeToSend = static_cast<unsigned short>(code == CloseEventCodeNotSpecified ? CloseEventCodeNoStatusRcvd : code);
-    m_messages.append(adoptPtr(new Message(codeToSend, reason)));
+    m_messages.append(new Message(codeToSend, reason));
     processSendQueue();
 }
 
@@ -238,7 +263,7 @@ void DocumentWebSocketChannel::fail(const String& reason, MessageLevel level, co
 
     InspectorInstrumentation::didReceiveWebSocketFrameError(document(), m_identifier, reason);
     const String message = "WebSocket connection to '" + m_url.elidedString() + "' failed: " + reason;
-    executionContext()->addConsoleMessage(ConsoleMessage::create(JSMessageSource, level, message, sourceURL, lineNumber));
+    getExecutionContext()->addConsoleMessage(ConsoleMessage::create(JSMessageSource, level, message, sourceURL, lineNumber));
 
     if (m_client)
         m_client->didError();
@@ -269,7 +294,7 @@ DocumentWebSocketChannel::Message::Message(PassRefPtr<BlobDataHandle> blobDataHa
     : type(MessageTypeBlob)
     , blobDataHandle(blobDataHandle) { }
 
-DocumentWebSocketChannel::Message::Message(PassRefPtr<DOMArrayBuffer> arrayBuffer)
+DocumentWebSocketChannel::Message::Message(DOMArrayBuffer* arrayBuffer)
     : type(MessageTypeArrayBuffer)
     , arrayBuffer(arrayBuffer) { }
 
@@ -382,7 +407,7 @@ void DocumentWebSocketChannel::handleDidClose(bool wasClean, unsigned short code
 Document* DocumentWebSocketChannel::document()
 {
     // This context is always a Document. See the constructor.
-    ExecutionContext* context = executionContext();
+    ExecutionContext* context = getExecutionContext();
     ASSERT(context->isDocument());
     return toDocument(context);
 }
@@ -529,14 +554,14 @@ void DocumentWebSocketChannel::didStartClosingHandshake(WebSocketHandle* handle)
         m_client->didStartClosingHandshake();
 }
 
-void DocumentWebSocketChannel::didFinishLoadingBlob(PassRefPtr<DOMArrayBuffer> buffer)
+void DocumentWebSocketChannel::didFinishLoadingBlob(DOMArrayBuffer* buffer)
 {
     m_blobLoader.clear();
     ASSERT(m_handle);
     // The loaded blob is always placed on m_messages[0].
     ASSERT(m_messages.size() > 0 && m_messages.first()->type == MessageTypeBlob);
     // We replace it with the loaded blob.
-    m_messages.first() = adoptPtr(new Message(buffer));
+    m_messages.first() = new Message(buffer);
     processSendQueue();
 }
 
@@ -555,6 +580,7 @@ void DocumentWebSocketChannel::didFailLoadingBlob(FileError::ErrorCode errorCode
 DEFINE_TRACE(DocumentWebSocketChannel)
 {
     visitor->trace(m_blobLoader);
+    visitor->trace(m_messages);
     visitor->trace(m_client);
     WebSocketChannel::trace(visitor);
     ContextLifecycleObserver::trace(visitor);

@@ -107,9 +107,8 @@ class CloseObserver : public content::WebContentsObserver {
 
 class BrowserActivationObserver : public chrome::BrowserListObserver {
  public:
-  explicit BrowserActivationObserver(chrome::HostDesktopType desktop_type)
-      : browser_(chrome::FindLastActiveWithHostDesktopType(desktop_type)),
-        observed_(false) {
+  BrowserActivationObserver()
+      : browser_(chrome::FindLastActive()), observed_(false) {
     BrowserList::AddObserver(this);
   }
   ~BrowserActivationObserver() override { BrowserList::RemoveObserver(this); }
@@ -125,8 +124,6 @@ class BrowserActivationObserver : public chrome::BrowserListObserver {
   // chrome::BrowserListObserver:
   void OnBrowserSetLastActive(Browser* browser) override {
     if (browser == browser_)
-      return;
-    if (browser->host_desktop_type() != browser_->host_desktop_type())
       return;
     observed_ = true;
     if (message_loop_runner_.get() && message_loop_runner_->loop_running())
@@ -181,13 +178,9 @@ class PopupBlockerBrowserTest : public InProcessBrowserTest {
     observer.Wait();
 
     if (what_to_expect == ExpectPopup) {
-      ASSERT_EQ(2u,
-                chrome::GetBrowserCount(browser()->profile(),
-                                        browser()->host_desktop_type()));
+      ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
     } else {
-      ASSERT_EQ(1u,
-                chrome::GetBrowserCount(browser()->profile(),
-                                        browser()->host_desktop_type()));
+      ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
       ASSERT_EQ(2, browser()->tab_strip_model()->count());
 
       // Check that we always create foreground tabs.
@@ -218,8 +211,7 @@ class PopupBlockerBrowserTest : public InProcessBrowserTest {
 
     // Since the popup blocker blocked the window.open, there should be only one
     // tab.
-    EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile(),
-                                          browser->host_desktop_type()));
+    EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
     EXPECT_EQ(1, browser->tab_strip_model()->count());
     WebContents* web_contents =
         browser->tab_strip_model()->GetActiveWebContents();
@@ -351,11 +343,8 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
   GURL url(embedded_test_server()->GetURL(
       "/popup_blocker/popup-blocked-to-post-blank.html"));
   HostContentSettingsMapFactory::GetForProfile(browser()->profile())
-      ->SetContentSetting(ContentSettingsPattern::FromURL(url),
-                          ContentSettingsPattern::Wildcard(),
-                          CONTENT_SETTINGS_TYPE_POPUPS,
-                          std::string(),
-                          CONTENT_SETTING_ALLOW);
+      ->SetContentSettingDefaultScope(url, GURL(), CONTENT_SETTINGS_TYPE_POPUPS,
+                                      std::string(), CONTENT_SETTING_ALLOW);
 
   NavigateAndCheckPopupShown(url, ExpectTab);
 }
@@ -365,11 +354,8 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
                        AllowPopupThroughContentSettingIFrame) {
   GURL url(embedded_test_server()->GetURL("/popup_blocker/popup-frames.html"));
   HostContentSettingsMapFactory::GetForProfile(browser()->profile())
-      ->SetContentSetting(ContentSettingsPattern::FromURL(url),
-                          ContentSettingsPattern::Wildcard(),
-                          CONTENT_SETTINGS_TYPE_POPUPS,
-                          std::string(),
-                          CONTENT_SETTING_ALLOW);
+      ->SetContentSettingDefaultScope(url, GURL(), CONTENT_SETTINGS_TYPE_POPUPS,
+                                      std::string(), CONTENT_SETTING_ALLOW);
 
   // Popup from the iframe should be allowed since the top-level URL is
   // whitelisted.
@@ -384,11 +370,9 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
   HostContentSettingsMapFactory::GetForProfile(browser()->profile())
       ->ClearSettingsForOneType(CONTENT_SETTINGS_TYPE_POPUPS);
   HostContentSettingsMapFactory::GetForProfile(browser()->profile())
-      ->SetContentSetting(ContentSettingsPattern::FromURL(frame_url),
-                          ContentSettingsPattern::Wildcard(),
-                          CONTENT_SETTINGS_TYPE_POPUPS,
-                          std::string(),
-                          CONTENT_SETTING_ALLOW);
+      ->SetContentSettingDefaultScope(frame_url, GURL(),
+                                      CONTENT_SETTINGS_TYPE_POPUPS,
+                                      std::string(), CONTENT_SETTING_ALLOW);
 
   // Popup should be blocked.
   ui_test_utils::NavigateToURL(browser(), url);
@@ -558,8 +542,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, Regress427477) {
   tab->GetController().GoBack();
   content::WaitForLoadStop(tab);
 
-  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile(),
-                                        browser()->host_desktop_type()));
+  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
   ASSERT_EQ(1, browser()->tab_strip_model()->count());
 
   // The popup from the unload event handler should not show up for about:blank.
@@ -572,16 +555,12 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, ModalPopUnder) {
   GURL url(
       embedded_test_server()->GetURL("/popup_blocker/popup-window-open.html"));
   HostContentSettingsMapFactory::GetForProfile(browser()->profile())
-      ->SetContentSetting(ContentSettingsPattern::FromURL(url),
-                          ContentSettingsPattern::Wildcard(),
-                          CONTENT_SETTINGS_TYPE_POPUPS,
-                          std::string(),
-                          CONTENT_SETTING_ALLOW);
+      ->SetContentSettingDefaultScope(url, GURL(), CONTENT_SETTINGS_TYPE_POPUPS,
+                                      std::string(), CONTENT_SETTING_ALLOW);
 
   NavigateAndCheckPopupShown(url, ExpectPopup);
 
-  Browser* popup_browser =
-      chrome::FindLastActiveWithHostDesktopType(browser()->host_desktop_type());
+  Browser* popup_browser = chrome::FindLastActive();
   ASSERT_NE(popup_browser, browser());
 
   // Showing an alert will raise the tab over the popup.
@@ -593,15 +572,12 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, ModalPopUnder) {
   app_modal::JavaScriptAppModalDialog* js_dialog =
       static_cast<app_modal::JavaScriptAppModalDialog*>(dialog);
 
-  BrowserActivationObserver activation_observer(browser()->host_desktop_type());
+  BrowserActivationObserver activation_observer;
   js_dialog->native_dialog()->AcceptAppModalDialog();
 
-  if (popup_browser != chrome::FindLastActiveWithHostDesktopType(
-                           popup_browser->host_desktop_type())) {
+  if (popup_browser != chrome::FindLastActive())
     activation_observer.WaitForActivation();
-  }
-  ASSERT_EQ(popup_browser, chrome::FindLastActiveWithHostDesktopType(
-                               popup_browser->host_desktop_type()));
+  ASSERT_EQ(popup_browser, chrome::FindLastActive());
 }
 
 void BuildSimpleWebKeyEvent(blink::WebInputEvent::Type type,
@@ -683,8 +659,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, CtrlEnterKey) {
 #endif
   wait_for_new_tab.Wait();
 
-  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile(),
-                                        browser()->host_desktop_type()));
+  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
   ASSERT_EQ(2, browser()->tab_strip_model()->count());
   // Check that we create the background tab.
   ASSERT_EQ(0, browser()->tab_strip_model()->active_index());
@@ -712,8 +687,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, TapGestureWithCtrlKey) {
 
   wait_for_new_tab.Wait();
 
-  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile(),
-                                        browser()->host_desktop_type()));
+  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
   ASSERT_EQ(2, browser()->tab_strip_model()->count());
   // Check that we create the background tab.
   ASSERT_EQ(0, browser()->tab_strip_model()->active_index());

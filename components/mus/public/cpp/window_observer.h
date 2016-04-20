@@ -54,6 +54,7 @@ class WindowObserver {
   virtual void OnWindowBoundsChanged(Window* window,
                                      const gfx::Rect& old_bounds,
                                      const gfx::Rect& new_bounds) {}
+  virtual void OnWindowLostCapture(Window* window) {}
   virtual void OnWindowClientAreaChanged(
       Window* window,
       const gfx::Insets& old_client_area,
@@ -70,6 +71,9 @@ class WindowObserver {
                                                mojom::Cursor cursor) {}
   virtual void OnWindowVisibilityChanging(Window* window) {}
   virtual void OnWindowVisibilityChanged(Window* window) {}
+  virtual void OnWindowOpacityChanged(Window* window,
+                                      float old_opacity,
+                                      float new_opacity) {}
 
   // Invoked when this Window's shared properties have changed. This can either
   // be caused by SetSharedProperty() being called locally, or by us receiving

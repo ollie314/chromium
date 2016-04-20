@@ -4,12 +4,12 @@
 
 #include "chrome/browser/sync/test/integration/wifi_credentials_helper_chromeos.h"
 
+#include <memory>
 #include <string>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -36,7 +36,7 @@ const char kProfilePrefix[] = "/profile/";
 void LogCreateConfigurationFailure(
     const std::string& debug_hint,
     const std::string& /* network_config_error_message */,
-    scoped_ptr<base::DictionaryValue> /* network_config_error_data */) {
+    std::unique_ptr<base::DictionaryValue> /* network_config_error_data */) {
   LOG(FATAL) << debug_hint;
 }
 
@@ -102,18 +102,16 @@ void AddWifiCredentialToProfileChromeOs(
     const content::BrowserContext* browser_context,
     const WifiCredential& credential) {
   DCHECK(browser_context);
-  scoped_ptr<base::DictionaryValue> onc_properties =
+  std::unique_ptr<base::DictionaryValue> onc_properties =
       credential.ToOncProperties();
   CHECK(onc_properties) << "Failed to generate ONC properties for "
                         << credential.ToString();
-  GetManagedNetworkConfigurationHandler()
-      ->CreateConfiguration(
-          ChromeOsUserHashForBrowserContext(*browser_context),
-          *onc_properties,
-          ::chromeos::network_handler::StringResultCallback(),
-          base::Bind(LogCreateConfigurationFailure,
-                     base::StringPrintf("Failed to add credential %s",
-                                        credential.ToString().c_str())));
+  GetManagedNetworkConfigurationHandler()->CreateConfiguration(
+      ChromeOsUserHashForBrowserContext(*browser_context), *onc_properties,
+      ::chromeos::network_handler::ServiceResultCallback(),
+      base::Bind(LogCreateConfigurationFailure,
+                 base::StringPrintf("Failed to add credential %s",
+                                    credential.ToString().c_str())));
   base::MessageLoop::current()->RunUntilIdle();
 }
 

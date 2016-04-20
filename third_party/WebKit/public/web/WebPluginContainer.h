@@ -45,6 +45,7 @@ class WebString;
 class WebURL;
 class WebURLRequest;
 class WebLayer;
+class WebDOMMessageEvent;
 struct WebPoint;
 struct WebRect;
 
@@ -59,36 +60,23 @@ public:
     // Returns the element containing this plugin.
     virtual WebElement element() = 0;
 
+    // Synchronously dispatches the progress event.
     virtual void dispatchProgressEvent(const WebString& type, bool lengthComputable, unsigned long long loaded, unsigned long long total, const WebString& url) = 0;
+
+    // Enqueue's a task to dispatch the event.
+    // TODO(esprehn): Why are progress events sync and message events async!?
+    virtual void enqueueMessageEvent(const WebDOMMessageEvent&) = 0;
 
     virtual void invalidate() = 0;
     virtual void invalidateRect(const WebRect&) = 0;
     virtual void scrollRect(const WebRect&) = 0;
 
-    // Causes the container to be marked as needing layout, which in turn will cause
-    // layoutIfNeeded() to be called on any contained WebPlugin during the container's
-    // web view's lifecycle update, and in particular before calling paint() on the
-    // WebPlugin.
-    virtual void setNeedsLayout() = 0;
+    // Schedules an animation of the WebView that contains the plugin, as well as the plugin.
+    virtual void scheduleAnimation() = 0;
 
     // Causes the container to report its current geometry via
     // WebPlugin::updateGeometry.
     virtual void reportGeometry() = 0;
-
-    // Allow the plugin to pass script objects to the browser. The container
-    // tracks ownership of script objects in order to allow browser references
-    // to them to be dropped when clearScriptObjects is called.
-    virtual void allowScriptObjects() = 0;
-
-    // Drop any references to script objects allocated by the plugin.
-    // These are objects derived from WebPlugin::scriptableObject.  This is
-    // called when the plugin is being destroyed or if it needs to be
-    // re-initialized.
-    virtual void clearScriptObjects() = 0;
-
-    // Returns the scriptable object associated with the DOM element
-    // containing the plugin.
-    virtual NPObject* scriptableObjectForElement() = 0;
 
     // Returns the scriptable object associated with the DOM element
     // containing the plugin as a native v8 object.

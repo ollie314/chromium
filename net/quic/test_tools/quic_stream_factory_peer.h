@@ -23,6 +23,7 @@ class QuicCryptoClientConfig;
 class QuicHttpStream;
 class QuicStreamFactory;
 class QuicChromiumClientSession;
+class QuicClientPushPromiseIndex;
 
 namespace test {
 
@@ -39,7 +40,7 @@ class QuicStreamFactoryPeer {
       QuicStreamFactory* factory,
       const HostPortPair& host_port_pair);
 
-  static scoped_ptr<QuicHttpStream> CreateFromSession(
+  static std::unique_ptr<QuicHttpStream> CreateFromSession(
       QuicStreamFactory* factory,
       QuicChromiumClientSession* session);
 
@@ -84,6 +85,11 @@ class QuicStreamFactoryPeer {
   // Creates a dummy QUIC server config and caches it.
   static void CacheDummyServerConfig(QuicStreamFactory* factory,
                                      const QuicServerId& quic_server_id);
+
+  static QuicClientPushPromiseIndex* GetPushPromiseIndex(
+      QuicStreamFactory* factory);
+
+  static int GetNumPushStreamsCreated(QuicStreamFactory* factory);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicStreamFactoryPeer);

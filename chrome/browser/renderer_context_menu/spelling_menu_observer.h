@@ -8,15 +8,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_member.h"
 #include "base/strings/string16.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/spellchecker/spelling_service_client.h"
+#include "components/prefs/pref_member.h"
 #include "components/renderer_context_menu/render_view_context_menu_observer.h"
 
 class RenderViewContextMenuProxy;
@@ -105,7 +105,7 @@ class SpellingMenuObserver : public RenderViewContextMenuObserver {
   base::string16 result_;
 
   // The URLFetcher object used for sending a JSON-RPC request.
-  scoped_ptr<SpellingServiceClient> client_;
+  std::unique_ptr<SpellingServiceClient> client_;
 
   // A timer used for loading animation.
   base::RepeatingTimer animation_timer_;

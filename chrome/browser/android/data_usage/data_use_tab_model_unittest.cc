@@ -6,10 +6,10 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
@@ -18,6 +18,8 @@
 #include "base/test/histogram_tester.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/time/time.h"
+#include "chrome/browser/android/data_usage/data_use_matcher.h"
+#include "chrome/browser/android/data_usage/external_data_use_observer_bridge.h"
 #include "chrome/browser/android/data_usage/tab_data_use_entry.h"
 #include "components/data_usage/core/data_use_aggregator.h"
 #include "components/data_usage/core/data_use_amortizer.h"
@@ -66,27 +68,33 @@ class MockTabDataUseObserver
   MOCK_METHOD1(NotifyTrackingEnding, void(SessionID::id_type tab_id));
 };
 
+class TestExternalDataUseObserverBridge
+    : public chrome::android::ExternalDataUseObserverBridge {
+ public:
+  TestExternalDataUseObserverBridge() {}
+  void FetchMatchingRules() const override {}
+  void ShouldRegisterAsDataUseObserver(bool should_register) const override{};
+};
+
 }  // namespace
 
 namespace chrome {
 
 namespace android {
 
-class ExternalDataUseObserver;
-
 class DataUseTabModelTest : public testing::Test {
  public:
   DataUseTabModelTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {}
+      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
+        external_data_use_observer_bridge_(
+            new TestExternalDataUseObserverBridge()) {}
 
  protected:
   void SetUp() override {
     base::RunLoop().RunUntilIdle();
     data_use_tab_model_.reset(new DataUseTabModel());
     data_use_tab_model_->InitOnUIThread(
-        content::BrowserThread::GetMessageLoopProxyForThread(
-            content::BrowserThread::IO),
-        base::WeakPtr<ExternalDataUseObserver>());
+        external_data_use_observer_bridge_.get());
 
     tick_clock_ = new base::SimpleTestTickClock();
 
@@ -95,6 +103,7 @@ class DataUseTabModelTest : public testing::Test {
 
     // |tick_clock_| will be owned by |data_use_tab_model_|.
     data_use_tab_model_->tick_clock_.reset(tick_clock_);
+    data_use_tab_model_->OnControlAppInstallStateChange(true);
   }
 
   // Returns true if tab entry for |tab_id| exists in |active_tabs_|.
@@ -183,10 +192,12 @@ class DataUseTabModelTest : public testing::Test {
   // Pointer to the tick clock owned by |data_use_tab_model_|.
   base::SimpleTestTickClock* tick_clock_;
 
-  scoped_ptr<DataUseTabModel> data_use_tab_model_;
+  std::unique_ptr<DataUseTabModel> data_use_tab_model_;
 
  private:
   content::TestBrowserThreadBundle thread_bundle_;
+  std::unique_ptr<ExternalDataUseObserverBridge>
+      external_data_use_observer_bridge_;
 
   DISALLOW_COPY_AND_ASSIGN(DataUseTabModelTest);
 };
@@ -356,8 +367,8 @@ TEST_F(DataUseTabModelTest, OnTrackingLabelRemoved) {
   EXPECT_TRUE(IsTrackingDataUse(kTabID2));
   EXPECT_TRUE(IsTrackingDataUse(kTabID3));
 
-  // Observer notified of end tracking.
-  EXPECT_CALL(mock_observer, NotifyTrackingEnding(kTabID2)).Times(1);
+  // Observer not notified of end tracking.
+  EXPECT_CALL(mock_observer, NotifyTrackingEnding(kTabID2)).Times(0);
 
   data_use_tab_model_->OnTrackingLabelRemoved(kTestLabel2);
 
@@ -365,7 +376,8 @@ TEST_F(DataUseTabModelTest, OnTrackingLabelRemoved) {
   EXPECT_FALSE(IsTrackingDataUse(kTabID2));
   EXPECT_TRUE(IsTrackingDataUse(kTabID3));
 
-  EXPECT_CALL(mock_observer, NotifyTrackingEnding(kTabID3)).Times(1);
+  // Observer not notified of end tracking.
+  EXPECT_CALL(mock_observer, NotifyTrackingEnding(kTabID3)).Times(0);
 
   data_use_tab_model_->OnTrackingLabelRemoved(kTestLabel3);
 
@@ -434,7 +446,7 @@ TEST_F(DataUseTabModelTest, CompactTabEntriesWithinMaxLimit) {
 
 TEST_F(DataUseTabModelTest, ExpiredInactiveTabEntryRemovaltimeHistogram) {
   const char kUMAExpiredInactiveTabEntryRemovalDurationHistogram[] =
-      "DataUse.TabModel.ExpiredInactiveTabEntryRemovalDuration";
+      "DataUsage.TabModel.ExpiredInactiveTabEntryRemovalDuration";
   base::HistogramTester histogram_tester;
 
   StartTrackingDataUse(kTabID1, kTestLabel1);
@@ -464,7 +476,7 @@ TEST_F(DataUseTabModelTest, ExpiredInactiveTabEntryRemovaltimeHistogram) {
 
 TEST_F(DataUseTabModelTest, UnexpiredTabEntryRemovaltimeHistogram) {
   const char kUMAUnexpiredTabEntryRemovalDurationHistogram[] =
-      "DataUse.TabModel.UnexpiredTabEntryRemovalDuration";
+      "DataUsage.TabModel.UnexpiredTabEntryRemovalDuration";
   base::HistogramTester histogram_tester;
   const int32_t max_tab_entries =
       static_cast<int32_t>(data_use_tab_model_->max_tab_entries_);
@@ -885,6 +897,64 @@ TEST_F(DataUseTabModelTest, LabelRemoved) {
   RegisterURLRegexes(std::vector<std::string>(labels.size(), std::string()),
                      std::vector<std::string>(labels.size(), kURLFoo), labels);
   EXPECT_FALSE(IsTrackingDataUse(kTabID1));
+}
+
+// Tests the behavior when the external control app is uninstalled. When the app
+// gets uninstalled the active tracking sessions should end and the existing
+// matching rules should be cleared.
+TEST_F(DataUseTabModelTest, MatchingRuleClearedOnControlAppUninstall) {
+  std::vector<std::string> app_package_names, domain_regexes, labels;
+
+  app_package_names.push_back(kPackageFoo);
+  domain_regexes.push_back(kURLFoo);
+  labels.push_back(kTestLabel1);
+
+  RegisterURLRegexes(app_package_names, domain_regexes, labels);
+
+  StartTrackingDataUse(kTabID1, kTestLabel1);
+  EXPECT_TRUE(IsTrackingDataUse(kTabID1));
+  EXPECT_TRUE(data_use_tab_model_->data_use_matcher_->HasValidRules());
+
+  data_use_tab_model_->OnControlAppInstallStateChange(false);
+
+  EXPECT_FALSE(IsTrackingDataUse(kTabID1));
+  EXPECT_FALSE(data_use_tab_model_->data_use_matcher_->HasValidRules());
+}
+
+// Tests that UI navigation events are buffered until matching rules are fetched
+// and then processed to start data use tracking.
+TEST_F(DataUseTabModelTest, ProcessBufferedNavigationEventsAfterRuleFetch) {
+  MockTabDataUseObserver mock_observer;
+  std::vector<std::string> app_package_names, domain_regexes, labels;
+
+  app_package_names.push_back(kPackageFoo);
+  domain_regexes.push_back(kURLFoo);
+  labels.push_back(kTestLabel1);
+  data_use_tab_model_->AddObserver(&mock_observer);
+
+  // Navigation event should get buffered, and tracking should not start.
+  EXPECT_CALL(mock_observer, NotifyTrackingStarting(kTabID1)).Times(0);
+  EXPECT_CALL(mock_observer, NotifyTrackingEnding(kTabID1)).Times(0);
+  data_use_tab_model_->OnNavigationEvent(
+      kTabID1, DataUseTabModel::TRANSITION_OMNIBOX_SEARCH, GURL(kURLFoo),
+      std::string());
+  EXPECT_EQ(1U, data_use_tab_model_->data_use_ui_navigations_->size());
+  testing::Mock::VerifyAndClearExpectations(&mock_observer);
+
+  // Once matching rules are fetched, data use tracking should start.
+  EXPECT_CALL(mock_observer, NotifyTrackingStarting(kTabID1)).Times(1);
+  EXPECT_CALL(mock_observer, NotifyTrackingEnding(kTabID1)).Times(0);
+  RegisterURLRegexes(app_package_names, domain_regexes, labels);
+  EXPECT_FALSE(data_use_tab_model_->data_use_ui_navigations_.get());
+  testing::Mock::VerifyAndClearExpectations(&mock_observer);
+
+  // Data use tracking should end.
+  EXPECT_CALL(mock_observer, NotifyTrackingStarting(kTabID1)).Times(0);
+  EXPECT_CALL(mock_observer, NotifyTrackingEnding(kTabID1)).Times(1);
+  data_use_tab_model_->OnNavigationEvent(kTabID1,
+                                         DataUseTabModel::TRANSITION_BOOKMARK,
+                                         GURL(std::string()), std::string());
+  EXPECT_FALSE(data_use_tab_model_->data_use_ui_navigations_.get());
 }
 
 }  // namespace android

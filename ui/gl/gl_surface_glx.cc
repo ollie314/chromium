@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ui/gl/gl_surface_glx.h"
+
 extern "C" {
 #include <X11/Xlib.h>
 }
-
-#include "ui/gl/gl_surface_glx.h"
+#include <memory>
 
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -332,9 +332,9 @@ class SGIVideoSyncVSyncProvider
   scoped_refptr<SGIVideoSyncThread> vsync_thread_;
 
   // Thread shim through which the sync provider is accessed on |vsync_thread_|.
-  scoped_ptr<SGIVideoSyncProviderThreadShim> shim_;
+  std::unique_ptr<SGIVideoSyncProviderThreadShim> shim_;
 
-  scoped_ptr<VSyncProvider::UpdateVSyncCallback> pending_callback_;
+  std::unique_ptr<VSyncProvider::UpdateVSyncCallback> pending_callback_;
 
   // Raw pointers to sync primitives owned by the shim_.
   // These will only be referenced before we post a task to destroy
@@ -450,7 +450,7 @@ GLXDrawable NativeViewGLSurfaceGLX::GetDrawableHandle() const {
   return glx_window_;
 }
 
-bool NativeViewGLSurfaceGLX::Initialize() {
+bool NativeViewGLSurfaceGLX::Initialize(GLSurface::Format format) {
   XWindowAttributes attributes;
   if (!XGetWindowAttributes(g_display, parent_window_, &attributes)) {
     LOG(ERROR) << "XGetWindowAttributes failed for window " << parent_window_
@@ -588,7 +588,7 @@ UnmappedNativeViewGLSurfaceGLX::UnmappedNativeViewGLSurfaceGLX(
     size_.SetSize(1, 1);
 }
 
-bool UnmappedNativeViewGLSurfaceGLX::Initialize() {
+bool UnmappedNativeViewGLSurfaceGLX::Initialize(GLSurface::Format format) {
   DCHECK(!window_);
 
   gfx::AcceleratedWidget parent_window =

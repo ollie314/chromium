@@ -4,6 +4,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include <memory>
 #include <utility>
 
 #include "base/memory/scoped_vector.h"
@@ -73,7 +75,7 @@ class BluetoothGattBlueZTest : public testing::Test {
         error_callback_count_(0) {}
 
   void SetUp() override {
-    scoped_ptr<bluez::BluezDBusManagerSetter> dbus_setter =
+    std::unique_ptr<bluez::BluezDBusManagerSetter> dbus_setter =
         bluez::BluezDBusManager::GetSetterForTesting();
     fake_bluetooth_device_client_ = new bluez::FakeBluetoothDeviceClient;
     fake_bluetooth_gatt_service_client_ =
@@ -83,25 +85,25 @@ class BluetoothGattBlueZTest : public testing::Test {
     fake_bluetooth_gatt_descriptor_client_ =
         new bluez::FakeBluetoothGattDescriptorClient;
     dbus_setter->SetBluetoothDeviceClient(
-        scoped_ptr<bluez::BluetoothDeviceClient>(
+        std::unique_ptr<bluez::BluetoothDeviceClient>(
             fake_bluetooth_device_client_));
     dbus_setter->SetBluetoothGattServiceClient(
-        scoped_ptr<bluez::BluetoothGattServiceClient>(
+        std::unique_ptr<bluez::BluetoothGattServiceClient>(
             fake_bluetooth_gatt_service_client_));
     dbus_setter->SetBluetoothGattCharacteristicClient(
-        scoped_ptr<bluez::BluetoothGattCharacteristicClient>(
+        std::unique_ptr<bluez::BluetoothGattCharacteristicClient>(
             fake_bluetooth_gatt_characteristic_client_));
     dbus_setter->SetBluetoothGattDescriptorClient(
-        scoped_ptr<bluez::BluetoothGattDescriptorClient>(
+        std::unique_ptr<bluez::BluetoothGattDescriptorClient>(
             fake_bluetooth_gatt_descriptor_client_));
     dbus_setter->SetBluetoothAdapterClient(
-        scoped_ptr<bluez::BluetoothAdapterClient>(
+        std::unique_ptr<bluez::BluetoothAdapterClient>(
             new bluez::FakeBluetoothAdapterClient));
     dbus_setter->SetBluetoothInputClient(
-        scoped_ptr<bluez::BluetoothInputClient>(
+        std::unique_ptr<bluez::BluetoothInputClient>(
             new bluez::FakeBluetoothInputClient));
     dbus_setter->SetBluetoothAgentManagerClient(
-        scoped_ptr<bluez::BluetoothAgentManagerClient>(
+        std::unique_ptr<bluez::BluetoothAgentManagerClient>(
             new bluez::FakeBluetoothAgentManagerClient));
 
     GetAdapter();
@@ -121,6 +123,7 @@ class BluetoothGattBlueZTest : public testing::Test {
   void GetAdapter() {
     device::BluetoothAdapterFactory::GetAdapter(base::Bind(
         &BluetoothGattBlueZTest::AdapterCallback, base::Unretained(this)));
+    base::MessageLoop::current()->Run();
     ASSERT_TRUE(adapter_.get() != NULL);
     ASSERT_TRUE(adapter_->IsInitialized());
     ASSERT_TRUE(adapter_->IsPresent());
@@ -128,6 +131,10 @@ class BluetoothGattBlueZTest : public testing::Test {
 
   void AdapterCallback(scoped_refptr<BluetoothAdapter> adapter) {
     adapter_ = adapter;
+    if (base::MessageLoop::current() &&
+        base::MessageLoop::current()->is_running()) {
+      base::MessageLoop::current()->QuitWhenIdle();
+    }
   }
 
   void SuccessCallback() { ++success_callback_count_; }
@@ -137,12 +144,13 @@ class BluetoothGattBlueZTest : public testing::Test {
     last_read_value_ = value;
   }
 
-  void GattConnectionCallback(scoped_ptr<BluetoothGattConnection> conn) {
+  void GattConnectionCallback(std::unique_ptr<BluetoothGattConnection> conn) {
     ++success_callback_count_;
     gatt_conn_ = std::move(conn);
   }
 
-  void NotifySessionCallback(scoped_ptr<BluetoothGattNotifySession> session) {
+  void NotifySessionCallback(
+      std::unique_ptr<BluetoothGattNotifySession> session) {
     ++success_callback_count_;
     update_sessions_.push_back(session.release());
     QuitMessageLoop();
@@ -179,7 +187,7 @@ class BluetoothGattBlueZTest : public testing::Test {
       fake_bluetooth_gatt_characteristic_client_;
   bluez::FakeBluetoothGattDescriptorClient*
       fake_bluetooth_gatt_descriptor_client_;
-  scoped_ptr<device::BluetoothGattConnection> gatt_conn_;
+  std::unique_ptr<device::BluetoothGattConnection> gatt_conn_;
   ScopedVector<BluetoothGattNotifySession> update_sessions_;
   scoped_refptr<BluetoothAdapter> adapter_;
 
@@ -216,7 +224,7 @@ TEST_F(BluetoothGattBlueZTest, GattConnection) {
             gatt_conn_->GetDeviceAddress());
 
   gatt_conn_->Disconnect();
-  EXPECT_TRUE(device->IsConnected());
+  EXPECT_FALSE(device->IsConnected());
   EXPECT_FALSE(gatt_conn_->IsConnected());
 
   device->CreateGattConnection(
@@ -238,6 +246,7 @@ TEST_F(BluetoothGattBlueZTest, GattConnection) {
 
   EXPECT_EQ(3, success_callback_count_);
   EXPECT_EQ(0, error_callback_count_);
+  EXPECT_FALSE(device->IsConnected());
   ASSERT_TRUE(gatt_conn_.get());
   EXPECT_FALSE(gatt_conn_->IsConnected());
 
@@ -377,10 +386,41 @@ TEST_F(BluetoothGattBlueZTest, ServicesDiscovered) {
   properties->gatt_services.ReplaceValue(
       fake_bluetooth_gatt_service_client_->GetServices());
 
+  EXPECT_TRUE(device->IsGattServicesDiscoveryComplete());
+  EXPECT_EQ(1u, device->GetGattServices().size());
   EXPECT_EQ(1, observer.gatt_services_discovered_count());
   EXPECT_EQ(device, observer.last_device());
   EXPECT_EQ(bluez::FakeBluetoothDeviceClient::kLowEnergyAddress,
             observer.last_device_address());
+
+  // Disconnect from the device:
+  device->Disconnect(base::Bind(&BluetoothGattBlueZTest::SuccessCallback,
+                                base::Unretained(this)),
+                     base::Bind(&BluetoothGattBlueZTest::ErrorCallback,
+                                base::Unretained(this)));
+  fake_bluetooth_gatt_service_client_->HideHeartRateService();
+  properties->connected.ReplaceValue(false);
+
+  EXPECT_FALSE(device->IsConnected());
+  EXPECT_FALSE(device->IsGattServicesDiscoveryComplete());
+  EXPECT_EQ(0u, device->GetGattServices().size());
+
+  // Verify that the device can be connected to again:
+  device->CreateGattConnection(
+      base::Bind(&BluetoothGattBlueZTest::GattConnectionCallback,
+                 base::Unretained(this)),
+      base::Bind(&BluetoothGattBlueZTest::ConnectErrorCallback,
+                 base::Unretained(this)));
+  properties->connected.ReplaceValue(true);
+  EXPECT_TRUE(device->IsConnected());
+
+  // Verify that service discovery can be done again:
+  fake_bluetooth_gatt_service_client_->ExposeHeartRateService(
+      dbus::ObjectPath(bluez::FakeBluetoothDeviceClient::kLowEnergyPath));
+  properties->gatt_services.ReplaceValue(
+      fake_bluetooth_gatt_service_client_->GetServices());
+  EXPECT_TRUE(device->IsGattServicesDiscoveryComplete());
+  EXPECT_EQ(1u, device->GetGattServices().size());
 }
 
 TEST_F(BluetoothGattBlueZTest, GattCharacteristicAddedAndRemoved) {

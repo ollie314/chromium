@@ -7,8 +7,10 @@
 #include <string>
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "net/base/address_list.h"
+#include "net/base/ip_address.h"
 #include "net/base/net_errors.h"
 #include "net/base/request_priority.h"
 #include "net/base/test_completion_callback.h"
@@ -53,27 +55,27 @@ struct HostResolverAction {
     RETAIN,
   };
 
-  static scoped_ptr<HostResolverAction> ReturnError(Error error) {
-    scoped_ptr<HostResolverAction> result(new HostResolverAction);
+  static std::unique_ptr<HostResolverAction> ReturnError(Error error) {
+    std::unique_ptr<HostResolverAction> result(new HostResolverAction);
     result->error = error;
     return result;
   }
 
-  static scoped_ptr<HostResolverAction> ReturnResult(
+  static std::unique_ptr<HostResolverAction> ReturnResult(
       const AddressList& address_list) {
-    scoped_ptr<HostResolverAction> result(new HostResolverAction);
+    std::unique_ptr<HostResolverAction> result(new HostResolverAction);
     result->addresses = interfaces::AddressList::From(address_list);
     return result;
   }
 
-  static scoped_ptr<HostResolverAction> DropRequest() {
-    scoped_ptr<HostResolverAction> result(new HostResolverAction);
+  static std::unique_ptr<HostResolverAction> DropRequest() {
+    std::unique_ptr<HostResolverAction> result(new HostResolverAction);
     result->action = DROP;
     return result;
   }
 
-  static scoped_ptr<HostResolverAction> RetainRequest() {
-    scoped_ptr<HostResolverAction> result(new HostResolverAction);
+  static std::unique_ptr<HostResolverAction> RetainRequest() {
+    std::unique_ptr<HostResolverAction> result(new HostResolverAction);
     result->action = RETAIN;
     return result;
   }
@@ -89,7 +91,7 @@ class MockMojoHostResolver : public HostResolverMojo::Impl {
       const base::Closure& request_connection_error_callback);
   ~MockMojoHostResolver() override;
 
-  void AddAction(scoped_ptr<HostResolverAction> action);
+  void AddAction(std::unique_ptr<HostResolverAction> action);
 
   const mojo::Array<interfaces::HostResolverRequestInfoPtr>& requests() {
     return requests_received_;
@@ -99,11 +101,11 @@ class MockMojoHostResolver : public HostResolverMojo::Impl {
                   interfaces::HostResolverRequestClientPtr client) override;
 
  private:
-  std::vector<scoped_ptr<HostResolverAction>> actions_;
+  std::vector<std::unique_ptr<HostResolverAction>> actions_;
   size_t results_returned_ = 0;
   mojo::Array<interfaces::HostResolverRequestInfoPtr> requests_received_;
   const base::Closure request_connection_error_callback_;
-  std::vector<scoped_ptr<MockMojoHostResolverRequest>> requests_;
+  std::vector<std::unique_ptr<MockMojoHostResolverRequest>> requests_;
 };
 
 MockMojoHostResolver::MockMojoHostResolver(
@@ -115,7 +117,8 @@ MockMojoHostResolver::~MockMojoHostResolver() {
   EXPECT_EQ(results_returned_, actions_.size());
 }
 
-void MockMojoHostResolver::AddAction(scoped_ptr<HostResolverAction> action) {
+void MockMojoHostResolver::AddAction(
+    std::unique_ptr<HostResolverAction> action) {
   actions_.push_back(std::move(action));
 }
 
@@ -130,7 +133,7 @@ void MockMojoHostResolver::ResolveDns(
                            std::move(actions_[results_returned_]->addresses));
       break;
     case HostResolverAction::RETAIN:
-      requests_.push_back(make_scoped_ptr(new MockMojoHostResolverRequest(
+      requests_.push_back(base::WrapUnique(new MockMojoHostResolverRequest(
           std::move(client), request_connection_error_callback_)));
       break;
     case HostResolverAction::DROP:
@@ -165,20 +168,19 @@ class HostResolverMojoTest : public testing::Test {
         &request_handle, BoundNetLog()));
   }
 
-  scoped_ptr<MockMojoHostResolver> mock_resolver_;
+  std::unique_ptr<MockMojoHostResolver> mock_resolver_;
 
-  scoped_ptr<HostResolverMojo> resolver_;
+  std::unique_ptr<HostResolverMojo> resolver_;
 
   Waiter waiter_;
 };
 
 TEST_F(HostResolverMojoTest, Basic) {
   AddressList address_list;
-  IPAddressNumber address_number;
-  ASSERT_TRUE(ParseIPLiteralToNumber("1.2.3.4", &address_number));
-  address_list.push_back(IPEndPoint(address_number, 12345));
+  IPAddress address(1, 2, 3, 4);
+  address_list.push_back(IPEndPoint(address, 12345));
   address_list.push_back(
-      IPEndPoint(ConvertIPv4NumberToIPv6Number(address_number), 12345));
+      IPEndPoint(ConvertIPv4ToIPv4MappedIPv6(address), 12345));
   mock_resolver_->AddAction(HostResolverAction::ReturnResult(address_list));
   HostResolver::RequestInfo request_info(
       HostPortPair::FromString("example.com:12345"));
@@ -192,17 +194,16 @@ TEST_F(HostResolverMojoTest, Basic) {
   interfaces::HostResolverRequestInfo& request = *mock_resolver_->requests()[0];
   EXPECT_EQ("example.com", request.host.To<std::string>());
   EXPECT_EQ(12345, request.port);
-  EXPECT_EQ(interfaces::ADDRESS_FAMILY_UNSPECIFIED, request.address_family);
+  EXPECT_EQ(interfaces::AddressFamily::UNSPECIFIED, request.address_family);
   EXPECT_FALSE(request.is_my_ip_address);
 }
 
 TEST_F(HostResolverMojoTest, ResolveCachedResult) {
   AddressList address_list;
-  IPAddressNumber address_number;
-  ASSERT_TRUE(ParseIPLiteralToNumber("1.2.3.4", &address_number));
-  address_list.push_back(IPEndPoint(address_number, 12345));
+  IPAddress address(1, 2, 3, 4);
+  address_list.push_back(IPEndPoint(address, 12345));
   address_list.push_back(
-      IPEndPoint(ConvertIPv4NumberToIPv6Number(address_number), 12345));
+      IPEndPoint(ConvertIPv4ToIPv4MappedIPv6(address), 12345));
   mock_resolver_->AddAction(HostResolverAction::ReturnResult(address_list));
   HostResolver::RequestInfo request_info(
       HostPortPair::FromString("example.com:12345"));
@@ -215,9 +216,9 @@ TEST_F(HostResolverMojoTest, ResolveCachedResult) {
   EXPECT_EQ(OK, Resolve(request_info, &result));
   ASSERT_EQ(2u, result.size());
   address_list.clear();
-  address_list.push_back(IPEndPoint(address_number, 6789));
+  address_list.push_back(IPEndPoint(address, 6789));
   address_list.push_back(
-      IPEndPoint(ConvertIPv4NumberToIPv6Number(address_number), 6789));
+      IPEndPoint(ConvertIPv4ToIPv4MappedIPv6(address), 6789));
   EXPECT_EQ(address_list[0], result[0]);
   EXPECT_EQ(address_list[1], result[1]);
   EXPECT_EQ(1u, mock_resolver_->requests().size());
@@ -234,9 +235,8 @@ TEST_F(HostResolverMojoTest, ResolveCachedResult) {
 
 TEST_F(HostResolverMojoTest, Multiple) {
   AddressList address_list;
-  IPAddressNumber address_number;
-  ASSERT_TRUE(ParseIPLiteralToNumber("1.2.3.4", &address_number));
-  address_list.push_back(IPEndPoint(address_number, 12345));
+  IPAddress address(1, 2, 3, 4);
+  address_list.push_back(IPEndPoint(address, 12345));
   mock_resolver_->AddAction(HostResolverAction::ReturnResult(address_list));
   mock_resolver_->AddAction(
       HostResolverAction::ReturnError(ERR_NAME_NOT_RESOLVED));
@@ -272,13 +272,13 @@ TEST_F(HostResolverMojoTest, Multiple) {
       *mock_resolver_->requests()[0];
   EXPECT_EQ("example.com", request1.host.To<std::string>());
   EXPECT_EQ(12345, request1.port);
-  EXPECT_EQ(interfaces::ADDRESS_FAMILY_IPV4, request1.address_family);
+  EXPECT_EQ(interfaces::AddressFamily::IPV4, request1.address_family);
   EXPECT_TRUE(request1.is_my_ip_address);
   interfaces::HostResolverRequestInfo& request2 =
       *mock_resolver_->requests()[1];
   EXPECT_EQ("example.org", request2.host.To<std::string>());
   EXPECT_EQ(80, request2.port);
-  EXPECT_EQ(interfaces::ADDRESS_FAMILY_IPV6, request2.address_family);
+  EXPECT_EQ(interfaces::AddressFamily::IPV6, request2.address_family);
   EXPECT_FALSE(request2.is_my_ip_address);
 }
 
@@ -296,7 +296,7 @@ TEST_F(HostResolverMojoTest, Error) {
   interfaces::HostResolverRequestInfo& request = *mock_resolver_->requests()[0];
   EXPECT_EQ("example.com", request.host.To<std::string>());
   EXPECT_EQ(8080, request.port);
-  EXPECT_EQ(interfaces::ADDRESS_FAMILY_IPV4, request.address_family);
+  EXPECT_EQ(interfaces::AddressFamily::IPV4, request.address_family);
   EXPECT_FALSE(request.is_my_ip_address);
 }
 
@@ -328,7 +328,7 @@ TEST_F(HostResolverMojoTest, Cancel) {
   interfaces::HostResolverRequestInfo& request = *mock_resolver_->requests()[0];
   EXPECT_EQ("example.com", request.host.To<std::string>());
   EXPECT_EQ(80, request.port);
-  EXPECT_EQ(interfaces::ADDRESS_FAMILY_IPV6, request.address_family);
+  EXPECT_EQ(interfaces::AddressFamily::IPV6, request.address_family);
   EXPECT_FALSE(request.is_my_ip_address);
 }
 
@@ -344,7 +344,7 @@ TEST_F(HostResolverMojoTest, ImplDropsClientConnection) {
   interfaces::HostResolverRequestInfo& request = *mock_resolver_->requests()[0];
   EXPECT_EQ("example.com", request.host.To<std::string>());
   EXPECT_EQ(1, request.port);
-  EXPECT_EQ(interfaces::ADDRESS_FAMILY_UNSPECIFIED, request.address_family);
+  EXPECT_EQ(interfaces::AddressFamily::UNSPECIFIED, request.address_family);
   EXPECT_FALSE(request.is_my_ip_address);
 }
 
@@ -359,11 +359,10 @@ TEST_F(HostResolverMojoTest, ResolveFromCache_Miss) {
 
 TEST_F(HostResolverMojoTest, ResolveFromCache_Hit) {
   AddressList address_list;
-  IPAddressNumber address_number;
-  ASSERT_TRUE(ParseIPLiteralToNumber("1.2.3.4", &address_number));
-  address_list.push_back(IPEndPoint(address_number, 12345));
+  IPAddress address(1, 2, 3, 4);
+  address_list.push_back(IPEndPoint(address, 12345));
   address_list.push_back(
-      IPEndPoint(ConvertIPv4NumberToIPv6Number(address_number), 12345));
+      IPEndPoint(ConvertIPv4ToIPv4MappedIPv6(address), 12345));
   mock_resolver_->AddAction(HostResolverAction::ReturnResult(address_list));
   HostResolver::RequestInfo request_info(
       HostPortPair::FromString("example.com:12345"));
@@ -382,11 +381,10 @@ TEST_F(HostResolverMojoTest, ResolveFromCache_Hit) {
 
 TEST_F(HostResolverMojoTest, ResolveFromCache_CacheNotAllowed) {
   AddressList address_list;
-  IPAddressNumber address_number;
-  ASSERT_TRUE(ParseIPLiteralToNumber("1.2.3.4", &address_number));
-  address_list.push_back(IPEndPoint(address_number, 12345));
+  IPAddress address(1, 2, 3, 4);
+  address_list.push_back(IPEndPoint(address, 12345));
   address_list.push_back(
-      IPEndPoint(ConvertIPv4NumberToIPv6Number(address_number), 12345));
+      IPEndPoint(ConvertIPv4ToIPv4MappedIPv6(address), 12345));
   mock_resolver_->AddAction(HostResolverAction::ReturnResult(address_list));
   HostResolver::RequestInfo request_info(
       HostPortPair::FromString("example.com:12345"));

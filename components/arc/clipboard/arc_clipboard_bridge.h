@@ -9,12 +9,14 @@
 
 #include "base/macros.h"
 #include "components/arc/arc_bridge_service.h"
+#include "components/arc/arc_service.h"
 #include "mojo/public/cpp/bindings/binding.h"
 
 namespace arc {
 
-class ArcClipboardBridge : public ArcBridgeService::Observer,
-                           public ClipboardHost {
+class ArcClipboardBridge : public ArcService,
+                           public ArcBridgeService::Observer,
+                           public mojom::ClipboardHost {
  public:
   explicit ArcClipboardBridge(ArcBridgeService* bridge_service);
   ~ArcClipboardBridge() override;
@@ -22,16 +24,14 @@ class ArcClipboardBridge : public ArcBridgeService::Observer,
   // ArcBridgeService::Observer overrides.
   void OnClipboardInstanceReady() override;
 
-  // ClipboardHost overrides.
+  // mojom::ClipboardHost overrides.
   void SetTextContent(const mojo::String& text) override;
   void GetTextContent() override;
 
  private:
   bool CalledOnValidThread();
 
-  ArcBridgeService* bridge_service_;
-
-  mojo::Binding<ClipboardHost> binding_;
+  mojo::Binding<mojom::ClipboardHost> binding_;
 
   base::ThreadChecker thread_checker_;
 

@@ -144,6 +144,10 @@ cr.define('options', function() {
           $('sync-spinner-cancel').onclick = function() {
         self.closeOverlay_();
       };
+      $('activity-controls').onclick = function() {
+        chrome.metricsPrivate.recordUserAction(
+            'Signin_AccountSettings_GoogleActivityControlsClicked');
+      };
       $('confirm-everything-ok').onclick = function() {
         self.sendConfiguration_();
       };
@@ -643,6 +647,7 @@ cr.define('options', function() {
 
       // Hide the encryption section.
       $('customize-sync-encryption-new').hidden = true;
+      $('personalize-google-services').hidden = true;
       $('sync-custom-passphrase-container').hidden = true;
       $('sync-existing-passphrase-container').hidden = true;
 
@@ -702,6 +707,7 @@ cr.define('options', function() {
       $('sync-custom-passphrase-container').hidden = false;
       $('sync-new-encryption-section-container').hidden = false;
       $('customize-sync-encryption-new').hidden = !args.encryptAllDataAllowed;
+      $('personalize-google-services').hidden = false;
 
       $('sync-existing-passphrase-container').hidden = true;
 
@@ -842,10 +848,11 @@ cr.define('options', function() {
     /**
      * Starts the signin process for the user. Does nothing if the user is
      * already signed in.
+     * @param {boolean} creatingSupervisedUser
      * @private
      */
-    startSignIn_: function(accessPoint) {
-      chrome.send('SyncSetupStartSignIn', [accessPoint]);
+    startSignIn_: function(creatingSupervisedUser) {
+      chrome.send('SyncSetupStartSignIn', [creatingSupervisedUser]);
     },
 
     /**

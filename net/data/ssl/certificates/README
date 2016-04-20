@@ -38,21 +38,6 @@ unit tests.
      certificates actually represent the same intermediate CA but have
      different validity periods.
 
-- cybertrust_gte_root.pem
-- cybertrust_baltimore_root.pem
-- cybertrust_omniroot_chain.pem
-- cybertrust_baltimore_cross_certified_1.pem
-- cybertrust_baltimore_cross_certified_2.pem
-     These certificates are reflect a portion of the CyberTrust (Verizon
-     Business) CA hierarchy. _gte_root.pem is a legacy 1024-bit root that is
-     still widely supported, while _baltimore_root.pem reflects the newer
-     2048-bit root. For clients that only support the GTE root, two versions
-     of the Baltimore root were cross-signed by GTE, namely
-     _cross_certified_[1,2].pem. _omniroot_chain.pem contains a certificate
-     chain that was issued under the Baltimore root. Combined, these
-     certificates can be used to test real-world cross-signing; in practice,
-     they are used to test certain workarounds for OS X's chain building code.
-
 - ndn.ca.crt: "New Dream Network Certificate Authority" root certificate.
      This is an X.509 v1 certificate that omits the version field. Used to
      test that the certificate version gets the default value v1.
@@ -149,8 +134,6 @@ unit tests.
     A certificate and private key only valid on 0001-01-01. Windows refuses to
     parse this certificate.
 
-- sha256.pem: Used to test the handling of SHA-256 certs on Windows.
-
 - spdy_pooling.pem : Used to test the handling of spdy IP connection pooling
 
 - subjectAltName_sanity_check.pem : Used to test the handling of various types
@@ -224,6 +207,10 @@ unit tests.
 - client_2.key
 - client_2.pk8
 - client_2_ca.pem
+- client_3.pem
+- client_3.key
+- client_3.pk8
+- client_3_ca.pem
      This is a set of files used to unit test SSL client certificate
      authentication.
      - client_1_ca.pem and client_2_ca.pem are the certificates of
@@ -234,6 +221,10 @@ unit tests.
        private key for a second certificate signed by client_2_ca.pem.
      - each .pk8 file contains the same key as the corresponding .key file
        as PKCS#8 PrivateKeyInfo in DER encoding.
+     - client_3.pem is nearly identical to client_2.pem, except it is used
+       to test wifi EAP-TLS authentication so it uses a different set
+       of X509v3 extensions.  Specifically it includes two Subject
+       Alternative Name fields recognized by Chrome OS.
 
 ===== From net/data/ssl/scripts/generate-android-test-key.sh
 - android-test-key-rsa.pem

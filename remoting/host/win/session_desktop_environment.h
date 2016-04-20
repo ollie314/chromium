@@ -20,12 +20,13 @@ class SessionDesktopEnvironment : public Me2MeDesktopEnvironment {
   ~SessionDesktopEnvironment() override;
 
   // DesktopEnvironment implementation.
-  scoped_ptr<InputInjector> CreateInputInjector() override;
+  std::unique_ptr<InputInjector> CreateInputInjector() override;
 
  private:
   friend class SessionDesktopEnvironmentFactory;
   SessionDesktopEnvironment(
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
       const base::Closure& inject_sas,
@@ -42,13 +43,14 @@ class SessionDesktopEnvironmentFactory : public Me2MeDesktopEnvironmentFactory {
  public:
   SessionDesktopEnvironmentFactory(
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> video_capture_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
       const base::Closure& inject_sas);
   ~SessionDesktopEnvironmentFactory() override;
 
   // DesktopEnvironmentFactory implementation.
-  scoped_ptr<DesktopEnvironment> Create(
+  std::unique_ptr<DesktopEnvironment> Create(
       base::WeakPtr<ClientSessionControl> client_session_control) override;
 
  private:

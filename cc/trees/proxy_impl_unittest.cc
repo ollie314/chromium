@@ -45,13 +45,13 @@ class ProxyImplTest : public testing::Test, public TestHooks {
   FakeLayerTreeHostClient host_client_;
   FakeChannelImpl channel_impl_;
   TaskRunnerProvider* task_runner_provider_;
-  scoped_ptr<ProxyImplForTest> proxy_impl_;
-  scoped_ptr<FakeLayerTreeHost> layer_tree_host_;
+  std::unique_ptr<ProxyImplForTest> proxy_impl_;
+  std::unique_ptr<FakeLayerTreeHost> layer_tree_host_;
 };
 
 // This is a regression test. See crbug/568120.
 TEST_F(ProxyImplTest, NonZeroSmoothnessPriorityExpiration) {
-  Initialize(CompositorMode::Threaded);
+  Initialize(CompositorMode::THREADED);
   DebugScopedSetImplThread impl_thread(task_runner_provider_);
   EXPECT_FALSE(
       proxy_impl_->smoothness_priority_expiration_notifier().delay().is_zero());

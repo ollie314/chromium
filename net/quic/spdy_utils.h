@@ -13,6 +13,7 @@
 
 #include "base/macros.h"
 #include "net/base/net_export.h"
+#include "net/quic/quic_header_list.h"
 #include "net/quic/quic_protocol.h"
 #include "net/spdy/spdy_framer.h"
 
@@ -30,7 +31,7 @@ class NET_EXPORT_PRIVATE SpdyUtils {
   // Returns true on success, false if parsing fails, or invalid keys are found.
   static bool ParseHeaders(const char* data,
                            uint32_t data_len,
-                           int* content_length,
+                           int64_t* content_length,
                            SpdyHeaderBlock* headers);
 
   // Parses |data| as a std::string containing serialized HTTP/2 HEADERS frame,
@@ -43,9 +44,18 @@ class NET_EXPORT_PRIVATE SpdyUtils {
                             size_t* final_byte_offset,
                             SpdyHeaderBlock* trailers);
 
+  // Copies a list of headers to a SpdyHeaderBlock. Performs similar validation
+  // to SpdyFramer::ParseHeaderBlockInBuffer.
+  static bool CopyAndValidateTrailers(const QuicHeaderList& header_list,
+                                      size_t* final_byte_offset,
+                                      SpdyHeaderBlock* trailers);
+
   // Returns URL composed from scheme, authority, and path header
   // values, or empty string if any of those fields are missing.
   static std::string GetUrlFromHeaderBlock(const net::SpdyHeaderBlock& headers);
+
+  // Returns hostname, or empty std::string if missing.
+  static std::string GetHostNameFromHeaderBlock(const SpdyHeaderBlock& headers);
 
   // Returns true if result of |GetUrlFromHeaderBlock()| is non-empty
   // and is a well-formed URL.

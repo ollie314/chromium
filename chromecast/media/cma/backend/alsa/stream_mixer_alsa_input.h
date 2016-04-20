@@ -5,9 +5,10 @@
 #ifndef CHROMECAST_MEDIA_CMA_BACKEND_ALSA_STREAM_MIXER_ALSA_INPUT_H_
 #define CHROMECAST_MEDIA_CMA_BACKEND_ALSA_STREAM_MIXER_ALSA_INPUT_H_
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "chromecast/media/cma/backend/alsa/media_pipeline_backend_alsa.h"
 
@@ -21,15 +22,25 @@ class StreamMixerAlsaInputImpl;
 // must be called on the same thread.
 class StreamMixerAlsaInput {
  public:
+  enum class MixerError {
+    // This input is being ignored due to a sample rate changed.
+    kInputIgnored,
+    // An internal mixer error occurred. The input is no longer usable.
+    kInternalError,
+  };
+
   class Delegate {
    public:
+    using MixerError = StreamMixerAlsaInput::MixerError;
+
     // Called when the last data passed to WritePcm() has been successfully
     // added to the queue.
     virtual void OnWritePcmCompletion(
         MediaPipelineBackendAlsa::BufferStatus status,
         const MediaPipelineBackendAlsa::RenderingDelay& delay) = 0;
+
     // Called when a mixer error occurs. No further data should be written.
-    virtual void OnMixerError() = 0;
+    virtual void OnMixerError(MixerError error) = 0;
 
    protected:
     virtual ~Delegate() {}

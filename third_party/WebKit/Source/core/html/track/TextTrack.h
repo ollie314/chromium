@@ -45,9 +45,8 @@ class TextTrackList;
 class VTTRegion;
 class VTTRegionList;
 
-class CORE_EXPORT TextTrack : public RefCountedGarbageCollectedEventTargetWithInlineData<TextTrack>, public TrackBase {
+class CORE_EXPORT TextTrack : public EventTargetWithInlineData, public TrackBase {
     DEFINE_WRAPPERTYPEINFO();
-    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(TextTrack);
     USING_GARBAGE_COLLECTED_MIXIN(TextTrack);
 public:
     static TextTrack* create(const AtomicString& kind, const AtomicString& label, const AtomicString& language)
@@ -76,7 +75,7 @@ public:
     virtual void setMode(const AtomicString&);
 
     enum ReadinessState { NotLoaded = 0, Loading = 1, Loaded = 2, FailedToLoad = 3 };
-    ReadinessState readinessState() const { return m_readinessState; }
+    ReadinessState getReadinessState() const { return m_readinessState; }
     void setReadinessState(ReadinessState state) { m_readinessState = state; }
 
     TextTrackCueList* cues();
@@ -115,7 +114,7 @@ public:
 
     // EventTarget methods
     const AtomicString& interfaceName() const override;
-    ExecutionContext* executionContext() const override;
+    ExecutionContext* getExecutionContext() const override;
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -146,7 +145,7 @@ private:
     bool m_hasBeenConfigured;
 };
 
-DEFINE_TRACK_TYPE_CASTS(TextTrack, TrackBase::TextTrack);
+DEFINE_TRACK_TYPE_CASTS(TextTrack, WebMediaPlayer::TextTrack);
 
 } // namespace blink
 

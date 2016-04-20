@@ -5,7 +5,9 @@
 #include "tools/battor_agent/battor_connection_impl.h"
 
 #include "base/bind.h"
-#include "base/callback.h"
+#include "base/bind_helpers.h"
+#include "base/memory/ptr_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "device/serial/buffer.h"
 #include "device/serial/serial_io_handler.h"
 #include "net/base/io_buffer.h"
@@ -19,10 +21,10 @@ namespace {
 // Serial configuration parameters for the BattOr.
 const uint32_t kBattOrBitrate = 2000000;
 const device::serial::DataBits kBattOrDataBits =
-    device::serial::DATA_BITS_EIGHT;
+    device::serial::DataBits::EIGHT;
 const device::serial::ParityBit kBattOrParityBit =
-    device::serial::PARITY_BIT_NONE;
-const device::serial::StopBits kBattOrStopBit = device::serial::STOP_BITS_ONE;
+    device::serial::ParityBit::NONE;
+const device::serial::StopBits kBattOrStopBit = device::serial::StopBits::ONE;
 const bool kBattOrCtsFlowControl = true;
 const bool kBattOrHasCtsFlowControl = true;
 // The maximum BattOr message is 50kB long.
@@ -84,7 +86,9 @@ void BattOrConnectionImpl::OnOpened(bool success) {
   if (!success)
     Close();
 
-  listener_->OnConnectionOpened(success);
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&Listener::OnConnectionOpened,
+                            base::Unretained(listener_), success));
 }
 
 void BattOrConnectionImpl::Close() {
@@ -116,7 +120,7 @@ void BattOrConnectionImpl::SendBytes(BattOrMessageType type,
   data.push_back(BATTOR_CONTROL_BYTE_END);
 
   pending_write_length_ = data.size();
-  io_handler_->Write(make_scoped_ptr(new device::SendBuffer(
+  io_handler_->Write(base::WrapUnique(new device::SendBuffer(
       data, base::Bind(&BattOrConnectionImpl::OnBytesSent, AsWeakPtr()))));
 }
 
@@ -127,11 +131,14 @@ void BattOrConnectionImpl::ReadMessage(BattOrMessageType type) {
   // Check the left-over bytes from the last read to make sure that we don't
   // already have a full message.
   BattOrMessageType parsed_type;
-  scoped_ptr<vector<char>> bytes(new vector<char>());
+  std::unique_ptr<vector<char>> bytes(new vector<char>());
   bytes->reserve(max_bytes_to_read);
 
   if (ParseMessage(&parsed_type, bytes.get())) {
-    listener_->OnMessageRead(true, parsed_type, std::move(bytes));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(&Listener::OnMessageRead, base::Unretained(listener_), true,
+                   parsed_type, base::Passed(std::move(bytes))));
     return;
   }
 
@@ -155,13 +162,14 @@ void BattOrConnectionImpl::BeginReadBytes(size_t max_bytes_to_read) {
   auto on_receive_buffer_filled =
       base::Bind(&BattOrConnectionImpl::OnBytesRead, AsWeakPtr());
 
-  io_handler_->Read(make_scoped_ptr(new device::ReceiveBuffer(
-      pending_read_buffer_, max_bytes_to_read, on_receive_buffer_filled)));
+  io_handler_->Read(base::WrapUnique(new device::ReceiveBuffer(
+      pending_read_buffer_, static_cast<uint32_t>(max_bytes_to_read),
+      on_receive_buffer_filled)));
 }
 
 void BattOrConnectionImpl::OnBytesRead(int bytes_read,
                                        device::serial::ReceiveError error) {
-  if (bytes_read == 0 || error != device::serial::RECEIVE_ERROR_NONE) {
+  if (bytes_read == 0 || error != device::serial::ReceiveError::NONE) {
     // If we didn't have a message before, and we weren't able to read any
     // additional bytes, then there's no valid message available.
     EndReadBytes(false, BATTOR_MESSAGE_TYPE_CONTROL, nullptr);
@@ -173,7 +181,7 @@ void BattOrConnectionImpl::OnBytesRead(int bytes_read,
                               pending_read_buffer_->data() + bytes_read);
 
   BattOrMessageType type;
-  scoped_ptr<vector<char>> bytes(new vector<char>());
+  std::unique_ptr<vector<char>> bytes(new vector<char>());
   bytes->reserve(GetMaxBytesForMessageType(pending_read_message_type_));
 
   if (!ParseMessage(&type, bytes.get())) {
@@ -192,12 +200,15 @@ void BattOrConnectionImpl::OnBytesRead(int bytes_read,
   EndReadBytes(true, type, std::move(bytes));
 }
 
-void BattOrConnectionImpl::EndReadBytes(bool success,
-                                        BattOrMessageType type,
-                                        scoped_ptr<std::vector<char>> bytes) {
+void BattOrConnectionImpl::EndReadBytes(
+    bool success,
+    BattOrMessageType type,
+    std::unique_ptr<std::vector<char>> bytes) {
   pending_read_buffer_ = nullptr;
-
-  listener_->OnMessageRead(success, type, std::move(bytes));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&Listener::OnMessageRead, base::Unretained(listener_), success,
+                 type, base::Passed(std::move(bytes))));
 }
 
 bool BattOrConnectionImpl::ParseMessage(BattOrMessageType* type,
@@ -255,9 +266,11 @@ bool BattOrConnectionImpl::ParseMessage(BattOrMessageType* type,
 
 void BattOrConnectionImpl::OnBytesSent(int bytes_sent,
                                        device::serial::SendError error) {
-  bool success = (error == device::serial::SEND_ERROR_NONE) &&
+  bool success = (error == device::serial::SendError::NONE) &&
                  (pending_write_length_ == static_cast<size_t>(bytes_sent));
-  listener_->OnBytesSent(success);
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&Listener::OnBytesSent, base::Unretained(listener_), success));
 }
 
 }  // namespace battor

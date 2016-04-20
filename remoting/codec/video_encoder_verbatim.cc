@@ -25,8 +25,9 @@ static uint8_t* GetPacketOutputBuffer(VideoPacket* packet, size_t size) {
 VideoEncoderVerbatim::VideoEncoderVerbatim() {}
 VideoEncoderVerbatim::~VideoEncoderVerbatim() {}
 
-scoped_ptr<VideoPacket> VideoEncoderVerbatim::Encode(
-    const webrtc::DesktopFrame& frame) {
+std::unique_ptr<VideoPacket> VideoEncoderVerbatim::Encode(
+    const webrtc::DesktopFrame& frame,
+    uint32_t flags) {
   DCHECK(frame.data());
 
   // If nothing has changed in the frame then return NULL to indicate that
@@ -35,7 +36,7 @@ scoped_ptr<VideoPacket> VideoEncoderVerbatim::Encode(
     return nullptr;
 
   // Create a VideoPacket with common fields (e.g. DPI, rects, shape) set.
-  scoped_ptr<VideoPacket> packet(helper_.CreateVideoPacket(frame));
+  std::unique_ptr<VideoPacket> packet(helper_.CreateVideoPacket(frame));
   packet->mutable_format()->set_encoding(VideoPacketFormat::ENCODING_VERBATIM);
 
   // Calculate output size.

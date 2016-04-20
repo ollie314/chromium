@@ -5,12 +5,12 @@
 #define NET_URL_REQUEST_URL_REQUEST_FILTER_H_
 
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/containers/hash_tables.h"
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/base/net_export.h"
 #include "net/url_request/url_request_interceptor.h"
 
@@ -25,11 +25,11 @@ class URLRequestInterceptor;
 // rather than just the scheme.  Example usage:
 //
 // // Intercept "scheme://host/" requests.
-// URLRequestFilter::GetInstance()->AddHostnameInterceptor("scheme", "host",
-//                                                         interceptor.Pass());
+// URLRequestFilter::GetInstance()->AddHostnameInterceptor(
+//     "scheme", "host", std::move(interceptor));
 // // Add special handling for the URL http://foo.com/
-// URLRequestFilter::GetInstance()->AddUrlInterceptor(GURL("http://foo.com/"),
-//                                                    interceptor.Pass());
+// URLRequestFilter::GetInstance()->AddUrlInterceptor(
+//     GURL("http://foo.com/"), std::move(interceptor));
 //
 // The URLRequestFilter is implemented as a singleton that is not thread-safe,
 // and hence must only be used in test code where the network stack is used
@@ -47,14 +47,14 @@ class NET_EXPORT URLRequestFilter : public URLRequestInterceptor {
   void AddHostnameInterceptor(
       const std::string& scheme,
       const std::string& hostname,
-      scoped_ptr<URLRequestInterceptor> interceptor);
+      std::unique_ptr<URLRequestInterceptor> interceptor);
   void RemoveHostnameHandler(const std::string& scheme,
                              const std::string& hostname);
 
   // Returns true if we successfully added the URL handler.  This will replace
   // old handlers for the URL if one existed.
   bool AddUrlInterceptor(const GURL& url,
-                         scoped_ptr<URLRequestInterceptor> interceptor);
+                         std::unique_ptr<URLRequestInterceptor> interceptor);
 
   void RemoveUrlHandler(const GURL& url);
 
@@ -72,11 +72,13 @@ class NET_EXPORT URLRequestFilter : public URLRequestInterceptor {
 
  private:
   // scheme,hostname -> URLRequestInterceptor
-  using HostnameInterceptorMap = std::map<std::pair<std::string, std::string>,
-                                          scoped_ptr<URLRequestInterceptor>>;
+  using HostnameInterceptorMap =
+      std::map<std::pair<std::string, std::string>,
+               std::unique_ptr<URLRequestInterceptor>>;
   // URL -> URLRequestInterceptor
   using URLInterceptorMap =
-      base::ScopedPtrHashMap<std::string, scoped_ptr<URLRequestInterceptor>>;
+      base::ScopedPtrHashMap<std::string,
+                             std::unique_ptr<URLRequestInterceptor>>;
 
   URLRequestFilter();
   ~URLRequestFilter() override;

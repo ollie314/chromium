@@ -5,13 +5,13 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_MEDIA_ROUTER_MEDIA_ROUTER_UI_H_
 #define CHROME_BROWSER_UI_WEBUI_MEDIA_ROUTER_MEDIA_ROUTER_UI_H_
 
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/media/router/issue.h"
@@ -38,16 +38,16 @@ class Collator;
 
 namespace media_router {
 
+class CreatePresentationConnectionRequest;
 class IssuesObserver;
 class MediaRoute;
 class MediaRouter;
 class MediaRouterDialogCallbacks;
-class MediaRouterMojoImpl;
-class MediaRouterWebUIMessageHandler;
 class MediaRoutesObserver;
+class MediaRouterWebUIMessageHandler;
 class MediaSink;
 class MediaSinksObserver;
-class CreatePresentationConnectionRequest;
+class RouteRequestResult;
 
 // Implements the chrome://media-router user interface.
 class MediaRouterUI : public ConstrainedWebDialogUI,
@@ -88,7 +88,8 @@ class MediaRouterUI : public ConstrainedWebDialogUI,
   void InitWithPresentationSessionRequest(
       content::WebContents* initiator,
       const base::WeakPtr<PresentationServiceDelegateImpl>& delegate,
-      scoped_ptr<CreatePresentationConnectionRequest> presentation_request);
+      std::unique_ptr<CreatePresentationConnectionRequest>
+          presentation_request);
 
   // Closes the media router UI.
   void Close();
@@ -140,6 +141,10 @@ class MediaRouterUI : public ConstrainedWebDialogUI,
 
   void UpdateMaxDialogHeight(int height);
 
+  void InitForTest(MediaRouter* router,
+                   content::WebContents* initiator,
+                   MediaRouterWebUIMessageHandler* handler);
+
  private:
   FRIEND_TEST_ALL_PREFIXES(MediaRouterUITest, SortedSinks);
   FRIEND_TEST_ALL_PREFIXES(MediaRouterUITest,
@@ -151,6 +156,9 @@ class MediaRouterUI : public ConstrainedWebDialogUI,
                            GetExtensionNameEmptyWhenNotInstalled);
   FRIEND_TEST_ALL_PREFIXES(MediaRouterUITest,
                            GetExtensionNameEmptyWhenNotExtensionURL);
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterUITest,
+                           RouteCreationTimeoutForPresentation);
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterUITest, RouteRequestFromIncognito);
 
   class UIIssuesObserver;
 
@@ -193,14 +201,17 @@ class MediaRouterUI : public ConstrainedWebDialogUI,
 
   // Callback passed to MediaRouter to receive response to route creation
   // requests.
-  void OnRouteResponseReceived(const int route_request_id,
-                               const MediaSink::Id& sink_id,
-                               const MediaRoute* route,
-                               const std::string& presentation_id,
-                               const std::string& error);
+  void OnRouteResponseReceived(
+      int route_request_id,
+      const MediaSink::Id& sink_id,
+      MediaCastMode cast_mode,
+      const base::string16& presentation_request_source_name,
+      const RouteRequestResult& result);
 
-  // Creates and sends an issue if route creation times out.
-  void RouteCreationTimeout();
+  // Creates and sends an issue if route creation timed out.
+  void SendIssueForRouteTimeout(
+      MediaCastMode cast_mode,
+      const base::string16& presentation_request_source_name);
 
   // Initializes the dialog with mirroring sources derived from |initiator|.
   void InitCommon(content::WebContents* initiator);
@@ -233,8 +244,8 @@ class MediaRouterUI : public ConstrainedWebDialogUI,
 
   // These are non-null while this instance is registered to receive
   // updates from them.
-  scoped_ptr<IssuesObserver> issues_observer_;
-  scoped_ptr<MediaRoutesObserver> routes_observer_;
+  std::unique_ptr<IssuesObserver> issues_observer_;
+  std::unique_ptr<MediaRoutesObserver> routes_observer_;
 
   // Set to true by |handler_| when the UI has been initialized.
   bool ui_initialized_;
@@ -248,22 +259,22 @@ class MediaRouterUI : public ConstrainedWebDialogUI,
 
   // Used for locale-aware sorting of sinks by name. Set during |InitCommon()|
   // using the current locale. Set to null
-  scoped_ptr<icu::Collator> collator_;
+  std::unique_ptr<icu::Collator> collator_;
 
   std::vector<MediaSinkWithCastModes> sinks_;
   std::vector<MediaRoute> routes_;
   std::vector<MediaRoute::Id> joinable_route_ids_;
   CastModeSet cast_modes_;
 
-  scoped_ptr<QueryResultManager> query_result_manager_;
+  std::unique_ptr<QueryResultManager> query_result_manager_;
 
   // If set, then the result of the next presentation route request will
   // be handled by this object.
-  scoped_ptr<CreatePresentationConnectionRequest> create_session_request_;
+  std::unique_ptr<CreatePresentationConnectionRequest> create_session_request_;
 
   // Set to the presentation request corresponding to the presentation cast
   // mode, if supported. Otherwise set to nullptr.
-  scoped_ptr<PresentationRequest> presentation_request_;
+  std::unique_ptr<PresentationRequest> presentation_request_;
 
   // It's possible for PresentationServiceDelegateImpl to be destroyed before
   // this class.
@@ -277,10 +288,7 @@ class MediaRouterUI : public ConstrainedWebDialogUI,
   content::WebContents* initiator_;
 
   // Pointer to the MediaRouter for this instance's BrowserContext.
-  MediaRouterMojoImpl* router_;
-
-  // Timer used to implement a timeout on a create route request.
-  base::OneShotTimer route_creation_timer_;
+  MediaRouter* router_;
 
   // The start time for UI initialization metrics timer. When a dialog has been
   // been painted and initialized with initial data, this should be cleared.

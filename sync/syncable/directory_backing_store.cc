@@ -40,6 +40,9 @@ namespace syncable {
 // Increment this version whenever updating DB tables.
 const int32_t kCurrentDBVersion = 90;
 
+// The current database page size in Kilobytes.
+const int32_t kCurrentPageSizeKB = 32768;
+
 // Iterate over the fields of |entry| and bind each to |statement| for
 // updating.  Returns the number of args bound.
 void BindFields(const EntryKernel& entry,
@@ -123,9 +126,9 @@ void UnpackProtoFields(sql::Statement* statement,
 // The caller owns the returned EntryKernel*.  Assumes the statement currently
 // points to a valid row in the metas table. Returns NULL to indicate that
 // it detected a corruption in the data on unpacking.
-scoped_ptr<EntryKernel> UnpackEntry(sql::Statement* statement,
-                                    int* total_specifics_copies) {
-  scoped_ptr<EntryKernel> kernel(new EntryKernel());
+std::unique_ptr<EntryKernel> UnpackEntry(sql::Statement* statement,
+                                         int* total_specifics_copies) {
+  std::unique_ptr<EntryKernel> kernel(new EntryKernel());
   DCHECK_EQ(statement->ColumnCount(), static_cast<int>(FIELD_COUNT));
   int i = 0;
   for (i = BEGIN_FIELDS; i < INT64_FIELDS_END; ++i) {
@@ -155,7 +158,7 @@ scoped_ptr<EntryKernel> UnpackEntry(sql::Statement* statement,
     sync_pb::UniquePosition proto;
     if (!proto.ParseFromString(temp)) {
       DVLOG(1) << "Unpacked invalid position.  Assuming the DB is corrupt";
-      return scoped_ptr<EntryKernel>();
+      return std::unique_ptr<EntryKernel>();
     }
 
     kernel->mutable_ref(static_cast<UniquePositionField>(i)) =
@@ -172,7 +175,7 @@ scoped_ptr<EntryKernel> UnpackEntry(sql::Statement* statement,
       !kernel->ref(UNIQUE_POSITION).IsValid()) {
     DVLOG(1) << "Unpacked invalid position on an entity that should have a "
              << "valid position.  Assuming the DB is corrupt.";
-    return scoped_ptr<EntryKernel>();
+    return std::unique_ptr<EntryKernel>();
   }
 
   return kernel;
@@ -260,7 +263,7 @@ void UploadModelTypeEntryCount(const int total_specifics_copies,
 
 DirectoryBackingStore::DirectoryBackingStore(const string& dir_name)
     : dir_name_(dir_name),
-      database_page_size_(32768),
+      database_page_size_(kCurrentPageSizeKB),
       needs_metas_column_refresh_(false),
       needs_share_info_column_refresh_(false) {
   DCHECK(base::ThreadTaskRunnerHandle::IsSet());
@@ -270,7 +273,7 @@ DirectoryBackingStore::DirectoryBackingStore(const string& dir_name)
 DirectoryBackingStore::DirectoryBackingStore(const string& dir_name,
                                              sql::Connection* db)
     : dir_name_(dir_name),
-      database_page_size_(32768),
+      database_page_size_(kCurrentPageSizeKB),
       db_(db),
       needs_metas_column_refresh_(false),
       needs_share_info_column_refresh_(false) {
@@ -413,13 +416,19 @@ bool DirectoryBackingStore::OpenInMemory() {
 }
 
 bool DirectoryBackingStore::InitializeTables() {
-  int page_size = 0;
-  if (GetDatabasePageSize(&page_size) && page_size == 4096) {
-    IncreasePageSizeTo32K();
-  }
+  if (!UpdatePageSizeIfNecessary())
+    return false;
+
   sql::Transaction transaction(db_.get());
   if (!transaction.Begin())
     return false;
+
+  if (!db_->DoesTableExist("share_version")) {
+    // Delete the existing database (if any), and create a fresh one.
+    DropAllTables();
+    if (!CreateTables())
+      return false;
+  }
 
   int version_on_disk = GetVersion();
 
@@ -569,21 +578,13 @@ bool DirectoryBackingStore::InitializeTables() {
   // version.
   if (version_on_disk == kCurrentDBVersion && needs_column_refresh()) {
     if (!RefreshColumns())
-      version_on_disk = 0;
-  }
-
-  // A final, alternative catch-all migration to simply re-sync everything.
-  if (version_on_disk != kCurrentDBVersion) {
-    if (version_on_disk > kCurrentDBVersion)
-      return false;
-
-    // Fallback (re-sync everything) migration path.
-    DVLOG(1) << "Old/null sync database, version " << version_on_disk;
-    // Delete the existing database (if any), and create a fresh one.
-    DropAllTables();
-    if (!CreateTables())
       return false;
   }
+
+  // In case of error, let the caller decide whether to re-sync from scratch
+  // with a new database.
+  if (version_on_disk != kCurrentDBVersion)
+    return false;
 
   return transaction.Commit();
 }
@@ -663,7 +664,8 @@ bool DirectoryBackingStore::LoadEntries(Directory::MetahandlesMap* handles_map,
   sql::Statement s(db_->GetUniqueStatement(select.c_str()));
 
   while (s.Step()) {
-    scoped_ptr<EntryKernel> kernel = UnpackEntry(&s, &total_specifics_copies);
+    std::unique_ptr<EntryKernel> kernel =
+        UnpackEntry(&s, &total_specifics_copies);
     // A null kernel is evidence of external data corruption.
     if (!kernel)
       return false;
@@ -709,7 +711,7 @@ bool DirectoryBackingStore::LoadDeleteJournals(
 
   while (s.Step()) {
     int total_entry_copies;
-    scoped_ptr<EntryKernel> kernel = UnpackEntry(&s, &total_entry_copies);
+    std::unique_ptr<EntryKernel> kernel = UnpackEntry(&s, &total_entry_copies);
     // A null kernel is evidence of external data corruption.
     if (!kernel)
       return false;
@@ -1472,6 +1474,7 @@ bool DirectoryBackingStore::MigrateVersion89To90() {
 
 bool DirectoryBackingStore::CreateTables() {
   DVLOG(1) << "First run, creating tables";
+
   // Create two little tables share_version and share_info
   if (!db_->Execute(
           "CREATE TABLE share_version ("
@@ -1711,10 +1714,16 @@ bool DirectoryBackingStore::GetDatabasePageSize(int* page_size) {
   return true;
 }
 
-bool DirectoryBackingStore::IncreasePageSizeTo32K() {
-  if (!db_->Execute("PRAGMA page_size=32768;") || !Vacuum()) {
+bool DirectoryBackingStore::UpdatePageSizeIfNecessary() {
+  int page_size;
+  if (!GetDatabasePageSize(&page_size))
     return false;
-  }
+  if (page_size == kCurrentPageSizeKB)
+    return true;
+  std::string update_page_size = base::StringPrintf(
+    "PRAGMA page_size=%i;", kCurrentPageSizeKB);
+  if (!db_->Execute(update_page_size.c_str()) || !Vacuum())
+    return false;
   return true;
 }
 

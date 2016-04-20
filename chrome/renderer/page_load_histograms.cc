@@ -6,9 +6,9 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 
-#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
@@ -31,6 +31,7 @@
 #include "extensions/common/url_pattern.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
+#include "third_party/WebKit/public/platform/URLConversion.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -696,8 +697,8 @@ void DumpDeprecatedHistograms(const WebPerformance& performance,
   }
   PLT_HISTOGRAM("PLT.CommitToFinish", finish_all_loads - commit);
 
-  scoped_ptr<TimeDelta> begin_to_first_paint;
-  scoped_ptr<TimeDelta> commit_to_first_paint;
+  std::unique_ptr<TimeDelta> begin_to_first_paint;
+  std::unique_ptr<TimeDelta> commit_to_first_paint;
   if (!first_paint.is_null()) {
     // 'first_paint' can be before 'begin' for an unknown reason.
     // See bug http://crbug.com/125273 for details.
@@ -852,50 +853,34 @@ void DumpDeprecatedHistograms(const WebPerformance& performance,
 }  // namespace
 
 PageLoadHistograms::PageLoadHistograms(content::RenderView* render_view)
-    : content::RenderViewObserver(render_view),
-      dumped_first_layout_histograms_(false),
-      weak_factory_(this) {
+    : content::RenderViewObserver(render_view) {
 }
 
 PageLoadHistograms::~PageLoadHistograms() {
 }
 
-bool PageLoadHistograms::ShouldDump(WebFrame* frame) {
+void PageLoadHistograms::Dump(WebFrame* frame) {
   // We only dump histograms for main frames.
   // In the future, it may be interesting to tag subframes and dump them too.
   if (!frame || frame->parent())
-    return false;
+    return;
 
   // If the main frame lives in a different process, don't do anything.
   // Histogram data will be recorded by the real main frame.
   if (frame->isWebRemoteFrame())
-    return false;
+    return;
 
   // Only dump for supported schemes.
   URLPattern::SchemeMasks scheme_type =
       GetSupportedSchemeType(frame->document().url());
   if (scheme_type == 0)
-    return false;
+    return;
 
   // Don't dump stats for the NTP, as PageLoadHistograms should only be recorded
   // for pages visited due to an explicit user navigation.
   if (SearchBouncer::GetInstance()->IsNewTabPage(frame->document().url())) {
-    return false;
-  }
-
-  // Ignore multipart requests.
-  if (frame->dataSource()->response().isMultipartPayload())
-    return false;
-
-  return true;
-}
-
-void PageLoadHistograms::Dump(WebFrame* frame) {
-  if (!ShouldDump(frame))
     return;
-
-  URLPattern::SchemeMasks scheme_type =
-      GetSupportedSchemeType(frame->document().url());
+  }
 
   DocumentState* document_state =
       DocumentState::FromDataSource(frame->dataSource());
@@ -910,18 +895,16 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
     DCHECK(handled || !data_reduction_proxy_was_used);
   }
 
-  bool came_from_websearch =
-      IsFromGoogleSearchResult(frame->document().url(),
-                               GURL(frame->document().referrer()));
+  bool came_from_websearch = IsFromGoogleSearchResult(
+      frame->document().url(),
+      blink::WebStringToGURL(frame->document().referrer()));
   int websearch_chrome_joint_experiment_id = kNoExperiment;
   bool is_preview = false;
   if (came_from_websearch) {
-    websearch_chrome_joint_experiment_id =
-        GetQueryStringBasedExperiment(GURL(frame->document().referrer()));
+    websearch_chrome_joint_experiment_id = GetQueryStringBasedExperiment(
+        blink::WebStringToGURL(frame->document().referrer()));
     is_preview = ViaHeaderContains(frame, "1.1 Google Instant Proxy Preview");
   }
-
-  MaybeDumpFirstLayoutHistograms();
 
   content::RenderFrame* render_frame =
       content::RenderFrame::FromWebFrame(frame);
@@ -957,29 +940,6 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
       content::kHistogramSynchronizerReservedSequenceNumber);
 }
 
-void PageLoadHistograms::MaybeDumpFirstLayoutHistograms() {
-  if (dumped_first_layout_histograms_)
-    return;
-
-  const WebPerformance& performance =
-    render_view()->GetWebView()->mainFrame()->performance();
-  Time first_layout = Time::FromDoubleT(performance.firstLayout());
-  if (first_layout.is_null())
-    return;
-
-  Time navigation_start = Time::FromDoubleT(performance.navigationStart());
-  if (!navigation_start.is_null())
-    PLT_HISTOGRAM("PLT.PT.NavigationStartToFirstLayout",
-                  first_layout - navigation_start);
-
-  Time response_start = Time::FromDoubleT(performance.responseStart());
-  if (!response_start.is_null())
-    PLT_HISTOGRAM("PLT.PT.ResponseStartToFirstLayout",
-                  first_layout - response_start);
-
-  dumped_first_layout_histograms_ = true;
-}
-
 void PageLoadHistograms::FrameWillClose(WebFrame* frame) {
   Dump(frame);
 }
@@ -989,49 +949,6 @@ void PageLoadHistograms::ClosePage() {
   // called when a page is destroyed. page_load_histograms_.Dump() is safe
   // to call multiple times for the same frame, but it will simplify things.
   Dump(render_view()->GetWebView()->mainFrame());
-}
-
-void PageLoadHistograms::DidUpdateLayout() {
-  DCHECK(content::RenderThread::Get());
-  // Normally, PageLoadHistograms dumps all histograms in the FrameWillClose or
-  // ClosePage callbacks, which happen as a page is being torn down. However,
-  // renderers that are killed by fast shutdown (for example, renderers closed
-  // due to the user closing a tab) don't get a chance to run these callbacks
-  // (see crbug.com/382542 for details).
-  //
-  // Longer term, we need to migrate histogram recording to happen earlier in
-  // the page load life cycle, so histograms aren't lost when tabs are
-  // closed. As a first step, we use the RenderViewObserver::DidUpdateLayout
-  // callback to log first layout histograms earlier in the page load life
-  // cycle.
-
-  if (dumped_first_layout_histograms_)
-    return;
-
-  WebFrame* frame = render_view()->GetWebView()->mainFrame();
-  if (!ShouldDump(frame))
-    return;
-
-  // The canonical source for the 'first layout time' is the
-  // blink::WebPerformance object, so we need to read the first layout timestamp
-  // from that object, rather than taking our own timestamp in this
-  // callback.
-  //
-  // This DidUpdateLayout callback gets invoked in the midst of the
-  // layout process. The logic that records the first layout time in the
-  // blink::WebPerformance object may run later in the layout process, after
-  // DidUpdateLayout gets invoked. Thus, we schedule a callback to run
-  // MaybeDumpFirstLayoutHistograms asynchronously, after the layout process is
-  // complete.
-  //
-  // Note, too, that some layouts are performed with pending stylesheets, and
-  // blink will not record firstLayout during those layouts, so firstLayout may
-  // not be populated during the layout associated with the first
-  // DidUpdateLayout callback.
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::Bind(&PageLoadHistograms::MaybeDumpFirstLayoutHistograms,
-                 weak_factory_.GetWeakPtr()));
 }
 
 void PageLoadHistograms::LogPageLoadTime(const DocumentState* document_state,

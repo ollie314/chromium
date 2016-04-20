@@ -42,10 +42,12 @@ Status ChromeImpl::GetWebViewIds(std::list<std::string>* web_view_ids) {
   if (status.IsError())
     return status;
 
-  // Check if some web views are closed.
+  // Check if some web views are closed (or in the case of background pages,
+  // become inactive).
   WebViewList::iterator it = web_views_.begin();
   while (it != web_views_.end()) {
-    if (!views_info.GetForId((*it)->GetId())) {
+    const WebViewInfo* view = views_info.GetForId((*it)->GetId());
+    if (!view || view->IsInactiveBackgroundPage()) {
       it = web_views_.erase(it);
     } else {
       ++it;
@@ -55,11 +57,8 @@ Status ChromeImpl::GetWebViewIds(std::list<std::string>* web_view_ids) {
   // Check for newly-opened web views.
   for (size_t i = 0; i < views_info.GetSize(); ++i) {
     const WebViewInfo& view = views_info.Get(i);
-    if (devtools_http_client_->IsBrowserWindow(view.type) ||
-        (view.type == WebViewInfo::kOther &&
-         (view.url.find("chrome-extension://") == 0 ||
-          view.url == "chrome://print/" ||
-          view.url == "chrome://media-router/"))) {
+    if (devtools_http_client_->IsBrowserWindow(view) &&
+        !view.IsInactiveBackgroundPage()) {
       bool found = false;
       for (WebViewList::const_iterator web_view_iter = web_views_.begin();
            web_view_iter != web_views_.end(); ++web_view_iter) {
@@ -69,7 +68,7 @@ Status ChromeImpl::GetWebViewIds(std::list<std::string>* web_view_ids) {
         }
       }
       if (!found) {
-        scoped_ptr<DevToolsClient> client(
+        std::unique_ptr<DevToolsClient> client(
             devtools_http_client_->CreateClient(view.id));
         for (ScopedVector<DevToolsEventListener>::const_iterator listener =
                  devtools_event_listeners_.begin();
@@ -138,10 +137,10 @@ Status ChromeImpl::Quit() {
 }
 
 ChromeImpl::ChromeImpl(
-    scoped_ptr<DevToolsHttpClient> http_client,
-    scoped_ptr<DevToolsClient> websocket_client,
+    std::unique_ptr<DevToolsHttpClient> http_client,
+    std::unique_ptr<DevToolsClient> websocket_client,
     ScopedVector<DevToolsEventListener>& devtools_event_listeners,
-    scoped_ptr<PortReservation> port_reservation)
+    std::unique_ptr<PortReservation> port_reservation)
     : quit_(false),
       devtools_http_client_(std::move(http_client)),
       devtools_websocket_client_(std::move(websocket_client)),

@@ -60,6 +60,11 @@ class ArcNotificationDelegate : public message_center::NotificationDelegate {
       item_->Click();
   }
 
+  void ButtonClick(int button_index) override {
+    if (item_)
+      item_->ButtonClick(button_index);
+  }
+
  private:
   // The destructor is private since this class is ref-counted.
   ~ArcNotificationDelegate() override {}
@@ -84,7 +89,7 @@ ArcNotificationItem::ArcNotificationItem(
       weak_ptr_factory_(this) {}
 
 void ArcNotificationItem::UpdateWithArcNotificationData(
-    const ArcNotificationData& data) {
+    const mojom::ArcNotificationData& data) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(notification_key_ == data.key);
 
@@ -104,15 +109,15 @@ void ArcNotificationItem::UpdateWithArcNotificationData(
   message_center::NotificationType type;
 
   switch (data.type) {
-    case ARC_NOTIFICATION_TYPE_BASIC:
-      type = message_center::NOTIFICATION_TYPE_SIMPLE;
+    case mojom::ArcNotificationType::BASIC:
+      type = message_center::NOTIFICATION_TYPE_BASE_FORMAT;
       break;
-    case ARC_NOTIFICATION_TYPE_IMAGE:
+    case mojom::ArcNotificationType::IMAGE:
       // TODO(yoshiki): Implement this types.
-      type = message_center::NOTIFICATION_TYPE_SIMPLE;
+      type = message_center::NOTIFICATION_TYPE_BASE_FORMAT;
       LOG(ERROR) << "Unsupported notification type: image";
       break;
-    case ARC_NOTIFICATION_TYPE_PROGRESS:
+    case mojom::ArcNotificationType::PROGRESS:
       type = message_center::NOTIFICATION_TYPE_PROGRESS;
       rich_data.timestamp = base::Time::UnixEpoch() +
                             base::TimeDelta::FromMilliseconds(data.time);
@@ -122,8 +127,17 @@ void ArcNotificationItem::UpdateWithArcNotificationData(
                                data.progress_max * 100))));
       break;
   }
-  DCHECK(0 <= data.type && data.type <= ARC_NOTIFICATION_TYPE_MAX)
-      << "Unsupported notification type: " << data.type;
+  DCHECK(IsKnownEnumValue(data.type)) << "Unsupported notification type: "
+                                      << data.type;
+
+  for (size_t i = 0; i < data.buttons.size(); i++) {
+    rich_data.buttons.push_back(message_center::ButtonInfo(
+        base::UTF8ToUTF16(data.buttons.at(i)->label.get())));
+  }
+
+  // If the client is old (version < 1), both |no_clear| and |ongoing_event|
+  // are false.
+  rich_data.pinned = (data.no_clear || data.ongoing_event);
 
   // The identifier of the notifier, which is used to distinguish the notifiers
   // in the message center.
@@ -158,9 +172,9 @@ void ArcNotificationItem::UpdateWithArcNotificationData(
 
 ArcNotificationItem::~ArcNotificationItem() {}
 
-void ArcNotificationItem::OnClosedFromAndroid() {
+void ArcNotificationItem::OnClosedFromAndroid(bool by_user) {
   being_removed_by_manager_ = true;  // Closing is initiated by the manager.
-  message_center_->RemoveNotification(notification_id_, true /* by_user */);
+  message_center_->RemoveNotification(notification_id_, by_user);
 }
 
 void ArcNotificationItem::Close(bool by_user) {
@@ -179,6 +193,11 @@ void ArcNotificationItem::Click() {
   manager_->SendNotificationClickedOnChrome(notification_key_);
 }
 
+void ArcNotificationItem::ButtonClick(int button_index) {
+  manager_->SendNotificationButtonClickedOnChrome(
+      notification_key_, button_index);
+}
+
 void ArcNotificationItem::OnImageDecoded(const SkBitmap& bitmap) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -190,7 +209,7 @@ void ArcNotificationItem::OnImageDecoded(const SkBitmap& bitmap) {
 
   if (newer_data_) {
     // There is the newer data, so updates again.
-    ArcNotificationDataPtr data(std::move(newer_data_));
+    mojom::ArcNotificationDataPtr data(std::move(newer_data_));
     UpdateWithArcNotificationData(*data);
   }
 }

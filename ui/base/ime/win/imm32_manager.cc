@@ -6,19 +6,15 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/scoped_comptr.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/ime/composition_text.h"
-
-// "imm32.lib" is required by IMM32 APIs used in this file.
-// NOTE(hbono): To comply with a comment from Darin, I have added
-// this #pragma directive instead of adding "imm32.lib" to a project file.
-#pragma comment(lib, "imm32.lib")
 
 // Following code requires wchar_t to be same as char16. It should always be
 // true on Windows.
@@ -46,7 +42,7 @@ void GetCompositionTargetRange(HIMC imm_context, int* target_start,
   if (attribute_size > 0) {
     int start = 0;
     int end = 0;
-    scoped_ptr<char[]> attribute_data(new char[attribute_size]);
+    std::unique_ptr<char[]> attribute_data(new char[attribute_size]);
     if (attribute_data.get()) {
       ::ImmGetCompositionString(imm_context, GCS_COMPATTR,
                                 attribute_data.get(), attribute_size);
@@ -74,7 +70,7 @@ void GetCompositionUnderlines(HIMC imm_context,
                                               NULL, 0);
   int clause_length = clause_size / sizeof(uint32_t);
   if (clause_length) {
-    scoped_ptr<uint32_t[]> clause_data(new uint32_t[clause_length]);
+    std::unique_ptr<uint32_t[]> clause_data(new uint32_t[clause_length]);
     if (clause_data.get()) {
       ::ImmGetCompositionString(imm_context, GCS_COMPCLAUSE,
                                 clause_data.get(), clause_size);
@@ -534,7 +530,7 @@ bool IMM32Manager::IsRTLKeyboardLayoutInstalled() {
 
   // Retrieve the keyboard layouts in an array and check if there is an RTL
   // layout in it.
-  scoped_ptr<HKL[]> layouts(new HKL[size]);
+  std::unique_ptr<HKL[]> layouts(new HKL[size]);
   ::GetKeyboardLayoutList(size, layouts.get());
   for (int i = 0; i < size; ++i) {
     if (IsRTLPrimaryLangID(

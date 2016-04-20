@@ -662,7 +662,10 @@ FileManager.prototype = /** @struct */ {
     this.dialogDom_ = dialogDom;
     this.document_ = this.dialogDom_.ownerDocument;
 
-    return this.initBackgroundPagePromise_.then(function() {
+    return Promise.all([
+      this.initBackgroundPagePromise_,
+      window.importElementsPromise
+    ]).then(function() {
       this.initEssentialUI_();
       this.initAdditionalUI_();
       return this.initSettingsPromise_;
@@ -742,24 +745,31 @@ FileManager.prototype = /** @struct */ {
    * @private
    */
   FileManager.prototype.initVolumeManager_ = function() {
-    // Auto resolving to local path does not work for folders (e.g., dialog for
-    // loading unpacked extensions).
-    var noLocalPathResolution =
-        DialogType.isFolderDialog(this.launchParams_.type);
+    var allowedPaths = this.launchParams_.allowedPaths;
+    // Files.app native implementation create snapshot files for non-native
+    // files. But it does not work for folders (e.g., dialog for loading
+    // unpacked extensions).
+    if (allowedPaths === AllowedPaths.NATIVE_PATH &&
+        !DialogType.isFolderDialog(this.launchParams_.type)) {
+      if (this.launchParams_.type == DialogType.SELECT_SAVEAS_FILE) {
+        // Only drive can create snapshot files for saving.
+        allowedPaths = AllowedPaths.NATIVE_OR_DRIVE_PATH;
+      } else {
+        allowedPaths = AllowedPaths.ANY_PATH;
+      }
+    }
 
-    // If this condition is false, VolumeManagerWrapper hides all drive
-    // related event and data, even if Drive is enabled on preference.
+    // VolumeManagerWrapper hides virtual file system related event and data
+    // even depends on the value of |supportVirtualPath|. If it is
+    // VirtualPathSupport.NO_VIRTUAL_PATH, it hides Drive even if Drive is
+    // enabled on preference.
     // In other words, even if Drive is disabled on preference but Files.app
     // should show Drive when it is re-enabled, then the value should be set to
     // true.
     // Note that the Drive enabling preference change is listened by
     // DriveIntegrationService, so here we don't need to take care about it.
-    var nonNativeEnabled =
-        !noLocalPathResolution || !this.launchParams_.shouldReturnLocalPath;
     this.volumeManager_ = new VolumeManagerWrapper(
-        /** @type {VolumeManagerWrapper.NonNativeVolumeStatus} */
-        (nonNativeEnabled),
-        this.backgroundPage_);
+        allowedPaths, this.backgroundPage_);
   };
 
   /**
@@ -792,11 +802,6 @@ FileManager.prototype = /** @struct */ {
     assert(this.launchParams_);
     this.ui_ = new FileManagerUI(
         assert(this.providersModel_), this.dialogDom_, this.launchParams_);
-
-    // Show the window as soon as the UI pre-initialization is done.
-    if (this.dialogType == DialogType.FULL_PAGE && !util.runningInBrowser()) {
-      chrome.app.window.current().show();
-    }
   };
 
   /**
@@ -833,11 +838,23 @@ FileManager.prototype = /** @struct */ {
         this.volumeManager_,
         this.historyLoader_);
 
+    var singlePanel = queryRequiredElement('#single-file-details', dom);
+    SingleFileDetailsPanel.decorate(
+        assertInstanceof(singlePanel, HTMLDivElement),
+        this.metadataModel_);
+
+    var multiPanel = queryRequiredElement('#multi-file-details', dom);
+    MultiFileDetailsPanel.decorate(
+        assertInstanceof(multiPanel, HTMLDivElement),
+        this.metadataModel_);
+
     this.addHistoryObserver_();
 
     this.ui_.initAdditionalUI(
         assertInstanceof(table, FileTable),
         assertInstanceof(grid, FileGrid),
+        assertInstanceof(singlePanel, SingleFileDetailsPanel),
+        assertInstanceof(multiPanel, MultiFileDetailsPanel),
         new LocationLine(
             queryRequiredElement('#location-breadcrumbs', dom),
             this.volumeManager_));
@@ -974,6 +991,7 @@ FileManager.prototype = /** @struct */ {
     // Create metadata update controller.
     this.metadataUpdateController_ = new MetadataUpdateController(
         this.ui_.listContainer,
+        assert(this.ui_.detailsContainer),
         this.directoryModel_,
         this.metadataModel_);
 
@@ -1374,8 +1392,10 @@ FileManager.prototype = /** @struct */ {
         this.backgroundPage_.background.progressCenter.updateItem(item);
       }
     }
-    this.backgroundPage_.background.progressCenter.removePanel(
-        this.ui_.progressCenterPanel);
+    if (this.ui_ && this.ui_.progressCenterPanel) {
+      this.backgroundPage_.background.progressCenter.removePanel(
+          this.ui_.progressCenterPanel);
+    }
   };
 
   /**

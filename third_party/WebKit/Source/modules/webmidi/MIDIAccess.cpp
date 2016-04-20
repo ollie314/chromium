@@ -48,11 +48,13 @@ namespace blink {
 using PortState = MIDIAccessor::MIDIPortState;
 
 MIDIAccess::MIDIAccess(PassOwnPtr<MIDIAccessor> accessor, bool sysexEnabled, const Vector<MIDIAccessInitializer::PortDescriptor>& ports, ExecutionContext* executionContext)
-    : ActiveDOMObject(executionContext)
+    : ActiveScriptWrappable(this)
+    , ActiveDOMObject(executionContext)
     , m_accessor(accessor)
     , m_sysexEnabled(sysexEnabled)
     , m_hasPendingActivity(false)
 {
+    ThreadState::current()->registerPreFinalizer(this);
     m_accessor->setClient(this);
     for (size_t i = 0; i < ports.size(); ++i) {
         const MIDIAccessInitializer::PortDescriptor& port = ports[i];
@@ -68,12 +70,17 @@ MIDIAccess::~MIDIAccess()
 {
 }
 
+void MIDIAccess::dispose()
+{
+    m_accessor.clear();
+}
+
 EventListener* MIDIAccess::onstatechange()
 {
     return getAttributeEventListener(EventTypeNames::statechange);
 }
 
-void MIDIAccess::setOnstatechange(PassRefPtrWillBeRawPtr<EventListener> listener)
+void MIDIAccess::setOnstatechange(EventListener* listener)
 {
     m_hasPendingActivity = listener;
     setAttributeEventListener(EventTypeNames::statechange, listener);
@@ -81,7 +88,7 @@ void MIDIAccess::setOnstatechange(PassRefPtrWillBeRawPtr<EventListener> listener
 
 bool MIDIAccess::hasPendingActivity() const
 {
-    return m_hasPendingActivity && !executionContext()->activeDOMObjectsAreStopped();
+    return m_hasPendingActivity && !getExecutionContext()->activeDOMObjectsAreStopped();
 }
 
 MIDIInputMap* MIDIAccess::inputs() const
@@ -164,7 +171,7 @@ void MIDIAccess::didReceiveMIDIData(unsigned portIndex, const unsigned char* dat
     // Convert from time in seconds which is based on the time coordinate system of monotonicallyIncreasingTime()
     // into time in milliseconds (a DOMHighResTimeStamp) according to the same time coordinate system as performance.now().
     // This is how timestamps are defined in the Web MIDI spec.
-    Document* document = toDocument(executionContext());
+    Document* document = toDocument(getExecutionContext());
     ASSERT(document);
 
     double timeStampInMilliseconds = 1000 * document->loader()->timing().monotonicTimeToZeroBasedDocumentTime(timeStamp);
@@ -185,7 +192,7 @@ void MIDIAccess::sendMIDIData(unsigned portIndex, const unsigned char* data, siz
         // We need to translate it exactly to 0 seconds.
         timeStamp = 0;
     } else {
-        Document* document = toDocument(executionContext());
+        Document* document = toDocument(getExecutionContext());
         ASSERT(document);
         double documentStartTime = document->loader()->timing().referenceMonotonicTime();
         timeStamp = documentStartTime + 0.001 * timeStampInMilliseconds;
@@ -203,7 +210,7 @@ DEFINE_TRACE(MIDIAccess)
 {
     visitor->trace(m_inputs);
     visitor->trace(m_outputs);
-    RefCountedGarbageCollectedEventTargetWithInlineData<MIDIAccess>::trace(visitor);
+    EventTargetWithInlineData::trace(visitor);
     ActiveDOMObject::trace(visitor);
 }
 

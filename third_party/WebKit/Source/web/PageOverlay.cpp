@@ -35,6 +35,7 @@
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/GraphicsLayerClient.h"
+#include "platform/scroll/MainThreadScrollingReason.h"
 #include "public/platform/WebLayer.h"
 #include "public/web/WebViewClient.h"
 #include "web/WebDevToolsAgentImpl.h"
@@ -77,7 +78,7 @@ void PageOverlay::update()
         return;
 
     if (!m_layer) {
-        m_layer = GraphicsLayer::create(m_viewImpl->graphicsLayerFactory(), this);
+        m_layer = GraphicsLayer::create(this);
         m_layer->setDrawsContent(true);
 
         if (WebDevToolsAgentImpl* devTools = m_viewImpl->mainFrameDevToolsAgentImpl())
@@ -85,7 +86,7 @@ void PageOverlay::update()
 
         // This is required for contents of overlay to stay in sync with the page while scrolling.
         WebLayer* platformLayer = m_layer->platformLayer();
-        platformLayer->addMainThreadScrollingReasons(WebMainThreadScrollingReason::PageOverlay);
+        platformLayer->addMainThreadScrollingReasons(MainThreadScrollingReason::kPageOverlay);
         page->frameHost().visualViewport().containerLayer()->addChild(m_layer.get());
     }
 
@@ -96,6 +97,12 @@ void PageOverlay::update()
     m_layer->setNeedsDisplay();
 }
 
+LayoutRect PageOverlay::visualRect() const
+{
+    DCHECK(m_layer.get());
+    return LayoutRect(FloatPoint(), m_layer->size());
+}
+
 IntRect PageOverlay::computeInterestRect(const GraphicsLayer* graphicsLayer, const IntRect&) const
 {
     return IntRect(IntPoint(), expandedIntSize(m_layer->size()));
@@ -103,7 +110,7 @@ IntRect PageOverlay::computeInterestRect(const GraphicsLayer* graphicsLayer, con
 
 void PageOverlay::paintContents(const GraphicsLayer* graphicsLayer, GraphicsContext& gc, GraphicsLayerPaintingPhase phase, const IntRect& interestRect) const
 {
-    ASSERT(m_layer);
+    DCHECK(m_layer);
     m_delegate->paintPageOverlay(*this, gc, interestRect.size());
 }
 

@@ -5,6 +5,8 @@
 #include "content/common/gpu/media/vaapi_video_encode_accelerator.h"
 
 #include <string.h>
+
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -13,6 +15,7 @@
 #include "base/metrics/histogram.h"
 #include "base/numerics/safe_conversions.h"
 #include "content/common/gpu/media/h264_dpb.h"
+#include "content/common/gpu/media/shared_memory_region.h"
 #include "media/base/bind_to_current_loop.h"
 #include "third_party/libva/va/va_enc_h264.h"
 
@@ -100,13 +103,10 @@ struct VaapiVideoEncodeAccelerator::InputFrameRef {
 };
 
 struct VaapiVideoEncodeAccelerator::BitstreamBufferRef {
-  BitstreamBufferRef(int32_t id,
-                     scoped_ptr<base::SharedMemory> shm,
-                     size_t size)
-      : id(id), shm(std::move(shm)), size(size) {}
+  BitstreamBufferRef(int32_t id, std::unique_ptr<SharedMemoryRegion> shm)
+      : id(id), shm(std::move(shm)) {}
   const int32_t id;
-  const scoped_ptr<base::SharedMemory> shm;
-  const size_t size;
+  const std::unique_ptr<SharedMemoryRegion> shm;
 };
 
 media::VideoEncodeAccelerator::SupportedProfiles
@@ -176,9 +176,19 @@ bool VaapiVideoEncodeAccelerator::Initialize(
   client_ptr_factory_.reset(new base::WeakPtrFactory<Client>(client));
   client_ = client_ptr_factory_->GetWeakPtr();
 
-  if (output_profile < media::H264PROFILE_BASELINE ||
-      output_profile > media::H264PROFILE_MAIN) {
-    DVLOGF(1) << "Unsupported output profile: " << output_profile;
+  const SupportedProfiles& profiles = GetSupportedProfiles();
+  auto profile = find_if(profiles.begin(), profiles.end(),
+      [output_profile](const SupportedProfile& profile) {
+        return profile.profile == output_profile;
+      });
+  if (profile == profiles.end()) {
+    DVLOGF(1) << "Unsupported output profile " << output_profile;
+    return false;
+  }
+  if (input_visible_size.width() > profile->max_resolution.width() ||
+        input_visible_size.height() > profile->max_resolution.height()) {
+    DVLOGF(1) << "Input size too big: " << input_visible_size.ToString()
+              << ", max supported size: " << profile->max_resolution.ToString();
     return false;
   }
 
@@ -546,11 +556,8 @@ void VaapiVideoEncodeAccelerator::TryToReturnBitstreamBuffer() {
 
   size_t data_size = 0;
   if (!vaapi_wrapper_->DownloadAndDestroyCodedBuffer(
-          encode_job->coded_buffer,
-          encode_job->input_surface->id(),
-          target_data,
-          buffer->size,
-          &data_size)) {
+          encode_job->coded_buffer, encode_job->input_surface->id(),
+          target_data, buffer->shm->size(), &data_size)) {
     NOTIFY_ERROR(kPlatformFailureError, "Failed downloading coded buffer");
     return;
   }
@@ -669,15 +676,15 @@ void VaapiVideoEncodeAccelerator::UseOutputBitstreamBuffer(
     return;
   }
 
-  scoped_ptr<base::SharedMemory> shm(
-      new base::SharedMemory(buffer.handle(), false));
-  if (!shm->Map(buffer.size())) {
+  std::unique_ptr<SharedMemoryRegion> shm(
+      new SharedMemoryRegion(buffer, false));
+  if (!shm->Map()) {
     NOTIFY_ERROR(kPlatformFailureError, "Failed mapping shared memory.");
     return;
   }
 
-  scoped_ptr<BitstreamBufferRef> buffer_ref(
-      new BitstreamBufferRef(buffer.id(), std::move(shm), buffer.size()));
+  std::unique_ptr<BitstreamBufferRef> buffer_ref(
+      new BitstreamBufferRef(buffer.id(), std::move(shm)));
 
   encoder_thread_task_runner_->PostTask(
       FROM_HERE,
@@ -686,7 +693,7 @@ void VaapiVideoEncodeAccelerator::UseOutputBitstreamBuffer(
 }
 
 void VaapiVideoEncodeAccelerator::UseOutputBitstreamBufferTask(
-    scoped_ptr<BitstreamBufferRef> buffer_ref) {
+    std::unique_ptr<BitstreamBufferRef> buffer_ref) {
   DCHECK(encoder_thread_task_runner_->BelongsToCurrentThread());
   DCHECK_NE(state_, kUninitialized);
 

@@ -6,6 +6,8 @@
 
 #include <jni.h>
 #include <stddef.h>
+
+#include <memory>
 #include <vector>
 
 #include "base/android/build_info.h"
@@ -15,8 +17,6 @@
 #include "base/android/jni_weak_ref.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_service.h"
 #include "base/scoped_observer.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
@@ -26,20 +26,25 @@
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/browsing_data/browsing_data_remover_factory.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+#include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/android/android_about_app_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/locale_settings.h"
+#include "components/browsing_data_ui/history_notice_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/common/signin_pref_names.h"
+#include "components/strings/grit/components_locale_settings.h"
 #include "components/translate/core/browser/translate_prefs.h"
 #include "components/translate/core/common/translate_pref_names.h"
 #include "components/version_info/version_info.h"
@@ -58,12 +63,6 @@ using base::android::ScopedJavaGlobalRef;
 using content::BrowserThread;
 
 namespace {
-
-enum NetworkPredictionOptions {
-  NETWORK_PREDICTION_ALWAYS,
-  NETWORK_PREDICTION_WIFI_ONLY,
-  NETWORK_PREDICTION_NEVER,
-};
 
 Profile* GetOriginalProfile() {
   return ProfileManager::GetActiveUserProfile()->GetOriginalProfile();
@@ -168,11 +167,10 @@ static void SetContentSettingForPattern(JNIEnv* env,
                                         int setting) {
   HostContentSettingsMap* host_content_settings_map =
       HostContentSettingsMapFactory::GetForProfile(GetOriginalProfile());
-  host_content_settings_map->SetContentSetting(
+  host_content_settings_map->SetContentSettingCustomScope(
       ContentSettingsPattern::FromString(ConvertJavaStringToUTF8(env, pattern)),
       ContentSettingsPattern::Wildcard(),
-      static_cast<ContentSettingsType>(content_settings_type),
-      std::string(),
+      static_cast<ContentSettingsType>(content_settings_type), std::string(),
       static_cast<ContentSetting>(setting));
 }
 
@@ -206,6 +204,11 @@ static jboolean GetAcceptCookiesManaged(JNIEnv* env,
   return IsContentSettingManaged(CONTENT_SETTINGS_TYPE_COOKIES);
 }
 
+static jboolean GetBackgroundSyncEnabled(JNIEnv* env,
+                                         const JavaParamRef<jobject>& obj) {
+  return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC);
+}
+
 static jboolean GetBlockThirdPartyCookiesEnabled(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
@@ -228,7 +231,7 @@ static jboolean GetPasswordManagerAutoSigninEnabled(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   return GetPrefService()->GetBoolean(
-      password_manager::prefs::kPasswordManagerAutoSignin);
+      password_manager::prefs::kCredentialsEnableAutosignin);
 }
 
 static jboolean GetRememberPasswordsManaged(JNIEnv* env,
@@ -241,7 +244,7 @@ static jboolean GetPasswordManagerAutoSigninManaged(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   return GetPrefService()->IsManagedPreference(
-      password_manager::prefs::kPasswordManagerAutoSignin);
+      password_manager::prefs::kCredentialsEnableAutosignin);
 }
 
 static jboolean GetDoNotTrackEnabled(JNIEnv* env,
@@ -249,9 +252,10 @@ static jboolean GetDoNotTrackEnabled(JNIEnv* env,
   return GetPrefService()->GetBoolean(prefs::kEnableDoNotTrack);
 }
 
-static jint GetNetworkPredictionOptions(JNIEnv* env,
+static jboolean GetNetworkPredictionEnabled(JNIEnv* env,
                                         const JavaParamRef<jobject>& obj) {
-  return GetPrefService()->GetInteger(prefs::kNetworkPredictionOptions);
+  return GetPrefService()->GetInteger(prefs::kNetworkPredictionOptions)
+      != chrome_browser_net::NETWORK_PREDICTION_NEVER;
 }
 
 static jboolean GetNetworkPredictionManaged(JNIEnv* env,
@@ -345,8 +349,8 @@ static jboolean GetProtectedMediaIdentifierEnabled(
       CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER);
 }
 
-static jboolean GetPushNotificationsEnabled(JNIEnv* env,
-                                            const JavaParamRef<jobject>& obj) {
+static jboolean GetNotificationsEnabled(JNIEnv* env,
+                                        const JavaParamRef<jobject>& obj) {
   return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
 }
 
@@ -485,7 +489,7 @@ class ClearBrowsingDataObserver : public BrowsingDataRemover::Observer {
 
   void OnBrowsingDataRemoverDone() override {
     // We delete ourselves when done.
-    scoped_ptr<ClearBrowsingDataObserver> auto_delete(this);
+    std::unique_ptr<ClearBrowsingDataObserver> auto_delete(this);
 
     JNIEnv* env = AttachCurrentThread();
     if (weak_chrome_native_preferences_.get(env).is_null())
@@ -539,9 +543,25 @@ static void SetBrowsingDataDeletionPreference(
   GetOriginalProfile()->GetPrefs()->SetBoolean(pref, value);
 }
 
+static jint GetBrowsingDataDeletionTimePeriod(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  return GetPrefService()->GetInteger(prefs::kDeleteTimePeriod);
+}
+
+static void SetBrowsingDataDeletionTimePeriod(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jint time_period) {
+  DCHECK_GE(time_period, 0);
+  DCHECK_LE(time_period, BrowsingDataRemover::TIME_PERIOD_LAST);
+  GetPrefService()->SetInteger(prefs::kDeleteTimePeriod, time_period);
+}
+
 static void ClearBrowsingData(JNIEnv* env,
                               const JavaParamRef<jobject>& obj,
-                              const JavaParamRef<jintArray>& data_types) {
+                              const JavaParamRef<jintArray>& data_types,
+                              jint time_period) {
   BrowsingDataRemover* browsing_data_remover =
       BrowsingDataRemoverFactory::GetForBrowserContext(GetOriginalProfile());
   // ClearBrowsingDataObserver deletes itself when |browsing_data_remover| is
@@ -570,18 +590,63 @@ static void ClearBrowsingData(JNIEnv* env,
       case FORM_DATA:
         remove_mask |= BrowsingDataRemover::REMOVE_FORM_DATA;
         break;
-      default:
+      case BOOKMARKS:
+        // Bookmarks are deleted separately on the Java side.
+        NOTREACHED();
+        break;
+      case NUM_TYPES:
         NOTREACHED();
     }
   }
 
-  browsing_data_remover->Remove(BrowsingDataRemover::Unbounded(), remove_mask,
-                                BrowsingDataHelper::UNPROTECTED_WEB);
+  browsing_data_remover->Remove(
+      BrowsingDataRemover::Period(
+          static_cast<BrowsingDataRemover::TimePeriod>(time_period)),
+      remove_mask, BrowsingDataHelper::UNPROTECTED_WEB);
 }
 
 static jboolean CanDeleteBrowsingHistory(JNIEnv* env,
                                          const JavaParamRef<jobject>& obj) {
   return GetPrefService()->GetBoolean(prefs::kAllowDeletingBrowserHistory);
+}
+
+static void ShowNoticeAboutOtherFormsOfBrowsingHistory(
+    ScopedJavaGlobalRef<jobject>* listener,
+    bool show) {
+  JNIEnv* env = AttachCurrentThread();
+  if (!show)
+    return;
+  Java_OtherFormsOfBrowsingHistoryListener_showNoticeAboutOtherFormsOfBrowsingHistory(
+      env, listener->obj());
+}
+
+static void EnableDialogAboutOtherFormsOfBrowsingHistory(
+    ScopedJavaGlobalRef<jobject>* listener,
+    bool enabled) {
+  JNIEnv* env = AttachCurrentThread();
+  if (!enabled)
+    return;
+  Java_OtherFormsOfBrowsingHistoryListener_enableDialogAboutOtherFormsOfBrowsingHistory(
+      env, listener->obj());
+}
+
+static void RequestInfoAboutOtherFormsOfBrowsingHistory(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& listener) {
+  // The permanent notice in the footer.
+  browsing_data_ui::ShouldShowNoticeAboutOtherFormsOfBrowsingHistory(
+      ProfileSyncServiceFactory::GetForProfile(GetOriginalProfile()),
+      WebHistoryServiceFactory::GetForProfile(GetOriginalProfile()),
+      base::Bind(&ShowNoticeAboutOtherFormsOfBrowsingHistory,
+                 base::Owned(new ScopedJavaGlobalRef<jobject>(env, listener))));
+
+  // The one-time notice in the dialog.
+  browsing_data_ui::ShouldPopupDialogAboutOtherFormsOfBrowsingHistory(
+      ProfileSyncServiceFactory::GetForProfile(GetOriginalProfile()),
+      WebHistoryServiceFactory::GetForProfile(GetOriginalProfile()),
+      base::Bind(&EnableDialogAboutOtherFormsOfBrowsingHistory,
+                 base::Owned(new ScopedJavaGlobalRef<jobject>(env, listener))));
 }
 
 static void SetAllowCookiesEnabled(JNIEnv* env,
@@ -591,6 +656,16 @@ static void SetAllowCookiesEnabled(JNIEnv* env,
       HostContentSettingsMapFactory::GetForProfile(GetOriginalProfile());
   host_content_settings_map->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_COOKIES,
+      allow ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
+}
+
+static void SetBackgroundSyncEnabled(JNIEnv* env,
+                                     const JavaParamRef<jobject>& obj,
+                                     jboolean allow) {
+  HostContentSettingsMap* host_content_settings_map =
+      HostContentSettingsMapFactory::GetForProfile(GetOriginalProfile());
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC,
       allow ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
 }
 
@@ -612,7 +687,7 @@ static void SetPasswordManagerAutoSigninEnabled(
     const JavaParamRef<jobject>& obj,
     jboolean enabled) {
   GetPrefService()->SetBoolean(
-      password_manager::prefs::kPasswordManagerAutoSignin, enabled);
+      password_manager::prefs::kCredentialsEnableAutosignin, enabled);
 }
 
 static void SetProtectedMediaIdentifierEnabled(JNIEnv* env,
@@ -665,9 +740,9 @@ static void SetFullscreenAllowed(JNIEnv* env,
       allow ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_ASK);
 }
 
-static void SetPushNotificationsEnabled(JNIEnv* env,
-                                        const JavaParamRef<jobject>& obj,
-                                        jboolean allow) {
+static void SetNotificationsEnabled(JNIEnv* env,
+                                    const JavaParamRef<jobject>& obj,
+                                    jboolean allow) {
   HostContentSettingsMap* host_content_settings_map =
       HostContentSettingsMapFactory::GetForProfile(GetOriginalProfile());
   host_content_settings_map->SetDefaultContentSetting(
@@ -682,7 +757,7 @@ static void SetCrashReporting(JNIEnv* env,
   local_state->SetBoolean(prefs::kCrashReportingEnabled, reporting);
 }
 
-static jboolean CanPredictNetworkActions(JNIEnv* env,
+static jboolean CanPrefetchAndPrerender(JNIEnv* env,
                                          const JavaParamRef<jobject>& obj) {
   return chrome_browser_net::CanPrefetchAndPrerenderUI(GetPrefService()) ==
       chrome_browser_net::NetworkPredictionStatus::ENABLED;
@@ -723,7 +798,7 @@ static void SetAutoDetectEncodingEnabled(JNIEnv* env,
 
 static void ResetTranslateDefaults(JNIEnv* env,
                                    const JavaParamRef<jobject>& obj) {
-  scoped_ptr<translate::TranslatePrefs> translate_prefs =
+  std::unique_ptr<translate::TranslatePrefs> translate_prefs =
       ChromeTranslateClient::CreateTranslatePrefs(GetPrefService());
   translate_prefs->ResetToDefaults();
 }
@@ -785,34 +860,6 @@ static jboolean GetMicManagedByCustodian(JNIEnv* env,
              CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
 }
 
-static void SetJavaScriptAllowed(JNIEnv* env,
-                                 const JavaParamRef<jobject>& obj,
-                                 const JavaParamRef<jstring>& pattern,
-                                 int setting) {
-  HostContentSettingsMap* host_content_settings_map =
-      HostContentSettingsMapFactory::GetForProfile(GetOriginalProfile());
-  host_content_settings_map->SetContentSetting(
-      ContentSettingsPattern::FromString(ConvertJavaStringToUTF8(env, pattern)),
-      ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTINGS_TYPE_JAVASCRIPT,
-      "",
-      static_cast<ContentSetting>(setting));
-}
-
-static void SetPopupException(JNIEnv* env,
-                              const JavaParamRef<jobject>& obj,
-                              const JavaParamRef<jstring>& pattern,
-                              int setting) {
-  HostContentSettingsMap* host_content_settings_map =
-      HostContentSettingsMapFactory::GetForProfile(GetOriginalProfile());
-  host_content_settings_map->SetContentSetting(
-      ContentSettingsPattern::FromString(ConvertJavaStringToUTF8(env, pattern)),
-      ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTINGS_TYPE_POPUPS,
-      "",
-      static_cast<ContentSetting>(setting));
-}
-
 static void SetSearchSuggestEnabled(JNIEnv* env,
                                     const JavaParamRef<jobject>& obj,
                                     jboolean enabled) {
@@ -839,27 +886,30 @@ static void SetContextualSearchPreference(JNIEnv* env,
       ConvertJavaStringToUTF8(env, pref));
 }
 
-static void SetNetworkPredictionOptions(JNIEnv* env,
+static void SetNetworkPredictionEnabled(JNIEnv* env,
                                         const JavaParamRef<jobject>& obj,
-                                        int option) {
-  GetPrefService()->SetInteger(prefs::kNetworkPredictionOptions, option);
+                                        jboolean enabled) {
+  GetPrefService()->SetInteger(
+      prefs::kNetworkPredictionOptions,
+      enabled ? chrome_browser_net::NETWORK_PREDICTION_WIFI_ONLY
+              : chrome_browser_net::NETWORK_PREDICTION_NEVER);
 }
 
-static jboolean NetworkPredictionEnabledHasUserSetting(
+static jboolean ObsoleteNetworkPredictionEnabledHasUserSetting(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   return GetPrefService()->GetUserPrefValue(
       prefs::kNetworkPredictionEnabled) != NULL;
 }
 
-static jboolean NetworkPredictionOptionsHasUserSetting(
+static jboolean ObsoleteNetworkPredictionOptionsHasUserSetting(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   return GetPrefService()->GetUserPrefValue(
       prefs::kNetworkPredictionOptions) != NULL;
 }
 
-static jboolean GetNetworkPredictionEnabledUserPrefValue(
+static jboolean ObsoleteGetNetworkPredictionEnabledUserPrefValue(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   const base::Value* network_prediction_enabled =

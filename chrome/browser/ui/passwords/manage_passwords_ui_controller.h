@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_PASSWORDS_MANAGE_PASSWORDS_UI_CONTROLLER_H_
 #define CHROME_BROWSER_UI_PASSWORDS_MANAGE_PASSWORDS_UI_CONTROLLER_H_
 
+#include <vector>
+
 #include "base/macros.h"
 #include "chrome/browser/ui/passwords/manage_passwords_state.h"
 #include "chrome/browser/ui/passwords/passwords_client_ui_delegate.h"
@@ -26,6 +28,7 @@ class PasswordFormManager;
 }
 
 class AccountChooserPrompt;
+class AutoSigninFirstRunPrompt;
 class ManagePasswordsIconView;
 class PasswordDialogController;
 class PasswordDialogControllerImpl;
@@ -42,20 +45,27 @@ class ManagePasswordsUIController
 
   // PasswordsClientUIDelegate:
   void OnPasswordSubmitted(
-      scoped_ptr<password_manager::PasswordFormManager> form_manager) override;
+      std::unique_ptr<password_manager::PasswordFormManager> form_manager)
+      override;
   void OnUpdatePasswordSubmitted(
-      scoped_ptr<password_manager::PasswordFormManager> form_manager) override;
+      std::unique_ptr<password_manager::PasswordFormManager> form_manager)
+      override;
   bool OnChooseCredentials(
       ScopedVector<autofill::PasswordForm> local_credentials,
       ScopedVector<autofill::PasswordForm> federated_credentials,
       const GURL& origin,
-      base::Callback<void(const password_manager::CredentialInfo&)> callback)
-      override;
-  void OnAutoSignin(ScopedVector<autofill::PasswordForm> local_forms) override;
+      const ManagePasswordsState::CredentialsCallback& callback) override;
+  void OnAutoSignin(ScopedVector<autofill::PasswordForm> local_forms,
+                    const GURL& origin) override;
+  void OnPromptEnableAutoSignin() override;
   void OnAutomaticPasswordSave(
-      scoped_ptr<password_manager::PasswordFormManager> form_manager) override;
-  void OnPasswordAutofilled(const autofill::PasswordFormMap& password_form_map,
-                            const GURL& origin) override;
+      std::unique_ptr<password_manager::PasswordFormManager> form_manager)
+      override;
+  void OnPasswordAutofilled(
+      const autofill::PasswordFormMap& password_form_map,
+      const GURL& origin,
+      const std::vector<std::unique_ptr<autofill::PasswordForm>>*
+          federated_matches) override;
 
   // PasswordStore::Observer:
   void OnLoginsChanged(
@@ -65,7 +75,9 @@ class ManagePasswordsUIController
   // without user interaction.
   virtual void UpdateIconAndBubbleState(ManagePasswordsIconView* icon);
 
-  bool IsAutomaticallyOpeningBubble() const { return should_pop_up_bubble_; }
+  bool IsAutomaticallyOpeningBubble() const {
+    return bubble_status_ == SHOULD_POP_UP;
+  }
 
   // PasswordsModelDelegate:
   const GURL& GetOrigin() const override;
@@ -86,11 +98,12 @@ class ManagePasswordsUIController
   void SavePassword() override;
   void UpdatePassword(const autofill::PasswordForm& password_form) override;
   void ChooseCredential(
-      const autofill::PasswordForm& form,
+      autofill::PasswordForm form,
       password_manager::CredentialType credential_type) override;
   void NavigateToExternalPasswordManager() override;
   void NavigateToSmartLockHelpPage() override;
   void NavigateToPasswordManagerSettingsPage() override;
+  void OnDialogHidden() override;
 
  protected:
   explicit ManagePasswordsUIController(
@@ -112,6 +125,10 @@ class ManagePasswordsUIController
   virtual AccountChooserPrompt* CreateAccountChooser(
       PasswordDialogController* controller);
 
+  // Called to create the account chooser dialog. Mocked in tests.
+  virtual AutoSigninFirstRunPrompt* CreateAutoSigninPrompt(
+      PasswordDialogController* controller);
+
   // Overwrites the client for |passwords_data_|.
   void set_client(password_manager::PasswordManagerClient* client) {
     passwords_data_.set_client(client);
@@ -126,8 +143,20 @@ class ManagePasswordsUIController
  private:
   friend class content::WebContentsUserData<ManagePasswordsUIController>;
 
+  enum BubbleStatus {
+    NOT_SHOWN,
+    // The bubble is to be popped up in the next call to
+    // UpdateBubbleAndIconVisibility().
+    SHOULD_POP_UP,
+    SHOWN,
+  };
+
   // Shows the password bubble without user interaction.
   void ShowBubbleWithoutUserInteraction();
+
+  // Closes the account chooser gracefully so the callback is called. Then sets
+  // the state to MANAGE_STATE.
+  void DestroyAccountChooser();
 
   // content::WebContentsObserver:
   void WebContentsDestroyed() override;
@@ -136,11 +165,9 @@ class ManagePasswordsUIController
   ManagePasswordsState passwords_data_;
 
   // The controller for the blocking dialogs.
-  scoped_ptr<PasswordDialogControllerImpl> dialog_controller_;
+  std::unique_ptr<PasswordDialogControllerImpl> dialog_controller_;
 
-  // Contains true if the bubble is to be popped up in the next call to
-  // UpdateBubbleAndIconVisibility().
-  bool should_pop_up_bubble_;
+  BubbleStatus bubble_status_;
 
   DISALLOW_COPY_AND_ASSIGN(ManagePasswordsUIController);
 };

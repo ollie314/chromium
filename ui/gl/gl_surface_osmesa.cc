@@ -15,24 +15,17 @@
 
 namespace gfx {
 
-GLSurfaceOSMesa::GLSurfaceOSMesa(OSMesaSurfaceFormat format,
+GLSurfaceOSMesa::GLSurfaceOSMesa(GLSurface::Format format,
                                  const gfx::Size& size)
-    : size_(size) {
-  switch (format) {
-    case OSMesaSurfaceFormatBGRA:
-      format_ = OSMESA_BGRA;
-      break;
-    case OSMesaSurfaceFormatRGBA:
-      format_ = OSMESA_RGBA;
-      break;
-  }
+    : size_(size),
+      format_(format) {
   // Implementations of OSMesa surface do not support having a 0 size. In such
   // cases use a (1, 1) surface.
   if (size_.GetArea() == 0)
     size_.SetSize(1, 1);
 }
 
-bool GLSurfaceOSMesa::Initialize() {
+bool GLSurfaceOSMesa::Initialize(GLSurface::Format format) {
   return Resize(size_, 1.f, true);
 }
 
@@ -43,7 +36,7 @@ void GLSurfaceOSMesa::Destroy() {
 bool GLSurfaceOSMesa::Resize(const gfx::Size& new_size,
                              float scale_factor,
                              bool has_alpha) {
-  scoped_ptr<ui::ScopedMakeCurrent> scoped_make_current;
+  std::unique_ptr<ui::ScopedMakeCurrent> scoped_make_current;
   GLContext* current_context = GLContext::GetCurrent();
   bool was_current =
       current_context && current_context->IsCurrent(this);
@@ -54,7 +47,7 @@ bool GLSurfaceOSMesa::Resize(const gfx::Size& new_size,
   }
 
   // Preserve the old buffer.
-  scoped_ptr<int32_t[]> old_buffer(buffer_.release());
+  std::unique_ptr<int32_t[]> old_buffer(buffer_.release());
 
   base::CheckedNumeric<int> checked_size = sizeof(buffer_[0]);
   checked_size *= new_size.width();
@@ -102,7 +95,7 @@ void* GLSurfaceOSMesa::GetHandle() {
   return buffer_.get();
 }
 
-unsigned GLSurfaceOSMesa::GetFormat() {
+GLSurface::Format GLSurfaceOSMesa::GetFormat() {
   return format_;
 }
 
@@ -117,7 +110,7 @@ gfx::SwapResult GLSurfaceOSMesaHeadless::SwapBuffers() {
 }
 
 GLSurfaceOSMesaHeadless::GLSurfaceOSMesaHeadless()
-    : GLSurfaceOSMesa(OSMesaSurfaceFormatBGRA, gfx::Size(1, 1)) {
+    : GLSurfaceOSMesa(SURFACE_OSMESA_BGRA, gfx::Size(1, 1)) {
 }
 
 GLSurfaceOSMesaHeadless::~GLSurfaceOSMesaHeadless() { Destroy(); }

@@ -32,6 +32,9 @@ base::TimeDelta CalculateTickLength(double throughput) {
 DevToolsNetworkInterceptor::ThrottleRecord::ThrottleRecord() {
 }
 
+DevToolsNetworkInterceptor::ThrottleRecord::ThrottleRecord(
+    const ThrottleRecord& other) = default;
+
 DevToolsNetworkInterceptor::ThrottleRecord::~ThrottleRecord() {
 }
 
@@ -63,7 +66,7 @@ void DevToolsNetworkInterceptor::FinishRecords(
 }
 
 void DevToolsNetworkInterceptor::UpdateConditions(
-    scoped_ptr<DevToolsNetworkConditions> conditions) {
+    std::unique_ptr<DevToolsNetworkConditions> conditions) {
   DCHECK(conditions);
   base::TimeTicks now = base::TimeTicks::Now();
   if (conditions_->IsThrottling())

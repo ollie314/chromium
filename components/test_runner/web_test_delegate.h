@@ -11,14 +11,18 @@
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 #include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/platform/WebTaskRunner.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationType.h"
 
 #define WEBTESTRUNNER_NEW_HISTORY_CAPTURE
 
+namespace base {
+class DictionaryValue;
+}
+
 namespace blink {
-class WebBatteryStatus;
 class WebDeviceMotionData;
 class WebDeviceOrientationData;
 class WebFrame;
@@ -74,25 +78,14 @@ class WebTestDelegate {
   virtual void SetDeviceOrientationData(
       const blink::WebDeviceOrientationData& data) = 0;
 
-  // Set orientation to set when registering via
-  // Platform::setScreenOrientationListener().
-  virtual void SetScreenOrientation(
-      const blink::WebScreenOrientationType& orientation) = 0;
-
-  // Reset the screen orientation data used for testing.
-  virtual void ResetScreenOrientation() = 0;
-
-  // Notifies blink about a change in battery status.
-  virtual void DidChangeBatteryStatus(
-      const blink::WebBatteryStatus& status) = 0;
-
   // Add a message to the text dump for the layout test.
   virtual void PrintMessage(const std::string& message) = 0;
 
   // The delegate takes ownership of the WebTask objects and is responsible
   // for deleting them.
-  virtual void PostTask(WebTask* task) = 0;
-  virtual void PostDelayedTask(WebTask* task, long long ms) = 0;
+  virtual void PostTask(blink::WebTaskRunner::Task* task) = 0;
+  virtual void PostDelayedTask(blink::WebTaskRunner::Task* task,
+                               long long ms) = 0;
 
   // Register a new isolated filesystem with the given files, and return the
   // new filesystem id.
@@ -143,7 +136,7 @@ class WebTestDelegate {
   virtual void CloseDevTools() = 0;
 
   // Evaluate the given script in the DevTools agent.
-  virtual void EvaluateInWebInspector(long call_id,
+  virtual void EvaluateInWebInspector(int call_id,
                                       const std::string& script) = 0;
 
   // Evaluate the given script in the inspector overlay page.
@@ -157,6 +150,8 @@ class WebTestDelegate {
   // Controls Web Notifications.
   virtual void SimulateWebNotificationClick(const std::string& title,
                                             int action_index) = 0;
+  virtual void SimulateWebNotificationClose(const std::string& title,
+                                            bool by_user) = 0;
 
   // Controls the device scale factor of the main WebView for hidpi tests.
   virtual void SetDeviceScaleFactor(float factor) = 0;
@@ -167,12 +162,15 @@ class WebTestDelegate {
   // Change the device color profile while running a layout test.
   virtual void SetDeviceColorProfile(const std::string& name) = 0;
 
-  // Change the bluetooth test data while running a layout test.
-  virtual void SetBluetoothMockDataSet(const std::string& data_set) = 0;
+  // Set the bluetooth adapter while running a layout test, uses Mojo to
+  // communicate with the browser.
+  virtual void SetBluetoothFakeAdapter(const std::string& adapter_name,
+                                       const base::Closure& callback) = 0;
 
-  // Makes the Bluetooth chooser record its input and wait for instructions from
-  // the test program on how to proceed.
-  virtual void SetBluetoothManualChooser() = 0;
+  // If |enable| is true makes the Bluetooth chooser record its input and wait
+  // for instructions from the test program on how to proceed. Otherwise
+  // fall backs to the browser's default chooser.
+  virtual void SetBluetoothManualChooser(bool enable) = 0;
 
   // Returns the events recorded since the last call to this function.
   virtual void GetBluetoothManualChooserEvents(
@@ -199,7 +197,7 @@ class WebTestDelegate {
   virtual void SetGeofencingMockPosition(double latitude, double longitude) = 0;
 
   // Controls which WebView should be focused.
-  virtual void SetFocus(WebTestProxyBase* proxy, bool focus) = 0;
+  virtual void SetFocus(blink::WebView* web_view, bool focus) = 0;
 
   // Controls whether all cookies should be accepted or writing cookies in a
   // third-party context is blocked.
@@ -212,6 +210,10 @@ class WebTestDelegate {
   // Sets the POSIX locale of the current process.
   virtual void SetLocale(const std::string& locale) = 0;
 
+  // Invoked when layout test runtime flags change.
+  virtual void OnLayoutTestRuntimeFlagsChanged(
+      const base::DictionaryValue& changed_values) = 0;
+
   // Invoked when the test finished.
   virtual void TestFinished() = 0;
 
@@ -223,7 +225,7 @@ class WebTestDelegate {
   // Returns the length of the back/forward history of the main WebView.
   virtual int NavigationEntryCount() = 0;
 
-  // The following trigger navigations on the main WebViwe.
+  // The following trigger navigations on the main WebView.
   virtual void GoToOffset(int offset) = 0;
   virtual void Reload() = 0;
   virtual void LoadURLForFrame(const blink::WebURL& url,
@@ -231,10 +233,6 @@ class WebTestDelegate {
 
   // Returns true if resource requests to external URLs should be permitted.
   virtual bool AllowExternalPages() = 0;
-
-  // Returns a text dump the back/forward history for the WebView associated
-  // with the given WebTestProxyBase.
-  virtual std::string DumpHistoryForWindow(WebTestProxyBase* proxy) = 0;
 
   // Fetch the manifest for a given WebView from the given url.
   virtual void FetchManifest(
@@ -271,23 +269,14 @@ class WebTestDelegate {
       const std::vector<std::string>& event_platforms,
       const base::Callback<void(bool)>& callback) = 0;
 
-  // Resolve the promise associated with the beforeinstallprompt even with
-  // request id |request_id|. The promise is resolved with a result.platform set
-  // to |platform|. If |platform| is not empty, result.outcome will be
-  // 'accepted', otherwise it will be 'dismissed'.
-  virtual void ResolveBeforeInstallPromptPromise(
-      int request_id,
-      const std::string& platform) = 0;
-
   virtual blink::WebPlugin* CreatePluginPlaceholder(
     blink::WebLocalFrame* frame,
     const blink::WebPluginParams& params) = 0;
 
-  virtual void OnWebTestProxyBaseDestroy(WebTestProxyBase* proxy) = 0;
+  virtual float GetDeviceScaleFactorForTest() const = 0;
 
-  // Convert the position in DIP to native coordinates.
-  virtual blink::WebPoint ConvertDIPToNative(
-      const blink::WebPoint& point_in_dip) const = 0;
+  // Run all pending idle tasks, and then run callback.
+  virtual void RunIdleTasks(const base::Closure& callback) = 0;
 };
 
 }  // namespace test_runner

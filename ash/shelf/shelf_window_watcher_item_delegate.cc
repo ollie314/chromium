@@ -4,11 +4,10 @@
 
 #include "ash/shelf/shelf_window_watcher_item_delegate.h"
 
-#include "ash/shelf/shelf_model.h"
 #include "ash/shelf/shelf_util.h"
 #include "ash/shell.h"
-#include "ash/shell_delegate.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ui/aura/window.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/window_animations.h"
@@ -16,13 +15,10 @@
 namespace ash {
 
 ShelfWindowWatcherItemDelegate::ShelfWindowWatcherItemDelegate(
-    aura::Window* window, ShelfModel* model)
-    : window_(window),
-      model_(model) {
-}
+    aura::Window* window)
+    : window_(window) {}
 
-ShelfWindowWatcherItemDelegate::~ShelfWindowWatcherItemDelegate() {
-}
+ShelfWindowWatcherItemDelegate::~ShelfWindowWatcherItemDelegate() {}
 
 void ShelfWindowWatcherItemDelegate::Close() {
   views::Widget::GetWidgetForNativeWindow(window_)->Close();
@@ -49,17 +45,9 @@ base::string16 ShelfWindowWatcherItemDelegate::GetTitle() {
   return GetShelfItemDetailsForWindow(window_)->title;
 }
 
-ui::MenuModel* ShelfWindowWatcherItemDelegate::CreateContextMenu(
-    aura::Window* root_window) {
-  ash::ShelfItem item = *(model_->ItemByID(GetShelfIDForWindow(window_)));
-  return Shell::GetInstance()->delegate()->CreateContextMenu(root_window,
-                                                             this,
-                                                             &item);
-}
-
 ShelfMenuModel* ShelfWindowWatcherItemDelegate::CreateApplicationMenu(
     int event_flags) {
-  return NULL;
+  return nullptr;
 }
 
 bool ShelfWindowWatcherItemDelegate::IsDraggable() {

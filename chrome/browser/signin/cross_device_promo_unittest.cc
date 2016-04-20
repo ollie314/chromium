@@ -6,7 +6,12 @@
 
 #include <stdint.h>
 
+#include <map>
+#include <string>
+#include <vector>
+
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/test/histogram_tester.h"
@@ -108,9 +113,9 @@ class CrossDevicePromoTest : public ::testing::Test {
   FakeSigninManagerForTesting* signin_manager_;
   FakeGaiaCookieManagerService* cookie_manager_service_;
   syncable_prefs::TestingPrefServiceSyncable* pref_service_;
-  scoped_ptr<TestingProfileManager> testing_profile_manager_;
+  std::unique_ptr<TestingProfileManager> testing_profile_manager_;
   base::HistogramTester histogram_tester_;
-  scoped_ptr<base::FieldTrialList> field_trial_list_;
+  std::unique_ptr<base::FieldTrialList> field_trial_list_;
   net::FakeURLFetcherFactory fake_url_fetcher_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CrossDevicePromoTest);
@@ -139,7 +144,7 @@ void CrossDevicePromoTest::SetUp() {
 
   profile_ = testing_profile_manager_.get()->CreateTestingProfile(
       "name",
-      make_scoped_ptr<syncable_prefs::PrefServiceSyncable>(pref_service_),
+      base::WrapUnique<syncable_prefs::PrefServiceSyncable>(pref_service_),
       base::UTF8ToUTF16("name"), 0, std::string(), factories);
 
   cookie_manager_service_ = static_cast<FakeGaiaCookieManagerService*>(
@@ -295,7 +300,8 @@ TEST_F(CrossDevicePromoTest, SignedInAndOut) {
 
   {
     base::HistogramTester test_signed_out;
-    signin_manager()->SignOut(signin_metrics::SIGNOUT_TEST);
+    signin_manager()->SignOut(signin_metrics::SIGNOUT_TEST,
+                              signin_metrics::SignoutDelete::IGNORE_METRIC);
     promo()->CheckPromoEligibilityForTesting();
     test_signed_out.ExpectUniqueSample("Signin.XDevicePromo.Eligibility",
                                        signin_metrics::NOT_SINGLE_GAIA_ACCOUNT,

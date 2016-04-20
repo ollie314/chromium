@@ -14,6 +14,7 @@
 #include "base/cancelable_callback.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "cc/base/unique_notifier.h"
@@ -21,16 +22,15 @@
 #include "cc/raster/gpu_rasterizer.h"
 #include "cc/raster/gpu_tile_task_worker_pool.h"
 #include "cc/raster/one_copy_tile_task_worker_pool.h"
-#include "cc/raster/raster_buffer.h"
 #include "cc/raster/synchronous_task_graph_runner.h"
 #include "cc/raster/tile_task_runner.h"
 #include "cc/raster/zero_copy_tile_task_worker_pool.h"
 #include "cc/resources/resource_pool.h"
 #include "cc/resources/resource_provider.h"
 #include "cc/resources/scoped_resource.h"
-#include "cc/test/fake_display_list_raster_source.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_output_surface_client.h"
+#include "cc/test/fake_raster_source.h"
 #include "cc/test/fake_resource_provider.h"
 #include "cc/test/test_gpu_memory_buffer_manager.h"
 #include "cc/test/test_shared_bitmap_manager.h"
@@ -51,34 +51,34 @@ enum TileTaskWorkerPoolType {
   TILE_TASK_WORKER_POOL_TYPE_BITMAP
 };
 
-class TestRasterTaskImpl : public RasterTask {
+class TestRasterTaskImpl : public TileTask {
  public:
   typedef base::Callback<void(bool was_canceled)> Reply;
 
   TestRasterTaskImpl(const Resource* resource,
                      const Reply& reply,
-                     ImageDecodeTask::Vector* dependencies)
-      : RasterTask(dependencies),
+                     TileTask::Vector* dependencies)
+      : TileTask(true, dependencies),
         resource_(resource),
         reply_(reply),
-        raster_source_(
-            FakeDisplayListRasterSource::CreateFilled(gfx::Size(1, 1))) {}
+        raster_source_(FakeRasterSource::CreateFilled(gfx::Size(1, 1))) {}
 
   // Overridden from Task:
   void RunOnWorkerThread() override {
     uint64_t new_content_id = 0;
     raster_buffer_->Playback(raster_source_.get(), gfx::Rect(1, 1),
-                             gfx::Rect(1, 1), new_content_id, 1.f, true);
+                             gfx::Rect(1, 1), new_content_id, 1.f,
+                             RasterSource::PlaybackSettings());
   }
 
   // Overridden from TileTask:
-  void ScheduleOnOriginThread(TileTaskClient* client) override {
+  void ScheduleOnOriginThread(RasterBufferProvider* provider) override {
     // The raster buffer has no tile ids associated with it for partial update,
     // so doesn't need to provide a valid dirty rect.
-    raster_buffer_ = client->AcquireBufferForRaster(resource_, 0, 0);
+    raster_buffer_ = provider->AcquireBufferForRaster(resource_, 0, 0);
   }
-  void CompleteOnOriginThread(TileTaskClient* client) override {
-    client->ReleaseBufferForRaster(std::move(raster_buffer_));
+  void CompleteOnOriginThread(RasterBufferProvider* provider) override {
+    provider->ReleaseBufferForRaster(std::move(raster_buffer_));
     reply_.Run(!HasFinishedRunning());
   }
 
@@ -88,8 +88,8 @@ class TestRasterTaskImpl : public RasterTask {
  private:
   const Resource* resource_;
   const Reply reply_;
-  scoped_ptr<RasterBuffer> raster_buffer_;
-  scoped_refptr<DisplayListRasterSource> raster_source_;
+  std::unique_ptr<RasterBuffer> raster_buffer_;
+  scoped_refptr<RasterSource> raster_source_;
 
   DISALLOW_COPY_AND_ASSIGN(TestRasterTaskImpl);
 };
@@ -99,7 +99,7 @@ class BlockingTestRasterTaskImpl : public TestRasterTaskImpl {
   BlockingTestRasterTaskImpl(const Resource* resource,
                              const Reply& reply,
                              base::Lock* lock,
-                             ImageDecodeTask::Vector* dependencies)
+                             TileTask::Vector* dependencies)
       : TestRasterTaskImpl(resource, reply, dependencies), lock_(lock) {}
 
   // Overridden from Task:
@@ -125,7 +125,7 @@ class TileTaskWorkerPoolTest
     bool canceled;
   };
 
-  typedef std::vector<scoped_refptr<RasterTask>> RasterTaskVector;
+  typedef std::vector<scoped_refptr<TileTask>> RasterTaskVector;
 
   enum NamedTaskSet { REQUIRED_FOR_ACTIVATION, REQUIRED_FOR_DRAW, ALL };
 
@@ -147,14 +147,15 @@ class TileTaskWorkerPoolTest
         Create3dOutputSurfaceAndResourceProvider();
         tile_task_worker_pool_ = ZeroCopyTileTaskWorkerPool::Create(
             base::ThreadTaskRunnerHandle::Get().get(), &task_graph_runner_,
-            resource_provider_.get(), false);
+            resource_provider_.get(), PlatformColor::BestTextureFormat());
         break;
       case TILE_TASK_WORKER_POOL_TYPE_ONE_COPY:
         Create3dOutputSurfaceAndResourceProvider();
         tile_task_worker_pool_ = OneCopyTileTaskWorkerPool::Create(
             base::ThreadTaskRunnerHandle::Get().get(), &task_graph_runner_,
             context_provider_.get(), resource_provider_.get(),
-            kMaxBytesPerCopyOperation, false, kMaxStagingBuffers, false);
+            kMaxBytesPerCopyOperation, false, kMaxStagingBuffers,
+            PlatformColor::BestTextureFormat());
         break;
       case TILE_TASK_WORKER_POOL_TYPE_GPU:
         Create3dOutputSurfaceAndResourceProvider();
@@ -203,13 +204,13 @@ class TileTaskWorkerPoolTest
   }
 
   void AppendTask(unsigned id, const gfx::Size& size) {
-    scoped_ptr<ScopedResource> resource(
+    std::unique_ptr<ScopedResource> resource(
         ScopedResource::Create(resource_provider_.get()));
     resource->Allocate(size, ResourceProvider::TEXTURE_HINT_IMMUTABLE,
                        RGBA_8888);
     const Resource* const_resource = resource.get();
 
-    ImageDecodeTask::Vector empty;
+    TileTask::Vector empty;
     tasks_.push_back(new TestRasterTaskImpl(
         const_resource,
         base::Bind(&TileTaskWorkerPoolTest::OnTaskCompleted,
@@ -222,13 +223,13 @@ class TileTaskWorkerPoolTest
   void AppendBlockingTask(unsigned id, base::Lock* lock) {
     const gfx::Size size(1, 1);
 
-    scoped_ptr<ScopedResource> resource(
+    std::unique_ptr<ScopedResource> resource(
         ScopedResource::Create(resource_provider_.get()));
     resource->Allocate(size, ResourceProvider::TEXTURE_HINT_IMMUTABLE,
                        RGBA_8888);
     const Resource* const_resource = resource.get();
 
-    ImageDecodeTask::Vector empty;
+    TileTask::Vector empty;
     tasks_.push_back(new BlockingTestRasterTaskImpl(
         const_resource,
         base::Bind(&TileTaskWorkerPoolTest::OnTaskCompleted,
@@ -261,16 +262,15 @@ class TileTaskWorkerPoolTest
 
   void CreateSoftwareOutputSurfaceAndResourceProvider() {
     output_surface_ = FakeOutputSurface::CreateSoftware(
-        make_scoped_ptr(new SoftwareOutputDevice));
+        base::WrapUnique(new SoftwareOutputDevice));
     CHECK(output_surface_->BindToClient(&output_surface_client_));
     resource_provider_ = FakeResourceProvider::Create(
         output_surface_.get(), &shared_bitmap_manager_, nullptr);
   }
 
-  void OnTaskCompleted(
-      scoped_ptr<ScopedResource> resource,
-      unsigned id,
-      bool was_canceled) {
+  void OnTaskCompleted(std::unique_ptr<ScopedResource> resource,
+                       unsigned id,
+                       bool was_canceled) {
     RasterTaskResult result;
     result.id = id;
     result.canceled = was_canceled;
@@ -286,9 +286,9 @@ class TileTaskWorkerPoolTest
   scoped_refptr<TestContextProvider> context_provider_;
   scoped_refptr<TestContextProvider> worker_context_provider_;
   FakeOutputSurfaceClient output_surface_client_;
-  scoped_ptr<FakeOutputSurface> output_surface_;
-  scoped_ptr<ResourceProvider> resource_provider_;
-  scoped_ptr<TileTaskWorkerPool> tile_task_worker_pool_;
+  std::unique_ptr<FakeOutputSurface> output_surface_;
+  std::unique_ptr<ResourceProvider> resource_provider_;
+  std::unique_ptr<TileTaskWorkerPool> tile_task_worker_pool_;
   TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
   TestSharedBitmapManager shared_bitmap_manager_;
   SynchronousTaskGraphRunner task_graph_runner_;

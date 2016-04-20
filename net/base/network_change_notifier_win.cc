@@ -17,8 +17,6 @@
 #include "net/base/winsock_util.h"
 #include "net/dns/dns_config_service.h"
 
-#pragma comment(lib, "iphlpapi.lib")
-
 namespace net {
 
 namespace {
@@ -44,7 +42,7 @@ class NetworkChangeNotifierWin::DnsConfigServiceThread : public base::Thread {
   void CleanUp() override { service_.reset(); }
 
  private:
-  scoped_ptr<DnsConfigService> service_;
+  std::unique_ptr<DnsConfigService> service_;
 
   DISALLOW_COPY_AND_ASSIGN(DnsConfigServiceThread);
 };

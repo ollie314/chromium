@@ -14,8 +14,12 @@
 #include "ui/gl/test/gl_surface_test_support.h"
 
 #if defined(USE_AURA)
+#include <memory>
+
 #include "ui/aura/env.h"
 #endif
+
+namespace views {
 
 class ViewTestSuite : public base::TestSuite {
  public:
@@ -31,26 +35,31 @@ class ViewTestSuite : public base::TestSuite {
     ASSERT_TRUE(PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
     ui::ResourceBundle::InitSharedInstanceWithPakPath(ui_test_pak_path);
 #if defined(USE_AURA)
-    aura::Env::CreateInstance(true);
+    env_ = aura::Env::CreateInstance();
 #endif
   }
 
   void Shutdown() override {
 #if defined(USE_AURA)
-    aura::Env::DeleteInstance();
+    env_.reset();
 #endif
     ui::ResourceBundle::CleanupSharedInstance();
     base::TestSuite::Shutdown();
   }
 
  private:
+#if defined(USE_AURA)
+  std::unique_ptr<aura::Env> env_;
+#endif
   DISALLOW_COPY_AND_ASSIGN(ViewTestSuite);
 };
 
-int main(int argc, char** argv) {
+int RunAllUnittests(int argc, char** argv) {
   ViewTestSuite test_suite(argc, argv);
 
   return base::LaunchUnitTests(
       argc, argv, base::Bind(&ViewTestSuite::Run,
                              base::Unretained(&test_suite)));
 }
+
+}  // namespace views

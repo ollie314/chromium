@@ -19,10 +19,10 @@ class Range;
 // position.
 //
 //  Example usage:
-//    RefPtrWillBeRawPtr<Range> range = produceRange();
-//    consumeRange(range.get());
+//    Range* range = produceRange();
+//    consumeRange(range);
 //    ... no DOM modification ...
-//    consumeRange2(range.get());
+//    consumeRange2(range);
 //
 //  Above code should be:
 //    EphemeralRangeTemplate range = produceRange();
@@ -60,7 +60,7 @@ public:
     bool isCollapsed() const;
     bool isNull() const
     {
-        ASSERT(isValid());
+        DCHECK(isValid());
         return m_startPosition.isNull();
     }
     bool isNotNull() const { return !isNull(); }
@@ -88,12 +88,12 @@ private:
 extern template class CORE_EXTERN_TEMPLATE_EXPORT EphemeralRangeTemplate<EditingStrategy>;
 using EphemeralRange = EphemeralRangeTemplate<EditingStrategy>;
 
-extern template class CORE_EXTERN_TEMPLATE_EXPORT EphemeralRangeTemplate<EditingInComposedTreeStrategy>;
-using EphemeralRangeInComposedTree = EphemeralRangeTemplate<EditingInComposedTreeStrategy>;
+extern template class CORE_EXTERN_TEMPLATE_EXPORT EphemeralRangeTemplate<EditingInFlatTreeStrategy>;
+using EphemeralRangeInFlatTree = EphemeralRangeTemplate<EditingInFlatTreeStrategy>;
 
 // Returns a newly created |Range| object from |range| or |nullptr| if
 // |range.isNull()| returns true.
-CORE_EXPORT PassRefPtrWillBeRawPtr<Range> createRange(const EphemeralRange& /* range */);
+CORE_EXPORT Range* createRange(const EphemeralRange& /* range */);
 
 } // namespace blink
 

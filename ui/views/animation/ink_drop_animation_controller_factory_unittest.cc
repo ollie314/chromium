@@ -2,14 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ui/views/animation/ink_drop_animation_controller_factory.h"
+
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/test/test_mock_time_task_runner.h"
+#include "base/thread_task_runner_handle.h"
+#include "base/timer/timer.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/resource/material_design/material_design_controller.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/test/material_design_controller_test_api.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/views/animation/ink_drop_animation_controller.h"
-#include "ui/views/animation/ink_drop_animation_controller_factory.h"
+#include "ui/views/animation/ink_drop_animation_controller_impl.h"
 #include "ui/views/animation/ink_drop_host.h"
 #include "ui/views/animation/ink_drop_state.h"
 #include "ui/views/animation/test/test_ink_drop_host.h"
@@ -17,7 +23,8 @@
 namespace views {
 
 class InkDropAnimationControllerFactoryTest
-    : public testing::TestWithParam<ui::MaterialDesignController::Mode> {
+    : public testing::TestWithParam<
+          testing::tuple<ui::MaterialDesignController::Mode>> {
  public:
   InkDropAnimationControllerFactoryTest();
   ~InkDropAnimationControllerFactoryTest();
@@ -28,10 +35,19 @@ class InkDropAnimationControllerFactoryTest
 
   // The InkDropAnimationController returned by the
   // InkDropAnimationControllerFactory test target.
-  scoped_ptr<InkDropAnimationController> ink_drop_animation_controller_;
+  std::unique_ptr<InkDropAnimationController> ink_drop_animation_controller_;
 
  private:
-  scoped_ptr<ui::ScopedAnimationDurationScaleMode> zero_duration_mode_;
+  // Extracts and returns the material design mode from the test parameters.
+  ui::MaterialDesignController::Mode GetMaterialMode() const;
+
+  std::unique_ptr<ui::ScopedAnimationDurationScaleMode> zero_duration_mode_;
+
+  // Required by base::Timer's.
+  std::unique_ptr<base::ThreadTaskRunnerHandle> thread_task_runner_handle_;
+
+  std::unique_ptr<ui::test::MaterialDesignControllerTestAPI>
+      material_design_state_;
 
   DISALLOW_COPY_AND_ASSIGN(InkDropAnimationControllerFactoryTest);
 };
@@ -41,22 +57,39 @@ InkDropAnimationControllerFactoryTest::InkDropAnimationControllerFactoryTest()
   // Any call by a previous test to MaterialDesignController::GetMode() will
   // initialize and cache the mode. This ensures that these tests will run from
   // a non-initialized state.
-  ui::test::MaterialDesignControllerTestAPI::UninitializeMode();
-  ui::test::MaterialDesignControllerTestAPI::SetMode(GetParam());
+  material_design_state_.reset(
+      new ui::test::MaterialDesignControllerTestAPI(GetMaterialMode()));
   ink_drop_animation_controller_.reset(
       InkDropAnimationControllerFactory::CreateInkDropAnimationController(
           &test_ink_drop_host_)
           .release());
-  ink_drop_animation_controller_->SetInkDropSize(gfx::Size(10, 10), 4,
-                                                 gfx::Size(8, 8), 2);
 
   zero_duration_mode_.reset(new ui::ScopedAnimationDurationScaleMode(
       ui::ScopedAnimationDurationScaleMode::ZERO_DURATION));
+
+  switch (GetMaterialMode()) {
+    case ui::MaterialDesignController::NON_MATERIAL:
+      break;
+    case ui::MaterialDesignController::MATERIAL_NORMAL:
+    case ui::MaterialDesignController::MATERIAL_HYBRID:
+      // The Timer's used by the InkDropAnimationControllerImpl class require a
+      // base::ThreadTaskRunnerHandle instance.
+      scoped_refptr<base::TestMockTimeTaskRunner> task_runner(
+          new base::TestMockTimeTaskRunner);
+      thread_task_runner_handle_.reset(
+          new base::ThreadTaskRunnerHandle(task_runner));
+      break;
+  }
 }
 
 InkDropAnimationControllerFactoryTest::
     ~InkDropAnimationControllerFactoryTest() {
-  ui::test::MaterialDesignControllerTestAPI::UninitializeMode();
+  material_design_state_.reset();
+}
+
+ui::MaterialDesignController::Mode
+InkDropAnimationControllerFactoryTest::GetMaterialMode() const {
+  return testing::get<0>(GetParam());
 }
 
 // Note: First argument is optional and intentionally left blank.
@@ -65,7 +98,8 @@ INSTANTIATE_TEST_CASE_P(
     ,
     InkDropAnimationControllerFactoryTest,
     testing::Values(ui::MaterialDesignController::NON_MATERIAL,
-                    ui::MaterialDesignController::MATERIAL_NORMAL));
+                    ui::MaterialDesignController::MATERIAL_NORMAL,
+                    ui::MaterialDesignController::MATERIAL_HYBRID));
 
 TEST_P(InkDropAnimationControllerFactoryTest,
        VerifyAllInkDropLayersRemovedAfterDestruction) {
@@ -76,39 +110,41 @@ TEST_P(InkDropAnimationControllerFactoryTest,
 
 TEST_P(InkDropAnimationControllerFactoryTest, StateIsHiddenInitially) {
   EXPECT_EQ(InkDropState::HIDDEN,
-            ink_drop_animation_controller_->GetInkDropState());
+            ink_drop_animation_controller_->GetTargetInkDropState());
 }
 
 TEST_P(InkDropAnimationControllerFactoryTest, TypicalQuickAction) {
   ink_drop_animation_controller_->AnimateToState(InkDropState::ACTION_PENDING);
-  ink_drop_animation_controller_->AnimateToState(InkDropState::QUICK_ACTION);
+  ink_drop_animation_controller_->AnimateToState(
+      InkDropState::ACTION_TRIGGERED);
   EXPECT_EQ(InkDropState::HIDDEN,
-            ink_drop_animation_controller_->GetInkDropState());
+            ink_drop_animation_controller_->GetTargetInkDropState());
 }
 
 TEST_P(InkDropAnimationControllerFactoryTest, CancelQuickAction) {
   ink_drop_animation_controller_->AnimateToState(InkDropState::ACTION_PENDING);
   ink_drop_animation_controller_->AnimateToState(InkDropState::HIDDEN);
   EXPECT_EQ(InkDropState::HIDDEN,
-            ink_drop_animation_controller_->GetInkDropState());
+            ink_drop_animation_controller_->GetTargetInkDropState());
 }
 
 TEST_P(InkDropAnimationControllerFactoryTest, TypicalSlowAction) {
   ink_drop_animation_controller_->AnimateToState(InkDropState::ACTION_PENDING);
   ink_drop_animation_controller_->AnimateToState(
-      InkDropState::SLOW_ACTION_PENDING);
-  ink_drop_animation_controller_->AnimateToState(InkDropState::SLOW_ACTION);
+      InkDropState::ALTERNATE_ACTION_PENDING);
+  ink_drop_animation_controller_->AnimateToState(
+      InkDropState::ALTERNATE_ACTION_TRIGGERED);
   EXPECT_EQ(InkDropState::HIDDEN,
-            ink_drop_animation_controller_->GetInkDropState());
+            ink_drop_animation_controller_->GetTargetInkDropState());
 }
 
 TEST_P(InkDropAnimationControllerFactoryTest, CancelSlowAction) {
   ink_drop_animation_controller_->AnimateToState(InkDropState::ACTION_PENDING);
   ink_drop_animation_controller_->AnimateToState(
-      InkDropState::SLOW_ACTION_PENDING);
+      InkDropState::ALTERNATE_ACTION_PENDING);
   ink_drop_animation_controller_->AnimateToState(InkDropState::HIDDEN);
   EXPECT_EQ(InkDropState::HIDDEN,
-            ink_drop_animation_controller_->GetInkDropState());
+            ink_drop_animation_controller_->GetTargetInkDropState());
 }
 
 TEST_P(InkDropAnimationControllerFactoryTest, TypicalQuickActivated) {
@@ -116,17 +152,17 @@ TEST_P(InkDropAnimationControllerFactoryTest, TypicalQuickActivated) {
   ink_drop_animation_controller_->AnimateToState(InkDropState::ACTIVATED);
   ink_drop_animation_controller_->AnimateToState(InkDropState::DEACTIVATED);
   EXPECT_EQ(InkDropState::HIDDEN,
-            ink_drop_animation_controller_->GetInkDropState());
+            ink_drop_animation_controller_->GetTargetInkDropState());
 }
 
 TEST_P(InkDropAnimationControllerFactoryTest, TypicalSlowActivated) {
   ink_drop_animation_controller_->AnimateToState(InkDropState::ACTION_PENDING);
   ink_drop_animation_controller_->AnimateToState(
-      InkDropState::SLOW_ACTION_PENDING);
+      InkDropState::ALTERNATE_ACTION_PENDING);
   ink_drop_animation_controller_->AnimateToState(InkDropState::ACTIVATED);
   ink_drop_animation_controller_->AnimateToState(InkDropState::DEACTIVATED);
   EXPECT_EQ(InkDropState::HIDDEN,
-            ink_drop_animation_controller_->GetInkDropState());
+            ink_drop_animation_controller_->GetTargetInkDropState());
 }
 
 }  // namespace views

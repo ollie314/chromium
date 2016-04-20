@@ -39,14 +39,15 @@ class ProtectedMediaIdentifierPermissionContext
     : public PermissionContextBase {
  public:
   explicit ProtectedMediaIdentifierPermissionContext(Profile* profile);
+  ~ProtectedMediaIdentifierPermissionContext() override;
 
   // PermissionContextBase implementation.
 #if defined(OS_CHROMEOS)
-  void RequestPermission(content::WebContents* web_contents,
-                         const PermissionRequestID& id,
-                         const GURL& requesting_origin,
-                         bool user_gesture,
-                         const BrowserPermissionCallback& callback) override;
+  void DecidePermission(content::WebContents* web_contents,
+                        const PermissionRequestID& id,
+                        const GURL& requesting_origin,
+                        const GURL& embedding_origin,
+                        const BrowserPermissionCallback& callback) override;
 #endif  // defined(OS_CHROMEOS)
   ContentSetting GetPermissionStatus(
       const GURL& requesting_origin,
@@ -55,8 +56,6 @@ class ProtectedMediaIdentifierPermissionContext
                                const PermissionRequestID& id) override;
 
  private:
-  ~ProtectedMediaIdentifierPermissionContext() override;
-
   void UpdateTabContext(const PermissionRequestID& id,
                         const GURL& requesting_frame,
                         bool allowed) override;

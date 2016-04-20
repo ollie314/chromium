@@ -5,12 +5,14 @@
 #include "content/browser/service_worker/service_worker_url_request_job.h"
 
 #include <stdint.h>
+
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/thread_task_runner_handle.h"
@@ -72,7 +74,9 @@ class TestCallbackTracker {
       const GURL& original_url_via_service_worker,
       blink::WebServiceWorkerResponseType response_type_via_service_worker,
       base::TimeTicks service_worker_start_time,
-      base::TimeTicks service_worker_ready_time) {
+      base::TimeTicks service_worker_ready_time,
+      bool response_is_in_cache_storage,
+      const std::string& response_cache_storage_cache_name) {
     ++times_on_start_completed_invoked_;
 
     was_fetched_via_service_worker_ = was_fetched_via_service_worker;
@@ -82,6 +86,8 @@ class TestCallbackTracker {
         blink::WebServiceWorkerResponseTypeDefault;
     service_worker_start_time_ = service_worker_start_time;
     service_worker_ready_time_ = service_worker_ready_time;
+    response_is_in_cache_storage_ = response_is_in_cache_storage;
+    response_cache_storage_cache_name_ = response_cache_storage_cache_name;
   }
 
   void OnPrepareToRestart(base::TimeTicks service_worker_start_time,
@@ -127,6 +133,14 @@ class TestCallbackTracker {
     return service_worker_ready_time_;
   }
 
+  bool response_is_in_cache_storage() const {
+    return response_is_in_cache_storage_;
+  }
+
+  const std::string& response_cache_storage_cache_name() const {
+    return response_cache_storage_cache_name_;
+  }
+
  private:
   int times_on_start_completed_invoked_ = 0;
   int times_prepare_to_restart_invoked_ = 0;
@@ -140,6 +154,8 @@ class TestCallbackTracker {
       blink::WebServiceWorkerResponseTypeDefault;
   base::TimeTicks service_worker_start_time_;
   base::TimeTicks service_worker_ready_time_;
+  bool response_is_in_cache_storage_ = false;
+  std::string response_cache_storage_cache_name_;
 
   DISALLOW_COPY_AND_ASSIGN(TestCallbackTracker);
 };
@@ -174,9 +190,10 @@ class MockHttpProtocolHandler
         request, network_delegate, provider_host_->client_uuid(),
         blob_storage_context_, resource_context_, FETCH_REQUEST_MODE_NO_CORS,
         FETCH_CREDENTIALS_MODE_OMIT, FetchRedirectMode::FOLLOW_MODE,
-        true /* is_main_resource_load */, REQUEST_CONTEXT_TYPE_HYPERLINK,
+        RESOURCE_TYPE_MAIN_FRAME, REQUEST_CONTEXT_TYPE_HYPERLINK,
         REQUEST_CONTEXT_FRAME_TYPE_TOP_LEVEL,
-        scoped_refptr<ResourceRequestBody>(), delegate_);
+        scoped_refptr<ResourceRequestBody>(), ServiceWorkerFetchType::FETCH,
+        delegate_);
     job_->ForwardToServiceWorker();
     return job_;
   }
@@ -191,11 +208,11 @@ class MockHttpProtocolHandler
 
 // Returns a BlobProtocolHandler that uses |blob_storage_context|. Caller owns
 // the memory.
-scoped_ptr<storage::BlobProtocolHandler> CreateMockBlobProtocolHandler(
+std::unique_ptr<storage::BlobProtocolHandler> CreateMockBlobProtocolHandler(
     storage::BlobStorageContext* blob_storage_context) {
   // The FileSystemContext and task runner are not actually used but a
   // task runner is needed to avoid a DCHECK in BlobURLRequestJob ctor.
-  return make_scoped_ptr(new storage::BlobProtocolHandler(
+  return base::WrapUnique(new storage::BlobProtocolHandler(
       blob_storage_context, nullptr,
       base::ThreadTaskRunnerHandle::Get().get()));
 }
@@ -257,7 +274,7 @@ class ServiceWorkerURLRequestJobTest
       version_->SetMainScriptHttpResponseInfo(http_info);
     }
 
-    scoped_ptr<ServiceWorkerProviderHost> provider_host(
+    std::unique_ptr<ServiceWorkerProviderHost> provider_host(
         new ServiceWorkerProviderHost(
             helper_->mock_render_process_id(), MSG_ROUTING_NONE, kProviderID,
             SERVICE_WORKER_PROVIDER_FOR_WINDOW, helper_->context()->AsWeakPtr(),
@@ -278,7 +295,7 @@ class ServiceWorkerURLRequestJobTest
     url_request_job_factory_.reset(new net::URLRequestJobFactoryImpl);
     url_request_job_factory_->SetProtocolHandler(
         "http",
-        make_scoped_ptr(new MockHttpProtocolHandler(
+        base::WrapUnique(new MockHttpProtocolHandler(
             provider_host->AsWeakPtr(), browser_context_->GetResourceContext(),
             blob_storage_context->AsWeakPtr(), this)));
     url_request_job_factory_->SetProtocolHandler(
@@ -346,11 +363,14 @@ class ServiceWorkerURLRequestJobTest
       const GURL& original_url_via_service_worker,
       blink::WebServiceWorkerResponseType response_type_via_service_worker,
       base::TimeTicks worker_start_time,
-      base::TimeTicks service_worker_ready_time) override {
+      base::TimeTicks service_worker_ready_time,
+      bool response_is_in_cache_storage,
+      const std::string& response_cache_storage_cache_name) override {
     callback_tracker_.OnStartCompleted(
         was_fetched_via_service_worker, was_fallback_required,
         original_url_via_service_worker, response_type_via_service_worker,
-        worker_start_time, service_worker_ready_time);
+        worker_start_time, service_worker_ready_time,
+        response_is_in_cache_storage, response_cache_storage_cache_name);
   }
 
   ServiceWorkerVersion* GetServiceWorkerVersion(
@@ -381,24 +401,19 @@ class ServiceWorkerURLRequestJobTest
     provider_host_->NotifyControllerLost();
   }
 
-  GURL GetRequestingOrigin() override {
-    CHECK(provider_host_);
-    return provider_host_->document_url().GetOrigin();
-  }
-
   TestBrowserThreadBundle thread_bundle_;
 
-  scoped_ptr<TestBrowserContext> browser_context_;
-  scoped_ptr<EmbeddedWorkerTestHelper> helper_;
+  std::unique_ptr<TestBrowserContext> browser_context_;
+  std::unique_ptr<EmbeddedWorkerTestHelper> helper_;
   scoped_refptr<ServiceWorkerRegistration> registration_;
   scoped_refptr<ServiceWorkerVersion> version_;
 
-  scoped_ptr<net::URLRequestJobFactoryImpl> url_request_job_factory_;
+  std::unique_ptr<net::URLRequestJobFactoryImpl> url_request_job_factory_;
   net::URLRequestContext url_request_context_;
   MockURLRequestDelegate url_request_delegate_;
-  scoped_ptr<net::URLRequest> request_;
+  std::unique_ptr<net::URLRequest> request_;
 
-  scoped_ptr<storage::BlobDataBuilder> blob_data_;
+  std::unique_ptr<storage::BlobDataBuilder> blob_data_;
 
   TestCallbackTracker callback_tracker_;
   base::WeakPtr<ServiceWorkerProviderHost> provider_host_;
@@ -420,6 +435,9 @@ TEST_F(ServiceWorkerURLRequestJobTest, Simple) {
             callback_tracker_.response_type_via_service_worker());
   EXPECT_FALSE(callback_tracker_.service_worker_start_time().is_null());
   EXPECT_FALSE(callback_tracker_.service_worker_ready_time().is_null());
+  EXPECT_FALSE(callback_tracker_.response_is_in_cache_storage());
+  EXPECT_EQ(std::string(),
+            callback_tracker_.response_cache_storage_cache_name());
 }
 
 class ProviderDeleteHelper : public EmbeddedWorkerTestHelper {
@@ -438,7 +456,9 @@ class ProviderDeleteHelper : public EmbeddedWorkerTestHelper {
         ServiceWorkerResponse(
             GURL(), 200, "OK", blink::WebServiceWorkerResponseTypeDefault,
             ServiceWorkerHeaderMap(), std::string(), 0, GURL(),
-            blink::WebServiceWorkerResponseErrorUnknown)));
+            blink::WebServiceWorkerResponseErrorUnknown, base::Time(),
+            false /* response_is_in_cache_storage */,
+            std::string() /* response_cache_storage_cache_name */)));
   }
 
  private:
@@ -510,7 +530,9 @@ class BlobResponder : public EmbeddedWorkerTestHelper {
         ServiceWorkerResponse(
             GURL(), 200, "OK", blink::WebServiceWorkerResponseTypeDefault,
             ServiceWorkerHeaderMap(), blob_uuid_, blob_size_, GURL(),
-            blink::WebServiceWorkerResponseErrorUnknown)));
+            blink::WebServiceWorkerResponseErrorUnknown, base::Time(),
+            false /* response_is_in_cache_storage */,
+            std::string() /* response_cache_storage_cache_name */)));
   }
 
   std::string blob_uuid_;
@@ -529,7 +551,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, BlobResponse) {
     blob_data_->AppendData(kTestData);
     expected_response += kTestData;
   }
-  scoped_ptr<storage::BlobDataHandle> blob_handle =
+  std::unique_ptr<storage::BlobDataHandle> blob_handle =
       blob_storage_context->context()->AddFinishedBlob(blob_data_.get());
   SetUpWithHelper(
       new BlobResponder(blob_handle->uuid(), expected_response.size()));
@@ -579,10 +601,12 @@ class StreamResponder : public EmbeddedWorkerTestHelper {
     SimulateSend(new ServiceWorkerHostMsg_FetchEventFinished(
         embedded_worker_id, request_id,
         SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
-        ServiceWorkerResponse(GURL(), 200, "OK",
-                              blink::WebServiceWorkerResponseTypeDefault,
-                              ServiceWorkerHeaderMap(), "", 0, stream_url_,
-                              blink::WebServiceWorkerResponseErrorUnknown)));
+        ServiceWorkerResponse(
+            GURL(), 200, "OK", blink::WebServiceWorkerResponseTypeDefault,
+            ServiceWorkerHeaderMap(), "", 0, stream_url_,
+            blink::WebServiceWorkerResponseErrorUnknown, base::Time(),
+            false /* response_is_in_cache_storage */,
+            std::string() /* response_cache_storage_cache_name */)));
   }
 
   const GURL stream_url_;

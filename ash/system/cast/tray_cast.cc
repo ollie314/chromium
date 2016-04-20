@@ -6,6 +6,7 @@
 
 #include "ash/session/session_state_delegate.h"
 #include "ash/shelf/shelf_types.h"
+#include "ash/shelf/shelf_util.h"
 #include "ash/shell.h"
 #include "ash/system/chromeos/screen_security/screen_tray_item.h"
 #include "ash/system/tray/fixed_sized_image_view.h"
@@ -37,17 +38,11 @@ namespace ash {
 
 namespace {
 
-const int kMaximumStatusStringLength = 100;
+const size_t kMaximumStatusStringLength = 100;
 const int kStopButtonRightPadding = 18;
 
 // Returns the active CastConfigDelegate instance.
 ash::CastConfigDelegate* GetCastConfigDelegate() {
-  // When shutting down Chrome, there may not be a shell or a delegate instance.
-  if (!ash::Shell::GetInstance() ||
-      !ash::Shell::GetInstance()->system_tray_delegate()) {
-    return nullptr;
-  }
-
   return ash::Shell::GetInstance()
       ->system_tray_delegate()
       ->GetCastConfigDelegate();
@@ -338,7 +333,7 @@ views::View* CastDuplexView::ActiveChildView() {
 // Exposes an icon in the tray. |TrayCast| manages the visiblity of this.
 class CastTrayView : public TrayItemView {
  public:
-  CastTrayView(SystemTrayItem* tray_item);
+  explicit CastTrayView(SystemTrayItem* tray_item);
   ~CastTrayView() override;
 
   // Called when the tray alignment changes so that the icon can recenter
@@ -363,17 +358,9 @@ CastTrayView::~CastTrayView() {
 
 void CastTrayView::UpdateAlignment(ShelfAlignment alignment) {
   // Center the item dependent on the orientation of the shelf.
-  views::BoxLayout::Orientation layout = views::BoxLayout::kHorizontal;
-  switch (alignment) {
-    case ash::SHELF_ALIGNMENT_BOTTOM:
-    case ash::SHELF_ALIGNMENT_TOP:
-      layout = views::BoxLayout::kHorizontal;
-      break;
-    case ash::SHELF_ALIGNMENT_LEFT:
-    case ash::SHELF_ALIGNMENT_RIGHT:
-      layout = views::BoxLayout::kVertical;
-      break;
-  }
+  views::BoxLayout::Orientation layout = IsHorizontalAlignment(alignment)
+                                             ? views::BoxLayout::kVertical
+                                             : views::BoxLayout::kHorizontal;
   SetLayoutManager(new views::BoxLayout(layout, 0, 0, 0));
   Layout();
 }
@@ -560,14 +547,9 @@ TrayCast::TrayCast(SystemTray* system_tray) : SystemTrayItem(system_tray) {
 }
 
 TrayCast::~TrayCast() {
-  // TODO(jdufault): Remove these if checks (and the ones in
-  // GetCastConfigDelegate) by fixing deinit order. See crbug.com/577413.
-  if (Shell::GetInstance())
-    Shell::GetInstance()->RemoveShellObserver(this);
-
-  ash::CastConfigDelegate* cast_config_delegate = GetCastConfigDelegate();
-  if (added_observer_ && cast_config_delegate)
-    cast_config_delegate->RemoveObserver(this);
+  Shell::GetInstance()->RemoveShellObserver(this);
+  if (added_observer_)
+    GetCastConfigDelegate()->RemoveObserver(this);
 }
 
 void TrayCast::StartCastForTest(const std::string& receiver_id) {

@@ -5,7 +5,8 @@
 #include "ui/views/win/windows_session_change_observer.h"
 
 #include <wtsapi32.h>
-#pragma comment(lib, "wtsapi32.lib")
+
+#include <memory>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -13,7 +14,6 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/observer_list.h"
 #include "base/task_runner.h"
@@ -102,7 +102,7 @@ class WindowsSessionChangeObserver::WtsRegistrationNotificationManager {
   }
 
   base::ObserverList<WindowsSessionChangeObserver, true> observer_list_;
-  scoped_ptr<gfx::SingletonHwndObserver> singleton_hwnd_observer_;
+  std::unique_ptr<gfx::SingletonHwndObserver> singleton_hwnd_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(WtsRegistrationNotificationManager);
 };

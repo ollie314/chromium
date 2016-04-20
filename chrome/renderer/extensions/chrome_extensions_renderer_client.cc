@@ -4,6 +4,7 @@
 
 #include "chrome/renderer/extensions/chrome_extensions_renderer_client.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/command_line.h"
@@ -14,7 +15,7 @@
 #include "chrome/common/extensions/extension_metrics.h"
 #include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/renderer/chrome_render_process_observer.h"
+#include "chrome/renderer/chrome_render_thread_observer.h"
 #include "chrome/renderer/extensions/chrome_extensions_dispatcher_delegate.h"
 #include "chrome/renderer/extensions/renderer_permissions_policy_delegate.h"
 #include "chrome/renderer/extensions/resource_request_policy.h"
@@ -85,7 +86,8 @@ bool CrossesExtensionExtents(blink::WebLocalFrame* frame,
     // in an extension process (other than the Chrome Web Store), we want to
     // keep it in process to allow the opener to script it.
     blink::WebDocument opener_document = opener_frame->document();
-    blink::WebSecurityOrigin opener_origin = opener_document.securityOrigin();
+    blink::WebSecurityOrigin opener_origin =
+        opener_document.getSecurityOrigin();
     bool opener_is_extension_url = !opener_origin.isUnique() &&
                                    extension_registry->GetExtensionOrAppByURL(
                                        opener_document.url()) != nullptr;
@@ -124,7 +126,7 @@ ChromeExtensionsRendererClient* ChromeExtensionsRendererClient::GetInstance() {
 }
 
 bool ChromeExtensionsRendererClient::IsIncognitoProcess() const {
-  return ChromeRenderProcessObserver::is_incognito_process();
+  return ChromeRenderThreadObserver::is_incognito_process();
 }
 
 int ChromeExtensionsRendererClient::GetLowestIsolatedWorldId() const {
@@ -228,7 +230,7 @@ bool ChromeExtensionsRendererClient::WillSendRequest(
 }
 
 void ChromeExtensionsRendererClient::SetExtensionDispatcherForTest(
-    scoped_ptr<extensions::Dispatcher> extension_dispatcher) {
+    std::unique_ptr<extensions::Dispatcher> extension_dispatcher) {
   extension_dispatcher_ = std::move(extension_dispatcher);
   permissions_policy_delegate_.reset(
       new extensions::RendererPermissionsPolicyDelegate(
@@ -302,4 +304,14 @@ ChromeExtensionsRendererClient::CreateBrowserPluginDelegate(
     return new extensions::ExtensionsGuestViewContainer(render_frame);
   return new extensions::MimeHandlerViewContainer(render_frame, mime_type,
                                                   original_url);
+}
+
+void ChromeExtensionsRendererClient::RunScriptsAtDocumentStart(
+    content::RenderFrame* render_frame) {
+  extension_dispatcher_->RunScriptsAtDocumentStart(render_frame);
+}
+
+void ChromeExtensionsRendererClient::RunScriptsAtDocumentEnd(
+    content::RenderFrame* render_frame) {
+  extension_dispatcher_->RunScriptsAtDocumentEnd(render_frame);
 }

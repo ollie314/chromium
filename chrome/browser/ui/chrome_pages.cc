@@ -45,7 +45,7 @@
 #include "extensions/browser/extension_registry.h"
 #endif
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "components/signin/core/browser/signin_manager.h"
 #endif
@@ -80,10 +80,7 @@ void NavigateToSingletonTab(Browser* browser, const GURL& url) {
 // |browser| is NULL and the help page is used (vs the app), the help page is
 // shown in the last active browser. If there is no such browser, a new browser
 // is created.
-void ShowHelpImpl(Browser* browser,
-                  Profile* profile,
-                  HostDesktopType host_desktop_type,
-                  HelpSource source) {
+void ShowHelpImpl(Browser* browser, Profile* profile, HelpSource source) {
   content::RecordAction(UserMetricsAction("ShowHelpTab"));
 #if defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD)
   const extensions::Extension* extension =
@@ -104,9 +101,8 @@ void ShowHelpImpl(Browser* browser,
     default:
       NOTREACHED() << "Unhandled help source" << source;
   }
-  AppLaunchParams params(profile, extension, CURRENT_TAB, host_desktop_type,
-                         app_launch_source);
-  OpenApplication(params);
+  OpenApplication(CreateAppLaunchParamsUserContainer(
+      profile, extension, NEW_FOREGROUND_TAB, app_launch_source));
 #else
   GURL url;
   switch (source) {
@@ -122,10 +118,9 @@ void ShowHelpImpl(Browser* browser,
     default:
       NOTREACHED() << "Unhandled help source " << source;
   }
-  scoped_ptr<ScopedTabbedBrowserDisplayer> displayer;
+  std::unique_ptr<ScopedTabbedBrowserDisplayer> displayer;
   if (!browser) {
-    displayer.reset(
-        new ScopedTabbedBrowserDisplayer(profile, host_desktop_type));
+    displayer.reset(new ScopedTabbedBrowserDisplayer(profile));
     browser = displayer->browser();
   }
   ShowSingletonTab(browser, url);
@@ -161,12 +156,9 @@ void ShowHistory(Browser* browser) {
 
 void ShowDownloads(Browser* browser) {
   content::RecordAction(UserMetricsAction("ShowDownloads"));
-  if (browser->window()) {
-    DownloadShelf* shelf = browser->window()->GetDownloadShelf();
-    // The downloads page is always shown in response to a user action.
-    if (shelf->IsShowing())
-      shelf->Close(DownloadShelf::USER_ACTION);
-  }
+  if (browser->window() && browser->window()->IsDownloadShelfVisible())
+    browser->window()->GetDownloadShelf()->Close(DownloadShelf::USER_ACTION);
+
   ShowSingletonTabOverwritingNTP(
       browser,
       GetSingletonTabNavigateParams(browser, GURL(kChromeUIDownloadsURL)));
@@ -206,14 +198,11 @@ void ShowConflicts(Browser* browser) {
 }
 
 void ShowHelp(Browser* browser, HelpSource source) {
-  ShowHelpImpl(
-      browser, browser->profile(), browser->host_desktop_type(), source);
+  ShowHelpImpl(browser, browser->profile(), source);
 }
 
-void ShowHelpForProfile(Profile* profile,
-                        HostDesktopType host_desktop_type,
-                        HelpSource source) {
-  ShowHelpImpl(NULL, profile, host_desktop_type, source);
+void ShowHelpForProfile(Profile* profile, HelpSource source) {
+  ShowHelpImpl(NULL, profile, source);
 }
 
 void ShowPolicy(Browser* browser) {
@@ -224,10 +213,6 @@ void ShowSlow(Browser* browser) {
 #if defined(OS_CHROMEOS)
   ShowSingletonTab(browser, GURL(kChromeUISlowURL));
 #endif
-}
-
-void ShowMemory(Browser* browser) {
-  ShowSingletonTab(browser, GURL(kChromeUIMemoryURL));
 }
 
 GURL GetSettingsUrl(const std::string& sub_page) {
@@ -285,11 +270,9 @@ void ShowSettingsSubPageForProfile(Profile* profile,
         profile, GetSettingsUrl(sub_page));
     return;
   }
-  Browser* browser =
-      chrome::FindTabbedBrowser(profile, false, HOST_DESKTOP_TYPE_NATIVE);
+  Browser* browser = chrome::FindTabbedBrowser(profile, false);
   if (!browser) {
-    browser = new Browser(
-        Browser::CreateParams(profile, chrome::HOST_DESKTOP_TYPE_NATIVE));
+    browser = new Browser(Browser::CreateParams(profile));
   }
   ShowSettingsSubPageInTabbedBrowser(browser, sub_page);
 }
@@ -359,7 +342,7 @@ void ShowSearchEngineSettings(Browser* browser) {
   ShowSettingsSubPage(browser, kSearchEnginesSubPage);
 }
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
 void ShowBrowserSignin(Browser* browser,
                        signin_metrics::AccessPoint access_point) {
   Profile* original_profile = browser->profile()->GetOriginalProfile();
@@ -370,11 +353,10 @@ void ShowBrowserSignin(Browser* browser,
   // a browser window from the original profile.  The user cannot sign in
   // from an incognito window.
   bool switched_browser = false;
-  scoped_ptr<ScopedTabbedBrowserDisplayer> displayer;
+  std::unique_ptr<ScopedTabbedBrowserDisplayer> displayer;
   if (browser->profile()->IsOffTheRecord()) {
     switched_browser = true;
-    displayer.reset(new ScopedTabbedBrowserDisplayer(
-        original_profile, chrome::HOST_DESKTOP_TYPE_NATIVE));
+    displayer.reset(new ScopedTabbedBrowserDisplayer(original_profile));
     browser = displayer->browser();
   }
 

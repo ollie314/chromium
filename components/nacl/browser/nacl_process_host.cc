@@ -67,6 +67,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+#include "content/public/browser/zygote_handle_linux.h"
 #include "ipc/ipc_channel_posix.h"
 #elif defined(OS_WIN)
 #include <windows.h>
@@ -76,6 +77,7 @@
 #include "base/win/scoped_handle.h"
 #include "components/nacl/browser/nacl_broker_service_win.h"
 #include "components/nacl/common/nacl_debug_exception_handler_win.h"
+#include "components/startup_metric_utils/common/pre_read_field_trial_utils_win.h"
 #include "content/public/common/sandbox_init.h"
 #endif
 
@@ -154,6 +156,10 @@ bool RunningOnWOW64() {
 
 namespace {
 
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+content::ZygoteHandle g_nacl_zygote;
+#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
+
 // NOTE: changes to this class need to be reviewed by the security team.
 class NaClSandboxedProcessLauncherDelegate
     : public content::SandboxedProcessLauncherDelegate {
@@ -180,7 +186,12 @@ class NaClSandboxedProcessLauncherDelegate
     }
   }
 #elif defined(OS_POSIX)
-  bool ShouldUseZygote() override { return true; }
+#if !defined(OS_MACOSX)
+  content::ZygoteHandle* GetZygote() override {
+    return content::GetGenericZygote();
+  }
+#endif  // !defined(OS_MACOSX)
+
   base::ScopedFD TakeIpcFd() override { return std::move(ipc_fd_); }
 #endif  // OS_WIN
 
@@ -305,7 +316,7 @@ NaClProcessHost::NaClProcessHost(
   // We aren't on the UI thread so getting the pref locale for language
   // formatting isn't possible, so IDN will be lost, but this is probably OK
   // for this use case.
-  process_->SetName(url_formatter::FormatUrl(manifest_url_, std::string()));
+  process_->SetName(url_formatter::FormatUrl(manifest_url_));
 
   enable_debug_stub_ = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableNaClDebug);
@@ -400,6 +411,14 @@ void NaClProcessHost::EarlyStartup() {
   }
   NaClBrowser::GetDelegate()->SetDebugPatterns(nacl_debug_mask);
 }
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+// static
+void NaClProcessHost::EarlyZygoteLaunch() {
+  DCHECK(!g_nacl_zygote);
+  g_nacl_zygote = content::CreateZygote();
+}
+#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
 
 // static
 void NaClProcessHost::SetPpapiKeepAliveThrottleForTesting(
@@ -625,7 +644,12 @@ bool NaClProcessHost::LaunchSelLdr() {
   if (NaClBrowser::GetDelegate()->DialogsAreSuppressed())
     cmd_line->AppendSwitch(switches::kNoErrorDialogs);
 
-  // On Windows we might need to start the broker process to launch a new loader
+#if defined(OS_WIN)
+  if (startup_metric_utils::GetPreReadOptions().use_prefetch_argument)
+    cmd_line->AppendArg(switches::kPrefetchArgumentOther);
+#endif  // defined(OS_WIN)
+
+// On Windows we might need to start the broker process to launch a new loader
 #if defined(OS_WIN)
   if (RunningOnWOW64()) {
     if (!NaClBrokerService::GetInstance()->LaunchLoader(
@@ -695,20 +719,6 @@ void NaClProcessHost::ReplyToRenderer(
     ScopedChannelHandle ppapi_channel_handle,
     ScopedChannelHandle trusted_channel_handle,
     ScopedChannelHandle manifest_service_channel_handle) {
-#if defined(OS_WIN)
-  // If we are on 64-bit Windows, the NaCl process's sandbox is
-  // managed by a different process from the renderer's sandbox.  We
-  // need to inform the renderer's sandbox about the NaCl process so
-  // that the renderer can send handles to the NaCl process using
-  // BrokerDuplicateHandle().
-  if (RunningOnWOW64()) {
-    if (!content::BrokerAddTargetPeer(process_->GetData().handle)) {
-      SendErrorToRenderer("BrokerAddTargetPeer() failed");
-      return;
-    }
-  }
-#endif
-
   // Hereafter, we always send an IPC message with handles created above
   // which, on Windows, are not closable in this process.
   std::string error_message;
@@ -859,51 +869,21 @@ bool NaClProcessHost::StartNaClExecution() {
     params.version = NaClBrowser::GetDelegate()->GetVersionString();
     params.enable_debug_stub = enable_nacl_debug;
 
-    const ChildProcessData& data = process_->GetData();
     const base::File& irt_file = nacl_browser->IrtFile();
     CHECK(irt_file.IsValid());
     // Send over the IRT file handle.  We don't close our own copy!
-    params.irt_handle = IPC::GetFileHandleForProcess(
-        irt_file.GetPlatformFile(), data.handle, false);
+    params.irt_handle = IPC::GetPlatformFileForTransit(
+        irt_file.GetPlatformFile(), false);
     if (params.irt_handle == IPC::InvalidPlatformFileForTransit()) {
       return false;
     }
-
-#if defined(OS_MACOSX)
-    // For dynamic loading support, NaCl requires a file descriptor that
-    // was created in /tmp, since those created with shm_open() are not
-    // mappable with PROT_EXEC.  Rather than requiring an extra IPC
-    // round trip out of the sandbox, we create an FD here.
-    base::SharedMemory memory_buffer;
-    base::SharedMemoryCreateOptions options;
-    options.size = 1;
-    options.executable = true;
-
-    // NaCl expects a POSIX fd.
-    options.type = base::SharedMemoryHandle::POSIX;
-
-    if (!memory_buffer.Create(options)) {
-      DLOG(ERROR) << "Failed to allocate memory buffer";
-      return false;
-    }
-    base::SharedMemoryHandle duped_handle =
-        base::SharedMemory::DuplicateHandle(memory_buffer.handle());
-    base::ScopedFD memory_fd(
-        base::SharedMemory::GetFdFromSharedMemoryHandle(duped_handle));
-    if (!memory_fd.is_valid()) {
-      DLOG(ERROR) << "Failed to dup() a file descriptor";
-      return false;
-    }
-    params.mac_shm_fd = IPC::GetFileHandleForProcess(
-        memory_fd.release(), data.handle, true);
-#endif
 
 #if defined(OS_POSIX)
     if (params.enable_debug_stub) {
       net::SocketDescriptor server_bound_socket = GetDebugStubSocketHandle();
       if (server_bound_socket != net::kInvalidSocket) {
-        params.debug_stub_server_bound_socket = IPC::GetFileHandleForProcess(
-            server_bound_socket, data.handle, true);
+        params.debug_stub_server_bound_socket = IPC::GetPlatformFileForTransit(
+            server_bound_socket, true);
       }
     }
 #endif
@@ -971,11 +951,10 @@ void NaClProcessHost::StartNaClFileResolved(
     content::BrowserThread::GetBlockingPool()->PostTask(
         FROM_HERE, base::Bind(&CloseFile, base::Passed(std::move(nexe_file_))));
     params.nexe_file_path_metadata = file_path;
-    params.nexe_file = IPC::TakeFileHandleForProcess(
-        std::move(checked_nexe_file), process_->GetData().handle);
+    params.nexe_file =
+        IPC::TakePlatformFileForTransit(std::move(checked_nexe_file));
   } else {
-    params.nexe_file = IPC::TakeFileHandleForProcess(
-        std::move(nexe_file_), process_->GetData().handle);
+    params.nexe_file = IPC::TakePlatformFileForTransit(std::move(nexe_file_));
   }
 
 #if defined(OS_LINUX)
@@ -1238,8 +1217,7 @@ void NaClProcessHost::FileResolved(
   IPC::PlatformFileForTransit out_handle;
   if (file.IsValid()) {
     out_file_path = file_path;
-    out_handle = IPC::TakeFileHandleForProcess(std::move(file),
-                                               process_->GetData().handle);
+    out_handle = IPC::TakePlatformFileForTransit(std::move(file));
   } else {
     out_handle = IPC::InvalidPlatformFileForTransit();
   }
@@ -1312,7 +1290,7 @@ bool NaClProcessHost::AttachDebugExceptionHandler(const std::string& info,
                info);
   } else {
     NaClStartDebugExceptionHandlerThread(
-        process.Pass(), info, base::ThreadTaskRunnerHandle::Get(),
+        std::move(process), info, base::ThreadTaskRunnerHandle::Get(),
         base::Bind(&NaClProcessHost::OnDebugExceptionHandlerLaunchedByBroker,
                    weak_factory_.GetWeakPtr()));
     return true;

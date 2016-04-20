@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -16,10 +17,8 @@
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
@@ -42,6 +41,7 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/core/common/schema.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "policy/policy_constants.h"
@@ -85,7 +85,7 @@ class IndicatorTestCase {
   bool readonly() const { return readonly_; }
 
  private:
-  scoped_ptr<base::DictionaryValue> policy_;
+  std::unique_ptr<base::DictionaryValue> policy_;
   std::string value_;
   bool readonly_;
 
@@ -236,7 +236,7 @@ class PolicyTestCases {
     int error_code = -1;
     std::string error_string;
     base::DictionaryValue* dict = NULL;
-    scoped_ptr<base::Value> value = base::JSONReader::ReadAndReturnError(
+    std::unique_ptr<base::Value> value = base::JSONReader::ReadAndReturnError(
         json, base::JSON_PARSE_RFC, &error_code, &error_string);
     if (!value.get() || !value->GetAsDictionary(&dict)) {
       ADD_FAILURE() << "Error parsing policy_test_cases.json: " << error_string;
@@ -431,7 +431,7 @@ void VerifyControlledSettingIndicators(Browser* browser,
   // |selector| as JSON.
   ASSERT_TRUE(content::ExecuteScriptAndExtractString(contents, javascript.str(),
                                                      &json));
-  scoped_ptr<base::Value> value_ptr = base::JSONReader::Read(json);
+  std::unique_ptr<base::Value> value_ptr = base::JSONReader::Read(json);
   const base::ListValue* indicators = NULL;
   ASSERT_TRUE(value_ptr.get());
   ASSERT_TRUE(value_ptr->GetAsList(&indicators));

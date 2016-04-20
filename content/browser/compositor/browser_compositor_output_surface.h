@@ -9,6 +9,7 @@
 #include "base/threading/non_thread_safe.h"
 #include "build/build_config.h"
 #include "cc/output/output_surface.h"
+#include "cc/scheduler/begin_frame_source.h"
 #include "content/common/content_export.h"
 #include "ui/compositor/compositor_vsync_manager.h"
 
@@ -36,7 +37,7 @@ class CONTENT_EXPORT BrowserCompositorOutputSurface
   bool BindToClient(cc::OutputSurfaceClient* client) override;
   cc::OverlayCandidateValidator* GetOverlayCandidateValidator() const override;
 
-  // ui::CompositorOutputSurface::Observer implementation.
+  // ui::CompositorVSyncManager::Observer implementation.
   void OnUpdateVSyncParameters(base::TimeTicks timebase,
                                base::TimeDelta interval) override;
 
@@ -68,15 +69,18 @@ class CONTENT_EXPORT BrowserCompositorOutputSurface
       const scoped_refptr<cc::ContextProvider>& context,
       const scoped_refptr<cc::ContextProvider>& worker_context,
       const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager,
-      scoped_ptr<BrowserCompositorOverlayCandidateValidator>
+      base::SingleThreadTaskRunner* task_runner,
+      std::unique_ptr<BrowserCompositorOverlayCandidateValidator>
           overlay_candidate_validator);
 
   // Constructor used by the software implementation.
   BrowserCompositorOutputSurface(
-      scoped_ptr<cc::SoftwareOutputDevice> software_device,
-      const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager);
+      std::unique_ptr<cc::SoftwareOutputDevice> software_device,
+      const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager,
+      base::SingleThreadTaskRunner* task_runner);
 
   scoped_refptr<ui::CompositorVSyncManager> vsync_manager_;
+  std::unique_ptr<cc::SyntheticBeginFrameSource> synthetic_begin_frame_source_;
   ReflectorImpl* reflector_;
 
   // True when BeginFrame scheduling is enabled.
@@ -85,7 +89,10 @@ class CONTENT_EXPORT BrowserCompositorOutputSurface
  private:
   void Initialize();
 
-  scoped_ptr<BrowserCompositorOverlayCandidateValidator>
+  void UpdateVSyncParametersInternal(base::TimeTicks timebase,
+                                     base::TimeDelta interval);
+
+  std::unique_ptr<BrowserCompositorOverlayCandidateValidator>
       overlay_candidate_validator_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserCompositorOutputSurface);

@@ -8,7 +8,6 @@
 
 #include "base/i18n/rtl.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -18,6 +17,7 @@
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/grit/components_resources.h"
+#include "components/prefs/pref_service.h"
 #include "components/security_interstitials/core/common_string_util.h"
 #include "components/security_interstitials/core/metrics_helper.h"
 #include "content/public/browser/interstitial_page.h"
@@ -78,13 +78,8 @@ bool SecurityInterstitialPage::IsPrefEnabled(const char* pref) {
 }
 
 base::string16 SecurityInterstitialPage::GetFormattedHostName() const {
-  std::string languages;
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
-  if (profile)
-    languages = profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
   return security_interstitials::common_string_util::GetFormattedHostName(
-      request_url_, languages);
+      request_url_);
 }
 
 std::string SecurityInterstitialPage::GetHTMLContents() {
@@ -113,6 +108,6 @@ SecurityInterstitialPage::metrics_helper() {
 }
 
 void SecurityInterstitialPage::set_metrics_helper(
-    scoped_ptr<security_interstitials::MetricsHelper> metrics_helper) {
+    std::unique_ptr<security_interstitials::MetricsHelper> metrics_helper) {
   controller_->set_metrics_helper(std::move(metrics_helper));
 }

@@ -23,7 +23,6 @@
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
@@ -38,10 +37,10 @@ class MediaQuerySet;
 // whenever it is needed and to call the listeners if the corresponding query has changed.
 // The listeners must be called in the very same order in which they have been added.
 
-class CORE_EXPORT MediaQueryMatcher final : public RefCountedWillBeGarbageCollectedFinalized<MediaQueryMatcher> {
+class CORE_EXPORT MediaQueryMatcher final : public GarbageCollectedFinalized<MediaQueryMatcher> {
     WTF_MAKE_NONCOPYABLE(MediaQueryMatcher);
 public:
-    static PassRefPtrWillBeRawPtr<MediaQueryMatcher> create(Document&);
+    static MediaQueryMatcher* create(Document&);
     ~MediaQueryMatcher();
 
     void documentDetached();
@@ -49,10 +48,10 @@ public:
     void addMediaQueryList(MediaQueryList*);
     void removeMediaQueryList(MediaQueryList*);
 
-    void addViewportListener(PassRefPtrWillBeRawPtr<MediaQueryListListener>);
-    void removeViewportListener(PassRefPtrWillBeRawPtr<MediaQueryListListener>);
+    void addViewportListener(MediaQueryListListener*);
+    void removeViewportListener(MediaQueryListListener*);
 
-    PassRefPtrWillBeRawPtr<MediaQueryList> matchMedia(const String&);
+    MediaQueryList* matchMedia(const String&);
 
     void mediaFeaturesChanged();
     void viewportChanged();
@@ -63,18 +62,18 @@ public:
 private:
     explicit MediaQueryMatcher(Document&);
 
-    PassOwnPtrWillBeRawPtr<MediaQueryEvaluator> createEvaluator() const;
+    MediaQueryEvaluator* createEvaluator() const;
 
-    RawPtrWillBeMember<Document> m_document;
-    OwnPtrWillBeMember<MediaQueryEvaluator> m_evaluator;
+    Member<Document> m_document;
+    Member<MediaQueryEvaluator> m_evaluator;
 
-    using MediaQueryListSet = WillBeHeapLinkedHashSet<RawPtrWillBeWeakMember<MediaQueryList>>;
+    using MediaQueryListSet = HeapLinkedHashSet<WeakMember<MediaQueryList>>;
     MediaQueryListSet m_mediaLists;
 
-    using ViewportListenerSet = WillBeHeapLinkedHashSet<RefPtrWillBeMember<MediaQueryListListener>>;
+    using ViewportListenerSet = HeapLinkedHashSet<Member<MediaQueryListListener>>;
     ViewportListenerSet m_viewportListeners;
 };
 
-}
+} // namespace blink
 
 #endif // MediaQueryMatcher_h

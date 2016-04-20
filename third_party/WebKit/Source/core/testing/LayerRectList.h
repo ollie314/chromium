@@ -32,8 +32,7 @@
 #define LayerRectList_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
+#include "platform/heap/Handle.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
 
@@ -53,7 +52,7 @@ public:
 
     unsigned length() const;
     LayerRect* item(unsigned index);
-    void append(PassRefPtrWillBeRawPtr<Node> layerAssociatedNode, const String& layerName, int layerOffsetX, int layerOffsetY, ClientRect* layerRelativeRect);
+    void append(Node* layerAssociatedNode, const String& layerName, int layerOffsetX, int layerOffsetY, ClientRect* layerRelativeRect);
 
     DECLARE_TRACE();
 

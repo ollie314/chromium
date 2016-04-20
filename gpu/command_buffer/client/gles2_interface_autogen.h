@@ -285,6 +285,7 @@ virtual void GetShaderSource(GLuint shader,
                              GLsizei* length,
                              char* source) = 0;
 virtual const GLubyte* GetString(GLenum name) = 0;
+virtual const GLubyte* GetStringi(GLenum name, GLuint index) = 0;
 virtual void GetSynciv(GLsync sync,
                        GLenum pname,
                        GLsizei bufsize,
@@ -748,8 +749,6 @@ virtual void DiscardFramebufferEXT(GLenum target,
                                    GLsizei count,
                                    const GLenum* attachments) = 0;
 virtual void LoseContextCHROMIUM(GLenum current, GLenum other) = 0;
-virtual GLuint InsertSyncPointCHROMIUM() = 0;
-virtual void WaitSyncPointCHROMIUM(GLuint sync_point) = 0;
 virtual GLuint64 InsertFenceSyncCHROMIUM() = 0;
 virtual void GenSyncTokenCHROMIUM(GLuint64 fence_sync, GLbyte* sync_token) = 0;
 virtual void GenUnverifiedSyncTokenCHROMIUM(GLuint64 fence_sync,
@@ -778,10 +777,12 @@ virtual void ScheduleCALayerCHROMIUM(GLuint contents_texture_id,
                                      GLboolean is_clipped,
                                      const GLfloat* clip_rect,
                                      GLint sorting_context_id,
-                                     const GLfloat* transform) = 0;
+                                     const GLfloat* transform,
+                                     GLuint filter) = 0;
 virtual void CommitOverlayPlanesCHROMIUM() = 0;
 virtual void SwapInterval(GLint interval) = 0;
 virtual void FlushDriverCachesCHROMIUM() = 0;
+virtual GLuint GetLastFlushIdCHROMIUM() = 0;
 virtual void MatrixLoadfCHROMIUM(GLenum matrixMode, const GLfloat* m) = 0;
 virtual void MatrixLoadIdentityCHROMIUM(GLenum matrixMode) = 0;
 virtual GLuint GenPathsCHROMIUM(GLsizei range) = 0;
@@ -887,4 +888,8 @@ virtual void BindFragDataLocationEXT(GLuint program,
                                      GLuint colorNumber,
                                      const char* name) = 0;
 virtual GLint GetFragDataIndexEXT(GLuint program, const char* name) = 0;
+virtual void UniformMatrix4fvStreamTextureMatrixCHROMIUM(
+    GLint location,
+    GLboolean transpose,
+    const GLfloat* default_value) = 0;
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_INTERFACE_AUTOGEN_H_

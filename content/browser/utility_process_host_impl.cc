@@ -31,11 +31,16 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/utility_process_host_client.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/sandbox_type.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "ipc/ipc_switches.h"
 #include "ui/base/ui_base_switches.h"
+
+#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
+#include "content/public/browser/zygote_handle_linux.h"
+#endif  // defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
 
 #if defined(OS_WIN)
 #include "sandbox/win/src/sandbox_policy.h"
@@ -43,6 +48,12 @@
 #endif
 
 namespace content {
+
+#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
+namespace {
+ZygoteHandle g_utility_zygote;
+}  // namespace
+#endif  // defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
 
 // NOTE: changes to this class need to be reviewed by the security team.
 class UtilitySandboxedProcessLauncherDelegate
@@ -58,7 +69,9 @@ class UtilitySandboxedProcessLauncherDelegate
         launch_elevated_(launch_elevated)
 #elif defined(OS_POSIX)
         env_(env),
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
         no_sandbox_(no_sandbox),
+#endif  // !defined(OS_MACOSX)  && !defined(OS_ANDROID)
         ipc_fd_(host->TakeClientFileDescriptor())
 #endif  // OS_WIN
   {}
@@ -88,9 +101,13 @@ class UtilitySandboxedProcessLauncherDelegate
 
 #elif defined(OS_POSIX)
 
-  bool ShouldUseZygote() override {
-    return !no_sandbox_ && exposed_dir_.empty();
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
+  ZygoteHandle* GetZygote() override {
+    if (no_sandbox_ || !exposed_dir_.empty())
+      return nullptr;
+    return GetGenericZygote();
   }
+#endif  // !defined(OS_MACOSX) && !defined(OS_ANDROID)
   base::EnvironmentMap GetEnvironment() override { return env_; }
   base::ScopedFD TakeIpcFd() override { return std::move(ipc_fd_); }
 #endif  // OS_WIN
@@ -106,7 +123,9 @@ class UtilitySandboxedProcessLauncherDelegate
   bool launch_elevated_;
 #elif defined(OS_POSIX)
   base::EnvironmentMap env_;
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
   bool no_sandbox_;
+#endif  // !defined(OS_MACOSX) && !defined(OS_ANDROID)
   base::ScopedFD ipc_fd_;
 #endif  // OS_WIN
 };
@@ -139,6 +158,7 @@ UtilityProcessHostImpl::UtilityProcessHostImpl(
 #endif
       started_(false),
       name_(base::ASCIIToUTF16("utility process")),
+      mojo_application_host_(new MojoApplicationHost),
       weak_ptr_factory_(this) {
 }
 
@@ -199,26 +219,26 @@ void UtilityProcessHostImpl::SetEnv(const base::EnvironmentMap& env) {
 
 #endif  // OS_POSIX
 
-bool UtilityProcessHostImpl::StartMojoMode() {
-  CHECK(!mojo_application_host_);
-  mojo_application_host_.reset(new MojoApplicationHost);
-
-  bool mojo_result = mojo_application_host_->Init();
-  if (!mojo_result)
-    return false;
-
+bool UtilityProcessHostImpl::Start() {
   return StartProcess();
 }
 
 ServiceRegistry* UtilityProcessHostImpl::GetServiceRegistry() {
-  if (mojo_application_host_)
-    return mojo_application_host_->service_registry();
-  return nullptr;
+  DCHECK(mojo_application_host_);
+  return mojo_application_host_->service_registry();
 }
 
 void UtilityProcessHostImpl::SetName(const base::string16& name) {
   name_ = name;
 }
+
+#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
+// static
+void UtilityProcessHostImpl::EarlyZygoteLaunch() {
+  DCHECK(!g_utility_zygote);
+  g_utility_zygote = CreateZygote();
+}
+#endif  // defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
 
 bool UtilityProcessHostImpl::StartProcess() {
   if (started_)
@@ -234,8 +254,10 @@ bool UtilityProcessHostImpl::StartProcess() {
   process_->SetName(name_);
 
   std::string channel_id = process_->GetHost()->CreateChannel();
-  if (channel_id.empty())
+  if (channel_id.empty()) {
+    NotifyAndDelete();
     return false;
+  }
 
   if (RenderProcessHost::run_renderer_in_process()) {
     DCHECK(g_utility_main_thread_factory);
@@ -244,9 +266,9 @@ bool UtilityProcessHostImpl::StartProcess() {
     in_process_thread_.reset(
         g_utility_main_thread_factory(InProcessChildThreadParams(
             channel_id, BrowserThread::UnsafeGetMessageLoopForThread(
-                            BrowserThread::IO)->task_runner())));
+                            BrowserThread::IO)->task_runner(),
+            std::string(), mojo_application_host_->GetToken())));
     in_process_thread_->Start();
-    OnProcessLaunched();
   } else {
     const base::CommandLine& browser_command_line =
         *base::CommandLine::ForCurrentProcess();
@@ -286,12 +308,16 @@ bool UtilityProcessHostImpl::StartProcess() {
     std::string locale = GetContentClient()->browser()->GetApplicationLocale();
     cmd_line->AppendSwitchASCII(switches::kLang, locale);
 
+#if defined(OS_WIN)
+    if (GetContentClient()->browser()->ShouldUseWindowsPrefetchArgument())
+      cmd_line->AppendArg(switches::kPrefetchArgumentOther);
+#endif  // defined(OS_WIN)
+
     if (no_sandbox_)
       cmd_line->AppendSwitch(switches::kNoSandbox);
 
     // Browser command-line switches to propagate to the utility process.
     static const char* const kSwitchNames[] = {
-      switches::kDebugPluginLoading,
       switches::kNoSandbox,
       switches::kProfilerTiming,
 #if defined(OS_MACOSX)
@@ -318,6 +344,9 @@ bool UtilityProcessHostImpl::StartProcess() {
     if (run_elevated_)
       cmd_line->AppendSwitch(switches::kUtilityProcessRunningElevated);
 #endif
+
+    cmd_line->AppendSwitchASCII(switches::kMojoApplicationChannelToken,
+                                mojo_application_host_->GetToken());
 
     process_->Launch(
         new UtilitySandboxedProcessLauncherDelegate(exposed_dir_,
@@ -365,16 +394,21 @@ void UtilityProcessHostImpl::OnProcessCrashed(int exit_code) {
             exit_code));
 }
 
-void UtilityProcessHostImpl::OnProcessLaunched() {
-  if (mojo_application_host_) {
-    base::ProcessHandle handle;
-    if (RenderProcessHost::run_renderer_in_process())
-      handle = base::GetCurrentProcessHandle();
-    else
-      handle = process_->GetData().handle;
+void UtilityProcessHostImpl::NotifyAndDelete() {
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&UtilityProcessHostImpl::NotifyLaunchFailedAndDelete,
+                 weak_ptr_factory_.GetWeakPtr()));
+}
 
-    mojo_application_host_->Activate(this, handle);
-  }
+// static
+void UtilityProcessHostImpl::NotifyLaunchFailedAndDelete(
+    base::WeakPtr<UtilityProcessHostImpl> host) {
+  if (!host)
+    return;
+
+  host->OnProcessLaunchFailed();
+  delete host.get();
 }
 
 }  // namespace content

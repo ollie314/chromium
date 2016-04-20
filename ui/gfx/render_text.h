@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -17,7 +18,6 @@
 #include "base/gtest_prod_util.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -57,14 +57,14 @@ class GFX_EXPORT SkiaTextRenderer {
   explicit SkiaTextRenderer(Canvas* canvas);
   virtual ~SkiaTextRenderer();
 
-  void SetDrawLooper(SkDrawLooper* draw_looper);
+  void SetDrawLooper(sk_sp<SkDrawLooper> draw_looper);
   void SetFontRenderParams(const FontRenderParams& params,
                            bool subpixel_rendering_suppressed);
   void SetTypeface(SkTypeface* typeface);
   void SetTextSize(SkScalar size);
   void SetFontWithStyle(const Font& font, int font_style);
   void SetForegroundColor(SkColor foreground);
-  void SetShader(SkShader* shader);
+  void SetShader(sk_sp<SkShader> shader);
   // Sets underline metrics to use if the text will be drawn with an underline.
   // If not set, default values based on the size of the text will be used. The
   // two metrics must be set together.
@@ -113,7 +113,7 @@ class GFX_EXPORT SkiaTextRenderer {
   SkPaint paint_;
   SkScalar underline_thickness_;
   SkScalar underline_position_;
-  scoped_ptr<DiagonalStrike> diagonal_;
+  std::unique_ptr<DiagonalStrike> diagonal_;
 
   DISALLOW_COPY_AND_ASSIGN(SkiaTextRenderer);
 };
@@ -170,6 +170,7 @@ struct LineSegment {
 // A line of display text, comprised of a line segment list and some metrics.
 struct Line {
   Line();
+  Line(const Line& other);
   ~Line();
 
   // Segments that make up this line in visual order.
@@ -209,7 +210,7 @@ class GFX_EXPORT RenderText {
   static RenderText* CreateInstanceForEditing();
 
   // Creates another instance of the same concrete class.
-  virtual scoped_ptr<RenderText> CreateInstanceOfSameType() const = 0;
+  virtual std::unique_ptr<RenderText> CreateInstanceOfSameType() const = 0;
 
   const base::string16& text() const { return text_; }
   void SetText(const base::string16& text);

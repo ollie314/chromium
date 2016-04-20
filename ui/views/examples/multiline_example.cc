@@ -25,7 +25,7 @@ namespace examples {
 
 namespace {
 
-gfx::Range ClampRange(gfx::Range range, size_t max) {
+gfx::Range ClampRange(gfx::Range range, uint32_t max) {
   range.set_start(std::min(range.start(), max));
   range.set_end(std::min(range.end(), max));
   return range;
@@ -113,7 +113,7 @@ class MultilineExample::RenderTextView : public View {
     render_text_->SetDisplayRect(bounds);
   }
 
-  scoped_ptr<gfx::RenderText> render_text_;
+  std::unique_ptr<gfx::RenderText> render_text_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderTextView);
 };

@@ -28,6 +28,7 @@ interface Client
 interface Clients
     method claim
     method constructor
+    method get
     method matchAll
     method openWindow
 interface CloseEvent : Event
@@ -164,6 +165,13 @@ interface EventTarget
 interface ExtendableEvent : Event
     method constructor
     method waitUntil
+interface ExtendableMessageEvent : ExtendableEvent
+    getter data
+    getter lastEventId
+    getter origin
+    getter ports
+    getter source
+    method constructor
 interface FetchEvent : ExtendableEvent
     getter clientId
     getter isReload
@@ -229,6 +237,15 @@ interface FileReaderSync
 interface FormData
     method append
     method constructor
+    method delete
+    method entries
+    method forEach
+    method get
+    method getAll
+    method has
+    method keys
+    method set
+    method values
 interface Headers
     method append
     method constructor
@@ -301,6 +318,7 @@ interface IDBKeyRange
     getter upper
     getter upperOpen
     method constructor
+    method includes
 interface IDBObjectStore
     getter autoIncrement
     getter indexNames
@@ -358,6 +376,10 @@ interface IDBVersionChangeEvent : Event
     getter newVersion
     getter oldVersion
     method constructor
+interface ImageBitmap
+    getter height
+    getter width
+    method constructor
 interface ImageData
     getter height
     getter width
@@ -393,9 +415,11 @@ interface Notification : EventTarget
     getter onclose
     getter onerror
     getter onshow
+    getter renotify
     getter requireInteraction
     getter silent
     getter tag
+    getter timestamp
     getter title
     method close
     method constructor
@@ -420,15 +444,23 @@ interface PromiseRejectionEvent : Event
     getter reason
     method constructor
 interface PushEvent : ExtendableEvent
+    getter data
     method constructor
 interface PushManager
     method constructor
     method getSubscription
     method permissionState
     method subscribe
+interface PushMessageData
+    method arrayBuffer
+    method blob
+    method constructor
+    method json
+    method text
 interface PushSubscription
     getter endpoint
     method constructor
+    method getKey
     method toJSON
     method unsubscribe
 interface ReadableByteStream
@@ -530,6 +562,7 @@ interface URL
     getter port
     getter protocol
     getter search
+    getter searchParams
     getter username
     method constructor
     method toString
@@ -586,8 +619,6 @@ interface WindowClient : Client
     method focus
     method navigate
 interface WorkerGlobalScope : EventTarget
-    attribute PERSISTENT
-    attribute TEMPORARY
     getter console
     getter crypto
     getter indexedDB
@@ -605,14 +636,11 @@ interface WorkerGlobalScope : EventTarget
     method clearTimeout
     method close
     method constructor
+    method createImageBitmap
     method fetch
     method importScripts
     method setInterval
     method setTimeout
-    method webkitRequestFileSystem
-    method webkitRequestFileSystemSync
-    method webkitResolveLocalFileSystemSyncURL
-    method webkitResolveLocalFileSystemURL
     setter console
     setter onerror
     setter onrejectionhandled
@@ -697,6 +725,7 @@ interface webkitIDBKeyRange
     getter upper
     getter upperOpen
     method constructor
+    method includes
 interface webkitIDBObjectStore
     getter autoIncrement
     getter indexNames
@@ -750,6 +779,7 @@ global object
     getter oninstall
     getter onmessage
     getter onnotificationclick
+    getter onnotificationclose
     getter onpush
     getter onsync
     getter registration
@@ -762,6 +792,7 @@ global object
     setter oninstall
     setter onmessage
     setter onnotificationclick
+    setter onnotificationclose
     setter onpush
     setter onsync
 This is a testharness.js-based test.

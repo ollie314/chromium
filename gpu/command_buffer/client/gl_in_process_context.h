@@ -55,8 +55,6 @@ class GL_IN_PROCESS_CONTEXT_EXPORT GLInProcessContext {
   // service must run on the same thread as this client because GLSurface is
   // not thread safe. If |surface| is NULL, then the other parameters are used
   // to correctly create a surface.
-  // Only one of |share_context| and |use_global_share_group| can be used at
-  // the same time.
   static GLInProcessContext* Create(
       scoped_refptr<gpu::InProcessCommandBuffer::Service> service,
       scoped_refptr<gfx::GLSurface> surface,
@@ -64,14 +62,11 @@ class GL_IN_PROCESS_CONTEXT_EXPORT GLInProcessContext {
       gfx::AcceleratedWidget window,
       const gfx::Size& size,
       GLInProcessContext* share_context,
-      bool use_global_share_group,
       const gpu::gles2::ContextCreationAttribHelper& attribs,
       gfx::GpuPreference gpu_preference,
       const GLInProcessContextSharedMemoryLimits& memory_limits,
       GpuMemoryBufferManager* gpu_memory_buffer_manager,
       ImageFactory* image_factory);
-
-  virtual void SetContextLostCallback(const base::Closure& callback) = 0;
 
   // Allows direct access to the GLES2 implementation so a GLInProcessContext
   // can be used without making it current.
@@ -80,12 +75,6 @@ class GL_IN_PROCESS_CONTEXT_EXPORT GLInProcessContext {
   virtual size_t GetMappedMemoryLimit() = 0;
 
   virtual void SetLock(base::Lock* lock) = 0;
-
-#if defined(OS_ANDROID)
-  virtual scoped_refptr<gfx::SurfaceTexture> GetSurfaceTexture(
-      uint32_t stream_id) = 0;
-  virtual uint32_t CreateStreamTexture(uint32_t texture_id) = 0;
-#endif
 };
 
 }  // namespace gpu

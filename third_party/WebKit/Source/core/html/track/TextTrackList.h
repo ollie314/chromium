@@ -32,7 +32,6 @@
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
 #include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 #include "wtf/Vector.h"
 
 namespace blink {
@@ -40,9 +39,8 @@ namespace blink {
 class GenericEventQueue;
 class TextTrack;
 
-class TextTrackList final : public RefCountedGarbageCollectedEventTargetWithInlineData<TextTrackList> {
+class CORE_EXPORT TextTrackList final : public EventTargetWithInlineData {
     DEFINE_WRAPPERTYPEINFO();
-    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(TextTrackList);
 public:
     static TextTrackList* create(HTMLMediaElement* owner)
     {
@@ -62,15 +60,12 @@ public:
 
     // EventTarget
     const AtomicString& interfaceName() const override;
-    ExecutionContext* executionContext() const override;
+    ExecutionContext* getExecutionContext() const override;
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(addtrack);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(change);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(removetrack);
 
-#if !ENABLE(OILPAN)
-    void clearOwner();
-#endif
     HTMLMediaElement* owner() const;
 
     void scheduleChangeEvent();
@@ -90,9 +85,9 @@ private:
 
     void invalidateTrackIndexesAfterTrack(TextTrack*);
 
-    RawPtrWillBeMember<HTMLMediaElement> m_owner;
+    Member<HTMLMediaElement> m_owner;
 
-    OwnPtrWillBeMember<GenericEventQueue> m_asyncEventQueue;
+    Member<GenericEventQueue> m_asyncEventQueue;
 
     HeapVector<Member<TextTrack>> m_addTrackTracks;
     HeapVector<Member<TextTrack>> m_elementTracks;

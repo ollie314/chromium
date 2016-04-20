@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
-#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -19,6 +18,7 @@
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/pref_names.h"
 #include "components/crx_file/id_util.h"
+#include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -136,7 +136,7 @@ void ErrorConsole::UseDefaultReportingForExtension(
   prefs_->UpdateExtensionPref(extension_id, kStoreExtensionErrorsPref, NULL);
 }
 
-void ErrorConsole::ReportError(scoped_ptr<ExtensionError> error) {
+void ErrorConsole::ReportError(std::unique_ptr<ExtensionError> error) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!enabled_ || !crx_file::id_util::IdIsValid(error->extension_id()))
     return;
@@ -263,11 +263,9 @@ void ErrorConsole::AddManifestErrorsForExtension(const Extension* extension) {
       extension->install_warnings();
   for (std::vector<InstallWarning>::const_iterator iter = warnings.begin();
        iter != warnings.end(); ++iter) {
-    ReportError(scoped_ptr<ExtensionError>(new ManifestError(
-        extension->id(),
-        base::UTF8ToUTF16(iter->message),
-        base::UTF8ToUTF16(iter->key),
-        base::UTF8ToUTF16(iter->specific))));
+    ReportError(std::unique_ptr<ExtensionError>(new ManifestError(
+        extension->id(), base::UTF8ToUTF16(iter->message),
+        base::UTF8ToUTF16(iter->key), base::UTF8ToUTF16(iter->specific))));
   }
 }
 

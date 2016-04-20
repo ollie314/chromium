@@ -35,6 +35,7 @@
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Noncopyable.h"
+#include "wtf/TypeTraits.h"
 #include <v8.h>
 
 namespace blink {
@@ -59,11 +60,19 @@ public:
     template<typename T>
     T* toImpl()
     {
+        // All ScriptWrappables are managed by the Blink GC heap; check that
+        // |T| is a garbage collected type.
+        static_assert(sizeof(T) && WTF::IsGarbageCollectedType<T>::value, "Classes implementing ScriptWrappable must be garbage collected.");
+
         // Check if T* is castable to ScriptWrappable*, which means T doesn't
         // have two or more ScriptWrappable as superclasses. If T has two
         // ScriptWrappable as superclasses, conversions from T* to
         // ScriptWrappable* are ambiguous.
-        ASSERT(static_cast<ScriptWrappable*>(static_cast<T*>(this)));
+#if !COMPILER(MSVC)
+        // MSVC 2013 doesn't support static_assert + constexpr well.
+        static_assert(!static_cast<ScriptWrappable*>(static_cast<T*>(nullptr)),
+            "Class T must not have two or more ScriptWrappable as its superclasses.");
+#endif
         return static_cast<T*>(this);
     }
 
@@ -133,17 +142,6 @@ public:
         return containsWrapper();
     }
 
-    void markAsDependentGroup(ScriptWrappable* groupRoot, v8::Isolate* isolate)
-    {
-        ASSERT(containsWrapper());
-        ASSERT(groupRoot && groupRoot->containsWrapper());
-
-        // FIXME: There has to be a better way.
-        v8::UniqueId groupId(*reinterpret_cast<intptr_t*>(&groupRoot->m_wrapper));
-        m_wrapper.MarkPartiallyDependent();
-        isolate->SetObjectGroupId(v8::Persistent<v8::Value>::Cast(m_wrapper), groupId);
-    }
-
     void setReference(const v8::Persistent<v8::Object>& parent, v8::Isolate* isolate)
     {
         isolate->SetReference(parent, m_wrapper);
@@ -151,18 +149,9 @@ public:
 
     bool containsWrapper() const { return !m_wrapper.IsEmpty(); }
 
-#if !ENABLE(OILPAN)
-protected:
-    virtual ~ScriptWrappable()
-    {
-        // We must not get deleted as long as we contain a wrapper. If this happens, we screwed up ref
-        // counting somewhere. Crash here instead of crashing during a later gc cycle.
-        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(!containsWrapper());
-    }
-#endif
     // With Oilpan we don't need a ScriptWrappable destructor.
     //
-    // - 'RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(!containsWrapper())' is not needed
+    // 'RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(!containsWrapper())' is not needed
     // because Oilpan is not using reference counting at all. If containsWrapper() is true,
     // it means that ScriptWrappable still has a wrapper. In this case, the destructor
     // must not be called since the wrapper has a persistent handle back to this ScriptWrappable object.
@@ -173,7 +162,7 @@ private:
     void disposeWrapper(const v8::WeakCallbackInfo<ScriptWrappable>& data)
     {
         auto scriptWrappable = reinterpret_cast<ScriptWrappable*>(data.GetInternalField(v8DOMWrapperObjectIndex));
-        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(scriptWrappable == this);
+        SECURITY_CHECK(scriptWrappable == this);
         RELEASE_ASSERT(containsWrapper());
         m_wrapper.Reset();
     }
@@ -184,31 +173,7 @@ private:
         scriptWrappable->disposeWrapper(data);
 
         auto wrapperTypeInfo = reinterpret_cast<WrapperTypeInfo*>(data.GetInternalField(v8DOMWrapperTypeIndex));
-        if (wrapperTypeInfo->isGarbageCollected()) {
-            // derefObject() for garbage collected objects is very cheap, so
-            // we don't delay derefObject to the second pass.
-            //
-            // More importantly, we've already disposed the wrapper at this
-            // moment, so the ScriptWrappable may have already been collected
-            // by GC by the second pass.  We shouldn't use a pointer to the
-            // ScriptWrappable in secondWeakCallback in case of garbage
-            // collected objects.  Thus calls derefObject right now.
-            wrapperTypeInfo->derefObject(scriptWrappable);
-        } else {
-            // For reference counted objects, let's delay the destruction of
-            // the object to the second pass.
-            data.SetSecondPassCallback(secondWeakCallback);
-        }
-    }
-
-    static void secondWeakCallback(const v8::WeakCallbackInfo<ScriptWrappable>& data)
-    {
-        // FIXME: I noticed that 50%~ of minor GC cycle times can be consumed
-        // inside data.GetParameter()->deref(), which causes Node destructions. We should
-        // make Node destructions incremental.
-        auto scriptWrappable = reinterpret_cast<ScriptWrappable*>(data.GetInternalField(v8DOMWrapperObjectIndex));
-        auto wrapperTypeInfo = reinterpret_cast<WrapperTypeInfo*>(data.GetInternalField(v8DOMWrapperTypeIndex));
-        wrapperTypeInfo->derefObject(scriptWrappable);
+        wrapperTypeInfo->wrapperDestroyed();
     }
 
     v8::Persistent<v8::Object> m_wrapper;
@@ -229,26 +194,6 @@ public: \
     } \
 private: \
     static const WrapperTypeInfo& s_wrapperTypeInfo
-
-// Defines 'wrapperTypeInfo' virtual method, which should never be called.
-//
-// This macro is used when there exists a class hierarchy with a root class
-// and most of the subclasses are script-wrappable but not all of them.
-// In that case, the root class can inherit from ScriptWrappable and use
-// this macro, and let subclasses have a choice whether or not use
-// DEFINE_WRAPPERTYPEINFO macro. The script-wrappable subclasses which have
-// corresponding IDL file must call DEFINE_WRAPPERTYPEINFO, and the others
-// must not.
-#define DEFINE_WRAPPERTYPEINFO_NOT_REACHED() \
-public: \
-    const WrapperTypeInfo* wrapperTypeInfo() const override \
-    { \
-        ASSERT_NOT_REACHED(); \
-        return 0; \
-    } \
-private: \
-    typedef void end_of_define_wrappertypeinfo_not_reached_t
-
 
 // Declares 'wrapperTypeInfo' method without definition.
 //

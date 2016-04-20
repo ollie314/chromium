@@ -5,12 +5,13 @@
 #include "ash/wm/toplevel_window_event_handler.h"
 
 #include "ash/shell.h"
+#include "ash/wm/common/wm_event.h"
 #include "ash/wm/resize_shadow_controller.h"
 #include "ash/wm/window_resizer.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_state_observer.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/wm_event.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "ui/aura/client/cursor_client.h"
@@ -108,7 +109,7 @@ class ToplevelWindowEventHandler::ScopedWindowResizer
 
  private:
   ToplevelWindowEventHandler* handler_;
-  scoped_ptr<WindowResizer> resizer_;
+  std::unique_ptr<WindowResizer> resizer_;
 
   // Whether ScopedWindowResizer grabbed capture.
   bool grabbed_capture_;
@@ -421,7 +422,7 @@ aura::client::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
   in_move_loop_ = true;
   bool destroyed = false;
   destroyed_ = &destroyed;
-  base::MessageLoopForUI* loop = base::MessageLoopForUI::current();
+  base::MessageLoop* loop = base::MessageLoop::current();
   base::MessageLoop::ScopedNestableTaskAllower allow_nested(loop);
   base::RunLoop run_loop;
   quit_closure_ = run_loop.QuitClosure();
@@ -466,7 +467,7 @@ bool ToplevelWindowEventHandler::CompleteDrag(DragCompletionStatus status) {
   if (!window_resizer_)
     return false;
 
-  scoped_ptr<ScopedWindowResizer> resizer(window_resizer_.release());
+  std::unique_ptr<ScopedWindowResizer> resizer(window_resizer_.release());
   switch (status) {
     case DRAG_COMPLETE:
       resizer->resizer()->CompleteDrag();

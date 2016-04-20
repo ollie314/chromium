@@ -6,7 +6,9 @@
 
 #include "ash/screen_util.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/wm/common/window_positioning_utils.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ui/aura/window.h"
 
 namespace ash {
@@ -28,7 +30,7 @@ TEST_F(WindowUtilTest, CenterWindow) {
     return;
 
   UpdateDisplay("500x400, 600x400");
-  scoped_ptr<aura::Window> window(
+  std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(12, 20, 100, 100)));
 
   wm::WindowState* window_state = wm::GetWindowState(window.get());

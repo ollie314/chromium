@@ -8,11 +8,15 @@
 #include <vector>
 
 #include "base/deferred_sequenced_task_runner.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "sync/internal_api/public/activation_context.h"
 #include "sync/internal_api/public/base/model_type.h"
-#include "sync/internal_api/public/shared_model_type_processor.h"
-#include "sync/internal_api/public/test/fake_model_type_service.h"
+#include "sync/internal_api/public/test/fake_model_type_processor.h"
+#include "sync/protocol/data_type_state.pb.h"
+#include "sync/syncable/directory.h"
+#include "sync/syncable/model_neutral_mutable_entry.h"
+#include "sync/syncable/syncable_model_neutral_write_transaction.h"
 #include "sync/test/engine/fake_model_worker.h"
 #include "sync/test/engine/mock_nudge_handler.h"
 #include "sync/test/engine/test_directory_setter_upper.h"
@@ -20,8 +24,7 @@
 
 namespace syncer {
 
-class ModelTypeRegistryTest : public ::testing::Test,
-                              syncer_v2::FakeModelTypeService {
+class ModelTypeRegistryTest : public ::testing::Test {
  public:
   ModelTypeRegistryTest();
   void SetUp() override;
@@ -29,29 +32,32 @@ class ModelTypeRegistryTest : public ::testing::Test,
 
   ModelTypeRegistry* registry();
 
-  static syncer_v2::DataTypeState MakeInitialDataTypeState(ModelType type) {
-    syncer_v2::DataTypeState state;
-    state.progress_marker.set_data_type_id(
+  static sync_pb::DataTypeState MakeInitialDataTypeState(ModelType type) {
+    sync_pb::DataTypeState state;
+    state.mutable_progress_marker()->set_data_type_id(
         GetSpecificsFieldNumberFromModelType(type));
     return state;
   }
 
-  static scoped_ptr<syncer_v2::ActivationContext> MakeActivationContext(
-      const syncer_v2::DataTypeState& data_type_state,
-      const syncer_v2::UpdateResponseDataList& saved_pending_updates,
-      scoped_ptr<syncer_v2::ModelTypeProcessor> type_processor) {
-    scoped_ptr<syncer_v2::ActivationContext> context =
-        make_scoped_ptr(new syncer_v2::ActivationContext);
+  static std::unique_ptr<syncer_v2::ActivationContext> MakeActivationContext(
+      const sync_pb::DataTypeState& data_type_state,
+      std::unique_ptr<syncer_v2::ModelTypeProcessor> type_processor) {
+    std::unique_ptr<syncer_v2::ActivationContext> context =
+        base::WrapUnique(new syncer_v2::ActivationContext);
     context->data_type_state = data_type_state;
-    context->saved_pending_updates = saved_pending_updates;
     context->type_processor = std::move(type_processor);
     return context;
   }
 
- protected:
-  scoped_ptr<syncer_v2::SharedModelTypeProcessor> MakeModelTypeProcessor(
-      ModelType type) {
-    return make_scoped_ptr(new syncer_v2::SharedModelTypeProcessor(type, this));
+  void MarkInitialSyncEndedForDirectoryType(ModelType type) {
+    syncable::ModelNeutralWriteTransaction trans(FROM_HERE, syncable::SYNCER,
+                                                 directory());
+    syncable::ModelNeutralMutableEntry entry(
+        &trans, syncable::CREATE_NEW_TYPE_ROOT, type);
+    ASSERT_TRUE(entry.good());
+    entry.PutServerIsDir(true);
+    entry.PutUniqueServerTag(ModelTypeToRootTag(type));
+    directory()->MarkInitialSyncEndedForType(&trans, type);
   }
 
  private:
@@ -61,7 +67,7 @@ class ModelTypeRegistryTest : public ::testing::Test,
 
   TestDirectorySetterUpper dir_maker_;
   std::vector<scoped_refptr<ModelSafeWorker> > workers_;
-  scoped_ptr<ModelTypeRegistry> registry_;
+  std::unique_ptr<ModelTypeRegistry> registry_;
   MockNudgeHandler mock_nudge_handler_;
 };
 
@@ -106,8 +112,14 @@ TEST_F(ModelTypeRegistryTest, SetEnabledDirectoryTypes_Once) {
   routing_info.insert(std::make_pair(NIGORI, GROUP_PASSIVE));
   routing_info.insert(std::make_pair(BOOKMARKS, GROUP_UI));
   routing_info.insert(std::make_pair(AUTOFILL, GROUP_DB));
+  routing_info.insert(std::make_pair(APPS, GROUP_NON_BLOCKING));
 
   registry()->SetEnabledDirectoryTypes(routing_info);
+
+  UpdateHandlerMap* update_handler_map = registry()->update_handler_map();
+  // Apps is non-blocking type, SetEnabledDirectoryTypes shouldn't instantiate
+  // update_handler for it.
+  EXPECT_TRUE(update_handler_map->find(APPS) == update_handler_map->end());
 }
 
 // Try two different routing info settings.
@@ -119,6 +131,7 @@ TEST_F(ModelTypeRegistryTest, SetEnabledDirectoryTypes_Repeatedly) {
   routing_info1.insert(std::make_pair(NIGORI, GROUP_PASSIVE));
   routing_info1.insert(std::make_pair(BOOKMARKS, GROUP_PASSIVE));
   routing_info1.insert(std::make_pair(AUTOFILL, GROUP_PASSIVE));
+  routing_info1.insert(std::make_pair(APPS, GROUP_NON_BLOCKING));
 
   registry()->SetEnabledDirectoryTypes(routing_info1);
 
@@ -126,6 +139,7 @@ TEST_F(ModelTypeRegistryTest, SetEnabledDirectoryTypes_Repeatedly) {
   routing_info2.insert(std::make_pair(NIGORI, GROUP_PASSIVE));
   routing_info2.insert(std::make_pair(BOOKMARKS, GROUP_UI));
   routing_info2.insert(std::make_pair(AUTOFILL, GROUP_DB));
+  routing_info2.insert(std::make_pair(APPS, GROUP_NON_BLOCKING));
 
   registry()->SetEnabledDirectoryTypes(routing_info2);
 }
@@ -139,6 +153,7 @@ TEST_F(ModelTypeRegistryTest, SetEnabledDirectoryTypes_Clear) {
   routing_info1.insert(std::make_pair(NIGORI, GROUP_PASSIVE));
   routing_info1.insert(std::make_pair(BOOKMARKS, GROUP_UI));
   routing_info1.insert(std::make_pair(AUTOFILL, GROUP_DB));
+  routing_info1.insert(std::make_pair(APPS, GROUP_NON_BLOCKING));
 
   registry()->SetEnabledDirectoryTypes(routing_info1);
 
@@ -155,6 +170,7 @@ TEST_F(ModelTypeRegistryTest, SetEnabledDirectoryTypes_OffAndOn) {
   routing_info1.insert(std::make_pair(NIGORI, GROUP_PASSIVE));
   routing_info1.insert(std::make_pair(BOOKMARKS, GROUP_UI));
   routing_info1.insert(std::make_pair(AUTOFILL, GROUP_DB));
+  routing_info1.insert(std::make_pair(APPS, GROUP_NON_BLOCKING));
 
   registry()->SetEnabledDirectoryTypes(routing_info1);
 
@@ -165,29 +181,25 @@ TEST_F(ModelTypeRegistryTest, SetEnabledDirectoryTypes_OffAndOn) {
 }
 
 TEST_F(ModelTypeRegistryTest, NonBlockingTypes) {
-  scoped_ptr<syncer_v2::SharedModelTypeProcessor> themes_sync_processor =
-      MakeModelTypeProcessor(syncer::THEMES);
-  scoped_ptr<syncer_v2::SharedModelTypeProcessor> sessions_sync_processor =
-      MakeModelTypeProcessor(syncer::SESSIONS);
-
   EXPECT_TRUE(registry()->GetEnabledTypes().Empty());
 
-  registry()->ConnectSyncTypeToWorker(
-      syncer::THEMES, MakeActivationContext(MakeInitialDataTypeState(THEMES),
-                                            syncer_v2::UpdateResponseDataList(),
-                                            std::move(themes_sync_processor)));
+  registry()->ConnectType(
+      syncer::THEMES,
+      MakeActivationContext(
+          MakeInitialDataTypeState(THEMES),
+          base::WrapUnique(new syncer_v2::FakeModelTypeProcessor())));
   EXPECT_TRUE(registry()->GetEnabledTypes().Equals(
       ModelTypeSet(syncer::THEMES)));
 
-  registry()->ConnectSyncTypeToWorker(
+  registry()->ConnectType(
       syncer::SESSIONS,
-      MakeActivationContext(MakeInitialDataTypeState(SESSIONS),
-                            syncer_v2::UpdateResponseDataList(),
-                            std::move(sessions_sync_processor)));
+      MakeActivationContext(
+          MakeInitialDataTypeState(SESSIONS),
+          base::WrapUnique(new syncer_v2::FakeModelTypeProcessor())));
   EXPECT_TRUE(registry()->GetEnabledTypes().Equals(
       ModelTypeSet(syncer::THEMES, syncer::SESSIONS)));
 
-  registry()->DisconnectSyncWorker(syncer::THEMES);
+  registry()->DisconnectType(syncer::THEMES);
   EXPECT_TRUE(registry()->GetEnabledTypes().Equals(
       ModelTypeSet(syncer::SESSIONS)));
 
@@ -196,51 +208,76 @@ TEST_F(ModelTypeRegistryTest, NonBlockingTypes) {
 }
 
 TEST_F(ModelTypeRegistryTest, NonBlockingTypesWithDirectoryTypes) {
-  scoped_ptr<syncer_v2::SharedModelTypeProcessor> themes_sync_processor =
-      MakeModelTypeProcessor(syncer::THEMES);
-  scoped_ptr<syncer_v2::SharedModelTypeProcessor> sessions_sync_processor =
-      MakeModelTypeProcessor(syncer::SESSIONS);
-
   ModelSafeRoutingInfo routing_info1;
   routing_info1.insert(std::make_pair(NIGORI, GROUP_PASSIVE));
   routing_info1.insert(std::make_pair(BOOKMARKS, GROUP_UI));
   routing_info1.insert(std::make_pair(AUTOFILL, GROUP_DB));
+  routing_info1.insert(std::make_pair(THEMES, GROUP_NON_BLOCKING));
+  routing_info1.insert(std::make_pair(SESSIONS, GROUP_NON_BLOCKING));
+
+  ModelTypeSet directory_types(NIGORI, BOOKMARKS, AUTOFILL);
 
   ModelTypeSet current_types;
   EXPECT_TRUE(registry()->GetEnabledTypes().Empty());
 
   // Add the themes non-blocking type.
-  registry()->ConnectSyncTypeToWorker(
-      syncer::THEMES, MakeActivationContext(MakeInitialDataTypeState(THEMES),
-                                            syncer_v2::UpdateResponseDataList(),
-                                            std::move(themes_sync_processor)));
+  registry()->ConnectType(
+      syncer::THEMES,
+      MakeActivationContext(
+          MakeInitialDataTypeState(THEMES),
+          base::WrapUnique(new syncer_v2::FakeModelTypeProcessor())));
   current_types.Put(syncer::THEMES);
   EXPECT_TRUE(registry()->GetEnabledTypes().Equals(current_types));
 
   // Add some directory types.
   registry()->SetEnabledDirectoryTypes(routing_info1);
-  current_types.PutAll(GetRoutingInfoTypes(routing_info1));
+  current_types.PutAll(directory_types);
   EXPECT_TRUE(registry()->GetEnabledTypes().Equals(current_types));
 
   // Add sessions non-blocking type.
-  registry()->ConnectSyncTypeToWorker(
+  registry()->ConnectType(
       syncer::SESSIONS,
-      MakeActivationContext(MakeInitialDataTypeState(SESSIONS),
-                            syncer_v2::UpdateResponseDataList(),
-                            std::move(sessions_sync_processor)));
+      MakeActivationContext(
+          MakeInitialDataTypeState(SESSIONS),
+          base::WrapUnique(new syncer_v2::FakeModelTypeProcessor())));
   current_types.Put(syncer::SESSIONS);
   EXPECT_TRUE(registry()->GetEnabledTypes().Equals(current_types));
 
   // Remove themes non-blocking type.
-  registry()->DisconnectSyncWorker(syncer::THEMES);
+  registry()->DisconnectType(syncer::THEMES);
   current_types.Remove(syncer::THEMES);
   EXPECT_TRUE(registry()->GetEnabledTypes().Equals(current_types));
 
   // Clear all directory types.
   ModelSafeRoutingInfo routing_info2;
   registry()->SetEnabledDirectoryTypes(routing_info2);
-  current_types.RemoveAll(GetRoutingInfoTypes(routing_info1));
+  current_types.RemoveAll(directory_types);
   EXPECT_TRUE(registry()->GetEnabledTypes().Equals(current_types));
+}
+
+// Tests correct result returned from GetInitialSyncEndedTypes.
+TEST_F(ModelTypeRegistryTest, GetInitialSyncEndedTypes) {
+  ModelSafeRoutingInfo routing_info;
+  // Add two directory and two non-blocking types.
+  routing_info.insert(std::make_pair(AUTOFILL, GROUP_PASSIVE));
+  routing_info.insert(std::make_pair(BOOKMARKS, GROUP_PASSIVE));
+  routing_info.insert(std::make_pair(THEMES, GROUP_NON_BLOCKING));
+  routing_info.insert(std::make_pair(SESSIONS, GROUP_NON_BLOCKING));
+  registry()->SetEnabledDirectoryTypes(routing_info);
+
+  // Only Autofill and Themes types finished initial sync.
+  MarkInitialSyncEndedForDirectoryType(AUTOFILL);
+
+  sync_pb::DataTypeState data_type_state = MakeInitialDataTypeState(THEMES);
+  data_type_state.set_initial_sync_done(true);
+  registry()->ConnectType(
+      syncer::THEMES,
+      MakeActivationContext(
+          data_type_state,
+          base::WrapUnique(new syncer_v2::FakeModelTypeProcessor())));
+
+  EXPECT_TRUE(registry()->GetInitialSyncEndedTypes().Equals(
+      ModelTypeSet(AUTOFILL, THEMES)));
 }
 
 }  // namespace syncer

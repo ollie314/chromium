@@ -9,6 +9,8 @@
 #include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "net/base/io_buffer.h"
+#include "net/base/ip_address.h"
 #include "net/base/net_errors.h"
 
 namespace {
@@ -37,7 +39,7 @@ AndroidUsbSocket::~AndroidUsbSocket() {
     delete_callback_.Run();
 }
 
-void AndroidUsbSocket::HandleIncoming(scoped_ptr<AdbMessage> message) {
+void AndroidUsbSocket::HandleIncoming(std::unique_ptr<AdbMessage> message) {
   if (!device_.get())
     return;
 
@@ -190,8 +192,7 @@ bool AndroidUsbSocket::IsConnectedAndIdle() const {
 }
 
 int AndroidUsbSocket::GetPeerAddress(net::IPEndPoint* address) const {
-  net::IPAddressNumber ip(net::kIPv4AddressSize);
-  *address = net::IPEndPoint(ip, 0);
+  *address = net::IPEndPoint(net::IPAddress(0, 0, 0, 0), 0);
   return net::OK;
 }
 
@@ -213,11 +214,6 @@ void AndroidUsbSocket::SetOmniboxSpeculation() {
 }
 
 bool AndroidUsbSocket::WasEverUsed() const {
-  NOTIMPLEMENTED();
-  return true;
-}
-
-bool AndroidUsbSocket::UsingTCPFastOpen() const {
   NOTIMPLEMENTED();
   return true;
 }

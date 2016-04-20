@@ -107,11 +107,14 @@ class NativeBackendGnome : public PasswordStoreX::NativeBackend,
       base::Time delete_begin,
       base::Time delete_end,
       password_manager::PasswordStoreChangeList* changes) override;
+  bool DisableAutoSignInForAllLogins(
+      password_manager::PasswordStoreChangeList* changes) override;
   bool GetLogins(const autofill::PasswordForm& form,
                  ScopedVector<autofill::PasswordForm>* forms) override;
   bool GetAutofillableLogins(
       ScopedVector<autofill::PasswordForm>* forms) override;
   bool GetBlacklistLogins(ScopedVector<autofill::PasswordForm>* forms) override;
+  bool GetAllLogins(ScopedVector<autofill::PasswordForm>* forms) override;
 
  private:
   enum TimestampToCompare {
@@ -127,10 +130,6 @@ class NativeBackendGnome : public PasswordStoreX::NativeBackend,
   // contents of |forms|. Returns true on success.
   bool GetLoginsList(bool autofillable,
                      ScopedVector<autofill::PasswordForm>* forms)
-      WARN_UNUSED_RESULT;
-
-  // Helper for GetLoginsCreatedBetween().
-  bool GetAllLogins(ScopedVector<autofill::PasswordForm>* forms)
       WARN_UNUSED_RESULT;
 
   // Retrieves password created/synced in the time interval. Returns |true| if

@@ -45,6 +45,7 @@
 #include "ash/shell.h"
 #include "ash/wm/maximize_mode/maximize_mode_controller.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ui/wm/core/coordinate_conversion.h"
 #endif
 
@@ -168,7 +169,7 @@ class EscapeTracker : public ui::EventHandler {
   }
 
   base::Closure escape_callback_;
-  scoped_ptr<views::EventMonitor> event_monitor_;
+  std::unique_ptr<views::EventMonitor> event_monitor_;
 
   DISALLOW_COPY_AND_ASSIGN(EscapeTracker);
 };
@@ -198,8 +199,6 @@ TabDragController::TabDragController()
     : event_source_(EVENT_SOURCE_MOUSE),
       source_tabstrip_(NULL),
       attached_tabstrip_(NULL),
-      screen_(NULL),
-      host_desktop_type_(chrome::HOST_DESKTOP_TYPE_NATIVE),
       can_release_capture_(true),
       offset_to_width_ratio_(0),
       old_focused_view_id_(
@@ -224,6 +223,7 @@ TabDragController::TabDragController()
       is_mutating_(false),
       attach_x_(-1),
       attach_index_(-1),
+      window_finder_(new WindowFinder),
       weak_factory_(this) {
   instance_ = this;
 }
@@ -263,10 +263,6 @@ void TabDragController::Init(
   source_tabstrip_ = source_tabstrip;
   was_source_maximized_ = source_tabstrip->GetWidget()->IsMaximized();
   was_source_fullscreen_ = source_tabstrip->GetWidget()->IsFullscreen();
-  screen_ = gfx::Screen::GetScreenFor(
-      source_tabstrip->GetWidget()->GetNativeView());
-  host_desktop_type_ = chrome::GetHostDesktopTypeForNativeView(
-      source_tabstrip->GetWidget()->GetNativeView());
   // Do not release capture when transferring capture between widgets on:
   // - Desktop Linux
   //     Mouse capture is not synchronous on desktop Linux. Chrome makes
@@ -274,11 +270,8 @@ void TabDragController::Init(
   //     synchronous on desktop Linux, so use that.
   // - Ash
   //     Releasing capture on Ash cancels gestures so avoid it.
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(USE_ASH)
   can_release_capture_ = false;
-#else
-  can_release_capture_ =
-      (host_desktop_type_ != chrome::HOST_DESKTOP_TYPE_ASH);
 #endif
   start_point_in_screen_ = gfx::Point(source_tab_offset, mouse_offset.y());
   views::View::ConvertPointToScreen(source_tab, &start_point_in_screen_);
@@ -395,7 +388,8 @@ void TabDragController::Drag(const gfx::Point& point_in_screen) {
     }
   }
 
-  ContinueDragging(point_in_screen);
+  if (ContinueDragging(point_in_screen) == Liveness::DELETED)
+    return;
 }
 
 void TabDragController::EndDrag(EndDragReason reason) {
@@ -482,7 +476,8 @@ gfx::Point TabDragController::GetWindowCreatePoint(
     const gfx::Point& origin) const {
   // If the cursor is outside the monitor area, move it inside. For example,
   // dropping a tab onto the task bar on Windows produces this situation.
-  gfx::Rect work_area = screen_->GetDisplayNearestPoint(origin).work_area();
+  gfx::Rect work_area =
+      gfx::Screen::GetScreen()->GetDisplayNearestPoint(origin).work_area();
   gfx::Point create_point(origin);
   if (!work_area.IsEmpty()) {
     if (create_point.x() < work_area.x())
@@ -535,14 +530,19 @@ bool TabDragController::CanStartDrag(const gfx::Point& point_in_screen) const {
               pow(static_cast<float>(y_offset), 2)) > kMinimumDragDistance;
 }
 
-void TabDragController::ContinueDragging(const gfx::Point& point_in_screen) {
+TabDragController::Liveness TabDragController::ContinueDragging(
+    const gfx::Point& point_in_screen) {
   TRACE_EVENT1("views", "TabDragController::ContinueDragging",
                "point_in_screen", point_in_screen.ToString());
 
   DCHECK(attached_tabstrip_);
 
-  TabStrip* target_tabstrip = detach_behavior_ == DETACHABLE ?
-      GetTargetTabStripForPoint(point_in_screen) : source_tabstrip_;
+  TabStrip* target_tabstrip = source_tabstrip_;
+  if (detach_behavior_ == DETACHABLE &&
+      GetTargetTabStripForPoint(point_in_screen, &target_tabstrip) ==
+          Liveness::DELETED) {
+    return Liveness::DELETED;
+  }
   bool tab_strip_changed = (target_tabstrip != attached_tabstrip_);
 
   if (attached_tabstrip_) {
@@ -559,7 +559,7 @@ void TabDragController::ContinueDragging(const gfx::Point& point_in_screen) {
     did_restore_window_ = false;
     if (DragBrowserToNewTabStrip(target_tabstrip, point_in_screen) ==
         DRAG_BROWSER_RESULT_STOP) {
-      return;
+      return Liveness::ALIVE;
     }
   }
   if (is_dragging_window_) {
@@ -581,6 +581,7 @@ void TabDragController::ContinueDragging(const gfx::Point& point_in_screen) {
       }
     }
   }
+  return Liveness::ALIVE;
 }
 
 TabDragController::DragBrowserResultType
@@ -606,10 +607,10 @@ TabDragController::DragBrowserToNewTabStrip(
     // ReleaseCapture() is going to result in calling back to us (because it
     // results in a move). That'll cause all sorts of problems.  Reset the
     // observer so we don't get notified and process the event.
-    if (host_desktop_type_ == chrome::HOST_DESKTOP_TYPE_ASH) {
-      move_loop_widget_->RemoveObserver(this);
-      move_loop_widget_ = NULL;
-    }
+#if defined(USE_ASH)
+    move_loop_widget_->RemoveObserver(this);
+    move_loop_widget_ = nullptr;
+#endif  // USE_ASH
     views::Widget* browser_widget = GetAttachedBrowserWidget();
     // Need to release the drag controller before starting the move loop as it's
     // going to trigger capture lost, which cancels drag.
@@ -824,8 +825,10 @@ TabDragController::DetachPosition TabDragController::GetDetachPosition(
   return DETACH_ABOVE_OR_BELOW;
 }
 
-TabStrip* TabDragController::GetTargetTabStripForPoint(
-    const gfx::Point& point_in_screen) {
+TabDragController::Liveness TabDragController::GetTargetTabStripForPoint(
+    const gfx::Point& point_in_screen,
+    TabStrip** tab_strip) {
+  *tab_strip = nullptr;
   TRACE_EVENT1("views", "TabDragController::GetTargetTabStripForPoint",
                "point_in_screen", point_in_screen.ToString());
 
@@ -835,20 +838,29 @@ TabStrip* TabDragController::GetTargetTabStripForPoint(
     gfx::Rect tabstrip_bounds = GetViewScreenBounds(attached_tabstrip_);
     if (DoesRectContainVerticalPointExpanded(tabstrip_bounds,
                                              kTouchVerticalDetachMagnetism,
-                                             point_in_screen.y()))
-      return attached_tabstrip_;
+                                             point_in_screen.y())) {
+      *tab_strip = attached_tabstrip_;
+      return Liveness::ALIVE;
+    }
   }
-  gfx::NativeWindow local_window =
-      GetLocalProcessWindow(point_in_screen, is_dragging_window_);
+  gfx::NativeWindow local_window;
+  const Liveness state = GetLocalProcessWindow(
+      point_in_screen, is_dragging_window_, &local_window);
+  if (state == Liveness::DELETED)
+    return Liveness::DELETED;
+
   // Do not allow dragging into a window with a modal dialog, it causes a weird
   // behavior.  See crbug.com/336691
   if (!GetModalTransient(local_window)) {
-    TabStrip* tab_strip = GetTabStripForWindow(local_window);
-    if (tab_strip && DoesTabStripContain(tab_strip, point_in_screen))
-      return tab_strip;
+    TabStrip* result = GetTabStripForWindow(local_window);
+    if (result && DoesTabStripContain(result, point_in_screen)) {
+      *tab_strip = result;
+      return Liveness::ALIVE;
+    }
   }
 
-  return is_dragging_window_ ? attached_tabstrip_ : NULL;
+  *tab_strip = is_dragging_window_ ? attached_tabstrip_ : nullptr;
+  return Liveness::ALIVE;
 }
 
 TabStrip* TabDragController::GetTabStripForWindow(gfx::NativeWindow window) {
@@ -1543,8 +1555,7 @@ void TabDragController::CompleteDrag() {
 void TabDragController::MaximizeAttachedWindow() {
   GetAttachedBrowserWidget()->Maximize();
 #if defined(USE_ASH)
-  if (was_source_fullscreen_ &&
-      host_desktop_type_ == chrome::HOST_DESKTOP_TYPE_ASH) {
+  if (was_source_fullscreen_) {
     // In fullscreen mode it is only possible to get here if the source
     // was in "immersive fullscreen" mode, so toggle it back on.
     ash::accelerators::ToggleFullscreen();
@@ -1563,7 +1574,11 @@ gfx::Rect TabDragController::GetViewScreenBounds(
 
 void TabDragController::BringWindowUnderPointToFront(
     const gfx::Point& point_in_screen) {
-  gfx::NativeWindow window = GetLocalProcessWindow(point_in_screen, true);
+  gfx::NativeWindow window;
+  if (GetLocalProcessWindow(point_in_screen, true, &window) ==
+      Liveness::DELETED) {
+    return;
+  }
 
   // Only bring browser windows to front - only windows with a TabStrip can
   // be tab drag targets.
@@ -1577,36 +1592,32 @@ void TabDragController::BringWindowUnderPointToFront(
       return;
 
 #if defined(USE_ASH)
-    if (host_desktop_type_ == chrome::HOST_DESKTOP_TYPE_ASH) {
-      // TODO(varkha): The code below ensures that the phantom drag widget
-      // is shown on top of browser windows. The code should be moved to ash/
-      // and the phantom should be able to assert its top-most state on its own.
-      // One strategy would be for DragWindowController to
-      // be able to observe stacking changes to the phantom drag widget's
-      // siblings in order to keep it on top. One way is to implement a
-      // notification that is sent to a window parent's observers when a
-      // stacking order is changed among the children of that same parent.
-      // Note that OnWindowStackingChanged is sent only to the child that is the
-      // argument of one of the Window::StackChildX calls and not to all its
-      // siblings affected by the stacking change.
-      aura::Window* browser_window = widget_window->GetNativeView();
-      // Find a topmost non-popup window and stack the recipient browser above
-      // it in order to avoid stacking the browser window on top of the phantom
-      // drag widget created by DragWindowController in a second display.
-      for (aura::Window::Windows::const_reverse_iterator it =
-           browser_window->parent()->children().rbegin();
-           it != browser_window->parent()->children().rend(); ++it) {
-        // If the iteration reached the recipient browser window then it is
-        // already topmost and it is safe to return with no stacking change.
-        if (*it == browser_window)
-          return;
-        if ((*it)->type() != ui::wm::WINDOW_TYPE_POPUP) {
-          widget_window->StackAbove(*it);
-          break;
-        }
+    // TODO(varkha): The code below ensures that the phantom drag widget
+    // is shown on top of browser windows. The code should be moved to ash/
+    // and the phantom should be able to assert its top-most state on its own.
+    // One strategy would be for DragWindowController to
+    // be able to observe stacking changes to the phantom drag widget's
+    // siblings in order to keep it on top. One way is to implement a
+    // notification that is sent to a window parent's observers when a
+    // stacking order is changed among the children of that same parent.
+    // Note that OnWindowStackingChanged is sent only to the child that is the
+    // argument of one of the Window::StackChildX calls and not to all its
+    // siblings affected by the stacking change.
+    aura::Window* browser_window = widget_window->GetNativeView();
+    // Find a topmost non-popup window and stack the recipient browser above
+    // it in order to avoid stacking the browser window on top of the phantom
+    // drag widget created by DragWindowController in a second display.
+    for (aura::Window::Windows::const_reverse_iterator it =
+             browser_window->parent()->children().rbegin();
+         it != browser_window->parent()->children().rend(); ++it) {
+      // If the iteration reached the recipient browser window then it is
+      // already topmost and it is safe to return with no stacking change.
+      if (*it == browser_window)
+        return;
+      if ((*it)->type() != ui::wm::WINDOW_TYPE_POPUP) {
+        widget_window->StackAbove(*it);
+        break;
       }
-    } else {
-      widget_window->StackAtTop();
     }
 #else
     widget_window->StackAtTop();
@@ -1647,8 +1658,9 @@ gfx::Rect TabDragController::CalculateDraggedBrowserBounds(
   views::View::ConvertPointToWidget(source, &center);
   gfx::Rect new_bounds(source->GetWidget()->GetRestoredBounds());
 
-  gfx::Rect work_area =
-      screen_->GetDisplayNearestPoint(last_point_in_screen_).work_area();
+  gfx::Rect work_area = gfx::Screen::GetScreen()
+                            ->GetDisplayNearestPoint(last_point_in_screen_)
+                            .work_area();
   if (new_bounds.size().width() >= work_area.size().width() &&
       new_bounds.size().height() >= work_area.size().height()) {
     new_bounds = work_area;
@@ -1749,9 +1761,7 @@ Browser* TabDragController::CreateBrowserForDrag(
 
   Profile* profile =
       Profile::FromBrowserContext(drag_data_[0].contents->GetBrowserContext());
-  Browser::CreateParams create_params(Browser::TYPE_TABBED,
-                                      profile,
-                                      host_desktop_type_);
+  Browser::CreateParams create_params(Browser::TYPE_TABBED, profile);
   create_params.initial_bounds = new_bounds;
   Browser* browser = new Browser(create_params);
   is_dragging_new_browser_ = true;
@@ -1765,8 +1775,7 @@ Browser* TabDragController::CreateBrowserForDrag(
 
 gfx::Point TabDragController::GetCursorScreenPoint() {
 #if defined(USE_ASH)
-  if (host_desktop_type_ == chrome::HOST_DESKTOP_TYPE_ASH &&
-      event_source_ == EVENT_SOURCE_TOUCH &&
+  if (event_source_ == EVENT_SOURCE_TOUCH &&
       aura::Env::GetInstance()->is_touch_down()) {
     views::Widget* widget = GetAttachedBrowserWidget();
     DCHECK(widget);
@@ -1782,7 +1791,7 @@ gfx::Point TabDragController::GetCursorScreenPoint() {
   }
 #endif
 
-  return screen_->GetCursorScreenPoint();
+  return gfx::Screen::GetScreen()->GetCursorScreenPoint();
 }
 
 gfx::Vector2d TabDragController::GetWindowOffset(
@@ -1796,9 +1805,10 @@ gfx::Vector2d TabDragController::GetWindowOffset(
   return point.OffsetFromOrigin();
 }
 
-gfx::NativeWindow TabDragController::GetLocalProcessWindow(
+TabDragController::Liveness TabDragController::GetLocalProcessWindow(
     const gfx::Point& screen_point,
-    bool exclude_dragged_view) {
+    bool exclude_dragged_view,
+    gfx::NativeWindow* window) {
   std::set<gfx::NativeWindow> exclude;
   if (exclude_dragged_view) {
     gfx::NativeWindow dragged_window =
@@ -1812,16 +1822,12 @@ gfx::NativeWindow TabDragController::GetLocalProcessWindow(
   // window which was used for dragging is not hidden once all of its tabs are
   // attached to another browser window in DragBrowserToNewTabStrip().
   // TODO(pkotwicz): Fix this properly (crbug.com/358482)
-  BrowserList* browser_list = BrowserList::GetInstance(
-      chrome::HOST_DESKTOP_TYPE_NATIVE);
-  for (BrowserList::const_iterator it = browser_list->begin();
-       it != browser_list->end(); ++it) {
-    if ((*it)->tab_strip_model()->empty())
-      exclude.insert((*it)->window()->GetNativeWindow());
+  for (auto* browser : *BrowserList::GetInstance()) {
+    if (browser->tab_strip_model()->empty())
+      exclude.insert(browser->window()->GetNativeWindow());
   }
 #endif
-  return GetLocalProcessWindowAtPoint(host_desktop_type_,
-                                      screen_point,
-                                      exclude);
-
+  base::WeakPtr<TabDragController> ref(weak_factory_.GetWeakPtr());
+  *window = window_finder_->GetLocalProcessWindowAtPoint(screen_point, exclude);
+  return ref ? Liveness::ALIVE : Liveness::DELETED;
 }

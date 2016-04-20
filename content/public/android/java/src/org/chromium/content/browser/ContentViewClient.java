@@ -46,11 +46,9 @@ public class ContentViewClient {
      * Notifies the client that the position of the top controls has changed.
      * @param topControlsOffsetYPix The Y offset of the top controls in physical pixels.
      * @param contentOffsetYPix The Y offset of the content in physical pixels.
-     * @param overdrawBottomHeightPix The overdraw height.
      */
     public void onOffsetsForFullscreenChanged(
-            float topControlsOffsetYPix, float contentOffsetYPix, float overdrawBottomHeightPix) {
-    }
+            float topControlsOffsetYPix, float contentOffsetYPix) { }
 
     public boolean shouldOverrideKeyEvent(KeyEvent event) {
         int keyCode = event.getKeyCode();
@@ -153,7 +151,7 @@ public class ContentViewClient {
         }
     }
 
-    public ContentVideoViewClient getContentVideoViewClient() {
+    public ContentVideoViewEmbedder getContentVideoViewEmbedder() {
         return null;
     }
 
@@ -214,5 +212,45 @@ public class ContentViewClient {
      */
     public int getDesiredHeightMeasureSpec() {
         return UNSPECIFIED_MEASURE_SPEC;
+    }
+
+    /**
+     * Returns the left system window inset in pixels. The system window inset represents the area
+     * of a full-screen window that is partially or fully obscured by the status bar, navigation
+     * bar, IME or other system windows.
+     * @return The left system window inset.
+     */
+    public int getSystemWindowInsetLeft() {
+        return 0;
+    }
+
+    /**
+     * Returns the top system window inset in pixels. The system window inset represents the area of
+     * a full-screen window that is partially or fully obscured by the status bar, navigation bar,
+     * IME or other system windows.
+     * @return The top system window inset.
+     */
+    public int getSystemWindowInsetTop() {
+        return 0;
+    }
+
+    /**
+     * Returns the right system window inset in pixels. The system window inset represents the area
+     * of a full-screen window that is partially or fully obscured by the status bar, navigation
+     * bar, IME or other system windows.
+     * @return The right system window inset.
+     */
+    public int getSystemWindowInsetRight() {
+        return 0;
+    }
+
+    /**
+     * Returns the bottom system window inset in pixels. The system window inset represents the area
+     * of a full-screen window that is partially or fully obscured by the status bar, navigation
+     * bar, IME or other system windows.
+     * @return The bottom system window inset.
+     */
+    public int getSystemWindowInsetBottom() {
+        return 0;
     }
 }

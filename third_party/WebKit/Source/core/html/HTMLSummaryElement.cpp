@@ -22,7 +22,7 @@
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/HTMLNames.h"
-#include "core/dom/shadow/ComposedTreeTraversal.h"
+#include "core/dom/shadow/FlatTreeTraversal.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/html/HTMLContentElement.h"
@@ -35,11 +35,11 @@ namespace blink {
 
 using namespace HTMLNames;
 
-PassRefPtrWillBeRawPtr<HTMLSummaryElement> HTMLSummaryElement::create(Document& document)
+HTMLSummaryElement* HTMLSummaryElement::create(Document& document)
 {
-    RefPtrWillBeRawPtr<HTMLSummaryElement> summary = adoptRefWillBeNoop(new HTMLSummaryElement(document));
+    HTMLSummaryElement* summary = new HTMLSummaryElement(document);
     summary->ensureUserAgentShadowRoot();
-    return summary.release();
+    return summary;
 }
 
 HTMLSummaryElement::HTMLSummaryElement(Document& document)
@@ -54,7 +54,7 @@ LayoutObject* HTMLSummaryElement::createLayoutObject(const ComputedStyle&)
 
 void HTMLSummaryElement::didAddUserAgentShadowRoot(ShadowRoot& root)
 {
-    RefPtrWillBeRawPtr<DetailsMarkerControl> markerControl = DetailsMarkerControl::create(document());
+    DetailsMarkerControl* markerControl = DetailsMarkerControl::create(document());
     markerControl->setIdAttribute(ShadowElementNames::detailsMarker());
     root.appendChild(markerControl);
     root.appendChild(HTMLContentElement::create(document()));
@@ -148,4 +148,4 @@ bool HTMLSummaryElement::willRespondToMouseClickEvents()
     return HTMLElement::willRespondToMouseClickEvents();
 }
 
-}
+} // namespace blink

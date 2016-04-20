@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -20,9 +22,11 @@ namespace base {
 class SingleThreadTaskRunner;
 }
 
-namespace content {
+namespace gpu {
 class GpuChannel;
+}
 
+namespace content {
 class GpuJpegDecodeAccelerator
     : public IPC::Sender,
       public base::NonThreadSafe,
@@ -30,11 +34,11 @@ class GpuJpegDecodeAccelerator
  public:
   // |channel| must outlive this object.
   GpuJpegDecodeAccelerator(
-      GpuChannel* channel,
+      gpu::GpuChannel* channel,
       const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner);
   ~GpuJpegDecodeAccelerator() override;
 
-  void AddClient(int32_t route_id, IPC::Message* reply_msg);
+  void AddClient(int32_t route_id, base::Callback<void(bool)> response);
 
   void NotifyDecodeStatus(int32_t route_id,
                           int32_t bitstream_buffer_id,
@@ -48,23 +52,23 @@ class GpuJpegDecodeAccelerator
   static bool IsSupported();
 
  private:
-  using CreateJDAFp = scoped_ptr<media::JpegDecodeAccelerator> (*)(
-          const scoped_refptr<base::SingleThreadTaskRunner>&);
+  using CreateJDAFp = std::unique_ptr<media::JpegDecodeAccelerator> (*)(
+      const scoped_refptr<base::SingleThreadTaskRunner>&);
 
   class Client;
   class MessageFilter;
 
   void ClientRemoved();
 
-  static scoped_ptr<media::JpegDecodeAccelerator> CreateV4L2JDA(
+  static std::unique_ptr<media::JpegDecodeAccelerator> CreateV4L2JDA(
       const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner);
-  static scoped_ptr<media::JpegDecodeAccelerator> CreateVaapiJDA(
+  static std::unique_ptr<media::JpegDecodeAccelerator> CreateVaapiJDA(
       const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner);
 
-  // The lifetime of objects of this class is managed by a GpuChannel. The
+  // The lifetime of objects of this class is managed by a gpu::GpuChannel. The
   // GpuChannels destroy all the GpuJpegDecodeAccelerator that they own when
   // they are destroyed. So a raw pointer is safe.
-  GpuChannel* channel_;
+  gpu::GpuChannel* channel_;
 
   // The message filter to run JpegDecodeAccelerator::Decode on IO thread.
   scoped_refptr<MessageFilter> filter_;

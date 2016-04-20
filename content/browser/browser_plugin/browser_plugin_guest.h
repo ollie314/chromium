@@ -35,9 +35,9 @@
 #include "content/public/browser/guest_host.h"
 #include "content/public/browser/readback_types.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "third_party/WebKit/public/platform/WebDragOperation.h"
 #include "third_party/WebKit/public/platform/WebFocusType.h"
 #include "third_party/WebKit/public/web/WebCompositionUnderline.h"
-#include "third_party/WebKit/public/web/WebDragOperation.h"
 #include "third_party/WebKit/public/web/WebDragStatus.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/base/ime/text_input_mode.h"
@@ -45,9 +45,6 @@
 #include "ui/gfx/geometry/rect.h"
 
 struct BrowserPluginHostMsg_Attach_Params;
-struct FrameHostMsg_CompositorFrameSwappedACK_Params;
-struct FrameHostMsg_ReclaimCompositorResources_Params;
-struct FrameMsg_CompositorFrameSwapped_Params;
 struct ViewHostMsg_TextInputState_Params;
 
 #if defined(OS_MACOSX)
@@ -241,11 +238,7 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
 
   void PointerLockPermissionResponse(bool allow);
 
-  // The next two functions are virtual for test purposes.
-  virtual void SwapCompositorFrame(uint32_t output_surface_id,
-                                   int host_process_id,
-                                   int host_routing_id,
-                                   scoped_ptr<cc::CompositorFrame> frame);
+  // The next function is virtual for test purposes.
   virtual void SetChildFrameSurface(const cc::SurfaceId& surface_id,
                                     const gfx::Size& frame_size,
                                     float scale_factor,
@@ -289,9 +282,6 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
                          const cc::SurfaceId& id,
                          const cc::SurfaceSequence& sequence);
   // Message handlers for messages from embedder.
-  void OnCompositorFrameSwappedACK(
-      int instance_id,
-      const FrameHostMsg_CompositorFrameSwappedACK_Params& params);
   void OnDetach(int instance_id);
   // Handles drag events from the embedder.
   // When dragging, the drag events go to the embedder first, and if the drag
@@ -306,11 +296,6 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   // Instructs the guest to execute an edit command decoded in the embedder.
   void OnExecuteEditCommand(int instance_id,
                             const std::string& command);
-
-  // Returns compositor resources reclaimed in the embedder to the guest.
-  void OnReclaimCompositorResources(
-      int instance_id,
-      const FrameHostMsg_ReclaimCompositorResources_Params& params);
 
   void OnLockMouse(bool user_gesture,
                    bool last_unlocked_by_target,
@@ -402,7 +387,7 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   // The last tooltip that was set with SetTooltipText().
   base::string16 current_tooltip_text_;
 
-  scoped_ptr<EmbedderVisibilityObserver> embedder_visibility_observer_;
+  std::unique_ptr<EmbedderVisibilityObserver> embedder_visibility_observer_;
   WebContentsImpl* owner_web_contents_;
 
   // Indicates whether this guest has been attached to a container.
@@ -441,7 +426,8 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
 
   // Text input type states.
   // Using scoped_ptr to avoid including the header file: view_messages.h.
-  scoped_ptr<const ViewHostMsg_TextInputState_Params> last_text_input_state_;
+  std::unique_ptr<const ViewHostMsg_TextInputState_Params>
+      last_text_input_state_;
 
   // The is the routing ID for a swapped out RenderView for the guest
   // WebContents in the embedder's process.
@@ -455,15 +441,6 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
 
   // Indicates the URL dragged into the guest if any.
   GURL dragged_url_;
-
-  // Guests generate frames and send a CompositorFrameSwapped (CFS) message
-  // indicating the next frame is ready to be positioned and composited.
-  // Subsequent frames are not generated until the IPC is ACKed. We would like
-  // to ensure that the guest generates frames on attachment so we directly ACK
-  // an unACKed CFS. ACKs could get lost between the time a guest is detached
-  // from a container and the time it is attached elsewhere. This mitigates this
-  // race by ensuring the guest is ACKed on attachment.
-  scoped_ptr<FrameMsg_CompositorFrameSwapped_Params> last_pending_frame_;
 
   // This is a queue of messages that are destined to be sent to the embedder
   // once the guest is attached to a particular embedder.

@@ -1,0 +1,10 @@
+{
+  "manifest_version":  1,
+  "name": "mojo:catalog",
+  "display_name": "Application Resolver",
+  "capabilities": {
+    "required": {
+      "mojo:shell": { "classes": [ "all_users" ] }      
+    }
+  }
+}

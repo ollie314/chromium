@@ -9,6 +9,7 @@ import android.view.View;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 
@@ -60,12 +61,18 @@ public class LocalizationUtils {
         return sIsLayoutRtl.booleanValue();
     }
 
+    @VisibleForTesting
+    public static void setRtlForTesting(boolean shouldBeRtl) {
+        sIsLayoutRtl = shouldBeRtl;
+    }
+
     /**
      * Jni binding to base::i18n::GetFirstStrongCharacterDirection
      * @param string String to decide the direction.
      * @return One of the UNKNOWN_DIRECTION, RIGHT_TO_LEFT, and LEFT_TO_RIGHT.
      */
     public static int getFirstStrongCharacterDirection(String string) {
+        assert string != null;
         return nativeGetFirstStrongCharacterDirection(string);
     }
 

@@ -85,6 +85,7 @@ class PrerenderLinkManager : public KeyedService,
                   int render_view_route_id,
                   base::TimeTicks creation_time,
                   PrerenderContents* deferred_launcher);
+    LinkPrerender(const LinkPrerender& other);
     ~LinkPrerender();
 
     // Parameters from PrerenderLinkManager::OnAddPrerender():
@@ -168,7 +169,7 @@ class PrerenderLinkManager : public KeyedService,
 
   // Helper object to manage prerenders which are launched by other prerenders
   // and must be deferred until the launcher is swapped in.
-  scoped_ptr<PendingPrerenderManager> pending_prerender_manager_;
+  std::unique_ptr<PendingPrerenderManager> pending_prerender_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(PrerenderLinkManager);
 };

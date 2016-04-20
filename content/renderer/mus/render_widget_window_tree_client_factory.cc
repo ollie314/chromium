@@ -12,9 +12,9 @@
 #include "content/common/render_widget_window_tree_client_factory.mojom.h"
 #include "content/public/common/mojo_shell_connection.h"
 #include "content/renderer/mus/render_widget_mus_connection.h"
-#include "mojo/common/weak_binding_set.h"
-#include "mojo/shell/public/cpp/application_connection.h"
-#include "mojo/shell/public/cpp/interface_factory.h"
+#include "mojo/public/cpp/bindings/binding_set.h"
+#include "services/shell/public/cpp/connection.h"
+#include "services/shell/public/cpp/interface_factory.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -25,7 +25,8 @@ namespace {
 // MojoShellConnection::Listener.
 class RenderWidgetWindowTreeClientFactoryImpl
     : public MojoShellConnection::Listener,
-      public mojo::InterfaceFactory<mojom::RenderWidgetWindowTreeClientFactory>,
+      public shell::InterfaceFactory<
+          mojom::RenderWidgetWindowTreeClientFactory>,
       public mojom::RenderWidgetWindowTreeClientFactory {
  public:
   RenderWidgetWindowTreeClientFactoryImpl() {
@@ -37,14 +38,13 @@ class RenderWidgetWindowTreeClientFactoryImpl
 
  private:
   // MojoShellConnection::Listener implementation:
-  bool ConfigureIncomingConnection(
-      mojo::ApplicationConnection* connection) override {
-    connection->AddService<mojom::RenderWidgetWindowTreeClientFactory>(this);
+  bool AcceptConnection(shell::Connection* connection) override {
+    connection->AddInterface<mojom::RenderWidgetWindowTreeClientFactory>(this);
     return true;
   }
 
-  // mojo::InterfaceFactory<mojom::RenderWidgetWindowTreeClientFactory>:
-  void Create(mojo::ApplicationConnection* connection,
+  // shell::InterfaceFactory<mojom::RenderWidgetWindowTreeClientFactory>:
+  void Create(shell::Connection* connection,
               mojo::InterfaceRequest<mojom::RenderWidgetWindowTreeClientFactory>
                   request) override {
     bindings_.AddBinding(this, std::move(request));
@@ -59,7 +59,7 @@ class RenderWidgetWindowTreeClientFactoryImpl
     connection->Bind(std::move(request));
   }
 
-  mojo::WeakBindingSet<mojom::RenderWidgetWindowTreeClientFactory> bindings_;
+  mojo::BindingSet<mojom::RenderWidgetWindowTreeClientFactory> bindings_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetWindowTreeClientFactoryImpl);
 };

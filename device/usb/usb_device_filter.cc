@@ -4,6 +4,7 @@
 
 #include "device/usb/usb_device_filter.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/values.h"
@@ -29,6 +30,8 @@ UsbDeviceFilter::UsbDeviceFilter()
       interface_subclass_set_(false),
       interface_protocol_set_(false) {
 }
+
+UsbDeviceFilter::UsbDeviceFilter(const UsbDeviceFilter& other) = default;
 
 UsbDeviceFilter::~UsbDeviceFilter() {
 }
@@ -88,8 +91,8 @@ bool UsbDeviceFilter::Matches(scoped_refptr<UsbDevice> device) const {
   return true;
 }
 
-scoped_ptr<base::Value> UsbDeviceFilter::ToValue() const {
-  scoped_ptr<base::DictionaryValue> obj(new base::DictionaryValue());
+std::unique_ptr<base::Value> UsbDeviceFilter::ToValue() const {
+  std::unique_ptr<base::DictionaryValue> obj(new base::DictionaryValue());
 
   if (vendor_id_set_) {
     obj->SetInteger(kVendorIdKey, vendor_id_);

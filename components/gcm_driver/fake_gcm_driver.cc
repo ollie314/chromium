@@ -74,6 +74,11 @@ void FakeGCMDriver::SendImpl(const std::string& app_id,
                              const OutgoingMessage& message) {
 }
 
+void FakeGCMDriver::RecordDecryptionFailure(
+    const std::string& app_id,
+    GCMEncryptionProvider::DecryptionResult result) {
+}
+
 void FakeGCMDriver::SetAccountTokens(
     const std::vector<GCMClient::AccountTokenInfo>& account_tokens) {
 }
@@ -95,7 +100,7 @@ void FakeGCMDriver::SetLastTokenFetchTime(const base::Time& time) {
 void FakeGCMDriver::WakeFromSuspendForHeartbeat(bool wake) {
 }
 
-InstanceIDHandler* FakeGCMDriver::GetInstanceIDHandler() {
+InstanceIDHandler* FakeGCMDriver::GetInstanceIDHandlerInternal() {
   return NULL;
 }
 

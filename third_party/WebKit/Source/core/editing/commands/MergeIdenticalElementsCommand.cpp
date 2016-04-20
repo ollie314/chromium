@@ -31,17 +31,17 @@
 
 namespace blink {
 
-MergeIdenticalElementsCommand::MergeIdenticalElementsCommand(PassRefPtrWillBeRawPtr<Element> first, PassRefPtrWillBeRawPtr<Element> second)
+MergeIdenticalElementsCommand::MergeIdenticalElementsCommand(Element* first, Element* second)
     : SimpleEditCommand(first->document())
     , m_element1(first)
     , m_element2(second)
 {
-    ASSERT(m_element1);
-    ASSERT(m_element2);
-    ASSERT(m_element1->nextSibling() == m_element2);
+    DCHECK(m_element1);
+    DCHECK(m_element2);
+    DCHECK_EQ(m_element1->nextSibling(), m_element2);
 }
 
-void MergeIdenticalElementsCommand::doApply()
+void MergeIdenticalElementsCommand::doApply(EditingState*)
 {
     if (m_element1->nextSibling() != m_element2 || !m_element1->hasEditableStyle() || !m_element2->hasEditableStyle())
         return;
@@ -59,10 +59,10 @@ void MergeIdenticalElementsCommand::doApply()
 
 void MergeIdenticalElementsCommand::doUnapply()
 {
-    ASSERT(m_element1);
-    ASSERT(m_element2);
+    DCHECK(m_element1);
+    DCHECK(m_element2);
 
-    RefPtrWillBeRawPtr<Node> atChild = m_atChild.release();
+    Node* atChild = m_atChild.release();
 
     ContainerNode* parent = m_element2->parentNode();
     if (!parent || !parent->hasEditableStyle())
@@ -74,7 +74,7 @@ void MergeIdenticalElementsCommand::doUnapply()
     if (exceptionState.hadException())
         return;
 
-    WillBeHeapVector<RefPtrWillBeMember<Node>> children;
+    HeapVector<Member<Node>> children;
     for (Node* child = m_element2->firstChild(); child && child != atChild; child = child->nextSibling())
         children.append(child);
 

@@ -6,12 +6,12 @@
 #define CHROME_BROWSER_UI_VIEWS_TABS_TAB_H_
 
 #include <list>
+#include <memory>
 #include <string>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
 #include "ui/base/layout.h"
 #include "ui/gfx/animation/animation_delegate.h"
@@ -23,7 +23,7 @@
 #include "ui/views/masked_targeter_delegate.h"
 #include "ui/views/view.h"
 
-class MediaIndicatorButton;
+class AlertIndicatorButton;
 class TabController;
 
 namespace gfx {
@@ -52,10 +52,7 @@ class Tab : public gfx::AnimationDelegate,
   // The Tab's class name.
   static const char kViewClassName[];
 
-  // The color of an inactive tab.
-  static const SkColor kInactiveTabColor;
-
-  explicit Tab(TabController* controller);
+  Tab(TabController* controller, gfx::AnimationContainer* container);
   ~Tab() override;
 
   TabController* controller() const { return controller_; }
@@ -75,15 +72,15 @@ class Tab : public gfx::AnimationDelegate,
 
   SkColor button_color() const { return button_color_; }
 
-  // Sets the container all animations run from.
-  void SetAnimationContainer(gfx::AnimationContainer* container);
-
   // Returns true if this tab is the active tab.
   bool IsActive() const;
 
-  // Notifies the MediaIndicatorButton that the active state of this tab has
+  // Notifies the AlertIndicatorButton that the active state of this tab has
   // changed.
   void ActiveStateChanged();
+
+  // Called when the alert indicator has changed states.
+  void AlertStateChanged();
 
   // Returns true if the tab is selected.
   bool IsSelected() const;
@@ -176,6 +173,7 @@ class Tab : public gfx::AnimationDelegate,
   static float GetInverseDiagonalSlope();
 
  private:
+  friend class AlertIndicatorButtonTest;
   friend class TabTest;
   friend class TabStripTest;
   FRIEND_TEST_ALL_PREFIXES(TabStripTest, TabHitTestMaskWhenStacked);
@@ -187,21 +185,11 @@ class Tab : public gfx::AnimationDelegate,
   class TabCloseButton;
   class ThrobberView;
 
-  // Contains a cached image and the values used to generate it.
-  struct ImageCacheEntry {
-    ImageCacheEntry();
-    ~ImageCacheEntry();
+  // All metadata necessary to uniquely identify a cached image.
+  struct ImageCacheEntryMetadata;
 
-    // ID of the resource used.
-    int resource_id;
-
-    // Scale factor we're drawing it.
-    ui::ScaleFactor scale_factor;
-
-    // The image.
-    gfx::ImageSkia image;
-  };
-
+  // A cached image and the metadata used to generate it.
+  struct ImageCacheEntry;
   typedef std::list<ImageCacheEntry> ImageCache;
 
   // gfx::AnimationDelegate:
@@ -243,7 +231,7 @@ class Tab : public gfx::AnimationDelegate,
   // ui::EventHandler:
   void OnGestureEvent(ui::GestureEvent* event) override;
 
-  // Invoked from Layout to adjust the position of the favicon or media
+  // Invoked from Layout to adjust the position of the favicon or alert
   // indicator for pinned tabs.
   void MaybeAdjustLeftForPinnedTab(gfx::Rect* bounds) const;
 
@@ -256,7 +244,7 @@ class Tab : public gfx::AnimationDelegate,
   // Paint with the "immersive mode" light-bar style.
   void PaintImmersiveTab(gfx::Canvas* canvas);
 
-  // Paint various portions of the Tab
+  // Paint various portions of the Tab.
   void PaintTabBackground(gfx::Canvas* canvas);
   void PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas);
   void PaintInactiveTabBackground(gfx::Canvas* canvas);
@@ -284,8 +272,8 @@ class Tab : public gfx::AnimationDelegate,
   // Returns whether the Tab should display a favicon.
   bool ShouldShowIcon() const;
 
-  // Returns whether the Tab should display the media indicator.
-  bool ShouldShowMediaIndicator() const;
+  // Returns whether the Tab should display the alert indicator.
+  bool ShouldShowAlertIndicator() const;
 
   // Returns whether the Tab should display a close button.
   bool ShouldShowCloseBox() const;
@@ -307,7 +295,7 @@ class Tab : public gfx::AnimationDelegate,
     should_display_crashed_favicon_ = true;
   }
 
-  // Recalculates the correct |button_color_| and resets the title, media
+  // Recalculates the correct |button_color_| and resets the title, alert
   // indicator, and close button colors if necessary.  This should be called any
   // time the theme or active state may have changed.
   void OnButtonColorMaybeChanged();
@@ -334,17 +322,6 @@ class Tab : public gfx::AnimationDelegate,
   // Loads the images to be used for the tab background.
   static void LoadTabImages();
 
-  // Returns the cached image for the specified arguments, or an empty image if
-  // there isn't one cached.
-  static gfx::ImageSkia GetCachedImage(int resource_id,
-                                       const gfx::Size& size,
-                                       ui::ScaleFactor scale_factor);
-
-  // Caches the specified image.
-  static void SetCachedImage(int resource_id,
-                             ui::ScaleFactor scale_factor,
-                             const gfx::ImageSkia& image);
-
   // The controller, never NULL.
   TabController* const controller_;
 
@@ -369,17 +346,17 @@ class Tab : public gfx::AnimationDelegate,
   bool should_display_crashed_favicon_;
 
   // Whole-tab throbbing "pulse" animation.
-  scoped_ptr<gfx::ThrobAnimation> pulse_animation_;
+  std::unique_ptr<gfx::ThrobAnimation> pulse_animation_;
 
-  scoped_ptr<gfx::MultiAnimation> pinned_title_change_animation_;
+  std::unique_ptr<gfx::MultiAnimation> pinned_title_change_animation_;
 
   // Crash icon animation (in place of favicon).
-  scoped_ptr<gfx::LinearAnimation> crash_icon_animation_;
+  std::unique_ptr<gfx::LinearAnimation> crash_icon_animation_;
 
   scoped_refptr<gfx::AnimationContainer> animation_container_;
 
   ThrobberView* throbber_;
-  MediaIndicatorButton* media_indicator_button_;
+  AlertIndicatorButton* alert_indicator_button_;
   views::ImageButton* close_button_;
   views::Label* title_;
 
@@ -408,15 +385,15 @@ class Tab : public gfx::AnimationDelegate,
   // changes and layout appropriately.
   bool showing_icon_;
 
-  // Whether we're showing the media indicator. It is cached so that we can
+  // Whether we're showing the alert indicator. It is cached so that we can
   // detect when it changes and layout appropriately.
-  bool showing_media_indicator_;
+  bool showing_alert_indicator_;
 
   // Whether we are showing the close button. It is cached so that we can
   // detect when it changes and layout appropriately.
   bool showing_close_button_;
 
-  // The current color of the media indicator and close button icons.
+  // The current color of the alert indicator and close button icons.
   SkColor button_color_;
 
   // As the majority of the tabs are inactive, and painting tabs is slowish,

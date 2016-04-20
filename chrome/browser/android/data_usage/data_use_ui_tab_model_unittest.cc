@@ -15,6 +15,7 @@
 #include "chrome/browser/android/data_usage/external_data_use_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
+#include "chrome/common/url_constants.h"
 #include "components/data_usage/core/data_use_aggregator.h"
 #include "components/data_usage/core/data_use_amortizer.h"
 #include "components/data_usage/core/data_use_annotator.h"
@@ -33,6 +34,8 @@ namespace {
 const char kFooLabel[] = "foo_label";
 const char kFooPackage[] = "com.foo";
 
+}  // namespace
+
 class TestDataUseTabModel : public DataUseTabModel {
  public:
   TestDataUseTabModel() {}
@@ -47,10 +50,6 @@ class DataUseUITabModelTest : public testing::Test {
   DataUseUITabModelTest()
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {}
   DataUseUITabModel* data_use_ui_tab_model() { return &data_use_ui_tab_model_; }
-
-  ExternalDataUseObserver* external_data_use_observer() const {
-    return external_data_use_observer_.get();
-  }
 
   TestDataUseTabModel* data_use_tab_model() const {
     return data_use_tab_model_.get();
@@ -80,8 +79,9 @@ class DataUseUITabModelTest : public testing::Test {
 
     data_use_tab_model_.reset(new TestDataUseTabModel());
     data_use_tab_model_->InitOnUIThread(
-        io_task_runner_, external_data_use_observer_->GetWeakPtr());
+        external_data_use_observer_->external_data_use_observer_bridge_);
     data_use_ui_tab_model_.SetDataUseTabModel(data_use_tab_model_.get());
+    data_use_tab_model_->OnControlAppInstallStateChange(true);
   }
 
  private:
@@ -89,12 +89,10 @@ class DataUseUITabModelTest : public testing::Test {
   DataUseUITabModel data_use_ui_tab_model_;
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
-  scoped_ptr<data_usage::DataUseAggregator> data_use_aggregator_;
-  scoped_ptr<ExternalDataUseObserver> external_data_use_observer_;
-  scoped_ptr<TestDataUseTabModel> data_use_tab_model_;
+  std::unique_ptr<data_usage::DataUseAggregator> data_use_aggregator_;
+  std::unique_ptr<ExternalDataUseObserver> external_data_use_observer_;
+  std::unique_ptr<TestDataUseTabModel> data_use_tab_model_;
 };
-
-}  // namespace
 
 // Tests that DataUseTabModel is notified of tab closure and navigation events,
 // and DataUseTabModel notifies DataUseUITabModel.
@@ -254,7 +252,7 @@ TEST_F(DataUseUITabModelTest, EntranceExitState) {
 }
 
 // Tests if the Entrance/Exit UI state is tracked correctly.
-TEST_F(DataUseUITabModelTest, EntraceExitStateForDialog) {
+TEST_F(DataUseUITabModelTest, EntranceExitStateForDialog) {
   const SessionID::id_type kFooTabId = 1;
 
   std::vector<std::string> url_regexes;
@@ -358,84 +356,77 @@ TEST_F(DataUseUITabModelTest, EntraceExitStateForDialog) {
 
 // Checks if page transition type is converted correctly.
 TEST_F(DataUseUITabModelTest, ConvertTransitionType) {
-  DataUseTabModel::TransitionType transition_type;
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_TYPED), &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_OMNIBOX_NAVIGATION, transition_type);
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_TYPED | 0xFF00),
-      &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_OMNIBOX_NAVIGATION, transition_type);
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_TYPED | 0xFFFF00),
-      &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_OMNIBOX_NAVIGATION, transition_type);
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_TYPED | 0x12FFFF00),
-      &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_OMNIBOX_NAVIGATION, transition_type);
+  const struct {
+    ui::PageTransition page_transition;
+    const std::string url;
+    bool expected_return;
+    DataUseTabModel::TransitionType expected_transition_type;
+  } tests[] = {
+      {ui::PageTransition(ui::PAGE_TRANSITION_TYPED), std::string(), true,
+       DataUseTabModel::TRANSITION_OMNIBOX_NAVIGATION},
+      {ui::PageTransition(ui::PAGE_TRANSITION_TYPED | 0xFF00), std::string(),
+       true, DataUseTabModel::TRANSITION_OMNIBOX_NAVIGATION},
+      {ui::PageTransition(ui::PAGE_TRANSITION_TYPED | 0xFFFF00), std::string(),
+       true, DataUseTabModel::TRANSITION_OMNIBOX_NAVIGATION},
+      {ui::PageTransition(ui::PAGE_TRANSITION_TYPED | 0x12FFFF00),
+       std::string(), true, DataUseTabModel::TRANSITION_OMNIBOX_NAVIGATION},
+      {ui::PageTransition(ui::PAGE_TRANSITION_AUTO_BOOKMARK), std::string(),
+       true, DataUseTabModel::TRANSITION_BOOKMARK},
+      {ui::PageTransition(ui::PAGE_TRANSITION_AUTO_BOOKMARK | 0xFF00),
+       std::string(), true, DataUseTabModel::TRANSITION_BOOKMARK},
+      {ui::PageTransition(ui::PAGE_TRANSITION_AUTO_BOOKMARK | 0xFFFF00),
+       std::string(), true, DataUseTabModel::TRANSITION_BOOKMARK},
+      {ui::PageTransition(ui::PAGE_TRANSITION_AUTO_BOOKMARK | 0x12FFFF00),
+       std::string(), true, DataUseTabModel::TRANSITION_BOOKMARK},
+      {ui::PageTransition(ui::PAGE_TRANSITION_GENERATED), std::string(), true,
+       DataUseTabModel::TRANSITION_OMNIBOX_SEARCH},
+      {ui::PageTransition(ui::PAGE_TRANSITION_GENERATED | 0xFF00),
+       std::string(), true, DataUseTabModel::TRANSITION_OMNIBOX_SEARCH},
+      {ui::PageTransition(ui::PAGE_TRANSITION_GENERATED | 0xFFFF00),
+       std::string(), true, DataUseTabModel::TRANSITION_OMNIBOX_SEARCH},
+      {ui::PageTransition(ui::PAGE_TRANSITION_GENERATED | 0x12FFFF00),
+       std::string(), true, DataUseTabModel::TRANSITION_OMNIBOX_SEARCH},
+      {ui::PageTransition(ui::PAGE_TRANSITION_RELOAD), std::string(), true,
+       DataUseTabModel::TRANSITION_RELOAD},
+      {ui::PageTransition(ui::PAGE_TRANSITION_RELOAD | 0xFF00), std::string(),
+       true, DataUseTabModel::TRANSITION_RELOAD},
+      {ui::PageTransition(ui::PAGE_TRANSITION_RELOAD | 0xFFFF00), std::string(),
+       true, DataUseTabModel::TRANSITION_RELOAD},
+      {ui::PageTransition(ui::PAGE_TRANSITION_RELOAD | 0x12FFFF00),
+       std::string(), true, DataUseTabModel::TRANSITION_RELOAD},
 
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_AUTO_BOOKMARK), &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_BOOKMARK, transition_type);
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_AUTO_BOOKMARK | 0xFF00),
-      &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_BOOKMARK, transition_type);
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_AUTO_BOOKMARK | 0xFFFF00),
-      &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_BOOKMARK, transition_type);
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_AUTO_BOOKMARK | 0x12FFFF00),
-      &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_BOOKMARK, transition_type);
+      // Navigating back or forward.
+      {ui::PageTransition(ui::PAGE_TRANSITION_RELOAD |
+                          ui::PAGE_TRANSITION_FORWARD_BACK),
+       std::string(), false},
+      {ui::PageTransition(ui::PAGE_TRANSITION_RELOAD |
+                          ui::PAGE_TRANSITION_AUTO_SUBFRAME),
+       std::string(), false},
+      {ui::PageTransition(ui::PAGE_TRANSITION_RELOAD |
+                          ui::PAGE_TRANSITION_MANUAL_SUBFRAME),
+       std::string(), false},
+      {ui::PageTransition(ui::PAGE_TRANSITION_RELOAD |
+                          ui::PAGE_TRANSITION_FORM_SUBMIT),
+       std::string(), false},
 
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_GENERATED), &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_OMNIBOX_SEARCH, transition_type);
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_GENERATED | 0xFF00),
-      &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_OMNIBOX_SEARCH, transition_type);
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_GENERATED | 0xFFFF00),
-      &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_OMNIBOX_SEARCH, transition_type);
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_GENERATED | 0x12FFFF00),
-      &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_OMNIBOX_SEARCH, transition_type);
+      // Navigating history.
+      {ui::PageTransition(ui::PAGE_TRANSITION_AUTO_TOPLEVEL),
+       kChromeUIHistoryFrameURL, true,
+       DataUseTabModel::TRANSITION_HISTORY_ITEM},
+      {ui::PageTransition(ui::PAGE_TRANSITION_AUTO_TOPLEVEL),
+       kChromeUIHistoryURL, true, DataUseTabModel::TRANSITION_HISTORY_ITEM},
+      {ui::PageTransition(ui::PAGE_TRANSITION_AUTO_TOPLEVEL), std::string(),
+       false},
+  };
 
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_RELOAD), &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_RELOAD, transition_type);
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_RELOAD | 0xFF00),
-      &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_RELOAD, transition_type);
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_RELOAD | 0xFFFF00),
-      &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_RELOAD, transition_type);
-  EXPECT_TRUE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_RELOAD | 0x12FFFF00),
-      &transition_type));
-  EXPECT_EQ(DataUseTabModel::TRANSITION_RELOAD, transition_type);
-
-  // Navigating back or forward.
-  EXPECT_FALSE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_RELOAD |
-                         ui::PAGE_TRANSITION_FORWARD_BACK),
-      &transition_type));
-
-  EXPECT_FALSE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_AUTO_SUBFRAME), &transition_type));
-  EXPECT_FALSE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_MANUAL_SUBFRAME),
-      &transition_type));
-  EXPECT_FALSE(data_use_ui_tab_model()->ConvertTransitionType(
-      ui::PageTransition(ui::PAGE_TRANSITION_FORM_SUBMIT), &transition_type));
+  for (const auto& test : tests) {
+    DataUseTabModel::TransitionType transition_type;
+    EXPECT_EQ(test.expected_return,
+              data_use_ui_tab_model()->ConvertTransitionType(
+                  test.page_transition, GURL(test.url), &transition_type));
+    if (test.expected_return)
+      EXPECT_EQ(test.expected_transition_type, transition_type);
+  }
 }
 
 }  // namespace android

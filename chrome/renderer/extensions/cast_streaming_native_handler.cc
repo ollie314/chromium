@@ -6,9 +6,11 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <algorithm>
 #include <functional>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,6 +18,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/thread_task_runner_handle.h"
@@ -27,10 +30,11 @@
 #include "chrome/renderer/media/cast_session.h"
 #include "chrome/renderer/media/cast_udp_transport.h"
 #include "content/public/child/v8_value_converter.h"
-#include "content/public/renderer/media_stream_api.h"
+#include "content/public/renderer/media_stream_utils.h"
 #include "extensions/renderer/script_context.h"
 #include "media/audio/audio_parameters.h"
 #include "net/base/host_port_pair.h"
+#include "net/base/ip_address.h"
 #include "third_party/WebKit/public/platform/WebMediaStream.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
@@ -124,7 +128,7 @@ bool ToCastRtpPayloadParamsOrThrow(v8::Isolate* isolate,
   }
   for (size_t i = 0; i < ext_params.codec_specific_params.size(); ++i) {
     CastCodecSpecificParams cast_codec_params;
-    ToCastCodecSpecificParams(*ext_params.codec_specific_params[i],
+    ToCastCodecSpecificParams(ext_params.codec_specific_params[i],
                               &cast_codec_params);
     cast_params->codec_specific_params.push_back(cast_codec_params);
   }
@@ -151,11 +155,10 @@ void FromCastRtpPayloadParams(const CastRtpPayloadParams& cast_params,
   if (cast_params.max_frame_rate > 0.0)
     ext_params->max_frame_rate.reset(new double(cast_params.max_frame_rate));
   for (size_t i = 0; i < cast_params.codec_specific_params.size(); ++i) {
-    linked_ptr<CodecSpecificParams> ext_codec_params(
-        new CodecSpecificParams());
+    CodecSpecificParams ext_codec_params;
     FromCastCodecSpecificParams(cast_params.codec_specific_params[i],
-                                ext_codec_params.get());
-    ext_params->codec_specific_params.push_back(ext_codec_params);
+                                &ext_codec_params);
+    ext_params->codec_specific_params.push_back(std::move(ext_codec_params));
   }
 }
 
@@ -187,42 +190,43 @@ CastStreamingNativeHandler::CastStreamingNativeHandler(ScriptContext* context)
     : ObjectBackedNativeHandler(context),
       last_transport_id_(1),
       weak_factory_(this) {
-  RouteFunction("CreateSession",
+  RouteFunction("CreateSession", "cast.streaming.session",
                 base::Bind(&CastStreamingNativeHandler::CreateCastSession,
                            weak_factory_.GetWeakPtr()));
-  RouteFunction("DestroyCastRtpStream",
+  RouteFunction("DestroyCastRtpStream", "cast.streaming.rtpStream",
                 base::Bind(&CastStreamingNativeHandler::DestroyCastRtpStream,
                            weak_factory_.GetWeakPtr()));
   RouteFunction(
-      "GetSupportedParamsCastRtpStream",
+      "GetSupportedParamsCastRtpStream", "cast.streaming.rtpStream",
       base::Bind(&CastStreamingNativeHandler::GetSupportedParamsCastRtpStream,
                  weak_factory_.GetWeakPtr()));
-  RouteFunction("StartCastRtpStream",
+  RouteFunction("StartCastRtpStream", "cast.streaming.rtpStream",
                 base::Bind(&CastStreamingNativeHandler::StartCastRtpStream,
                            weak_factory_.GetWeakPtr()));
-  RouteFunction("StopCastRtpStream",
+  RouteFunction("StopCastRtpStream", "cast.streaming.rtpStream",
                 base::Bind(&CastStreamingNativeHandler::StopCastRtpStream,
                            weak_factory_.GetWeakPtr()));
-  RouteFunction("DestroyCastUdpTransport",
+  RouteFunction("DestroyCastUdpTransport", "cast.streaming.udpTransport",
                 base::Bind(&CastStreamingNativeHandler::DestroyCastUdpTransport,
                            weak_factory_.GetWeakPtr()));
   RouteFunction(
-      "SetDestinationCastUdpTransport",
+      "SetDestinationCastUdpTransport", "cast.streaming.udpTransport",
       base::Bind(&CastStreamingNativeHandler::SetDestinationCastUdpTransport,
                  weak_factory_.GetWeakPtr()));
   RouteFunction(
-      "SetOptionsCastUdpTransport",
+      "SetOptionsCastUdpTransport", "cast.streaming.udpTransport",
       base::Bind(&CastStreamingNativeHandler::SetOptionsCastUdpTransport,
                  weak_factory_.GetWeakPtr()));
-  RouteFunction("ToggleLogging",
+  RouteFunction("ToggleLogging", "cast.streaming.rtpStream",
                 base::Bind(&CastStreamingNativeHandler::ToggleLogging,
                            weak_factory_.GetWeakPtr()));
-  RouteFunction("GetRawEvents",
+  RouteFunction("GetRawEvents", "cast.streaming.rtpStream",
                 base::Bind(&CastStreamingNativeHandler::GetRawEvents,
                            weak_factory_.GetWeakPtr()));
-  RouteFunction("GetStats", base::Bind(&CastStreamingNativeHandler::GetStats,
-                                       weak_factory_.GetWeakPtr()));
-  RouteFunction("StartCastRtpReceiver",
+  RouteFunction("GetStats", "cast.streaming.rtpStream",
+                base::Bind(&CastStreamingNativeHandler::GetStats,
+                           weak_factory_.GetWeakPtr()));
+  RouteFunction("StartCastRtpReceiver", "cast.streaming.receiverSession",
                 base::Bind(&CastStreamingNativeHandler::StartCastRtpReceiver,
                            weak_factory_.GetWeakPtr()));
 }
@@ -261,7 +265,7 @@ void CastStreamingNativeHandler::CreateCastSession(
   }
 
   scoped_refptr<CastSession> session(new CastSession());
-  scoped_ptr<CastRtpStream> stream1, stream2;
+  std::unique_ptr<CastRtpStream> stream1, stream2;
   if (!args[0]->IsNull() && !args[0]->IsUndefined()) {
     CHECK(args[0]->IsObject());
     blink::WebDOMMediaStreamTrack track =
@@ -284,7 +288,7 @@ void CastStreamingNativeHandler::CreateCastSession(
     }
     stream2.reset(new CastRtpStream(track.component(), session));
   }
-  scoped_ptr<CastUdpTransport> udp_transport(
+  std::unique_ptr<CastUdpTransport> udp_transport(
       new CastUdpTransport(session));
 
   create_callback_.Reset(isolate, args[2].As<v8::Function>());
@@ -297,9 +301,9 @@ void CastStreamingNativeHandler::CreateCastSession(
 }
 
 void CastStreamingNativeHandler::CallCreateCallback(
-    scoped_ptr<CastRtpStream> stream1,
-    scoped_ptr<CastRtpStream> stream2,
-    scoped_ptr<CastUdpTransport> udp_transport) {
+    std::unique_ptr<CastRtpStream> stream1,
+    std::unique_ptr<CastRtpStream> stream2,
+    std::unique_ptr<CastUdpTransport> udp_transport) {
   v8::Isolate* isolate = context()->isolate();
   v8::HandleScope handle_scope(isolate);
   v8::Context::Scope context_scope(context()->v8_context());
@@ -384,7 +388,7 @@ void CastStreamingNativeHandler::GetSupportedParamsCastRtpStream(
   if (!transport)
     return;
 
-  scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+  std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
   std::vector<CastRtpParams> cast_params = transport->GetSupportedParams();
   v8::Local<v8::Array> result =
       v8::Array::New(args.GetIsolate(),
@@ -392,7 +396,7 @@ void CastStreamingNativeHandler::GetSupportedParamsCastRtpStream(
   for (size_t i = 0; i < cast_params.size(); ++i) {
     RtpParams params;
     FromCastRtpParams(cast_params[i], &params);
-    scoped_ptr<base::DictionaryValue> params_value = params.ToValue();
+    std::unique_ptr<base::DictionaryValue> params_value = params.ToValue();
     result->Set(
         static_cast<int>(i),
         converter->ToV8Value(params_value.get(), context()->v8_context()));
@@ -411,15 +415,15 @@ void CastStreamingNativeHandler::StartCastRtpStream(
   if (!transport)
     return;
 
-  scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
-  scoped_ptr<base::Value> params_value(
+  std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+  std::unique_ptr<base::Value> params_value(
       converter->FromV8Value(args[1], context()->v8_context()));
   if (!params_value) {
     args.GetIsolate()->ThrowException(v8::Exception::TypeError(
         v8::String::NewFromUtf8(args.GetIsolate(), kUnableToConvertParams)));
     return;
   }
-  scoped_ptr<RtpParams> params = RtpParams::FromValue(*params_value);
+  std::unique_ptr<RtpParams> params = RtpParams::FromValue(*params_value);
   if (!params) {
     args.GetIsolate()->ThrowException(v8::Exception::TypeError(
         v8::String::NewFromUtf8(args.GetIsolate(), kInvalidRtpParams)));
@@ -504,7 +508,7 @@ void CastStreamingNativeHandler::SetOptionsCastUdpTransport(
   if (!transport)
     return;
 
-  scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+  std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
   base::Value* options_value =
       converter->FromV8Value(args[1], context()->v8_context());
   base::DictionaryValue* options;
@@ -514,7 +518,7 @@ void CastStreamingNativeHandler::SetOptionsCastUdpTransport(
         v8::String::NewFromUtf8(args.GetIsolate(), kUnableToConvertArgs)));
     return;
   }
-  transport->SetOptions(make_scoped_ptr(options));
+  transport->SetOptions(base::WrapUnique(options));
 }
 
 void CastStreamingNativeHandler::ToggleLogging(
@@ -582,7 +586,7 @@ void CastStreamingNativeHandler::GetStats(
 
 void CastStreamingNativeHandler::CallGetRawEventsCallback(
     int transport_id,
-    scoped_ptr<base::BinaryValue> raw_events) {
+    std::unique_ptr<base::BinaryValue> raw_events) {
   v8::Isolate* isolate = context()->isolate();
   v8::HandleScope handle_scope(isolate);
   v8::Context::Scope context_scope(context()->v8_context());
@@ -591,7 +595,7 @@ void CastStreamingNativeHandler::CallGetRawEventsCallback(
       get_raw_events_callbacks_.find(transport_id);
   if (it == get_raw_events_callbacks_.end())
     return;
-  scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+  std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
   v8::Local<v8::Value> callback_args[] = {
       converter->ToV8Value(raw_events.get(), context()->v8_context())};
   context()->CallFunction(v8::Local<v8::Function>::New(isolate, *it->second),
@@ -601,7 +605,7 @@ void CastStreamingNativeHandler::CallGetRawEventsCallback(
 
 void CastStreamingNativeHandler::CallGetStatsCallback(
     int transport_id,
-    scoped_ptr<base::DictionaryValue> stats) {
+    std::unique_ptr<base::DictionaryValue> stats) {
   v8::Isolate* isolate = context()->isolate();
   v8::HandleScope handle_scope(isolate);
   v8::Context::Scope context_scope(context()->v8_context());
@@ -610,7 +614,7 @@ void CastStreamingNativeHandler::CallGetStatsCallback(
   if (it == get_stats_callbacks_.end())
     return;
 
-  scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+  std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
   v8::Local<v8::Value> callback_args[] = {
       converter->ToV8Value(stats.get(), context()->v8_context())};
   context()->CallFunction(v8::Local<v8::Function>::New(isolate, *it->second),
@@ -646,15 +650,15 @@ bool CastStreamingNativeHandler::FrameReceiverConfigFromArg(
     v8::Isolate* isolate,
     const v8::Local<v8::Value>& arg,
     media::cast::FrameReceiverConfig* config) const {
-  scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
-  scoped_ptr<base::Value> params_value(
+  std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+  std::unique_ptr<base::Value> params_value(
       converter->FromV8Value(arg, context()->v8_context()));
   if (!params_value) {
     isolate->ThrowException(v8::Exception::TypeError(
         v8::String::NewFromUtf8(isolate, kUnableToConvertParams)));
     return false;
   }
-  scoped_ptr<RtpReceiverParams> params =
+  std::unique_ptr<RtpReceiverParams> params =
       RtpReceiverParams::FromValue(*params_value);
   if (!params) {
     isolate->ThrowException(v8::Exception::TypeError(
@@ -719,23 +723,23 @@ bool CastStreamingNativeHandler::IPEndPointFromArg(
     v8::Isolate* isolate,
     const v8::Local<v8::Value>& arg,
     net::IPEndPoint* ip_endpoint) const {
-  scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
-  scoped_ptr<base::Value> destination_value(
+  std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+  std::unique_ptr<base::Value> destination_value(
       converter->FromV8Value(arg, context()->v8_context()));
   if (!destination_value) {
     isolate->ThrowException(v8::Exception::TypeError(
         v8::String::NewFromUtf8(isolate, kInvalidAesIvMask)));
     return false;
   }
-  scoped_ptr<IPEndPoint> destination =
+  std::unique_ptr<IPEndPoint> destination =
       IPEndPoint::FromValue(*destination_value);
   if (!destination) {
     isolate->ThrowException(v8::Exception::TypeError(
         v8::String::NewFromUtf8(isolate, kInvalidDestination)));
     return false;
   }
-  net::IPAddressNumber ip;
-  if (!net::ParseIPLiteralToNumber(destination->address, &ip)) {
+  net::IPAddress ip;
+  if (!ip.AssignFromIPLiteral(destination->address)) {
     isolate->ThrowException(v8::Exception::TypeError(
         v8::String::NewFromUtf8(isolate, kInvalidDestination)));
     return false;
@@ -802,10 +806,9 @@ void CastStreamingNativeHandler::StartCastRtpReceiver(
 
   media::AudioParameters params(
       media::AudioParameters::AUDIO_PCM_LINEAR,
-      media::CHANNEL_LAYOUT_STEREO,
+      media::GuessChannelLayout(audio_config.channels),
       audio_config.rtp_timebase,  // sampling rate
-      16,
-      audio_config.rtp_timebase / audio_config.target_frame_rate);
+      16, audio_config.rtp_timebase / audio_config.target_frame_rate);
 
   if (!params.IsValid()) {
     args.GetIsolate()->ThrowException(v8::Exception::TypeError(
@@ -813,10 +816,10 @@ void CastStreamingNativeHandler::StartCastRtpReceiver(
     return;
   }
 
-  scoped_ptr<base::DictionaryValue> options;
+  std::unique_ptr<base::DictionaryValue> options;
   if (args.Length() >= 9) {
-    scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
-    scoped_ptr<base::Value> options_value(
+    std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+    std::unique_ptr<base::Value> options_value(
         converter->FromV8Value(args[8], context()->v8_context()));
     if (!options_value->IsType(base::Value::TYPE_NULL)) {
       options = base::DictionaryValue::From(std::move(options_value));
@@ -857,14 +860,29 @@ void CastStreamingNativeHandler::CallReceiverErrorCallback(
       v8::Local<v8::Function>::New(isolate, function), 1, &arg);
 }
 
-
 void CastStreamingNativeHandler::AddTracksToMediaStream(
     const std::string& url,
     const media::AudioParameters& params,
     scoped_refptr<media::AudioCapturerSource> audio,
-    scoped_ptr<media::VideoCapturerSource> video) {
-  content::AddAudioTrackToMediaStream(audio, params, true, true, url);
-  content::AddVideoTrackToMediaStream(std::move(video), true, true, url);
+    std::unique_ptr<media::VideoCapturerSource> video) {
+  blink::WebMediaStream web_stream =
+      blink::WebMediaStreamRegistry::lookupMediaStreamDescriptor(GURL(url));
+  if (web_stream.isNull()) {
+    LOG(DFATAL) << "Stream not found.";
+    return;
+  }
+  if (!content::AddAudioTrackToMediaStream(
+          audio, params.sample_rate(), params.channel_layout(),
+          params.frames_per_buffer(), true,  // is_remote
+          true,                              // is_readonly
+          &web_stream)) {
+    LOG(ERROR) << "Failed to add Cast audio track to media stream.";
+  }
+  if (!content::AddVideoTrackToMediaStream(std::move(video), true,  // is_remote
+                                           true,  // is_readonly
+                                           &web_stream)) {
+    LOG(ERROR) << "Failed to add Cast video track to media stream.";
+  }
 }
 
 }  // namespace extensions

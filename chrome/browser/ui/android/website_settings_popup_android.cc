@@ -7,6 +7,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "base/stl_util.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/chrome_security_state_model_client.h"
@@ -70,15 +71,12 @@ void WebsiteSettingsPopupAndroid::Destroy(JNIEnv* env,
   delete this;
 }
 
-void WebsiteSettingsPopupAndroid::OnPermissionSettingChanged(
+void WebsiteSettingsPopupAndroid::RecordWebsiteSettingsAction(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
-    jint type,
-    jint setting) {
-  ContentSettingsType content_setting_type =
-      static_cast<ContentSettingsType>(type);
-  ContentSetting content_setting = static_cast<ContentSetting>(setting);
-  presenter_->OnSitePermissionChanged(content_setting_type, content_setting);
+    jint action) {
+  presenter_->RecordWebsiteSettingsAction(
+      static_cast<WebsiteSettings::WebsiteSettingsAction>(action));
 }
 
 void WebsiteSettingsPopupAndroid::SetIdentityInfo(
@@ -109,14 +107,13 @@ void WebsiteSettingsPopupAndroid::SetPermissionInfo(
   permissions_to_display.push_back(CONTENT_SETTINGS_TYPE_IMAGES);
   permissions_to_display.push_back(CONTENT_SETTINGS_TYPE_JAVASCRIPT);
   permissions_to_display.push_back(CONTENT_SETTINGS_TYPE_POPUPS);
+  permissions_to_display.push_back(CONTENT_SETTINGS_TYPE_KEYGEN);
 
   std::map<ContentSettingsType, ContentSetting>
       user_specified_settings_to_display;
 
   for (const auto& permission : permission_info_list) {
-    if (std::find(permissions_to_display.begin(),
-                  permissions_to_display.end(),
-                  permission.type) != permissions_to_display.end() &&
+    if (ContainsValue(permissions_to_display, permission.type) &&
         permission.setting != CONTENT_SETTING_DEFAULT) {
       user_specified_settings_to_display[permission.type] = permission.setting;
     }

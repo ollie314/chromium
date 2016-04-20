@@ -23,7 +23,8 @@ bool CheckExpansionCase(const char* input, const char* expected, bool success) {
   scope.SetValue("onestring", Value(nullptr, "one"), nullptr);
 
   // Nested scope called "onescope" with a value "one" inside it.
-  scoped_ptr<Scope> onescope(new Scope(static_cast<const Settings*>(nullptr)));
+  std::unique_ptr<Scope> onescope(
+      new Scope(static_cast<const Settings*>(nullptr)));
   onescope->SetValue("one", Value(nullptr, one), nullptr);
   scope.SetValue("onescope", Value(nullptr, std::move(onescope)), nullptr);
 
@@ -110,4 +111,45 @@ TEST(StringUtils, ExpandStringLiteralExpression) {
   // Trying some other (otherwise valid) expressions should fail.
   EXPECT_TRUE(CheckExpansionCase("${1 + 2}", nullptr, false));
   EXPECT_TRUE(CheckExpansionCase("${print(1)}", nullptr, false));
+}
+
+TEST(StringUtils, EditDistance) {
+  EXPECT_EQ(3u, EditDistance("doom melon", "dune melon", 100));
+  EXPECT_EQ(2u, EditDistance("doom melon", "dune melon", 1));
+
+  EXPECT_EQ(2u, EditDistance("ab", "ba", 100));
+  EXPECT_EQ(2u, EditDistance("ba", "ab", 100));
+
+  EXPECT_EQ(2u, EditDistance("ananas", "banana", 100));
+  EXPECT_EQ(2u, EditDistance("banana", "ananas", 100));
+
+  EXPECT_EQ(2u, EditDistance("unclear", "nuclear", 100));
+  EXPECT_EQ(2u, EditDistance("nuclear", "unclear", 100));
+
+  EXPECT_EQ(3u, EditDistance("chrome", "chromium", 100));
+  EXPECT_EQ(3u, EditDistance("chromium", "chrome", 100));
+
+  EXPECT_EQ(4u, EditDistance("", "abcd", 100));
+  EXPECT_EQ(4u, EditDistance("abcd", "", 100));
+
+  EXPECT_EQ(4u, EditDistance("xxx", "xxxxxxx", 100));
+  EXPECT_EQ(4u, EditDistance("xxxxxxx", "xxx", 100));
+
+  EXPECT_EQ(7u, EditDistance("yyy", "xxxxxxx", 100));
+  EXPECT_EQ(7u, EditDistance("xxxxxxx", "yyy", 100));
+}
+
+TEST(StringUtils, SpellcheckString) {
+  std::vector<base::StringPiece> words;
+  words.push_back("your");
+  words.push_back("bravado");
+  words.push_back("won\'t");
+  words.push_back("help");
+  words.push_back("you");
+  words.push_back("now");
+
+  EXPECT_EQ("help", SpellcheckString("halp", words));
+
+  // barbados has an edit distance of 4 from bravado, so there's no suggestion.
+  EXPECT_TRUE(SpellcheckString("barbados", words).empty());
 }

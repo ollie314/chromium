@@ -39,6 +39,7 @@ _log = logging.getLogger(__name__)
 
 
 class ApacheHTTP(server_base.ServerBase):
+
     def __init__(self, port_obj, output_dir, additional_dirs, number_of_servers):
         super(ApacheHTTP, self).__init__(port_obj, output_dir)
         # We use the name "httpd" instead of "apache" to make our paths (e.g. the pid file: /tmp/WebKit/httpd.pid)
@@ -59,6 +60,7 @@ class ApacheHTTP(server_base.ServerBase):
         document_root = self._filesystem.join(test_dir, "http", "tests")
         js_test_resources_dir = self._filesystem.join(test_dir, "resources")
         forms_test_resources_dir = self._filesystem.join(test_dir, "fast", "forms", "resources")
+        imported_resources_dir = self._filesystem.join(test_dir, "imported", "web-platform-tests", "resources")
         media_resources_dir = self._filesystem.join(test_dir, "media")
         mime_types_path = self._filesystem.join(test_dir, "http", "conf", "mime.types")
         cert_file = self._filesystem.join(test_dir, "http", "conf", "webkit-httpd.pem")
@@ -75,6 +77,9 @@ class ApacheHTTP(server_base.ServerBase):
             '-C', 'ServerRoot "%s"' % server_root,
             '-C', 'DocumentRoot "%s"' % document_root,
             '-c', 'Alias /js-test-resources "%s"' % js_test_resources_dir,
+            '-c', 'AliasMatch ^/resources/testharness([r.].*) "%s/testharness$1"' % imported_resources_dir,
+            '-c', 'Alias /w3c/resources/WebIDLParser.js "%s/webidl2/lib/webidl2.js"' % imported_resources_dir,
+            '-c', 'Alias /w3c/resources "%s"' % imported_resources_dir,
             '-c', 'Alias /forms-test-resources "%s"' % forms_test_resources_dir,
             '-c', 'Alias /media-resources "%s"' % media_resources_dir,
             '-c', 'TypesConfig "%s"' % mime_types_path,
@@ -83,7 +88,7 @@ class ApacheHTTP(server_base.ServerBase):
             '-c', 'PidFile %s' % self._pid_file,
             '-c', 'SSLCertificateFile "%s"' % cert_file,
             '-c', 'Alias /inspector-sources "%s"' % inspector_sources_dir,
-            ]
+        ]
 
         if self._is_win:
             start_cmd += ['-c', "ThreadsPerChild %d" % (self._number_of_servers * 8)]
@@ -122,10 +127,10 @@ class ApacheHTTP(server_base.ServerBase):
             self._start_cmd = start_cmd
             for alias, path in additional_dirs.iteritems():
                 start_cmd += ['-c', 'Alias %s "%s"' % (alias, path),
-                        # Disable CGI handler for additional dirs.
-                        '-c', '<Location %s>' % alias,
-                        '-c', 'RemoveHandler .cgi .pl',
-                        '-c', '</Location>']
+                              # Disable CGI handler for additional dirs.
+                              '-c', '<Location %s>' % alias,
+                              '-c', 'RemoveHandler .cgi .pl',
+                              '-c', '</Location>']
 
         self._start_cmd = start_cmd
 

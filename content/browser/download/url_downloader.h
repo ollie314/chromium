@@ -7,9 +7,11 @@
 
 #include <stdint.h>
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "base/memory/weak_ptr.h"
 #include "content/browser/download/download_request_core.h"
+#include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_save_info.h"
 #include "content/public/browser/download_url_parameters.h"
 #include "content/public/common/referrer.h"
@@ -17,26 +19,26 @@
 #include "net/url_request/url_request.h"
 
 namespace content {
+class ByteStreamReader;
+struct DownloadCreateInfo;
 class DownloadManagerImpl;
 
-class UrlDownloader : public net::URLRequest::Delegate {
+class UrlDownloader : public net::URLRequest::Delegate,
+                      public DownloadRequestCore::Delegate {
  public:
-  UrlDownloader(
-      scoped_ptr<net::URLRequest> request,
-      base::WeakPtr<DownloadManagerImpl> manager,
-      scoped_ptr<DownloadSaveInfo> save_info,
-      uint32_t download_id,
-      const DownloadUrlParameters::OnStartedCallback& on_started_callback);
+  UrlDownloader(std::unique_ptr<net::URLRequest> request,
+                base::WeakPtr<DownloadManagerImpl> manager);
   ~UrlDownloader() override;
 
-  static scoped_ptr<UrlDownloader> BeginDownload(
+  static std::unique_ptr<UrlDownloader> BeginDownload(
       base::WeakPtr<DownloadManagerImpl> download_manager,
-      scoped_ptr<net::URLRequest> request,
-      const Referrer& referrer,
-      bool prefer_cache,
-      scoped_ptr<DownloadSaveInfo> save_info,
-      uint32_t download_id,
-      const DownloadUrlParameters::OnStartedCallback& started_callback);
+      std::unique_ptr<net::URLRequest> request,
+      const Referrer& referrer);
+
+ private:
+  class RequestHandle;
+
+  void Start();
 
   // URLRequest::Delegate:
   void OnReceivedRedirect(net::URLRequest* request,
@@ -48,24 +50,25 @@ class UrlDownloader : public net::URLRequest::Delegate {
   void StartReading(bool is_continuation);
   void ResponseCompleted();
 
-  void Start();
-  void ResumeReading();
-
-  void CallStartedCallbackOnFailure(DownloadInterruptReason result);
-
- private:
-  class RequestHandle;
+  // DownloadRequestCore::Delegate
+  void OnStart(
+      std::unique_ptr<DownloadCreateInfo> download_create_info,
+      std::unique_ptr<ByteStreamReader> stream_reader,
+      const DownloadUrlParameters::OnStartedCallback& callback) override;
+  void OnReadyToRead() override;
 
   void PauseRequest();
   void ResumeRequest();
   void CancelRequest();
 
-  scoped_ptr<net::URLRequest> request_;
-  base::WeakPtr<DownloadManagerImpl> manager_;
-  uint32_t download_id_;
-  DownloadUrlParameters::OnStartedCallback on_started_callback_;
+  // Called when the UrlDownloader is done with the request. Posts a task to
+  // remove itself from its download manager, which in turn would cause the
+  // UrlDownloader to be freed.
+  void Destroy();
 
-  DownloadRequestCore handler_;
+  std::unique_ptr<net::URLRequest> request_;
+  base::WeakPtr<DownloadManagerImpl> manager_;
+  DownloadRequestCore core_;
 
   base::WeakPtrFactory<UrlDownloader> weak_ptr_factory_;
 };

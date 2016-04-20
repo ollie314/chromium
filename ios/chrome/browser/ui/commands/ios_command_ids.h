@@ -12,6 +12,7 @@
 // If you change a given command's number, any NIB files that refer to it will
 // also need to be updated.
 
+// clang-format off
 #define IDC_BACK                                       33000
 #define IDC_FORWARD                                    33001
 #define IDC_RELOAD                                     33002
@@ -59,19 +60,21 @@
 #define IDC_SHARE_PAGE                                 40929
 #define IDC_BACK_FORWARD_IN_TAB_HISTORY                40930
 #define IDC_SHOW_GOOGLE_APPS_SETTINGS                  40931
-#define IDC_SHOW_SIGN_IN_WITH_PRINT_ON_COMPLETION      40933
 #define IDC_SHOW_PRIVACY_SETTINGS                      40934
 #define IDC_HIDE_SETTINGS_AND_SHOW_PRIVACY_SETTINGS    40935
 #define IDC_REPORT_AN_ISSUE                            40936
 #define IDC_PRELOAD_VOICE_SEARCH                       40937
 #define IDC_SHOW_BACK_HISTORY                          40938
 #define IDC_SHOW_FORWARD_HISTORY                       40939
-#define IDC_SHOW_PROXY_SETTINGS                        40940
 #define IDC_CLOSE_SETTINGS_AND_OPEN_NEW_INCOGNITO_TAB  40942
 #define IDC_SHOW_ACCOUNTS_SETTINGS                     40943
 #define IDC_CLOSE_SETTINGS                             40944
 #define IDC_SHOW_SAVE_PASSWORDS_SETTINGS               40945
 #define IDC_READER_MODE                                40947
 #define IDC_RATE_THIS_APP                              40948
+#define IDC_ADD_READING_LIST                           40949
+#define IDC_SHOW_READING_LIST                          40950
+#define IDC_SHOW_CLEAR_BROWSING_DATA_SETTINGS          40951
+// clang-format on
 
 #endif  // IOS_CHROME_BROWSER_UI_COMMANDS_IOS_COMMAND_IDS_H_

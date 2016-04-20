@@ -225,7 +225,7 @@ void CertificateManagerModel::DidGetCertDBOnUIThread(
     const CreationCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  scoped_ptr<CertificateManagerModel> model(new CertificateManagerModel(
+  std::unique_ptr<CertificateManagerModel> model(new CertificateManagerModel(
       cert_db, is_user_db_available, is_tpm_available, observer));
   callback.Run(std::move(model));
 }
@@ -237,7 +237,7 @@ void CertificateManagerModel::DidGetCertDBOnIOThread(
     net::NSSCertDatabase* cert_db) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  bool is_user_db_available = cert_db->GetPublicSlot();
+  bool is_user_db_available = !!cert_db->GetPublicSlot();
   bool is_tpm_available = false;
 #if defined(OS_CHROMEOS)
   is_tpm_available = crypto::IsTPMTokenEnabledForNSS();

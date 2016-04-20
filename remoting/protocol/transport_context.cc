@@ -8,67 +8,69 @@
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
+#include "remoting/base/url_request.h"
+#include "remoting/protocol/http_ice_config_request.h"
+#include "remoting/protocol/jingle_info_request.h"
 #include "remoting/protocol/port_allocator_factory.h"
 #include "third_party/webrtc/base/socketaddress.h"
 
 #if !defined(OS_NACL)
 #include "jingle/glue/thread_wrapper.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "remoting/protocol/chromium_port_allocator.h"
+#include "remoting/protocol/chromium_port_allocator_factory.h"
 #endif  // !defined(OS_NACL)
 
 namespace remoting {
 namespace protocol {
-
-// Get fresh STUN/Relay configuration every hour.
-static const int kJingleInfoUpdatePeriodSeconds = 3600;
 
 #if !defined(OS_NACL)
 // static
 scoped_refptr<TransportContext> TransportContext::ForTests(TransportRole role) {
   jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
   return new protocol::TransportContext(
-      nullptr,
-      make_scoped_ptr(new protocol::ChromiumPortAllocatorFactory(nullptr)),
-      protocol::NetworkSettings(
-          protocol::NetworkSettings::NAT_TRAVERSAL_OUTGOING),
+      nullptr, base::WrapUnique(new protocol::ChromiumPortAllocatorFactory()),
+      nullptr, protocol::NetworkSettings(
+                   protocol::NetworkSettings::NAT_TRAVERSAL_OUTGOING),
       role);
 }
 #endif  // !defined(OS_NACL)
 
 TransportContext::TransportContext(
     SignalStrategy* signal_strategy,
-    scoped_ptr<PortAllocatorFactory> port_allocator_factory,
+    std::unique_ptr<PortAllocatorFactory> port_allocator_factory,
+    std::unique_ptr<UrlRequestFactory> url_request_factory,
     const NetworkSettings& network_settings,
     TransportRole role)
     : signal_strategy_(signal_strategy),
       port_allocator_factory_(std::move(port_allocator_factory)),
+      url_request_factory_(std::move(url_request_factory)),
       network_settings_(network_settings),
       role_(role) {}
 
 TransportContext::~TransportContext() {}
 
 void TransportContext::Prepare() {
-  EnsureFreshJingleInfo();
+  EnsureFreshIceConfig();
 }
 
-void TransportContext::GetJingleInfo(const GetJingleInfoCallback& callback) {
-  EnsureFreshJingleInfo();
+void TransportContext::GetIceConfig(const GetIceConfigCallback& callback) {
+  EnsureFreshIceConfig();
 
-  // If there is a pending |jingle_info_request_| delay the callback until the
-  // request is finished.
-  if (jingle_info_request_) {
-    pending_jingle_info_callbacks_.push_back(callback);
+  // If there is a pending |ice_config_request_| for the current |relay_mode_|
+  // then delay the callback until the request is finished.
+  if (ice_config_request_[relay_mode_]) {
+    pending_ice_config_callbacks_[relay_mode_].push_back(callback);
   } else {
-    callback.Run(stun_hosts_, relay_hosts_, relay_token_);
+    callback.Run(ice_config_[relay_mode_]);
   }
 }
 
-void TransportContext::EnsureFreshJingleInfo() {
+void TransportContext::EnsureFreshIceConfig() {
   // Check if request is already pending.
-  if (jingle_info_request_)
+  if (ice_config_request_[relay_mode_])
     return;
 
   // Don't need to make jingleinfo request if both STUN and Relay are disabled.
@@ -77,31 +79,37 @@ void TransportContext::EnsureFreshJingleInfo() {
     return;
   }
 
-  if (last_jingle_info_update_time_.is_null() ||
-      base::TimeTicks::Now() - last_jingle_info_update_time_ >
-          base::TimeDelta::FromSeconds(kJingleInfoUpdatePeriodSeconds)) {
-    jingle_info_request_.reset(new JingleInfoRequest(signal_strategy_));
-    jingle_info_request_->Send(base::Bind(
-        &TransportContext::OnJingleInfo, base::Unretained(this)));
+  if (ice_config_[relay_mode_].is_null() ||
+      base::Time::Now() > ice_config_[relay_mode_].expiration_time) {
+    std::unique_ptr<IceConfigRequest> request;
+    switch (relay_mode_) {
+      case RelayMode::TURN:
+        if (ice_config_url_.empty()) {
+          LOG(WARNING) << "ice_config_url isn't set.";
+          return;
+        }
+        request.reset(new HttpIceConfigRequest(url_request_factory_.get(),
+                                               ice_config_url_));
+        break;
+      case RelayMode::GTURN:
+        request.reset(new JingleInfoRequest(signal_strategy_));
+        break;
+    }
+    ice_config_request_[relay_mode_] = std::move(request);
+    ice_config_request_[relay_mode_]->Send(base::Bind(
+        &TransportContext::OnIceConfig, base::Unretained(this), relay_mode_));
   }
 }
 
-void TransportContext::OnJingleInfo(
-    const std::string& relay_token,
-    const std::vector<std::string>& relay_hosts,
-    const std::vector<rtc::SocketAddress>& stun_hosts) {
-  relay_token_ = relay_token;
-  relay_hosts_ = relay_hosts;
-  stun_hosts_ = stun_hosts;
+void TransportContext::OnIceConfig(RelayMode relay_mode,
+                                   const IceConfig& ice_config) {
+  ice_config_[relay_mode] = ice_config;
+  ice_config_request_[relay_mode].reset();
 
-  jingle_info_request_.reset();
-  if ((!relay_token.empty() && !relay_hosts.empty()) || !stun_hosts.empty())
-    last_jingle_info_update_time_ = base::TimeTicks::Now();
-
-  while (!pending_jingle_info_callbacks_.empty()) {
-    pending_jingle_info_callbacks_.begin()->Run(stun_hosts_, relay_hosts_,
-                                                relay_token_);
-    pending_jingle_info_callbacks_.pop_front();
+  auto& callback_list = pending_ice_config_callbacks_[relay_mode];
+  while (!callback_list.empty()) {
+    callback_list.begin()->Run(ice_config);
+    callback_list.pop_front();
   }
 }
 

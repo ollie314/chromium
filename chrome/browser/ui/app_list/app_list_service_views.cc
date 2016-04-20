@@ -6,7 +6,8 @@
 
 #include <utility>
 
-#include "chrome/browser/apps/scoped_keep_alive.h"
+#include "chrome/browser/lifetime/keep_alive_types.h"
+#include "chrome/browser/lifetime/scoped_keep_alive.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/views/app_list_main_view.h"
@@ -14,7 +15,7 @@
 #include "ui/app_list/views/contents_view.h"
 
 AppListServiceViews::AppListServiceViews(
-    scoped_ptr<AppListControllerDelegate> controller_delegate)
+    std::unique_ptr<AppListControllerDelegate> controller_delegate)
     : shower_(this),
       can_dismiss_(true),
       controller_delegate_(std::move(controller_delegate)) {}
@@ -116,7 +117,8 @@ void AppListServiceViews::ShowForProfileInternal(
     app_list::AppListModel::State state) {
   DCHECK(profile);
 
-  ScopedKeepAlive keep_alive;
+  ScopedKeepAlive keep_alive(KeepAliveOrigin::APP_LIST_SERVICE_VIEWS,
+                             KeepAliveRestartOption::DISABLED);
 
   CreateForProfile(profile);
 

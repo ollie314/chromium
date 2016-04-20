@@ -11,7 +11,6 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/trace_event/trace_event.h"
@@ -27,6 +26,7 @@
 #include "components/crx_file/id_util.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
 #include "extensions/browser/pref_names.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/permissions/api_permission_set.h"
@@ -105,9 +105,10 @@ ExtensionManagement::InstallationMode ExtensionManagement::GetInstallationMode(
   return default_settings_->installation_mode;
 }
 
-scoped_ptr<base::DictionaryValue> ExtensionManagement::GetForceInstallList()
-    const {
-  scoped_ptr<base::DictionaryValue> install_list(new base::DictionaryValue());
+std::unique_ptr<base::DictionaryValue>
+ExtensionManagement::GetForceInstallList() const {
+  std::unique_ptr<base::DictionaryValue> install_list(
+      new base::DictionaryValue());
   for (SettingsIdMap::const_iterator it = settings_by_id_.begin();
        it != settings_by_id_.end();
        ++it) {
@@ -119,9 +120,10 @@ scoped_ptr<base::DictionaryValue> ExtensionManagement::GetForceInstallList()
   return install_list;
 }
 
-scoped_ptr<base::DictionaryValue>
+std::unique_ptr<base::DictionaryValue>
 ExtensionManagement::GetRecommendedInstallList() const {
-  scoped_ptr<base::DictionaryValue> install_list(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> install_list(
+      new base::DictionaryValue());
   for (SettingsIdMap::const_iterator it = settings_by_id_.begin();
        it != settings_by_id_.end();
        ++it) {
@@ -205,10 +207,10 @@ APIPermissionSet ExtensionManagement::GetBlockedAPIPermissions(
   return default_settings_->blocked_permissions;
 }
 
-scoped_ptr<const PermissionSet> ExtensionManagement::GetBlockedPermissions(
+std::unique_ptr<const PermissionSet> ExtensionManagement::GetBlockedPermissions(
     const Extension* extension) const {
   // Only api permissions are supported currently.
-  return scoped_ptr<const PermissionSet>(new PermissionSet(
+  return std::unique_ptr<const PermissionSet>(new PermissionSet(
       GetBlockedAPIPermissions(extension), ManifestPermissionSet(),
       URLPatternSet(), URLPatternSet()));
 }
@@ -441,7 +443,7 @@ internal::IndividualSettings* ExtensionManagement::AccessById(
   DCHECK(crx_file::id_util::IdIsValid(id)) << "Invalid ID: " << id;
   SettingsIdMap::iterator it = settings_by_id_.find(id);
   if (it == settings_by_id_.end()) {
-    scoped_ptr<internal::IndividualSettings> settings(
+    std::unique_ptr<internal::IndividualSettings> settings(
         new internal::IndividualSettings(default_settings_.get()));
     it = settings_by_id_.add(id, std::move(settings)).first;
   }
@@ -453,7 +455,7 @@ internal::IndividualSettings* ExtensionManagement::AccessByUpdateUrl(
   DCHECK(GURL(update_url).is_valid()) << "Invalid update URL: " << update_url;
   SettingsUpdateUrlMap::iterator it = settings_by_update_url_.find(update_url);
   if (it == settings_by_update_url_.end()) {
-    scoped_ptr<internal::IndividualSettings> settings(
+    std::unique_ptr<internal::IndividualSettings> settings(
         new internal::IndividualSettings(default_settings_.get()));
     it = settings_by_update_url_.add(update_url, std::move(settings)).first;
   }

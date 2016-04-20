@@ -35,19 +35,16 @@
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/Vector.h"
-#include "wtf/WeakPtr.h"
 
 namespace blink {
 
 class ExecutionContext;
 class ExecutionContextTask;
 
-class CORE_EXPORT MainThreadTaskRunner final : public NoBaseWillBeGarbageCollectedFinalized<MainThreadTaskRunner> {
+class CORE_EXPORT MainThreadTaskRunner final : public GarbageCollectedFinalized<MainThreadTaskRunner> {
     WTF_MAKE_NONCOPYABLE(MainThreadTaskRunner);
-    USING_FAST_MALLOC_WILL_BE_REMOVED(MainThreadTaskRunner);
-
 public:
-    static PassOwnPtrWillBeRawPtr<MainThreadTaskRunner> create(ExecutionContext*);
+    static MainThreadTaskRunner* create(ExecutionContext*);
 
     ~MainThreadTaskRunner();
 
@@ -65,22 +62,19 @@ private:
 
     void pendingTasksTimerFired(Timer<MainThreadTaskRunner>*);
 
-    WeakPtrWillBeRawPtr<MainThreadTaskRunner> createWeakPointerToSelf();
+    void postTaskInternal(const WebTraceLocation&, PassOwnPtr<ExecutionContextTask>, bool isInspectorTask);
 
-    RawPtrWillBeMember<ExecutionContext> m_context;
-#if !ENABLE(OILPAN)
-    WeakPtrFactory<MainThreadTaskRunner> m_weakFactory;
-#endif
+    Member<ExecutionContext> m_context;
     Timer<MainThreadTaskRunner> m_pendingTasksTimer;
     Vector<OwnPtr<ExecutionContextTask>> m_pendingTasks;
     bool m_suspended;
 };
 
-inline PassOwnPtrWillBeRawPtr<MainThreadTaskRunner> MainThreadTaskRunner::create(ExecutionContext* context)
+inline MainThreadTaskRunner* MainThreadTaskRunner::create(ExecutionContext* context)
 {
-    return adoptPtrWillBeNoop(new MainThreadTaskRunner(context));
+    return new MainThreadTaskRunner(context);
 }
 
-} // namespace
+} // namespace blink
 
 #endif

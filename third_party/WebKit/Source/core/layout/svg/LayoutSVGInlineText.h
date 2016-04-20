@@ -24,6 +24,8 @@
 
 #include "core/layout/LayoutText.h"
 #include "core/layout/svg/SVGTextLayoutAttributes.h"
+#include "core/layout/svg/SVGTextMetrics.h"
+#include "wtf/Vector.h"
 
 namespace blink {
 
@@ -35,9 +37,12 @@ public:
     SVGTextLayoutAttributes* layoutAttributes() { return &m_layoutAttributes; }
     const SVGTextLayoutAttributes* layoutAttributes() const { return &m_layoutAttributes; }
 
+    const Vector<SVGTextMetrics>& metricsList() const { return m_metrics; }
+
     float scalingFactor() const { return m_scalingFactor; }
     const Font& scaledFont() const { return m_scaledFont; }
     void updateScaledFont();
+    void updateMetricsList(bool& lastCharacterWasWhiteSpace);
     static void computeNewScaledFontForStyle(LayoutObject*, float& scalingFactor, Font& scaledFont);
 
     // Preserves floating point precision for the use in DRT. It knows how to round and does a better job than enclosingIntRect.
@@ -51,6 +56,8 @@ private:
     void setTextInternal(PassRefPtr<StringImpl>) override;
     void styleDidChange(StyleDifference, const ComputedStyle*) override;
 
+    void addMetricsFromRun(const TextRun&, bool& lastCharacterWasWhiteSpace);
+
     FloatRect objectBoundingBox() const override { return floatLinesBoundingBox(); }
 
     bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectSVG || type == LayoutObjectSVGInlineText || LayoutText::isOfType(type); }
@@ -60,15 +67,17 @@ private:
     IntRect linesBoundingBox() const override;
     InlineTextBox* createTextBox(int start, unsigned short length) override;
 
-    LayoutRect clippedOverflowRectForPaintInvalidation(const LayoutBoxModelObject* paintInvalidationContainer, const PaintInvalidationState*) const final;
+    LayoutRect absoluteClippedOverflowRect() const final;
+    FloatRect paintInvalidationRectInLocalSVGCoordinates() const final;
 
     float m_scalingFactor;
     Font m_scaledFont;
     SVGTextLayoutAttributes m_layoutAttributes;
+    Vector<SVGTextMetrics> m_metrics;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutSVGInlineText, isSVGInlineText());
 
-}
+} // namespace blink
 
 #endif // LayoutSVGInlineText_h

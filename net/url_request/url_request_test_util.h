@@ -7,13 +7,14 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
@@ -69,13 +70,24 @@ class TestURLRequestContext : public URLRequestContext {
     client_socket_factory_ = factory;
   }
 
+  ProxyDelegate* proxy_delegate() { return proxy_delegate_; }
+
+  void set_proxy_delegate(ProxyDelegate* proxy_delegate) {
+    proxy_delegate_ = proxy_delegate;
+  }
+
   void set_http_network_session_params(
-      scoped_ptr<HttpNetworkSession::Params> params) {
+      std::unique_ptr<HttpNetworkSession::Params> params) {
     http_network_session_params_ = std::move(params);
   }
 
-  void SetSdchManager(scoped_ptr<SdchManager> sdch_manager) {
+  void SetSdchManager(std::unique_ptr<SdchManager> sdch_manager) {
     context_storage_.set_sdch_manager(std::move(sdch_manager));
+  }
+
+  CTPolicyEnforcer* ct_policy_enforcer() { return ct_policy_enforcer_; }
+  void set_ct_policy_enforcer(CTPolicyEnforcer* ct_policy_enforcer) {
+    ct_policy_enforcer_ = ct_policy_enforcer;
   }
 
  private:
@@ -84,10 +96,14 @@ class TestURLRequestContext : public URLRequestContext {
   // Optional parameters to override default values.  Note that values that
   // point to other objects the TestURLRequestContext creates will be
   // overwritten.
-  scoped_ptr<HttpNetworkSession::Params> http_network_session_params_;
+  std::unique_ptr<HttpNetworkSession::Params> http_network_session_params_;
 
   // Not owned:
   ClientSocketFactory* client_socket_factory_;
+
+  ProxyDelegate* proxy_delegate_;
+
+  CTPolicyEnforcer* ct_policy_enforcer_;
 
  protected:
   URLRequestContextStorage context_storage_;
@@ -106,7 +122,7 @@ class TestURLRequestContextGetter : public URLRequestContextGetter {
   // Use to pass a pre-initialized |context|.
   TestURLRequestContextGetter(
       const scoped_refptr<base::SingleThreadTaskRunner>& network_task_runner,
-      scoped_ptr<TestURLRequestContext> context);
+      std::unique_ptr<TestURLRequestContext> context);
 
   // URLRequestContextGetter implementation.
   TestURLRequestContext* GetURLRequestContext() override;
@@ -118,7 +134,7 @@ class TestURLRequestContextGetter : public URLRequestContextGetter {
 
  private:
   const scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
-  scoped_ptr<TestURLRequestContext> context_;
+  std::unique_ptr<TestURLRequestContext> context_;
 };
 
 //-----------------------------------------------------------------------------
@@ -402,10 +418,10 @@ class TestJobInterceptor : public URLRequestJobFactory::ProtocolHandler {
   URLRequestJob* MaybeCreateJob(
       URLRequest* request,
       NetworkDelegate* network_delegate) const override;
-  void set_main_intercept_job(scoped_ptr<URLRequestJob> job);
+  void set_main_intercept_job(std::unique_ptr<URLRequestJob> job);
 
  private:
-  mutable scoped_ptr<URLRequestJob> main_intercept_job_;
+  mutable std::unique_ptr<URLRequestJob> main_intercept_job_;
 };
 
 }  // namespace net

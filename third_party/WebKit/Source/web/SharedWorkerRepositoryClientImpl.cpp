@@ -35,6 +35,7 @@
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/events/Event.h"
+#include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/workers/SharedWorker.h"
@@ -103,23 +104,23 @@ void SharedWorkerConnector::scriptLoadFailed()
 
 static WebSharedWorkerRepositoryClient::DocumentID getId(void* document)
 {
-    ASSERT(document);
+    DCHECK(document);
     return reinterpret_cast<WebSharedWorkerRepositoryClient::DocumentID>(document);
 }
 
 void SharedWorkerRepositoryClientImpl::connect(SharedWorker* worker, PassOwnPtr<WebMessagePortChannel> port, const KURL& url, const String& name, ExceptionState& exceptionState)
 {
-    ASSERT(m_client);
+    DCHECK(m_client);
 
     // No nested workers (for now) - connect() should only be called from document context.
-    ASSERT(worker->executionContext()->isDocument());
-    Document* document = toDocument(worker->executionContext());
+    DCHECK(worker->getExecutionContext()->isDocument());
+    Document* document = toDocument(worker->getExecutionContext());
 
     // TODO(estark): this is broken, as it only uses the first header
     // when multiple might have been sent. Fix by making the
     // SharedWorkerConnector interface take a map that can contain
     // multiple headers.
-    OwnPtr<Vector<CSPHeaderAndType>> headers = worker->executionContext()->contentSecurityPolicy()->headers();
+    OwnPtr<Vector<CSPHeaderAndType>> headers = worker->getExecutionContext()->contentSecurityPolicy()->headers();
     WebString header;
     WebContentSecurityPolicyType headerType = WebContentSecurityPolicyTypeReport;
 
@@ -130,20 +131,20 @@ void SharedWorkerRepositoryClientImpl::connect(SharedWorker* worker, PassOwnPtr<
 
     WebWorkerCreationError creationError;
     String unusedSecureContextError;
-    bool isSecureContext = worker->executionContext()->isSecureContext(unusedSecureContextError);
-    OwnPtr<WebSharedWorkerConnector> webWorkerConnector = adoptPtr(m_client->createSharedWorkerConnector(url, name, getId(document), header, headerType, isSecureContext ? WebSharedWorkerCreationContextTypeSecure : WebSharedWorkerCreationContextTypeNonsecure, &creationError));
-    if (!webWorkerConnector) {
+    bool isSecureContext = worker->getExecutionContext()->isSecureContext(unusedSecureContextError);
+    OwnPtr<WebSharedWorkerConnector> webWorkerConnector = adoptPtr(m_client->createSharedWorkerConnector(url, name, getId(document), header, headerType, worker->getExecutionContext()->securityContext().addressSpace(), isSecureContext ? WebSharedWorkerCreationContextTypeSecure : WebSharedWorkerCreationContextTypeNonsecure, &creationError));
+    if (creationError != WebWorkerCreationErrorNone) {
         if (creationError == WebWorkerCreationErrorURLMismatch) {
             // Existing worker does not match this url, so return an error back to the caller.
             exceptionState.throwDOMException(URLMismatchError, "The location of the SharedWorker named '" + name + "' does not exactly match the provided URL ('" + url.elidedString() + "').");
+            return;
         } else if (creationError == WebWorkerCreationErrorSecureContextMismatch) {
             if (isSecureContext) {
-                exceptionState.throwSecurityError("The SharedWorker named '" + name + "' was created from a nonsecure context and this context is secure.");
+                UseCounter::count(document, UseCounter::NonSecureSharedWorkerAccessedFromSecureContext);
             } else {
-                exceptionState.throwSecurityError("The SharedWorker named '" + name + "' was created from a secure context and this context is not secure.");
+                UseCounter::count(document, UseCounter::SecureSharedWorkerAccessedFromNonSecureContext);
             }
         }
-        return;
     }
 
     // The connector object manages its own lifecycle (and the lifecycles of the two worker objects).
@@ -154,7 +155,7 @@ void SharedWorkerRepositoryClientImpl::connect(SharedWorker* worker, PassOwnPtr<
 
 void SharedWorkerRepositoryClientImpl::documentDetached(Document* document)
 {
-    ASSERT(m_client);
+    DCHECK(m_client);
     m_client->documentDetached(getId(document));
 }
 

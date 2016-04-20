@@ -19,7 +19,7 @@
 namespace mus {
 
 namespace mojom {
-enum Cursor : int32_t;
+enum class Cursor : int32_t;
 }
 
 class Window;
@@ -29,15 +29,18 @@ enum class ChangeType {
   ADD_CHILD,
   ADD_TRANSIENT_WINDOW,
   BOUNDS,
+  CAPTURE,
   DELETE_WINDOW,
   FOCUS,
   NEW_WINDOW,
   NEW_TOP_LEVEL_WINDOW,
+  OPACITY,
   PREDEFINED_CURSOR,
   PROPERTY,
   REMOVE_CHILD,
   REMOVE_TRANSIENT_WINDOW_FROM_PARENT,
   REORDER,
+  SET_MODAL,
   VISIBLE,
 };
 
@@ -155,18 +158,26 @@ class CrashInFlightChange : public InFlightChange {
   DISALLOW_COPY_AND_ASSIGN(CrashInFlightChange);
 };
 
-// Focus is really a property of the WindowTreeConnection and not the Window.
-// As such, InFlightFocusChange is special in that it is not associated with
-// a particular window (InFlightFocusChange::window() returns null). Internally
-// InFlightFocusChange tracks a window to give focus to, but it may be null.
-class InFlightFocusChange : public InFlightChange, public WindowObserver {
+// Use this class for properties that are specific to the connection, and not a
+// particular window. For example, only a single window can have focus, so focus
+// is specific to the connection.
+//
+// This does not implement InFlightChange::Revert, subclasses must implement
+// that to update the WindowTreeConnection.
+class InFlightWindowTreeClientChange : public InFlightChange,
+                                       public WindowObserver {
  public:
-  InFlightFocusChange(WindowTreeClientImpl* connection, Window* revert_window);
-  ~InFlightFocusChange() override;
+  InFlightWindowTreeClientChange(WindowTreeClientImpl* client_connection,
+                                 Window* revert_value,
+                                 ChangeType type);
+  ~InFlightWindowTreeClientChange() override;
 
   // InFlightChange:
   void SetRevertValueFrom(const InFlightChange& change) override;
-  void Revert() override;
+
+ protected:
+  WindowTreeClientImpl* connection() { return connection_; }
+  Window* revert_window() { return revert_window_; }
 
  private:
   void SetRevertWindow(Window* window);
@@ -177,6 +188,32 @@ class InFlightFocusChange : public InFlightChange, public WindowObserver {
   WindowTreeClientImpl* connection_;
   Window* revert_window_;
 
+  DISALLOW_COPY_AND_ASSIGN(InFlightWindowTreeClientChange);
+};
+
+class InFlightCaptureChange : public InFlightWindowTreeClientChange {
+ public:
+  InFlightCaptureChange(WindowTreeClientImpl* client_connection,
+                        Window* revert_value);
+  ~InFlightCaptureChange() override;
+
+  // InFlightChange:
+  void Revert() override;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(InFlightCaptureChange);
+};
+
+class InFlightFocusChange : public InFlightWindowTreeClientChange {
+ public:
+  InFlightFocusChange(WindowTreeClientImpl* client_connection,
+                      Window* revert_value);
+  ~InFlightFocusChange() override;
+
+  // InFlightChange:
+  void Revert() override;
+
+ private:
   DISALLOW_COPY_AND_ASSIGN(InFlightFocusChange);
 };
 
@@ -217,6 +254,7 @@ class InFlightPredefinedCursorChange : public InFlightChange {
 class InFlightVisibleChange : public InFlightChange {
  public:
   InFlightVisibleChange(Window* window, const bool revert_value);
+  ~InFlightVisibleChange() override;
 
   // InFlightChange:
   void SetRevertValueFrom(const InFlightChange& change) override;
@@ -226,6 +264,34 @@ class InFlightVisibleChange : public InFlightChange {
   bool revert_visible_;
 
   DISALLOW_COPY_AND_ASSIGN(InFlightVisibleChange);
+};
+
+class InFlightOpacityChange : public InFlightChange {
+ public:
+  InFlightOpacityChange(Window* window, float revert_value);
+  ~InFlightOpacityChange() override;
+
+  // InFlightChange:
+  void SetRevertValueFrom(const InFlightChange& change) override;
+  void Revert() override;
+
+ private:
+  float revert_opacity_;
+
+  DISALLOW_COPY_AND_ASSIGN(InFlightOpacityChange);
+};
+
+class InFlightSetModalChange : public InFlightChange {
+ public:
+  explicit InFlightSetModalChange(Window* window);
+  ~InFlightSetModalChange() override;
+
+  // InFlightChange:
+  void SetRevertValueFrom(const InFlightChange& change) override;
+  void Revert() override;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(InFlightSetModalChange);
 };
 
 }  // namespace mus

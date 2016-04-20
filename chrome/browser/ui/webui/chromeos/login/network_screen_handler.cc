@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner_util.h"
@@ -34,6 +33,7 @@
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state_handler.h"
 #include "components/login/localized_values_builder.h"
+#include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -101,7 +101,7 @@ void NetworkScreenHandler::Show() {
   network_screen_params.SetBoolean("isDeveloperMode",
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kSystemDevMode));
-  ShowScreen(OobeUI::kScreenOobeNetwork, &network_screen_params);
+  ShowScreenWithData(OobeScreen::SCREEN_OOBE_NETWORK, &network_screen_params);
   core_oobe_actor_->InitDemoModeDetection();
 }
 
@@ -174,7 +174,7 @@ void NetworkScreenHandler::GetAdditionalParameters(
           ->GetCurrentInputMethod()
           .id();
 
-  scoped_ptr<base::ListValue> language_list;
+  std::unique_ptr<base::ListValue> language_list;
   if (model_) {
     if (model_->GetLanguageList() &&
         model_->GetLanguageListLocale() == application_locale) {
@@ -207,21 +207,15 @@ void NetworkScreenHandler::GetAdditionalParameters(
   // So we need to disable activation of login layouts if we are already in
   // active user session.
   //
-  // 3) This is the bootstrapping process for the remora/"Slave" device. The
-  // locale & input of the remora/"Slave" device is set up by a shark/"Master"
-  // device. In this case we don't want EnableLoginLayout() to reset the input
-  // method to the hardware default method.
-  const bool is_remora = g_browser_process->platform_part()
-                             ->browser_policy_connector_chromeos()
-                             ->GetDeviceCloudPolicyManager()
-                             ->IsRemoraRequisition();
-
-  const bool is_slave = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      chromeos::switches::kOobeBootstrappingSlave);
+  // 3) This is the bootstrapping process for a "Slave" device. The locale &
+  // input of the "Slave" device is set up by a "Master" device. In this case we
+  // don't want EnableLoginLayout() to reset the input method to the hardware
+  // default method.
+  const bool is_slave = g_browser_process->local_state()->GetBoolean(
+      prefs::kOobeControllerDetected);
 
   const bool enable_layouts =
-      !user_manager::UserManager::Get()->IsUserLoggedIn() && !is_slave &&
-      !is_remora;
+      !user_manager::UserManager::Get()->IsUserLoggedIn() && !is_slave;
 
   dict->Set("languageList", language_list.release());
   dict->Set(
@@ -249,8 +243,8 @@ base::ListValue* NetworkScreenHandler::GetTimezoneList() {
   std::string current_timezone_id;
   CrosSettings::Get()->GetString(kSystemTimezone, &current_timezone_id);
 
-  scoped_ptr<base::ListValue> timezone_list(new base::ListValue);
-  scoped_ptr<base::ListValue> timezones = system::GetTimezoneList();
+  std::unique_ptr<base::ListValue> timezone_list(new base::ListValue);
+  std::unique_ptr<base::ListValue> timezones = system::GetTimezoneList();
   for (size_t i = 0; i < timezones->GetSize(); ++i) {
     const base::ListValue* timezone = NULL;
     CHECK(timezones->GetList(i, &timezone));
@@ -261,7 +255,7 @@ base::ListValue* NetworkScreenHandler::GetTimezoneList() {
     std::string timezone_name;
     CHECK(timezone->GetString(1, &timezone_name));
 
-    scoped_ptr<base::DictionaryValue> timezone_option(
+    std::unique_ptr<base::DictionaryValue> timezone_option(
         new base::DictionaryValue);
     timezone_option->SetString("value", timezone_id);
     timezone_option->SetString("title", timezone_name);

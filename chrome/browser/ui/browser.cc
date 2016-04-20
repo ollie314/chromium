@@ -17,7 +17,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/process/process_info.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
@@ -36,6 +35,7 @@
 #include "chrome/browser/background/background_contents.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
+#include "chrome/browser/banners/app_banner_manager_desktop.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/character_encoding.h"
@@ -61,6 +61,9 @@
 #include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/lifetime/keep_alive_registry.h"
+#include "chrome/browser/lifetime/keep_alive_types.h"
+#include "chrome/browser/lifetime/scoped_keep_alive.h"
 #include "chrome/browser/memory/tab_manager_web_contents_data.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/pepper_broker_infobar_delegate.h"
@@ -87,7 +90,7 @@
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/autofill/chrome_autofill_client.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
-#include "chrome/browser/ui/bluetooth/bluetooth_chooser_bubble_delegate.h"
+#include "chrome/browser/ui/bluetooth/bluetooth_chooser_bubble_controller.h"
 #include "chrome/browser/ui/bluetooth/bluetooth_chooser_desktop.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
@@ -97,7 +100,6 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
-#include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_live_tab_context.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -138,7 +140,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_utils.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
-#include "chrome/browser/ui/toolbar/toolbar_model_impl.h"
 #include "chrome/browser/ui/unload_controller.h"
 #include "chrome/browser/ui/validation_message_bubble.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
@@ -165,11 +166,13 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/history/core/browser/top_sites.h"
+#include "components/prefs/pref_service.h"
 #include "components/search/search.h"
 #include "components/security_state/security_state_model.h"
 #include "components/sessions/core/session_types.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
+#include "components/toolbar/toolbar_model_impl.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/ui/zoom/zoom_controller.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
@@ -181,6 +184,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
@@ -190,6 +194,7 @@
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/renderer_preferences.h"
@@ -291,39 +296,33 @@ content::SecurityStyle SecurityLevelToSecurityStyle(
 ////////////////////////////////////////////////////////////////////////////////
 // Browser, CreateParams:
 
-Browser::CreateParams::CreateParams(Profile* profile,
-                                    chrome::HostDesktopType host_desktop_type)
+Browser::CreateParams::CreateParams(Profile* profile)
     : type(TYPE_TABBED),
       profile(profile),
-      host_desktop_type(host_desktop_type),
       trusted_source(false),
       initial_show_state(ui::SHOW_STATE_DEFAULT),
       is_session_restore(false),
-      window(NULL) {
-}
+      window(NULL) {}
 
-Browser::CreateParams::CreateParams(Type type,
-                                    Profile* profile,
-                                    chrome::HostDesktopType host_desktop_type)
+Browser::CreateParams::CreateParams(Type type, Profile* profile)
     : type(type),
       profile(profile),
-      host_desktop_type(host_desktop_type),
       trusted_source(false),
       initial_show_state(ui::SHOW_STATE_DEFAULT),
       is_session_restore(false),
-      window(NULL) {
-}
+      window(NULL) {}
+
+Browser::CreateParams::CreateParams(const CreateParams& other) = default;
 
 // static
 Browser::CreateParams Browser::CreateParams::CreateForApp(
     const std::string& app_name,
     bool trusted_source,
     const gfx::Rect& window_bounds,
-    Profile* profile,
-    chrome::HostDesktopType host_desktop_type) {
+    Profile* profile) {
   DCHECK(!app_name.empty());
 
-  CreateParams params(TYPE_POPUP, profile, host_desktop_type);
+  CreateParams params(TYPE_POPUP, profile);
   params.app_name = app_name;
   params.trusted_source = trusted_source;
   params.initial_bounds = window_bounds;
@@ -333,9 +332,8 @@ Browser::CreateParams Browser::CreateParams::CreateForApp(
 
 // static
 Browser::CreateParams Browser::CreateParams::CreateForDevTools(
-    Profile* profile,
-    chrome::HostDesktopType host_desktop_type) {
-  CreateParams params(TYPE_POPUP, profile, host_desktop_type);
+    Profile* profile) {
+  CreateParams params(TYPE_POPUP, profile);
   params.app_name = DevToolsWindow::kDevToolsApp;
   params.trusted_source = true;
   return params;
@@ -382,7 +380,6 @@ Browser::Browser(const CreateParams& params)
       override_bounds_(params.initial_bounds),
       initial_show_state_(params.initial_show_state),
       is_session_restore_(params.is_session_restore),
-      host_desktop_type_(params.host_desktop_type),
       content_setting_bubble_model_delegate_(
           new BrowserContentSettingBubbleModelDelegate(this)),
       toolbar_model_delegate_(new BrowserToolbarModelDelegate(this)),
@@ -414,7 +411,8 @@ Browser::Browser(const CreateParams& params)
 
   tab_strip_model_->AddObserver(this);
 
-  toolbar_model_.reset(new ToolbarModelImpl(toolbar_model_delegate_.get()));
+  toolbar_model_.reset(new ToolbarModelImpl(toolbar_model_delegate_.get(),
+                                            content::kMaxURLDisplayChars));
   search_model_.reset(new SearchModel());
   search_delegate_.reset(new SearchDelegate(search_model_.get()));
 
@@ -519,21 +517,6 @@ Browser::~Browser() {
       TabRestoreServiceFactory::GetForProfile(profile());
   if (tab_restore_service)
     tab_restore_service->BrowserClosed(live_tab_context());
-
-#if !defined(OS_MACOSX)
-  if (!chrome::GetTotalBrowserCountForProfile(profile_)) {
-    // We're the last browser window with this profile. We need to nuke the
-    // TabRestoreService, which will start the shutdown of the
-    // NavigationControllers and allow for proper shutdown. If we don't do this
-    // chrome won't shutdown cleanly, and may end up crashing when some
-    // thread tries to use the IO thread (or another thread) that is no longer
-    // valid.
-    // This isn't a valid assumption for Mac OS, as it stays running after
-    // the last browser has closed. The Mac equivalent is in its app
-    // controller.
-    TabRestoreServiceFactory::ResetForProfile(profile_);
-  }
-#endif
 
   profile_pref_registrar_.RemoveAll();
 
@@ -642,16 +625,10 @@ base::string16 Browser::GetWindowTitleForCurrentTab() const {
   if (title.empty())
     title = CoreTabHelper::GetDefaultTitle();
 
-#if defined(OS_MACOSX)
-  // On Mac, we don't want to suffix the page title with
-  // the application name.
+#if defined(OS_MACOSX) || defined(USE_ASH)
+  // On Mac and Ash, we don't want to suffix the page title with the application
+  // name.
   return title;
-#elif defined(USE_ASH)
-  // On Ash, we don't want to suffix the page title with the application name,
-  // but on Windows, where USE_ASH can also be true, we still want the prefix
-  // on desktop.
-  if (host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
-    return title;
 #endif
   // Don't append the app name to window titles on app frames and app popups
   return is_app() ?
@@ -720,7 +697,8 @@ void Browser::OnWindowClosing() {
   // AppController on the Mac, or BackgroundContentsService for background
   // pages).
   bool should_quit_if_last_browser =
-      browser_shutdown::IsTryingToQuit() || !chrome::WillKeepAlive();
+      browser_shutdown::IsTryingToQuit() ||
+      !KeepAliveRegistry::GetInstance()->IsKeepingAlive();
 
   if (should_quit_if_last_browser && ShouldStartShutdown())
     browser_shutdown::OnShutdownStarting(browser_shutdown::WINDOW_CLOSE);
@@ -798,15 +776,14 @@ Browser::DownloadClosePreventionType Browser::OkToCloseWithInProgressDownloads(
   // profile, that are relevant for the ok-to-close decision.
   int profile_window_count = 0;
   int total_window_count = 0;
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
+  for (auto* browser : *BrowserList::GetInstance()) {
     // Don't count this browser window or any other in the process of closing.
-    Browser* const browser = *it;
     // Window closing may be delayed, and windows that are in the process of
     // closing don't count against our totals.
     if (browser == this || browser->IsAttemptingToCloseBrowser())
       continue;
 
-    if (it->profile() == profile())
+    if (browser->profile() == profile())
       profile_window_count++;
     total_window_count++;
   }
@@ -903,7 +880,7 @@ void Browser::OpenFile() {
   // TODO(beng): figure out how to juggle this.
   gfx::NativeWindow parent_window = window_->GetNativeWindow();
   ui::SelectFileDialog::FileTypeInfo file_types;
-  file_types.support_drive = true;
+  file_types.allowed_paths = ui::SelectFileDialog::FileTypeInfo::ANY_PATH;
   select_file_dialog_->SelectFile(ui::SelectFileDialog::SELECT_OPEN_FILE,
                                   base::string16(),
                                   directory,
@@ -948,6 +925,27 @@ void Browser::UpdateUIForNavigationInTab(WebContents* contents,
 
   if (contents_is_selected)
     contents->SetInitialFocus();
+}
+
+void Browser::ShowModalSigninWindow(profiles::BubbleViewMode mode,
+                                    signin_metrics::AccessPoint access_point) {
+  signin_view_controller_.ShowModalSignin(mode, this, access_point);
+}
+
+void Browser::CloseModalSigninWindow() {
+  signin_view_controller_.CloseModalSignin();
+}
+
+void Browser::ShowModalSyncConfirmationWindow() {
+  signin_view_controller_.ShowModalSyncConfirmationDialog(this);
+}
+
+void Browser::RegisterKeepAlive() {
+  keep_alive_.reset(new ScopedKeepAlive(KeepAliveOrigin::BROWSER,
+                                        KeepAliveRestartOption::DISABLED));
+}
+void Browser::UnregisterKeepAlive() {
+  keep_alive_.reset();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1059,7 +1057,8 @@ void Browser::ActiveTabChanged(WebContents* old_contents,
   // Discarded tabs always get reloaded.
   // TODO(georgesak): Validate the usefulness of this. And if needed then move
   // to TabManager.
-  if (g_browser_process->GetTabManager()->IsTabDiscarded(new_contents))
+  if (g_browser_process->GetTabManager() &&
+      g_browser_process->GetTabManager()->IsTabDiscarded(new_contents))
     chrome::Reload(this, CURRENT_TAB);
 
   // If we have any update pending, do it now.
@@ -1277,7 +1276,8 @@ void Browser::ShowValidationMessage(content::WebContents* web_contents,
 }
 
 void Browser::HideValidationMessage(content::WebContents* web_contents) {
-  validation_message_bubble_.reset();
+  if (validation_message_bubble_)
+    validation_message_bubble_->CloseValidationMessage();
 }
 
 void Browser::MoveValidationMessage(content::WebContents* web_contents,
@@ -1422,27 +1422,49 @@ void Browser::ShowCertificateViewerInDevTools(
     devtools_window->ShowCertificateViewer(cert_id);
 }
 
-scoped_ptr<content::BluetoothChooser> Browser::RunBluetoothChooser(
-    content::WebContents* web_contents,
-    const content::BluetoothChooser::EventHandler& event_handler,
-    const GURL& origin) {
-  scoped_ptr<BluetoothChooserDesktop> bluetooth_chooser_desktop(
+std::unique_ptr<content::BluetoothChooser> Browser::RunBluetoothChooser(
+    content::RenderFrameHost* frame,
+    const content::BluetoothChooser::EventHandler& event_handler) {
+  std::unique_ptr<BluetoothChooserDesktop> bluetooth_chooser_desktop(
       new BluetoothChooserDesktop(event_handler));
-  Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
-  scoped_ptr<BluetoothChooserBubbleDelegate> bubble_delegate(
-      new BluetoothChooserBubbleDelegate(browser));
-  BluetoothChooserBubbleDelegate* bubble_delegate_ptr = bubble_delegate.get();
+  std::unique_ptr<BluetoothChooserBubbleController> bubble_controller(
+      new BluetoothChooserBubbleController(frame));
+  BluetoothChooserBubbleController* bubble_controller_ptr =
+      bubble_controller.get();
 
-  // Wire the ChooserBubbleDelegate to the BluetoothChooser.
-  bluetooth_chooser_desktop->set_bluetooth_chooser_bubble_delegate(
-      bubble_delegate_ptr);
-  bubble_delegate->set_bluetooth_chooser(bluetooth_chooser_desktop.get());
+  // Wire the ChooserBubbleController to the BluetoothChooser.
+  bluetooth_chooser_desktop->set_bluetooth_chooser_bubble_controller(
+      bubble_controller_ptr);
+  bubble_controller->set_bluetooth_chooser(bluetooth_chooser_desktop.get());
 
-  BubbleReference bubble_controller =
-      browser->GetBubbleManager()->ShowBubble(std::move(bubble_delegate));
-  bubble_delegate_ptr->set_bubble_controller(bubble_controller);
+  Browser* browser = chrome::FindBrowserWithWebContents(
+      WebContents::FromRenderFrameHost(frame));
+  BubbleReference bubble_reference =
+      browser->GetBubbleManager()->ShowBubble(std::move(bubble_controller));
+  bubble_controller_ptr->set_bubble_reference(bubble_reference);
 
   return std::move(bluetooth_chooser_desktop);
+}
+
+void Browser::RequestAppBannerFromDevTools(content::WebContents* web_contents) {
+  banners::AppBannerManagerDesktop::CreateForWebContents(web_contents);
+  RequestAppBanner(web_contents);
+}
+
+bool Browser::RequestAppBanner(content::WebContents* web_contents) {
+  banners::AppBannerManagerDesktop* manager =
+      banners::AppBannerManagerDesktop::FromWebContents(web_contents);
+  if (manager) {
+    manager->RequestAppBanner(web_contents->GetMainFrame(),
+                              web_contents->GetLastCommittedURL(), true);
+    return true;
+  }
+
+  web_contents->GetMainFrame()->AddMessageToConsole(
+      content::CONSOLE_MESSAGE_LEVEL_DEBUG,
+      "App banners are currently disabled. Please check chrome://flags/#" +
+          std::string(switches::kEnableAddToShelf));
+  return false;
 }
 
 bool Browser::IsMouseLocked() const {
@@ -1536,7 +1558,8 @@ void Browser::NavigationStateChanged(WebContents* source,
   // need to update the command state early on load to always present usable
   // actions in the face of slow-to-commit pages.
   if (changed_flags & (content::INVALIDATE_TYPE_URL |
-                       content::INVALIDATE_TYPE_LOAD))
+                       content::INVALIDATE_TYPE_LOAD |
+                       content::INVALIDATE_TYPE_TAB))
     command_controller_->TabStateChanged();
 
   if (hosted_app_controller_)
@@ -1610,16 +1633,16 @@ void Browser::UpdateTargetURL(WebContents* source, const GURL& url) {
   if (!GetStatusBubble())
     return;
 
-  if (source == tab_strip_model_->GetActiveWebContents()) {
-    PrefService* prefs = profile_->GetPrefs();
-    GetStatusBubble()->SetURL(url, prefs->GetString(prefs::kAcceptLanguages));
-  }
+  if (source == tab_strip_model_->GetActiveWebContents())
+    GetStatusBubble()->SetURL(url);
 }
 
 void Browser::ContentsMouseEvent(WebContents* source,
                                  const gfx::Point& location,
                                  bool motion,
                                  bool exited) {
+  exclusive_access_manager_->OnUserInput();
+
   // Mouse motion events update the status bubble, if it exists.
   if (!GetStatusBubble() || (!motion && !exited))
     return;
@@ -1627,7 +1650,7 @@ void Browser::ContentsMouseEvent(WebContents* source,
   if (source == tab_strip_model_->GetActiveWebContents()) {
     GetStatusBubble()->MouseMoved(location, exited);
     if (exited)
-      GetStatusBubble()->SetURL(GURL(), std::string());
+      GetStatusBubble()->SetURL(GURL());
   }
 }
 
@@ -2642,22 +2665,7 @@ bool Browser::ShouldHideUIForFullscreen() const {
 }
 
 bool Browser::ShouldStartShutdown() const {
-  if (BrowserList::GetInstance(host_desktop_type())->size() > 1)
-    return false;
-#if defined(OS_WIN)
-  // On Windows 8 the desktop and ASH environments could be active
-  // at the same time.
-  // We should not start the shutdown process in the following cases:-
-  // 1. If the desktop type of the browser going away is ASH and there
-  //    are browser windows open in the desktop.
-  // 2. If the desktop type of the browser going away is desktop and the ASH
-  //    environment is still active.
-  if (host_desktop_type() == chrome::HOST_DESKTOP_TYPE_NATIVE)
-    return !ash::Shell::HasInstance();
-  if (host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
-    return BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_NATIVE)->empty();
-#endif
-  return true;
+  return BrowserList::GetInstance()->size() <= 1;
 }
 
 bool Browser::MaybeCreateBackgroundContents(

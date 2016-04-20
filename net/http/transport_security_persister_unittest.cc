@@ -5,6 +5,7 @@
 #include "net/http/transport_security_persister.h"
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -40,7 +41,7 @@ class TransportSecurityPersisterTest : public testing::Test {
  protected:
   base::ScopedTempDir temp_dir_;
   TransportSecurityState state_;
-  scoped_ptr<TransportSecurityPersister> persister_;
+  std::unique_ptr<TransportSecurityPersister> persister_;
 };
 
 TEST_F(TransportSecurityPersisterTest, SerializeData1) {

@@ -13,12 +13,12 @@
 #include "base/callback_list.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/pref_change_registrar.h"
 #include "base/scoped_observer.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/accessibility/chromevox_panel.h"
 #include "chrome/browser/extensions/api/braille_display_private/braille_controller.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/event_router.h"
@@ -34,6 +34,8 @@ class Profile;
 
 namespace chromeos {
 
+class AccessibilityHighlightManager;
+
 enum AccessibilityNotificationType {
   ACCESSIBILITY_MANAGER_SHUTDOWN,
   ACCESSIBILITY_TOGGLE_HIGH_CONTRAST_MODE,
@@ -41,6 +43,7 @@ enum AccessibilityNotificationType {
   ACCESSIBILITY_TOGGLE_SCREEN_MAGNIFIER,
   ACCESSIBILITY_TOGGLE_SPOKEN_FEEDBACK,
   ACCESSIBILITY_TOGGLE_VIRTUAL_KEYBOARD,
+  ACCESSIBILITY_TOGGLE_MONO_AUDIO,
   ACCESSIBILITY_BRAILLE_DISPLAY_CONNECTION_STATE_CHANGED
 };
 
@@ -79,6 +82,7 @@ class ChromeVoxPanelWidgetObserver;
 class AccessibilityManager
     : public content::NotificationObserver,
       public extensions::api::braille_display_private::BrailleObserver,
+      public extensions::ExtensionRegistryObserver,
       public ash::SessionStateObserver,
       public ash::ShellObserver,
       public input_method::InputMethodManager::Observer {
@@ -164,6 +168,41 @@ class AccessibilityManager
   // Returns true if the virtual keyboard is enabled, otherwise false.
   bool IsVirtualKeyboardEnabled();
 
+  // Enables or disables mono audio output.
+  void EnableMonoAudio(bool enabled);
+  // Returns true if mono audio output is enabled, otherwise false.
+  bool IsMonoAudioEnabled();
+
+  // Invoked to enable or disable caret highlighting.
+  void SetCaretHighlightEnabled(bool enabled);
+
+  // Returns if caret highlighting is enabled.
+  bool IsCaretHighlightEnabled() const;
+
+  // Invoked to enable or disable cursor highlighting.
+  void SetCursorHighlightEnabled(bool enabled);
+
+  // Returns if cursor highlighting is enabled.
+  bool IsCursorHighlightEnabled() const;
+
+  // Invoked to enable or disable focus highlighting.
+  void SetFocusHighlightEnabled(bool enabled);
+
+  // Returns if focus highlighting is enabled.
+  bool IsFocusHighlightEnabled() const;
+
+  // Invoked to enable or disable select-to-speak.
+  void SetSelectToSpeakEnabled(bool enabled);
+
+  // Returns if select-to-speak is enabled.
+  bool IsSelectToSpeakEnabled() const;
+
+  // Invoked to enable or disable switch access.
+  void SetSwitchAccessEnabled(bool enabled);
+
+  // Returns if switch access is enabled.
+  bool IsSwitchAccessEnabled() const;
+
   // Returns true if a braille display is connected to the system, otherwise
   // false.
   bool IsBrailleDisplayConnected() const;
@@ -173,6 +212,8 @@ class AccessibilityManager
 
   // ShellObserver overrides:
   void OnAppTerminating() override;
+  void OnFullscreenStateChanged(bool is_fullscreen,
+                                aura::Window* root_window) override;
 
   void SetProfileForTest(Profile* profile);
 
@@ -190,7 +231,7 @@ class AccessibilityManager
 
   // Register a callback to be notified when the status of an accessibility
   // option changes.
-  scoped_ptr<AccessibilityStatusSubscription> RegisterCallback(
+  std::unique_ptr<AccessibilityStatusSubscription> RegisterCallback(
       const AccessibilityStatusCallback& cb);
 
   // Notify registered callbacks of a status change in an accessibility setting.
@@ -212,6 +253,19 @@ class AccessibilityManager
   // Profile having the a11y context.
   Profile* profile() { return profile_; }
 
+  // Extension id of extension receiving keyboard events.
+  void SetKeyboardListenerExtensionId(const std::string& id,
+                                      content::BrowserContext* context);
+  const std::string& keyboard_listener_extension_id() {
+    return keyboard_listener_extension_id_;
+  }
+
+  // Whether keyboard listener extension gets to capture keys.
+  void set_keyboard_listener_capture(bool val) {
+    keyboard_listener_capture_ = val;
+  }
+  bool keyboard_listener_capture() { return keyboard_listener_capture_; }
+
  protected:
   AccessibilityManager();
   ~AccessibilityManager() override;
@@ -232,10 +286,18 @@ class AccessibilityManager
   void UpdateAutoclickFromPref();
   void UpdateAutoclickDelayFromPref();
   void UpdateVirtualKeyboardFromPref();
+  void UpdateMonoAudioFromPref();
+  void UpdateCaretHighlightFromPref();
+  void UpdateCursorHighlightFromPref();
+  void UpdateFocusHighlightFromPref();
+  void UpdateSelectToSpeakFromPref();
+  void UpdateSwitchAccessFromPref();
+  void UpdateAccessibilityHighlightingFromPrefs();
 
   void CheckBrailleState();
   void ReceiveBrailleDisplayState(
-      scoped_ptr<extensions::api::braille_display_private::DisplayState> state);
+      std::unique_ptr<extensions::api::braille_display_private::DisplayState>
+          state);
   void UpdateBrailleImeState();
 
   void SetProfile(Profile* profile);
@@ -255,6 +317,13 @@ class AccessibilityManager
   void OnBrailleKeyEvent(
       const extensions::api::braille_display_private::KeyEvent& event) override;
 
+  // ExtensionRegistryObserver implementation.
+  void OnExtensionUnloaded(
+      content::BrowserContext* browser_context,
+      const extensions::Extension* extension,
+      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void OnShutdown(extensions::ExtensionRegistry* registry) override;
+
   // InputMethodManager::Observer
   void InputMethodChanged(input_method::InputMethodManager* manager,
                           Profile* profile,
@@ -269,9 +338,9 @@ class AccessibilityManager
   bool chrome_vox_loaded_on_user_screen_;
 
   content::NotificationRegistrar notification_registrar_;
-  scoped_ptr<PrefChangeRegistrar> pref_change_registrar_;
-  scoped_ptr<PrefChangeRegistrar> local_state_pref_change_registrar_;
-  scoped_ptr<ash::ScopedSessionStateObserver> session_state_observer_;
+  std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
+  std::unique_ptr<PrefChangeRegistrar> local_state_pref_change_registrar_;
+  std::unique_ptr<ash::ScopedSessionStateObserver> session_state_observer_;
 
   PrefHandler large_cursor_pref_handler_;
   PrefHandler spoken_feedback_pref_handler_;
@@ -279,6 +348,12 @@ class AccessibilityManager
   PrefHandler autoclick_pref_handler_;
   PrefHandler autoclick_delay_pref_handler_;
   PrefHandler virtual_keyboard_pref_handler_;
+  PrefHandler mono_audio_pref_handler_;
+  PrefHandler caret_highlight_pref_handler_;
+  PrefHandler cursor_highlight_pref_handler_;
+  PrefHandler focus_highlight_pref_handler_;
+  PrefHandler select_to_speak_pref_handler_;
+  PrefHandler switch_access_pref_handler_;
 
   bool large_cursor_enabled_;
   bool sticky_keys_enabled_;
@@ -287,6 +362,12 @@ class AccessibilityManager
   bool autoclick_enabled_;
   int autoclick_delay_ms_;
   bool virtual_keyboard_enabled_;
+  bool mono_audio_enabled_;
+  bool caret_highlight_enabled_;
+  bool cursor_highlight_enabled_;
+  bool focus_highlight_enabled_;
+  bool select_to_speak_enabled_;
+  bool switch_access_enabled_;
 
   ui::AccessibilityNotificationVisibility spoken_feedback_notification_;
 
@@ -303,7 +384,19 @@ class AccessibilityManager
   bool braille_ime_current_;
 
   ChromeVoxPanel* chromevox_panel_;
-  scoped_ptr<ChromeVoxPanelWidgetObserver> chromevox_panel_widget_observer_;
+  std::unique_ptr<ChromeVoxPanelWidgetObserver>
+      chromevox_panel_widget_observer_;
+
+  std::string keyboard_listener_extension_id_;
+  bool keyboard_listener_capture_;
+
+  // Listen to extension unloaded notifications.
+  ScopedObserver<extensions::ExtensionRegistry,
+                 extensions::ExtensionRegistryObserver>
+      extension_registry_observer_;
+
+  std::unique_ptr<AccessibilityHighlightManager>
+      accessibility_highlight_manager_;
 
   base::WeakPtrFactory<AccessibilityManager> weak_ptr_factory_;
 

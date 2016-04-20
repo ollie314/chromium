@@ -9,10 +9,10 @@
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover_factory.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/web_ui.h"
 
 namespace settings {
@@ -36,15 +36,18 @@ ClearBrowsingDataHandler::~ClearBrowsingDataHandler() {
 
 void ClearBrowsingDataHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
-      "performClearBrowserData",
-      base::Bind(&ClearBrowsingDataHandler::HandleClearBrowserData,
+      "clearBrowsingData",
+      base::Bind(&ClearBrowsingDataHandler::HandleClearBrowsingData,
                  base::Unretained(this)));
 }
 
-void ClearBrowsingDataHandler::HandleClearBrowserData(
+void ClearBrowsingDataHandler::HandleClearBrowsingData(
     const base::ListValue* args) {
   // We should never be called when the previous clearing has not yet finished.
   CHECK(!remover_);
+  CHECK_EQ(1U, args->GetSize());
+  CHECK(webui_callback_id_.empty());
+  CHECK(args->GetString(0, &webui_callback_id_));
 
   Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetPrefs();
@@ -135,12 +138,16 @@ void ClearBrowsingDataHandler::HandleClearBrowserData(
 void ClearBrowsingDataHandler::OnBrowsingDataRemoverDone() {
   remover_->RemoveObserver(this);
   remover_ = nullptr;
-  web_ui()->CallJavascriptFunction("SettingsClearBrowserData.doneClearing");
+  ResolveJavascriptCallback(
+      base::StringValue(webui_callback_id_),
+      *base::Value::CreateNullValue());
+  webui_callback_id_.clear();
 }
 
 void ClearBrowsingDataHandler::OnBrowsingHistoryPrefChanged() {
   web_ui()->CallJavascriptFunction(
-      "SettingsClearBrowserData.setAllowDeletingHistory",
+      "cr.webUIListenerCallback",
+      base::StringValue("browsing-history-pref-changed"),
       base::FundamentalValue(*allow_deleting_browser_history_));
 }
 

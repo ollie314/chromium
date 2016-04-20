@@ -11,6 +11,7 @@
 #include "base/mac/mac_logging.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/macros.h"
+#include "base/memory/free_deleter.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/power_monitor/power_observer.h"
 #include "base/strings/sys_string_conversions.h"
@@ -54,6 +55,7 @@ static OSStatus GetIOBufferFrameSizeRange(AudioDeviceID device_id,
                                           bool is_input,
                                           UInt32* minimum,
                                           UInt32* maximum) {
+  DCHECK(AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
   AudioObjectPropertyAddress address = GetAudioObjectPropertyAddress(
       kAudioDevicePropertyBufferFrameSizeRange, is_input);
   AudioValueRange range = {0, 0};
@@ -72,6 +74,7 @@ static OSStatus GetIOBufferFrameSizeRange(AudioDeviceID device_id,
 }
 
 static bool HasAudioHardware(AudioObjectPropertySelector selector) {
+  DCHECK(AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
   AudioDeviceID output_device_id = kAudioObjectUnknown;
   const AudioObjectPropertyAddress property_address = {
     selector,
@@ -89,10 +92,28 @@ static bool HasAudioHardware(AudioObjectPropertySelector selector) {
       output_device_id != kAudioObjectUnknown;
 }
 
+static std::string GetAudioDeviceNameFromDeviceId(AudioDeviceID device_id,
+                                                  bool is_input) {
+  DCHECK(AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
+  CFStringRef device_name = nullptr;
+  UInt32 data_size = sizeof(device_name);
+  AudioObjectPropertyAddress property_address = GetAudioObjectPropertyAddress(
+      kAudioDevicePropertyDeviceNameCFString, is_input);
+  OSStatus result = AudioObjectGetPropertyData(
+      device_id, &property_address, 0, nullptr, &data_size, &device_name);
+  std::string device;
+  if (result == noErr) {
+    device = base::SysCFStringRefToUTF8(device_name);
+    CFRelease(device_name);
+  }
+  return device;
+}
+
 // Retrieves information on audio devices, and prepends the default
 // device to the list if the list is non-empty.
 static void GetAudioDeviceInfo(bool is_input,
                                media::AudioDeviceNames* device_names) {
+  DCHECK(AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
   // Query the number of total devices.
   AudioObjectPropertyAddress property_address = {
     kAudioHardwarePropertyDevices,
@@ -197,6 +218,7 @@ static void GetAudioDeviceInfo(bool is_input,
 
 static AudioDeviceID GetAudioDeviceIdByUId(bool is_input,
                                            const std::string& device_id) {
+  DCHECK(AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
   AudioObjectPropertyAddress property_address = {
     kAudioHardwarePropertyDevices,
     kAudioObjectPropertyScopeGlobal,
@@ -246,24 +268,38 @@ static AudioDeviceID GetAudioDeviceIdByUId(bool is_input,
   return audio_device_id;
 }
 
-template <class T>
-void StopStreams(std::list<T*>* streams) {
-  for (typename std::list<T*>::iterator it = streams->begin();
-       it != streams->end();
-       ++it) {
-    // Stop() is safe to call multiple times, so it doesn't matter if a stream
-    // has already been stopped.
-    (*it)->Stop();
+static bool GetDefaultDevice(AudioDeviceID* device, bool input) {
+  DCHECK(AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
+  CHECK(device);
+
+  // Obtain the AudioDeviceID of the default input or output AudioDevice.
+  AudioObjectPropertyAddress pa;
+  pa.mSelector = input ? kAudioHardwarePropertyDefaultInputDevice
+                       : kAudioHardwarePropertyDefaultOutputDevice;
+  pa.mScope = kAudioObjectPropertyScopeGlobal;
+  pa.mElement = kAudioObjectPropertyElementMaster;
+
+  UInt32 size = sizeof(*device);
+  OSStatus result = AudioObjectGetPropertyData(kAudioObjectSystemObject, &pa, 0,
+                                               0, &size, device);
+  if ((result != kAudioHardwareNoError) || (*device == kAudioDeviceUnknown)) {
+    DLOG(ERROR) << "Error getting default AudioDevice.";
+    return false;
   }
-  streams->clear();
+  return true;
+}
+
+static bool GetDefaultOutputDevice(AudioDeviceID* device) {
+  return GetDefaultDevice(device, false);
 }
 
 class AudioManagerMac::AudioPowerObserver : public base::PowerObserver {
  public:
   AudioPowerObserver()
       : is_suspending_(false),
-        is_monitoring_(base::PowerMonitor::Get()) {
-    // The PowerMonitor requires signifcant setup (a CFRunLoop and preallocated
+        is_monitoring_(base::PowerMonitor::Get()),
+        num_resume_notifications_(0) {
+    // The PowerMonitor requires significant setup (a CFRunLoop and preallocated
     // IO ports) so it's not available under unit tests.  See the OSX impl of
     // base::PowerMonitorDeviceSource for more details.
     if (!is_monitoring_)
@@ -278,21 +314,36 @@ class AudioManagerMac::AudioPowerObserver : public base::PowerObserver {
     base::PowerMonitor::Get()->RemoveObserver(this);
   }
 
-  bool ShouldDeferStreamStart() {
+  bool IsSuspending() const {
+    DCHECK(thread_checker_.CalledOnValidThread());
+    return is_suspending_;
+  }
+
+  size_t num_resume_notifications() const { return num_resume_notifications_; }
+
+  bool ShouldDeferStreamStart() const {
     DCHECK(thread_checker_.CalledOnValidThread());
     // Start() should be deferred if the system is in the middle of a suspend or
     // has recently started the process of resuming.
     return is_suspending_ || base::TimeTicks::Now() < earliest_start_time_;
   }
 
+  bool IsOnBatteryPower() const {
+    DCHECK(thread_checker_.CalledOnValidThread());
+    return base::PowerMonitor::Get()->IsOnBatteryPower();
+  }
+
  private:
   void OnSuspend() override {
     DCHECK(thread_checker_.CalledOnValidThread());
+    DVLOG(1) << "OnSuspend";
     is_suspending_ = true;
   }
 
   void OnResume() override {
     DCHECK(thread_checker_.CalledOnValidThread());
+    DVLOG(1) << "OnResume";
+    ++num_resume_notifications_;
     is_suspending_ = false;
     earliest_start_time_ = base::TimeTicks::Now() +
         base::TimeDelta::FromSeconds(kStartDelayInSecsForPowerEvents);
@@ -302,12 +353,18 @@ class AudioManagerMac::AudioPowerObserver : public base::PowerObserver {
   const bool is_monitoring_;
   base::TimeTicks earliest_start_time_;
   base::ThreadChecker thread_checker_;
+  size_t num_resume_notifications_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioPowerObserver);
 };
 
-AudioManagerMac::AudioManagerMac(AudioLogFactory* audio_log_factory)
-    : AudioManagerBase(audio_log_factory),
+AudioManagerMac::AudioManagerMac(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
+    AudioLogFactory* audio_log_factory)
+    : AudioManagerBase(std::move(task_runner),
+                       std::move(worker_task_runner),
+                       audio_log_factory),
       current_sample_rate_(0),
       current_output_device_(kAudioDeviceUnknown) {
   SetMaxOutputStreamsAllowed(kMaxOutputStreams);
@@ -315,20 +372,12 @@ AudioManagerMac::AudioManagerMac(AudioLogFactory* audio_log_factory)
   // Task must be posted last to avoid races from handing out "this" to the
   // audio thread.  Always PostTask even if we're on the right thread since
   // AudioManager creation is on the startup path and this may be slow.
-  GetTaskRunner()->PostTask(FROM_HERE, base::Bind(
-      &AudioManagerMac::InitializeOnAudioThread, base::Unretained(this)));
+  GetTaskRunner()->PostTask(
+      FROM_HERE, base::Bind(&AudioManagerMac::InitializeOnAudioThread,
+                            base::Unretained(this)));
 }
 
 AudioManagerMac::~AudioManagerMac() {
-  if (GetTaskRunner()->BelongsToCurrentThread()) {
-    ShutdownOnAudioThread();
-  } else {
-    // It's safe to post a task here since Shutdown() will wait for all tasks to
-    // complete before returning.
-    GetTaskRunner()->PostTask(FROM_HERE, base::Bind(
-        &AudioManagerMac::ShutdownOnAudioThread, base::Unretained(this)));
-  }
-
   Shutdown();
 }
 
@@ -340,55 +389,19 @@ bool AudioManagerMac::HasAudioInputDevices() {
   return HasAudioHardware(kAudioHardwarePropertyDefaultInputDevice);
 }
 
-// TODO(xians): There are several places on the OSX specific code which
-// could benefit from these helper functions.
-bool AudioManagerMac::GetDefaultInputDevice(AudioDeviceID* device) {
-  return GetDefaultDevice(device, true);
-}
-
-bool AudioManagerMac::GetDefaultOutputDevice(AudioDeviceID* device) {
-  return GetDefaultDevice(device, false);
-}
-
-bool AudioManagerMac::GetDefaultDevice(AudioDeviceID* device, bool input) {
-  CHECK(device);
-
-  // Obtain the current output device selected by the user.
-  AudioObjectPropertyAddress pa;
-  pa.mSelector = input ? kAudioHardwarePropertyDefaultInputDevice :
-      kAudioHardwarePropertyDefaultOutputDevice;
-  pa.mScope = kAudioObjectPropertyScopeGlobal;
-  pa.mElement = kAudioObjectPropertyElementMaster;
-
-  UInt32 size = sizeof(*device);
-  OSStatus result = AudioObjectGetPropertyData(kAudioObjectSystemObject,
-                                               &pa,
-                                               0,
-                                               0,
-                                               &size,
-                                               device);
-
-  if ((result != kAudioHardwareNoError) || (*device == kAudioDeviceUnknown)) {
-    DLOG(ERROR) << "Error getting default AudioDevice.";
-    return false;
-  }
-
-  return true;
-}
-
-bool AudioManagerMac::GetDefaultOutputChannels(int* channels) {
-  AudioDeviceID device;
-  if (!GetDefaultOutputDevice(&device))
-    return false;
-  return GetDeviceChannels(device, kAudioDevicePropertyScopeOutput, channels);
-}
-
+// static
 bool AudioManagerMac::GetDeviceChannels(AudioDeviceID device,
                                         AudioObjectPropertyScope scope,
                                         int* channels) {
+  DCHECK(AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
   CHECK(channels);
+  const bool is_input = (scope == kAudioDevicePropertyScopeInput);
+  DVLOG(1) << "GetDeviceChannels(id=0x" << std::hex << device
+           << ", is_input=" << is_input << ")";
 
-  // Get stream configuration.
+  // Get the stream configuration of the device in an AudioBufferList (with the
+  // buffer pointers set to NULL) which describes the list of streams and the
+  // number of channels in each stream.
   AudioObjectPropertyAddress pa;
   pa.mSelector = kAudioDevicePropertyStreamConfiguration;
   pa.mScope = scope;
@@ -399,7 +412,6 @@ bool AudioManagerMac::GetDeviceChannels(AudioDeviceID device,
   if (result != noErr || !size)
     return false;
 
-  // Allocate storage.
   scoped_ptr<uint8_t[]> list_storage(new uint8_t[size]);
   AudioBufferList& buffer_list =
       *reinterpret_cast<AudioBufferList*>(list_storage.get());
@@ -408,21 +420,22 @@ bool AudioManagerMac::GetDeviceChannels(AudioDeviceID device,
   if (result != noErr)
     return false;
 
-  // Determine number of input channels.
-  int channels_per_frame = buffer_list.mNumberBuffers > 0 ?
-      buffer_list.mBuffers[0].mNumberChannels : 0;
-  if (channels_per_frame == 1 && buffer_list.mNumberBuffers > 1) {
-    // Non-interleaved.
-    *channels = buffer_list.mNumberBuffers;
-  } else {
-    // Interleaved.
-    *channels = channels_per_frame;
+  // Determine number of channels based on the AudioBufferList.
+  // |mNumberBuffers] is the  number of interleaved channels in the buffer.
+  // If the number is 1, the buffer is noninterleaved.
+  // TODO(henrika): add UMA stats to track utilized hardware configurations.
+  int num_channels = 0;
+  for (UInt32 i = 0; i < buffer_list.mNumberBuffers; ++i) {
+    num_channels += buffer_list.mBuffers[i].mNumberChannels;
   }
-
+  *channels = num_channels;
+  DVLOG(1) << "#channels: " << *channels;
   return true;
 }
 
+// static
 int AudioManagerMac::HardwareSampleRateForDevice(AudioDeviceID device_id) {
+  DCHECK(AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
   Float64 nominal_sample_rate;
   UInt32 info_size = sizeof(nominal_sample_rate);
 
@@ -446,6 +459,7 @@ int AudioManagerMac::HardwareSampleRateForDevice(AudioDeviceID device_id) {
   return static_cast<int>(nominal_sample_rate);
 }
 
+// static
 int AudioManagerMac::HardwareSampleRate() {
   // Determine the default output device's sample-rate.
   AudioDeviceID device_id = kAudioObjectUnknown;
@@ -504,6 +518,7 @@ AudioParameters AudioManagerMac::GetInputStreamParameters(
 
 std::string AudioManagerMac::GetAssociatedOutputDeviceID(
     const std::string& input_device_id) {
+  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
   AudioDeviceID device = GetAudioDeviceIdByUId(true, input_device_id);
   if (device == kAudioObjectUnknown)
     return std::string();
@@ -577,7 +592,7 @@ std::string AudioManagerMac::GetAssociatedOutputDeviceID(
       return *iter;
   }
 
-  // Failed to figure out which is the matching device, return an emtpy string.
+  // Failed to figure out which is the matching device, return an empty string.
   return std::string();
 }
 
@@ -589,13 +604,11 @@ AudioOutputStream* AudioManagerMac::MakeLinearOutputStream(
 AudioOutputStream* AudioManagerMac::MakeLowLatencyOutputStream(
     const AudioParameters& params,
     const std::string& device_id) {
-  AudioDeviceID device = GetAudioDeviceIdByUId(false, device_id);
-  if (device == kAudioObjectUnknown) {
-    DLOG(ERROR) << "Failed to open output device: " << device_id;
-    return NULL;
-  }
-
-  // Lazily create the audio device listener on the first stream creation.
+  bool device_listener_first_init = false;
+  // Lazily create the audio device listener on the first stream creation,
+  // even if getting an audio device fails. Otherwise, if we have 0 audio
+  // devices, the listener will never be initialized, and new valid devices
+  // will never be detected.
   if (!output_device_listener_) {
     // NOTE: Use BindToCurrentLoop() to ensure the callback is always PostTask'd
     // even if OSX calls us on the right thread.  Some CoreAudio drivers will
@@ -604,6 +617,18 @@ AudioOutputStream* AudioManagerMac::MakeLowLatencyOutputStream(
     output_device_listener_.reset(
         new AudioDeviceListenerMac(BindToCurrentLoop(base::Bind(
             &AudioManagerMac::HandleDeviceChanges, base::Unretained(this)))));
+    device_listener_first_init = true;
+  }
+
+  AudioDeviceID device = GetAudioDeviceIdByUId(false, device_id);
+  if (device == kAudioObjectUnknown) {
+    DLOG(ERROR) << "Failed to open output device: " << device_id;
+    return NULL;
+  }
+
+  // Only set the device and sample rate if we just initialized the device
+  // listener.
+  if (device_listener_first_init) {
     // Only set the current output device for the default device.
     if (device_id == AudioManagerBase::kDefaultDeviceId || device_id.empty())
       current_output_device_ = device;
@@ -618,6 +643,7 @@ AudioOutputStream* AudioManagerMac::MakeLowLatencyOutputStream(
 }
 
 std::string AudioManagerMac::GetDefaultOutputDeviceID() {
+  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
   AudioDeviceID device_id = kAudioObjectUnknown;
   if (!GetDefaultOutputDevice(&device_id))
     return std::string();
@@ -720,25 +746,6 @@ void AudioManagerMac::InitializeOnAudioThread() {
   power_observer_.reset(new AudioPowerObserver());
 }
 
-void AudioManagerMac::ShutdownOnAudioThread() {
-  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
-  output_device_listener_.reset();
-  power_observer_.reset();
-
-  // Since CoreAudio calls have to run on the UI thread and browser shutdown
-  // doesn't wait for outstanding tasks to complete, we may have input/output
-  // streams still running at shutdown.
-  //
-  // To avoid calls into destructed classes, we need to stop the OS callbacks
-  // by stopping the streams.  Note: The streams are leaked since process
-  // destruction is imminent.
-  //
-  // See http://crbug.com/354139 for crash details.
-  StopStreams(&basic_input_streams_);
-  StopStreams(&low_latency_input_streams_);
-  StopStreams(&output_streams_);
-}
-
 void AudioManagerMac::HandleDeviceChanges() {
   DCHECK(GetTaskRunner()->BelongsToCurrentThread());
   const int new_sample_rate = HardwareSampleRate();
@@ -746,8 +753,9 @@ void AudioManagerMac::HandleDeviceChanges() {
   GetDefaultOutputDevice(&new_output_device);
 
   if (current_sample_rate_ == new_sample_rate &&
-      current_output_device_ == new_output_device)
+      current_output_device_ == new_output_device) {
     return;
+  }
 
   current_sample_rate_ = new_sample_rate;
   current_output_device_ = new_output_device;
@@ -780,22 +788,45 @@ int AudioManagerMac::ChooseBufferSize(bool is_input, int sample_rate) {
   return buffer_size;
 }
 
-bool AudioManagerMac::ShouldDeferStreamStart() {
+bool AudioManagerMac::IsSuspending() const {
+  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
+  return power_observer_->IsSuspending();
+}
+
+bool AudioManagerMac::ShouldDeferStreamStart() const {
   DCHECK(GetTaskRunner()->BelongsToCurrentThread());
   return power_observer_->ShouldDeferStreamStart();
+}
+
+bool AudioManagerMac::IsOnBatteryPower() const {
+  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
+  return power_observer_->IsOnBatteryPower();
+}
+
+size_t AudioManagerMac::GetNumberOfResumeNotifications() const {
+  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
+  return power_observer_->num_resume_notifications();
 }
 
 bool AudioManagerMac::MaybeChangeBufferSize(AudioDeviceID device_id,
                                             AudioUnit audio_unit,
                                             AudioUnitElement element,
                                             size_t desired_buffer_size,
-                                            bool* size_was_changed) {
+                                            bool* size_was_changed,
+                                            size_t* io_buffer_frame_size) {
+  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
   const bool is_input = (element == 1);
   DVLOG(1) << "MaybeChangeBufferSize(id=0x" << std::hex << device_id
-           << ", is_input=" << is_input << ", buffer_size=" << std::dec
+           << ", is_input=" << is_input << ", desired_buffer_size=" << std::dec
            << desired_buffer_size << ")";
 
   *size_was_changed = false;
+  *io_buffer_frame_size = 0;
+
+  // Log the device name (and id) for debugging purposes.
+  std::string device_name = GetAudioDeviceNameFromDeviceId(device_id, is_input);
+  DVLOG(1) << "name: " << device_name << " (ID: 0x" << std::hex << device_id
+           << ")";
 
   // Get the current size of the I/O buffer for the specified device. The
   // property is read on a global scope, hence using element 0. The default IO
@@ -810,6 +841,9 @@ bool AudioManagerMac::MaybeChangeBufferSize(AudioDeviceID device_id,
         << "AudioUnitGetProperty(kAudioDevicePropertyBufferFrameSize) failed.";
     return false;
   }
+  // Store the currently used (not changed yet) I/O buffer frame size.
+  *io_buffer_frame_size = buffer_size;
+
   DVLOG(1) << "current IO buffer size: " << buffer_size;
   DVLOG(1) << "#output streams: " << output_streams_.size();
   DVLOG(1) << "#input streams: " << low_latency_input_streams_.size();
@@ -858,7 +892,7 @@ bool AudioManagerMac::MaybeChangeBufferSize(AudioDeviceID device_id,
   // 4410 will on most devices be limited to 4096 without any further notice.
   UInt32 minimum, maximum;
   GetIOBufferFrameSizeRange(device_id, is_input, &minimum, &maximum);
-  DVLOG(1) << "valid IO buffe size range: [" << minimum << ", " << maximum
+  DVLOG(1) << "valid IO buffer size range: [" << minimum << ", " << maximum
            << "]";
   buffer_size = desired_buffer_size;
   if (buffer_size < minimum)
@@ -877,16 +911,8 @@ bool AudioManagerMac::MaybeChangeBufferSize(AudioDeviceID device_id,
       << "Size:: " << buffer_size;
   *size_was_changed = (result == noErr);
   DVLOG_IF(1, result == noErr) << "IO buffer size changed to: " << buffer_size;
-
-  // Ensure that value specified by the kAudioUnitProperty_MaximumFramesPerSlice
-  // property is modified when the default IO buffer size is modified. Failure
-  // to update the this property will cause audio units to not perform any
-  // processing (this includes not pulling on any inputs). This property ensures
-  // that the audio unit is prepared to produce a sufficient number of frames
-  // of audio data in response to a render call.
-  result = AudioUnitSetProperty(
-      audio_unit, kAudioUnitProperty_MaximumFramesPerSlice,
-      kAudioUnitScope_Global, 0, &buffer_size, sizeof(buffer_size));
+  // Store the currently used (after a change) I/O buffer frame size.
+  *io_buffer_frame_size = buffer_size;
 
   return (result == noErr);
 }
@@ -908,8 +934,13 @@ void AudioManagerMac::ReleaseInputStream(AudioInputStream* stream) {
   AudioManagerBase::ReleaseInputStream(stream);
 }
 
-AudioManager* CreateAudioManager(AudioLogFactory* audio_log_factory) {
-  return new AudioManagerMac(audio_log_factory);
+ScopedAudioManagerPtr CreateAudioManager(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
+    AudioLogFactory* audio_log_factory) {
+  return ScopedAudioManagerPtr(
+      new AudioManagerMac(std::move(task_runner), std::move(worker_task_runner),
+                          audio_log_factory));
 }
 
 }  // namespace media

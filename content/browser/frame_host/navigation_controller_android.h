@@ -14,7 +14,7 @@
 
 namespace content {
 
-class NavigationController;
+class NavigationControllerImpl;
 
 // Android wrapper around NavigationController that provides safer passage
 // from java and back to native and provides java with a means of communicating
@@ -24,10 +24,10 @@ class CONTENT_EXPORT NavigationControllerAndroid {
   static bool Register(JNIEnv* env);
 
   explicit NavigationControllerAndroid(
-      NavigationController* navigation_controller);
+      NavigationControllerImpl* navigation_controller);
   ~NavigationControllerAndroid();
 
-  NavigationController* navigation_controller() const {
+  NavigationControllerImpl* navigation_controller() const {
     return navigation_controller_;
   }
 
@@ -57,9 +57,9 @@ class CONTENT_EXPORT NavigationControllerAndroid {
   void ReloadToRefreshContent(JNIEnv* env,
                               jobject obj,
                               jboolean check_for_repost);
-  void ReloadIgnoringCache(JNIEnv* env,
-                           const base::android::JavaParamRef<jobject>& obj,
-                           jboolean check_for_repost);
+  void ReloadBypassingCache(JNIEnv* env,
+                            const base::android::JavaParamRef<jobject>& obj,
+                            jboolean check_for_repost);
   void ReloadDisableLoFi(JNIEnv* env,
                          const base::android::JavaParamRef<jobject>& obj,
                          jboolean check_for_repost);
@@ -140,7 +140,7 @@ class CONTENT_EXPORT NavigationControllerAndroid {
                              jboolean replace_entry);
 
  private:
-  NavigationController* navigation_controller_;
+  NavigationControllerImpl* navigation_controller_;
   base::android::ScopedJavaGlobalRef<jobject> obj_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigationControllerAndroid);

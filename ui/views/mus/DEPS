@@ -6,7 +6,7 @@ include_rules = [
   "+components/gpu",
   "+components/mus",
   "+components/resource_provider",
-  "+mojo/shell/public",
+  "+services/shell/public",
   "+mojo/cc",
   "+mojo/converters",
   "+mojo/public",
@@ -22,3 +22,9 @@ include_rules = [
   "+ui/platform_window",
   "+ui/wm",
 ]
+
+specific_include_rules = {
+  "platform_test_helper_mus.cc": [
+    "+services/shell/background",
+  ],
+}

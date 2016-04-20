@@ -10,11 +10,10 @@
 #include <string>
 
 #include "build/build_config.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "url/gurl.h"
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
 #include "chrome/browser/signin/signin_promo.h"
 #endif
 
@@ -54,12 +53,9 @@ void ShowFeedbackPage(Browser* browser,
                       const std::string& category_tag);
 
 void ShowHelp(Browser* browser, HelpSource source);
-void ShowHelpForProfile(Profile* profile,
-                        HostDesktopType host_desktop_type,
-                        HelpSource source);
+void ShowHelpForProfile(Profile* profile, HelpSource source);
 void ShowPolicy(Browser* browser);
 void ShowSlow(Browser* browser);
-void ShowMemory(Browser* browser);
 
 // Constructs a settings GURL for the specified |sub_page|.
 GURL GetSettingsUrl(const std::string& sub_page);
@@ -93,7 +89,7 @@ void ShowImportDialog(Browser* browser);
 void ShowAboutChrome(Browser* browser);
 void ShowSearchEngineSettings(Browser* browser);
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
 // Initiates signin in a new browser tab.
 void ShowBrowserSignin(Browser* browser,
                        signin_metrics::AccessPoint access_point);

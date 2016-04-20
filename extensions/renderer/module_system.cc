@@ -22,7 +22,6 @@
 #include "extensions/renderer/v8_helpers.h"
 #include "gin/modules/module_registry.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
-#include "third_party/WebKit/public/web/WebScopedMicrotaskSuppression.h"
 
 namespace extensions {
 
@@ -132,15 +131,18 @@ std::string ModuleSystem::ExceptionHandler::CreateExceptionString(
     error_message.assign(*error_message_v8, error_message_v8.length());
   }
 
-  auto maybe = message->GetLineNumber(context_->v8_context());
-  int line_number = maybe.IsJust() ? maybe.FromJust() : 0;
+  int line_number = 0;
+  if (context_) {  // |context_| can be null in unittests.
+    auto maybe = message->GetLineNumber(context_->v8_context());
+    line_number = maybe.IsJust() ? maybe.FromJust() : 0;
+  }
   return base::StringPrintf("%s:%d: %s",
                             resource_name.c_str(),
                             line_number,
                             error_message.c_str());
 }
 
-ModuleSystem::ModuleSystem(ScriptContext* context, SourceMap* source_map)
+ModuleSystem::ModuleSystem(ScriptContext* context, const SourceMap* source_map)
     : ObjectBackedNativeHandler(context),
       context_(context),
       source_map_(source_map),
@@ -251,12 +253,12 @@ v8::Local<v8::Value> ModuleSystem::RequireForJsInner(
 
   v8::Local<v8::Object> modules(v8::Local<v8::Object>::Cast(modules_value));
   v8::Local<v8::Value> exports;
-  if (!GetProperty(v8_context, modules, module_name, &exports) ||
+  if (!GetPrivateProperty(v8_context, modules, module_name, &exports) ||
       !exports->IsUndefined())
     return handle_scope.Escape(exports);
 
   exports = LoadModule(*v8::String::Utf8Value(module_name));
-  SetProperty(v8_context, modules, module_name, exports);
+  SetPrivateProperty(v8_context, modules, module_name, exports);
   return handle_scope.Escape(exports);
 }
 
@@ -399,7 +401,7 @@ void ModuleSystem::LazyFieldGetterInner(
       v8::Local<v8::External>::Cast(module_system_value)->Value());
 
   v8::Local<v8::Value> v8_module_name;
-  if (!GetProperty(context, parameters, kModuleName, &v8_module_name)) {
+  if (!GetPrivateProperty(context, parameters, kModuleName, &v8_module_name)) {
     Warn(isolate, "Cannot find module.");
     return;
   }
@@ -419,7 +421,7 @@ void ModuleSystem::LazyFieldGetterInner(
 
   v8::Local<v8::Object> module = v8::Local<v8::Object>::Cast(module_value);
   v8::Local<v8::Value> field_value;
-  if (!GetProperty(context, parameters, kModuleField, &field_value)) {
+  if (!GetPrivateProperty(context, parameters, kModuleField, &field_value)) {
     module_system->HandleException(try_catch);
     return;
   }
@@ -479,9 +481,9 @@ void ModuleSystem::SetLazyField(v8::Local<v8::Object> object,
   v8::HandleScope handle_scope(GetIsolate());
   v8::Local<v8::Object> parameters = v8::Object::New(GetIsolate());
   v8::Local<v8::Context> context = context_->v8_context();
-  SetProperty(context, parameters, kModuleName,
+  SetPrivateProperty(context, parameters, kModuleName,
               ToV8StringUnsafe(GetIsolate(), module_name.c_str()));
-  SetProperty(context, parameters, kModuleField,
+  SetPrivateProperty(context, parameters, kModuleField,
               ToV8StringUnsafe(GetIsolate(), module_field.c_str()));
   auto maybe = object->SetAccessor(
       context, ToV8StringUnsafe(GetIsolate(), field.c_str()), getter, NULL,

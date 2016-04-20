@@ -10,11 +10,15 @@
 #include "base/command_line.h"
 #import "base/mac/bundle_locations.h"
 #include "base/strings/sys_string_conversions.h"
+#include "chrome/browser/media/combined_desktop_media_list.h"
 #import "chrome/browser/ui/cocoa/key_equivalent_constants.h"
 #import "chrome/browser/ui/cocoa/media_picker/desktop_media_picker_item.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "grit/components_strings.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #import "ui/base/cocoa/flipped_view.h"
@@ -60,11 +64,14 @@ const int kExcessButtonPadding = 6;
 
 @implementation DesktopMediaPickerController
 
-- (id)initWithMediaList:(scoped_ptr<DesktopMediaList>)media_list
-                 parent:(NSWindow*)parent
-               callback:(const DesktopMediaPicker::DoneCallback&)callback
-                appName:(const base::string16&)appName
-             targetName:(const base::string16&)targetName {
+- (id)initWithScreenList:(std::unique_ptr<DesktopMediaList>)screen_list
+              windowList:(std::unique_ptr<DesktopMediaList>)window_list
+                 tabList:(std::unique_ptr<DesktopMediaList>)tab_list
+                  parent:(NSWindow*)parent
+                callback:(const DesktopMediaPicker::DoneCallback&)callback
+                 appName:(const base::string16&)appName
+              targetName:(const base::string16&)targetName
+            requestAudio:(bool)requestAudio {
   const NSUInteger kStyleMask =
       NSTitledWindowMask | NSClosableWindowMask | NSResizableWindowMask;
   base::scoped_nsobject<NSWindow> window(
@@ -76,8 +83,23 @@ const int kExcessButtonPadding = 6;
   if ((self = [super initWithWindow:window])) {
     [parent addChildWindow:window ordered:NSWindowAbove];
     [window setDelegate:self];
-    [self initializeContentsWithAppName:appName targetName:targetName];
-    media_list_ = std::move(media_list);
+    [self initializeContentsWithAppName:appName
+                             targetName:targetName
+                           requestAudio:requestAudio];
+    std::vector<std::unique_ptr<DesktopMediaList>> media_lists;
+    if (screen_list)
+      media_lists.push_back(std::move(screen_list));
+
+    if (window_list)
+      media_lists.push_back(std::move(window_list));
+
+    if (tab_list)
+      media_lists.push_back(std::move(tab_list));
+
+    if (media_lists.size() > 1)
+      media_list_.reset(new CombinedDesktopMediaList(media_lists));
+    else
+      media_list_ = std::move(media_lists[0]);
     media_list_->SetViewDialogWindowId(content::DesktopMediaID(
        content::DesktopMediaID::TYPE_WINDOW, [window windowNumber]));
     doneCallback_ = callback;
@@ -97,7 +119,8 @@ const int kExcessButtonPadding = 6;
 }
 
 - (void)initializeContentsWithAppName:(const base::string16&)appName
-                           targetName:(const base::string16&)targetName {
+                           targetName:(const base::string16&)targetName
+                         requestAudio:(bool)requestAudio {
   // Use flipped coordinates to facilitate manual layout.
   const CGFloat kPaddedWidth = kInitialContentWidth - (kFramePadding * 2);
   base::scoped_nsobject<FlippedView> content(
@@ -146,6 +169,25 @@ const int kExcessButtonPadding = 6;
       NSViewWidthSizable | NSViewHeightSizable];
   [content addSubview:imageBrowserScroll];
   origin.y += NSHeight(imageBrowserScrollFrame) + kControlSpacing;
+
+  // Create a checkbox for audio sharing.
+  if (requestAudio) {
+    audioShareCheckbox_.reset([[NSButton alloc] initWithFrame:NSZeroRect]);
+    [audioShareCheckbox_ setFrameOrigin:origin];
+    [audioShareCheckbox_
+        setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
+    [audioShareCheckbox_ setButtonType:NSSwitchButton];
+    audioShareState_ = NSOnState;
+    [audioShareCheckbox_
+        setTitle:l10n_util::GetNSString(IDS_DESKTOP_MEDIA_PICKER_AUDIO_SHARE)];
+    [audioShareCheckbox_ sizeToFit];
+    [audioShareCheckbox_ setEnabled:NO];
+    [audioShareCheckbox_
+        setToolTip:l10n_util::GetNSString(
+                       IDS_DESKTOP_MEDIA_PICKER_AUDIO_SHARE_TOOLTIP_MAC)];
+    [content addSubview:audioShareCheckbox_];
+    origin.y += NSHeight([audioShareCheckbox_ frame]) + kControlSpacing;
+  }
 
   // Create the share button.
   shareButton_ = [self createButtonWithTitle:l10n_util::GetNSString(
@@ -198,6 +240,19 @@ const int kExcessButtonPadding = 6;
 - (void)reportResult:(content::DesktopMediaID)sourceID {
   if (doneCallback_.is_null()) {
     return;
+  }
+
+  sourceID.audio_share = [audioShareCheckbox_ isEnabled] &&
+                         [audioShareCheckbox_ state] == NSOnState;
+
+  // If the media source is an tab, activate it.
+  if (sourceID.type == content::DesktopMediaID::TYPE_WEB_CONTENTS) {
+    content::WebContents* tab = content::WebContents::FromRenderFrameHost(
+        content::RenderFrameHost::FromID(
+            sourceID.web_contents_id.render_process_id,
+            sourceID.web_contents_id.main_render_frame_id));
+    if (tab)
+      tab->GetDelegate()->ActivateContents(tab);
   }
 
   // Notify the |callback_| asynchronously because it may release the
@@ -280,9 +335,52 @@ const int kExcessButtonPadding = 6;
   [self close];
 }
 
-- (void)imageBrowserSelectionDidChange:(IKImageBrowserView*) aBrowser {
+- (void)imageBrowserSelectionDidChange:(IKImageBrowserView*)browser {
+  NSIndexSet* indexes = [sourceBrowser_ selectionIndexes];
+
   // Enable or disable the OK button based on whether we have a selection.
-  [shareButton_ setEnabled:([[sourceBrowser_ selectionIndexes] count] > 0)];
+  [shareButton_ setEnabled:([indexes count] > 0)];
+
+  // Enable or disable the checkbox based on whether we can support audio for
+  // the selected source.
+  // On Mac, the checkbox will enabled for tab sharing, namely
+  // TYPE_WEB_CONTENTS.
+  if ([indexes count] == 0) {
+    if ([audioShareCheckbox_ isEnabled]) {
+      [audioShareCheckbox_ setEnabled:NO];
+      audioShareState_ = [audioShareCheckbox_ state];
+      [audioShareCheckbox_ setState:NSOffState];
+    }
+    [audioShareCheckbox_
+        setToolTip:l10n_util::GetNSString(
+                       IDS_DESKTOP_MEDIA_PICKER_AUDIO_SHARE_TOOLTIP_MAC)];
+    return;
+  }
+
+  NSUInteger selectedIndex = [indexes firstIndex];
+  DesktopMediaPickerItem* item = [items_ objectAtIndex:selectedIndex];
+  switch ([item sourceID].type) {
+    case content::DesktopMediaID::TYPE_SCREEN:
+    case content::DesktopMediaID::TYPE_WINDOW:
+      if ([audioShareCheckbox_ isEnabled]) {
+        [audioShareCheckbox_ setEnabled:NO];
+        audioShareState_ = [audioShareCheckbox_ state];
+        [audioShareCheckbox_ setState:NSOffState];
+      }
+      [audioShareCheckbox_
+          setToolTip:l10n_util::GetNSString(
+                         IDS_DESKTOP_MEDIA_PICKER_AUDIO_SHARE_TOOLTIP_MAC)];
+      break;
+    case content::DesktopMediaID::TYPE_WEB_CONTENTS:
+      if (![audioShareCheckbox_ isEnabled]) {
+        [audioShareCheckbox_ setEnabled:YES];
+        [audioShareCheckbox_ setState:audioShareState_];
+      }
+      [audioShareCheckbox_ setToolTip:@""];
+      break;
+    case content::DesktopMediaID::TYPE_NONE:
+      NOTREACHED();
+  }
 }
 
 #pragma mark DesktopMediaPickerObserver

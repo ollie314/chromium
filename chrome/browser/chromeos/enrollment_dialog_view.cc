@@ -51,14 +51,13 @@ class EnrollmentDialogView : public views::DialogDelegateView {
                          const base::Closure& connect);
 
   // views::DialogDelegateView overrides
-  int GetDialogButtons() const override;
   bool Accept() override;
-  void OnClosed() override;
   base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
 
   // views::WidgetDelegate overrides
   ui::ModalType GetModalType() const override;
   base::string16 GetWindowTitle() const override;
+  void WindowClosing() override;
 
   // views::View overrides
   gfx::Size GetPreferredSize() const override;
@@ -111,24 +110,9 @@ void EnrollmentDialogView::ShowDialog(gfx::NativeWindow owning_window,
   widget->Show();
 }
 
-int EnrollmentDialogView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_CANCEL | ui::DIALOG_BUTTON_OK;
-}
-
 bool EnrollmentDialogView::Accept() {
   accepted_ = true;
   return true;
-}
-
-void EnrollmentDialogView::OnClosed() {
-  if (!accepted_)
-    return;
-  chrome::NavigateParams params(profile_,
-                                GURL(target_uri_),
-                                ui::PAGE_TRANSITION_LINK);
-  params.disposition = NEW_FOREGROUND_TAB;
-  params.window_action = chrome::NavigateParams::SHOW_WINDOW;
-  chrome::Navigate(&params);
 }
 
 base::string16 EnrollmentDialogView::GetDialogButtonLabel(
@@ -144,6 +128,16 @@ ui::ModalType EnrollmentDialogView::GetModalType() const {
 
 base::string16 EnrollmentDialogView::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(IDS_NETWORK_ENROLLMENT_HANDLER_TITLE);
+}
+
+void EnrollmentDialogView::WindowClosing() {
+  if (!accepted_)
+    return;
+  chrome::NavigateParams params(profile_, GURL(target_uri_),
+                                ui::PAGE_TRANSITION_LINK);
+  params.disposition = NEW_FOREGROUND_TAB;
+  params.window_action = chrome::NavigateParams::SHOW_WINDOW;
+  chrome::Navigate(&params);
 }
 
 gfx::Size EnrollmentDialogView::GetPreferredSize() const {

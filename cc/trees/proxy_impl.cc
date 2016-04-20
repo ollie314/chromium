@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/auto_reset.h"
+#include "base/memory/ptr_util.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "base/trace_event/trace_event_synthetic_delay.h"
@@ -34,20 +35,21 @@ unsigned int nextBeginFrameId = 0;
 
 }  // namespace
 
-scoped_ptr<ProxyImpl> ProxyImpl::Create(
+std::unique_ptr<ProxyImpl> ProxyImpl::Create(
     ChannelImpl* channel_impl,
     LayerTreeHost* layer_tree_host,
     TaskRunnerProvider* task_runner_provider,
-    scoped_ptr<BeginFrameSource> external_begin_frame_source) {
-  return make_scoped_ptr(new ProxyImpl(channel_impl, layer_tree_host,
-                                       task_runner_provider,
-                                       std::move(external_begin_frame_source)));
+    std::unique_ptr<BeginFrameSource> external_begin_frame_source) {
+  return base::WrapUnique(
+      new ProxyImpl(channel_impl, layer_tree_host, task_runner_provider,
+                    std::move(external_begin_frame_source)));
 }
 
-ProxyImpl::ProxyImpl(ChannelImpl* channel_impl,
-                     LayerTreeHost* layer_tree_host,
-                     TaskRunnerProvider* task_runner_provider,
-                     scoped_ptr<BeginFrameSource> external_begin_frame_source)
+ProxyImpl::ProxyImpl(
+    ChannelImpl* channel_impl,
+    LayerTreeHost* layer_tree_host,
+    TaskRunnerProvider* task_runner_provider,
+    std::unique_ptr<BeginFrameSource> external_begin_frame_source)
     : layer_tree_host_id_(layer_tree_host->id()),
       next_commit_waits_for_activation_(false),
       commit_completion_event_(nullptr),
@@ -73,14 +75,29 @@ ProxyImpl::ProxyImpl(ChannelImpl* channel_impl,
   SchedulerSettings scheduler_settings(
       layer_tree_host->settings().ToSchedulerSettings());
 
-  scoped_ptr<CompositorTimingHistory> compositor_timing_history(
-      new CompositorTimingHistory(CompositorTimingHistory::RENDERER_UMA,
-                                  rendering_stats_instrumentation_));
+  std::unique_ptr<CompositorTimingHistory> compositor_timing_history(
+      new CompositorTimingHistory(
+          scheduler_settings.using_synchronous_renderer_compositor,
+          CompositorTimingHistory::RENDERER_UMA,
+          rendering_stats_instrumentation_));
 
-  scheduler_ = Scheduler::Create(this, scheduler_settings, layer_tree_host_id_,
-                                 task_runner_provider_->ImplThreadTaskRunner(),
-                                 external_begin_frame_source_.get(),
-                                 std::move(compositor_timing_history));
+  BeginFrameSource* frame_source = external_begin_frame_source_.get();
+  if (!scheduler_settings.throttle_frame_production) {
+    // Unthrottled source takes precedence over external sources.
+    unthrottled_begin_frame_source_.reset(new BackToBackBeginFrameSource(
+        task_runner_provider_->ImplThreadTaskRunner()));
+    frame_source = unthrottled_begin_frame_source_.get();
+  }
+  if (!frame_source) {
+    synthetic_begin_frame_source_.reset(new SyntheticBeginFrameSource(
+        task_runner_provider_->ImplThreadTaskRunner(),
+        BeginFrameArgs::DefaultInterval()));
+    frame_source = synthetic_begin_frame_source_.get();
+  }
+  scheduler_ =
+      Scheduler::Create(this, scheduler_settings, layer_tree_host_id_,
+                        task_runner_provider_->ImplThreadTaskRunner(),
+                        frame_source, std::move(compositor_timing_history));
 
   DCHECK_EQ(scheduler_->visible(), layer_tree_host_impl_->visible());
 }
@@ -97,18 +114,13 @@ ProxyImpl::~ProxyImpl() {
 
   scheduler_ = nullptr;
   external_begin_frame_source_ = nullptr;
+  unthrottled_begin_frame_source_ = nullptr;
+  synthetic_begin_frame_source_ = nullptr;
   layer_tree_host_impl_ = nullptr;
   // We need to explicitly shutdown the notifier to destroy any weakptrs it is
   // holding while still on the compositor thread. This also ensures any
   // callbacks holding a ProxyImpl pointer are cancelled.
   smoothness_priority_expiration_notifier_.Shutdown();
-}
-
-void ProxyImpl::SetThrottleFrameProductionOnImpl(bool throttle) {
-  TRACE_EVENT1("cc", "ProxyImpl::SetThrottleFrameProductionOnImplThread",
-               "throttle", throttle);
-  DCHECK(IsImplThread());
-  scheduler_->SetThrottleFrameProduction(throttle);
 }
 
 void ProxyImpl::UpdateTopControlsStateOnImpl(TopControlsState constraints,
@@ -176,7 +188,6 @@ void ProxyImpl::BeginMainFrameAbortedOnImpl(
 
   if (CommitEarlyOutHandledCommit(reason)) {
     SetInputThrottledUntilCommitOnImpl(false);
-    last_processed_begin_main_frame_args_ = last_begin_main_frame_args_;
   }
   layer_tree_host_impl_->BeginMainFrameAborted(reason);
   scheduler_->NotifyBeginMainFrameStarted(main_thread_start_time);
@@ -281,7 +292,20 @@ void ProxyImpl::DidLoseOutputSurfaceOnImplThread() {
 void ProxyImpl::CommitVSyncParameters(base::TimeTicks timebase,
                                       base::TimeDelta interval) {
   DCHECK(IsImplThread());
-  scheduler_->CommitVSyncParameters(timebase, interval);
+  if (!synthetic_begin_frame_source_)
+    return;
+
+  if (interval == base::TimeDelta()) {
+    // TODO(brianderson): We should not be receiving 0 intervals.
+    interval = BeginFrameArgs::DefaultInterval();
+  }
+  synthetic_begin_frame_source_->OnUpdateVSyncParameters(timebase, interval);
+}
+
+void ProxyImpl::SetBeginFrameSource(BeginFrameSource* source) {
+  // TODO(enne): this overrides any preexisting begin frame source.  Those
+  // other sources will eventually be removed and this will be the only path.
+  scheduler_->SetBeginFrameSource(source);
 }
 
 void ProxyImpl::SetEstimatedParentDrawTime(base::TimeDelta draw_time) {
@@ -358,7 +382,7 @@ void ProxyImpl::SetVideoNeedsBeginFrames(bool needs_begin_frames) {
 }
 
 void ProxyImpl::PostAnimationEventsToMainThreadOnImplThread(
-    scoped_ptr<AnimationEvents> events) {
+    std::unique_ptr<AnimationEvents> events) {
   TRACE_EVENT0("cc", "ProxyImpl::PostAnimationEventsToMainThreadOnImplThread");
   DCHECK(IsImplThread());
   channel_impl_->SetAnimationEvents(std::move(events));
@@ -410,14 +434,6 @@ void ProxyImpl::RenewTreePriority() {
           : ScrollHandlerState::SCROLL_DOES_NOT_AFFECT_SCROLL_HANDLER;
   scheduler_->SetTreePrioritiesAndScrollState(tree_priority,
                                               scroll_handler_state);
-
-  // Notify the the client of this compositor via the output surface.
-  // TODO(epenner): Route this to compositor-thread instead of output-surface
-  // after GTFO refactor of compositor-thread (http://crbug/170828).
-  if (layer_tree_host_impl_->output_surface()) {
-    layer_tree_host_impl_->output_surface()->UpdateSmoothnessTakesPriority(
-        tree_priority == SMOOTHNESS_TAKES_PRIORITY);
-  }
 }
 
 void ProxyImpl::PostDelayedAnimationTaskOnImplThread(const base::Closure& task,
@@ -439,8 +455,6 @@ void ProxyImpl::DidActivateSyncTree() {
     commit_completion_event_ = nullptr;
     next_commit_waits_for_activation_ = false;
   }
-
-  last_processed_begin_main_frame_args_ = last_begin_main_frame_args_;
 }
 
 void ProxyImpl::WillPrepareTiles() {
@@ -463,26 +477,9 @@ void ProxyImpl::OnDrawForOutputSurface(bool resourceless_software_draw) {
   scheduler_->OnDrawForOutputSurface(resourceless_software_draw);
 }
 
-void ProxyImpl::PostFrameTimingEventsOnImplThread(
-    scoped_ptr<FrameTimingTracker::CompositeTimingSet> composite_events,
-    scoped_ptr<FrameTimingTracker::MainFrameTimingSet> main_frame_events) {
-  DCHECK(IsImplThread());
-  channel_impl_->PostFrameTimingEventsOnMain(std::move(composite_events),
-                                             std::move(main_frame_events));
-}
-
 void ProxyImpl::WillBeginImplFrame(const BeginFrameArgs& args) {
   DCHECK(IsImplThread());
   layer_tree_host_impl_->WillBeginImplFrame(args);
-  if (last_processed_begin_main_frame_args_.IsValid()) {
-    // Last processed begin main frame args records the frame args that we sent
-    // to the main thread for the last frame that we've processed. If that is
-    // set, that means the current frame is one past the frame in which we've
-    // finished the processing.
-    layer_tree_host_impl_->RecordMainFrameTiming(
-        last_processed_begin_main_frame_args_, args);
-    last_processed_begin_main_frame_args_ = BeginFrameArgs();
-  }
 }
 
 void ProxyImpl::DidFinishImplFrame() {
@@ -495,20 +492,18 @@ void ProxyImpl::ScheduledActionSendBeginMainFrame(const BeginFrameArgs& args) {
   unsigned int begin_frame_id = nextBeginFrameId++;
   benchmark_instrumentation::ScopedBeginFrameTask begin_frame_task(
       benchmark_instrumentation::kSendBeginFrame, begin_frame_id);
-  scoped_ptr<BeginMainFrameAndCommitState> begin_main_frame_state(
+  std::unique_ptr<BeginMainFrameAndCommitState> begin_main_frame_state(
       new BeginMainFrameAndCommitState);
   begin_main_frame_state->begin_frame_id = begin_frame_id;
   begin_main_frame_state->begin_frame_args = args;
+  begin_main_frame_state->begin_frame_callbacks =
+      layer_tree_host_impl_->ProcessLayerTreeMutations();
   begin_main_frame_state->scroll_info =
       layer_tree_host_impl_->ProcessScrollDeltas();
   begin_main_frame_state->memory_allocation_limit_bytes =
       layer_tree_host_impl_->memory_allocation_limit_bytes();
   begin_main_frame_state->evicted_ui_resources =
       layer_tree_host_impl_->EvictedUIResourcesExist();
-  // TODO(vmpstr): This needs to be fixed if
-  // main_frame_before_activation_enabled is set, since we might run this code
-  // twice before recording a duration. crbug.com/469824
-  last_begin_main_frame_args_ = begin_main_frame_state->begin_frame_args;
   channel_impl_->BeginMainFrame(std::move(begin_main_frame_state));
   devtools_instrumentation::DidRequestMainThreadFrame(layer_tree_host_id_);
 }
@@ -593,10 +588,6 @@ void ProxyImpl::ScheduledActionInvalidateOutputSurface() {
   DCHECK(IsImplThread());
   DCHECK(layer_tree_host_impl_->output_surface());
   layer_tree_host_impl_->output_surface()->Invalidate();
-}
-
-void ProxyImpl::SendBeginFramesToChildren(const BeginFrameArgs& args) {
-  NOTREACHED() << "Only used by SingleThreadProxy";
 }
 
 void ProxyImpl::SendBeginMainFrameNotExpectedSoon() {

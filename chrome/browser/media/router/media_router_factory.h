@@ -23,6 +23,11 @@ class MediaRouterFactory : public BrowserContextKeyedServiceFactory {
  public:
   static MediaRouter* GetApiForBrowserContext(content::BrowserContext* context);
 
+ protected:
+  // We override the shutdown method for the factory to give the Media Router a
+  // chance to remove off the record media routes.
+  void BrowserContextShutdown(content::BrowserContext* context) override;
+
  private:
   friend struct base::DefaultLazyInstanceTraits<MediaRouterFactory>;
 
@@ -30,6 +35,9 @@ class MediaRouterFactory : public BrowserContextKeyedServiceFactory {
   ~MediaRouterFactory() override;
 
   // BrowserContextKeyedServiceFactory interface.
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+
   KeyedService* BuildServiceInstanceFor(
       content::BrowserContext* context) const override;
 

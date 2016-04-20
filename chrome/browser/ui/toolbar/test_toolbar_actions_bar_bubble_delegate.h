@@ -5,8 +5,9 @@
 #ifndef CHROME_BROWSER_UI_TOOLBAR_TEST_TOOLBAR_ACTIONS_BAR_BUBBLE_DELEGATE_H_
 #define CHROME_BROWSER_UI_TOOLBAR_TEST_TOOLBAR_ACTIONS_BAR_BUBBLE_DELEGATE_H_
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar_bubble_delegate.h"
 
 // A test delegate for a bubble to hang off the toolbar actions bar.
@@ -21,7 +22,7 @@ class TestToolbarActionsBarBubbleDelegate {
   // Returns a delegate to pass to the bubble. Since the bubble typically owns
   // the delegate, it means we can't have this object be the delegate, because
   // it would be deleted once the bubble closes.
-  scoped_ptr<ToolbarActionsBarBubbleDelegate> GetDelegate();
+  std::unique_ptr<ToolbarActionsBarBubbleDelegate> GetDelegate();
 
   void set_dismiss_button_text(const base::string16& dismiss) {
     dismiss_ = dismiss;
@@ -31,6 +32,9 @@ class TestToolbarActionsBarBubbleDelegate {
   }
   void set_item_list_text(const base::string16& item_list) {
     item_list_ = item_list;
+  }
+  void set_close_on_deactivate(bool close_on_deactivate) {
+    close_on_deactivate_ = close_on_deactivate;
   }
 
   const ToolbarActionsBarBubbleDelegate::CloseAction* close_action() const {
@@ -45,7 +49,7 @@ class TestToolbarActionsBarBubbleDelegate {
   bool shown_;
 
   // The action that was taken to close the bubble.
-  scoped_ptr<ToolbarActionsBarBubbleDelegate::CloseAction> close_action_;
+  std::unique_ptr<ToolbarActionsBarBubbleDelegate::CloseAction> close_action_;
 
   // Strings for the bubble.
   base::string16 heading_;
@@ -54,6 +58,9 @@ class TestToolbarActionsBarBubbleDelegate {
   base::string16 dismiss_;
   base::string16 learn_more_;
   base::string16 item_list_;
+
+  // Whether to close the bubble on deactivation.
+  bool close_on_deactivate_;
 
   DISALLOW_COPY_AND_ASSIGN(TestToolbarActionsBarBubbleDelegate);
 };

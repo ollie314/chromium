@@ -5,10 +5,10 @@
 #include "cc/debug/lap_timer.h"
 #include "cc/resources/resource_provider.h"
 #include "cc/resources/scoped_resource.h"
-#include "cc/test/fake_display_list_raster_source.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/fake_picture_layer_tiling_client.h"
+#include "cc/test/fake_raster_source.h"
 #include "cc/test/fake_resource_provider.h"
 #include "cc/test/test_context_provider.h"
 #include "cc/test/test_shared_bitmap_manager.h"
@@ -44,9 +44,8 @@ class PictureLayerTilingPerfTest : public testing::Test {
   void SetUp() override {
     LayerTreeSettings defaults;
     picture_layer_tiling_client_.SetTileSize(gfx::Size(256, 256));
-    scoped_refptr<FakeDisplayListRasterSource> raster_source =
-        FakeDisplayListRasterSource::CreateFilled(
-            gfx::Size(256 * 50, 256 * 50));
+    scoped_refptr<FakeRasterSource> raster_source =
+        FakeRasterSource::CreateFilled(gfx::Size(256 * 50, 256 * 50));
     picture_layer_tiling_ = PictureLayerTiling::Create(
         PENDING_TREE, 1.f, raster_source, &picture_layer_tiling_client_,
         defaults.tiling_interest_area_padding,
@@ -125,15 +124,15 @@ class PictureLayerTilingPerfTest : public testing::Test {
 
  private:
   FakePictureLayerTilingClient picture_layer_tiling_client_;
-  scoped_ptr<PictureLayerTiling> picture_layer_tiling_;
+  std::unique_ptr<PictureLayerTiling> picture_layer_tiling_;
 
   LapTimer timer_;
 
   scoped_refptr<ContextProvider> context_provider_;
   FakeOutputSurfaceClient output_surface_client_;
-  scoped_ptr<FakeOutputSurface> output_surface_;
-  scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
-  scoped_ptr<ResourceProvider> resource_provider_;
+  std::unique_ptr<FakeOutputSurface> output_surface_;
+  std::unique_ptr<SharedBitmapManager> shared_bitmap_manager_;
+  std::unique_ptr<ResourceProvider> resource_provider_;
 };
 
 TEST_F(PictureLayerTilingPerfTest, Invalidate) {

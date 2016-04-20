@@ -5,6 +5,8 @@
 // Syncer unit tests. Unfortunately a lot of these tests
 // are outdated and need to be reworked and updated.
 
+#include "sync/engine/syncer.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -12,6 +14,7 @@
 #include <limits>
 #include <list>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 
@@ -21,7 +24,6 @@
 #include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/histogram_tester.h"
@@ -31,7 +33,6 @@
 #include "sync/engine/get_commit_ids.h"
 #include "sync/engine/net/server_connection_manager.h"
 #include "sync/engine/sync_scheduler_impl.h"
-#include "sync/engine/syncer.h"
 #include "sync/engine/syncer_proto_util.h"
 #include "sync/internal_api/public/base/cancelation_signal.h"
 #include "sync/internal_api/public/base/model_type.h"
@@ -283,6 +284,7 @@ class SyncerTest : public testing::Test,
                                                  &cancelation_signal_));
     debug_info_getter_.reset(new MockDebugInfoGetter);
     EnableDatatype(BOOKMARKS);
+    EnableDatatype(EXTENSIONS);
     EnableDatatype(NIGORI);
     EnableDatatype(PREFERENCES);
     EnableDatatype(NIGORI);
@@ -583,17 +585,17 @@ class SyncerTest : public testing::Test,
   TestDirectorySetterUpper dir_maker_;
   FakeEncryptor encryptor_;
   scoped_refptr<ExtensionsActivity> extensions_activity_;
-  scoped_ptr<MockConnectionManager> mock_server_;
+  std::unique_ptr<MockConnectionManager> mock_server_;
   CancelationSignal cancelation_signal_;
 
   Syncer* syncer_;
 
-  scoped_ptr<SyncSession> session_;
+  std::unique_ptr<SyncSession> session_;
   TypeDebugInfoCache debug_info_cache_;
   MockNudgeHandler mock_nudge_handler_;
-  scoped_ptr<ModelTypeRegistry> model_type_registry_;
-  scoped_ptr<SyncSchedulerImpl> scheduler_;
-  scoped_ptr<SyncSessionContext> context_;
+  std::unique_ptr<ModelTypeRegistry> model_type_registry_;
+  std::unique_ptr<SyncSchedulerImpl> scheduler_;
+  std::unique_ptr<SyncSessionContext> context_;
   base::TimeDelta last_short_poll_interval_received_;
   base::TimeDelta last_long_poll_interval_received_;
   base::TimeDelta last_sessions_commit_delay_;
@@ -603,7 +605,7 @@ class SyncerTest : public testing::Test,
 
   ModelTypeSet enabled_datatypes_;
   sessions::NudgeTracker nudge_tracker_;
-  scoped_ptr<MockDebugInfoGetter> debug_info_getter_;
+  std::unique_ptr<MockDebugInfoGetter> debug_info_getter_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SyncerTest);
@@ -2670,11 +2672,11 @@ TEST_F(SyncerTest, CommitsUpdateDoesntAlterEntry) {
 }
 
 TEST_F(SyncerTest, ParentAndChildBothMatch) {
-  // Disable PREFERENCES which is enabled at the setup step to avoid
-  // auto-creating
-  // PREFERENCES root folder and failing the test below that verifies the number
-  // of children at the root.
+  // Disable PREFERENCES and EXTENSIONS which are enabled at the setup step to
+  // avoid auto-creating root folders and failing the test below
+  // that verifies the number of children at the root.
   DisableDatatype(PREFERENCES);
+  DisableDatatype(EXTENSIONS);
 
   const FullModelTypeSet all_types = FullModelTypeSet::All();
   syncable::Id parent_id = ids_.NewServerId();
@@ -3752,6 +3754,82 @@ TEST_F(SyncerTest, ConflictResolverMergesLocalDeleteAndServerUpdate) {
     EXPECT_TRUE(local_deleted.GetIsUnsynced());
     EXPECT_TRUE(local_deleted.GetIsDel());
     EXPECT_FALSE(local_deleted.GetIsDir());
+  }
+}
+
+// This ensures that for extensions, we resolve the conflict of local updates
+// and server deletes in favor of the server, to prevent extensions from
+// being reinstalled after uninstall.
+TEST_F(SyncerTest, ConflictResolverAcceptsServerDeleteForExtensions) {
+  ASSERT_TRUE(context_->GetEnabledTypes().Has(EXTENSIONS));
+
+  // Create an extension entry.
+  int64_t metahandle;
+  {
+    WriteTransaction trans(FROM_HERE, UNITTEST, directory());
+    MutableEntry extension(
+        &trans, CREATE, EXTENSIONS, trans.root_id(), "extension_name");
+    ASSERT_TRUE(extension.good());
+    sync_pb::EntitySpecifics specifics;
+    AddDefaultFieldValue(EXTENSIONS, &specifics);
+    extension.PutSpecifics(specifics);
+    EXPECT_FALSE(extension.GetIsUnappliedUpdate());
+    EXPECT_FALSE(extension.GetId().ServerKnows());
+    metahandle = extension.GetMetahandle();
+    extension.PutIsUnsynced(true);
+  }
+
+  // Make sure the server has received the new item.
+  SyncShareNudge();
+  syncable::Id id;
+  {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry entry(&trans, GET_BY_HANDLE, metahandle);
+
+    EXPECT_EQ(metahandle, entry.GetMetahandle());
+    EXPECT_FALSE(entry.GetIsDel());
+    EXPECT_FALSE(entry.GetServerIsDel());
+    EXPECT_GE(entry.GetBaseVersion(), 0);
+    EXPECT_EQ(entry.GetBaseVersion(), entry.GetServerVersion());
+    EXPECT_FALSE(entry.GetIsUnsynced());
+    EXPECT_FALSE(entry.GetIsUnappliedUpdate());
+    id = entry.GetId();
+  }
+
+
+  // Simulate another client deleting the item.
+  {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry entry(&trans, GET_BY_HANDLE, metahandle);
+    mock_server_->AddUpdateTombstone(id, EXTENSIONS);
+  }
+
+  // Create a local update, which should cause a conflict with the delete that
+  // we just pushed to the server.
+  {
+    WriteTransaction trans(FROM_HERE, UNITTEST, directory());
+    MutableEntry extension(&trans, GET_BY_HANDLE, metahandle);
+    ASSERT_TRUE(extension.good());
+    sync_pb::EntitySpecifics specifics;
+    AddDefaultFieldValue(EXTENSIONS, &specifics);
+    specifics.mutable_extension()->set_disable_reasons(2);
+    extension.PutSpecifics(specifics);
+    EXPECT_FALSE(extension.GetIsUnappliedUpdate());
+    extension.PutIsUnsynced(true);
+  }
+
+  // Run a sync, and expect the item to be deleted.
+  SyncShareNudge();
+  {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry entry(&trans, GET_BY_HANDLE, metahandle);
+    EXPECT_EQ(metahandle, entry.GetMetahandle());
+    EXPECT_TRUE(entry.GetIsDel());
+    EXPECT_TRUE(entry.GetServerIsDel());
+    EXPECT_FALSE(entry.GetIsUnsynced());
+    EXPECT_FALSE(entry.GetIsUnappliedUpdate());
+    EXPECT_GE(entry.GetBaseVersion(), 0);
+    EXPECT_GE(entry.GetServerVersion(), 0);
   }
 }
 

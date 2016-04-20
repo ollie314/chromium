@@ -58,12 +58,12 @@ inline HTMLVideoElement::HTMLVideoElement(Document& document)
         m_defaultPosterURL = AtomicString(document.settings()->defaultVideoPosterURL());
 }
 
-PassRefPtrWillBeRawPtr<HTMLVideoElement> HTMLVideoElement::create(Document& document)
+HTMLVideoElement* HTMLVideoElement::create(Document& document)
 {
-    RefPtrWillBeRawPtr<HTMLVideoElement> video = adoptRefWillBeNoop(new HTMLVideoElement(document));
+    HTMLVideoElement* video = new HTMLVideoElement(document);
     video->ensureUserAgentShadowRoot();
     video->suspendIfNeeded();
-    return video.release();
+    return video;
 }
 
 DEFINE_TRACE(HTMLVideoElement)
@@ -118,7 +118,7 @@ void HTMLVideoElement::parseAttribute(const QualifiedName& name, const AtomicStr
     if (name == posterAttr) {
         // In case the poster attribute is set after playback, don't update the
         // display state, post playback the correct state will be picked up.
-        if (displayMode() < Video || !hasAvailableVideoFrame()) {
+        if (getDisplayMode() < Video || !hasAvailableVideoFrame()) {
             // Force a poster recalc by setting m_displayMode to Unknown directly before calling updateDisplayState.
             HTMLMediaElement::setDisplayMode(Unknown);
             updateDisplayState();
@@ -168,7 +168,7 @@ const AtomicString HTMLVideoElement::imageSourceURL() const
 
 void HTMLVideoElement::setDisplayMode(DisplayMode mode)
 {
-    DisplayMode oldMode = displayMode();
+    DisplayMode oldMode = getDisplayMode();
     KURL poster = posterImageURL();
 
     if (!poster.isEmpty()) {
@@ -182,7 +182,7 @@ void HTMLVideoElement::setDisplayMode(DisplayMode mode)
 
     HTMLMediaElement::setDisplayMode(mode);
 
-    if (layoutObject() && displayMode() != oldMode)
+    if (layoutObject() && getDisplayMode() != oldMode)
         layoutObject()->updateFromElement();
 }
 
@@ -190,7 +190,7 @@ void HTMLVideoElement::updateDisplayState()
 {
     if (posterImageURL().isEmpty())
         setDisplayMode(Video);
-    else if (displayMode() < Poster)
+    else if (getDisplayMode() < Poster)
         setDisplayMode(Poster);
 }
 
@@ -207,13 +207,13 @@ void HTMLVideoElement::paintCurrentFrame(SkCanvas* canvas, const IntRect& destRe
     webMediaPlayer()->paint(canvas, destRect, paint ? paint->getAlpha() : 0xFF, mode);
 }
 
-bool HTMLVideoElement::copyVideoTextureToPlatformTexture(WebGraphicsContext3D* context, Platform3DObject texture, GLenum internalFormat, GLenum type, bool premultiplyAlpha, bool flipY)
+bool HTMLVideoElement::copyVideoTextureToPlatformTexture(gpu::gles2::GLES2Interface* gl, Platform3DObject texture, GLenum internalFormat, GLenum type, bool premultiplyAlpha, bool flipY)
 {
     if (!webMediaPlayer())
         return false;
 
     ASSERT(Extensions3DUtil::canUseCopyTextureCHROMIUM(GL_TEXTURE_2D, internalFormat, type, 0));
-    return webMediaPlayer()->copyVideoTextureToPlatformTexture(context, texture, internalFormat, type, premultiplyAlpha, flipY);
+    return webMediaPlayer()->copyVideoTextureToPlatformTexture(gl, texture, internalFormat, type, premultiplyAlpha, flipY);
 }
 
 bool HTMLVideoElement::hasAvailableVideoFrame() const
@@ -221,7 +221,7 @@ bool HTMLVideoElement::hasAvailableVideoFrame() const
     if (!webMediaPlayer())
         return false;
 
-    return webMediaPlayer()->hasVideo() && webMediaPlayer()->readyState() >= WebMediaPlayer::ReadyStateHaveCurrentData;
+    return webMediaPlayer()->hasVideo() && webMediaPlayer()->getReadyState() >= WebMediaPlayer::ReadyStateHaveCurrentData;
 }
 
 void HTMLVideoElement::webkitEnterFullscreen()
@@ -285,7 +285,7 @@ KURL HTMLVideoElement::posterImageURL() const
     return document().completeURL(url);
 }
 
-PassRefPtr<Image> HTMLVideoElement::getSourceImageForCanvas(SourceImageStatus* status, AccelerationHint) const
+PassRefPtr<Image> HTMLVideoElement::getSourceImageForCanvas(SourceImageStatus* status, AccelerationHint, SnapshotReason, const FloatSize&) const
 {
     if (!hasAvailableVideoFrame()) {
         *status = InvalidSourceImageStatus;
@@ -316,7 +316,7 @@ bool HTMLVideoElement::wouldTaintOrigin(SecurityOrigin* destinationSecurityOrigi
     return !isMediaDataCORSSameOrigin(destinationSecurityOrigin);
 }
 
-FloatSize HTMLVideoElement::elementSize() const
+FloatSize HTMLVideoElement::elementSize(const FloatSize&) const
 {
     return FloatSize(videoWidth(), videoHeight());
 }
@@ -329,11 +329,11 @@ IntSize HTMLVideoElement::bitmapSourceSize() const
 ScriptPromise HTMLVideoElement::createImageBitmap(ScriptState* scriptState, EventTarget& eventTarget, int sx, int sy, int sw, int sh, const ImageBitmapOptions& options, ExceptionState& exceptionState)
 {
     ASSERT(eventTarget.toDOMWindow());
-    if (networkState() == HTMLMediaElement::NETWORK_EMPTY) {
+    if (getNetworkState() == HTMLMediaElement::NETWORK_EMPTY) {
         exceptionState.throwDOMException(InvalidStateError, "The provided element has not retrieved data.");
         return ScriptPromise();
     }
-    if (readyState() <= HTMLMediaElement::HAVE_METADATA) {
+    if (getReadyState() <= HTMLMediaElement::HAVE_METADATA) {
         exceptionState.throwDOMException(InvalidStateError, "The provided element's player has no current data.");
         return ScriptPromise();
     }

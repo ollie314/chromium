@@ -322,8 +322,7 @@ void PanelFrameView::Init() {
       PanelView::kResizeInsideBoundsSize - BorderThickness();
   aura::Window* window = panel_view_->GetNativePanelWindow();
   window->set_hit_test_bounds_override_inner(
-      gfx::Insets(thickness_for_mouse_resizing, thickness_for_mouse_resizing,
-                  thickness_for_mouse_resizing, thickness_for_mouse_resizing));
+      gfx::Insets(thickness_for_mouse_resizing));
 #endif
 }
 
@@ -593,7 +592,7 @@ bool PanelFrameView::OnMouseDragged(const ui::MouseEvent& event) {
   // Converting the mouse location to screen coordinates returns an incorrect
   // location while the panel is moving. See crbug.com/353393 for more details.
   // TODO(pkotwicz): Fix conversion to screen coordinates
-  gfx::Screen* screen = gfx::Screen::GetNativeScreen();
+  gfx::Screen* screen = gfx::Screen::GetScreen();
   gfx::Point mouse_location = screen->GetCursorScreenPoint();
 #else
   // |event.location| is in the view's coordinate system. Convert it to the

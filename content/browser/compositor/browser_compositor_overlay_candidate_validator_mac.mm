@@ -6,21 +6,19 @@
 
 #include <stddef.h>
 
-#include "cc/output/overlay_strategy_sandwich.h"
+#include "base/command_line.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "gpu/config/gpu_driver_bug_workaround_type.h"
+#include "ui/base/ui_base_switches.h"
 
 namespace content {
 
 BrowserCompositorOverlayCandidateValidatorMac::
-    BrowserCompositorOverlayCandidateValidatorMac(
-        gfx::AcceleratedWidget widget)
-    : widget_(widget),
-      software_mirror_active_(false),
+    BrowserCompositorOverlayCandidateValidatorMac()
+    : software_mirror_active_(false),
       ca_layers_disabled_(
           GpuDataManagerImpl::GetInstance()->IsDriverBugWorkaroundActive(
-              gpu::DISABLE_OVERLAY_CA_LAYERS)) {
-}
+              gpu::DISABLE_OVERLAY_CA_LAYERS)) {}
 
 BrowserCompositorOverlayCandidateValidatorMac::
     ~BrowserCompositorOverlayCandidateValidatorMac() {
@@ -28,11 +26,14 @@ BrowserCompositorOverlayCandidateValidatorMac::
 
 void BrowserCompositorOverlayCandidateValidatorMac::GetStrategies(
     cc::OverlayProcessor::StrategyList* strategies) {
-  strategies->push_back(make_scoped_ptr(new cc::OverlayStrategySandwich(this)));
 }
 
 bool BrowserCompositorOverlayCandidateValidatorMac::AllowCALayerOverlays() {
-  if (software_mirror_active_ || ca_layers_disabled_)
+  static bool overlays_disabled_at_command_line =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableMacOverlays);
+  if (software_mirror_active_ || ca_layers_disabled_ ||
+      overlays_disabled_at_command_line)
     return false;
   return true;
 }

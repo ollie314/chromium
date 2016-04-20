@@ -5,13 +5,12 @@
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/extensions/active_script_controller.h"
 #include "chrome/browser/extensions/context_menu_matcher.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
+#include "chrome/browser/extensions/extension_action_runner.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/extensions/extension_util.h"
@@ -30,6 +29,7 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/context_menu_params.h"
 #include "extensions/browser/extension_registry.h"
@@ -40,6 +40,7 @@
 #include "extensions/common/feature_switch.h"
 #include "extensions/common/manifest_handlers/options_page_info.h"
 #include "extensions/common/manifest_url_handlers.h"
+#include "grit/components_scaled_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -141,7 +142,7 @@ class UninstallDialogHelper : public ExtensionUninstallDialog::Delegate {
     delete this;
   }
 
-  scoped_ptr<ExtensionUninstallDialog> uninstall_dialog_;
+  std::unique_ptr<ExtensionUninstallDialog> uninstall_dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(UninstallDialogHelper);
 };
@@ -241,7 +242,7 @@ void ExtensionContextMenuModel::ExecuteCommand(int command_id,
       command_id <= IDC_EXTENSIONS_CONTEXT_CUSTOM_LAST) {
     DCHECK(extension_items_);
     extension_items_->ExecuteCommand(command_id, GetActiveWebContents(),
-                                     content::ContextMenuParams());
+                                     nullptr, content::ContextMenuParams());
     return;
   }
 
@@ -451,10 +452,10 @@ void ExtensionContextMenuModel::HandlePageAccessCommand(
 
   if (command_id == PAGE_ACCESS_RUN_ON_SITE ||
       command_id == PAGE_ACCESS_RUN_ON_ALL_SITES) {
-    ActiveScriptController* controller =
-        ActiveScriptController::GetForWebContents(web_contents);
-    if (controller && controller->WantsToRun(extension))
-      controller->OnClicked(extension);
+    ExtensionActionRunner* runner =
+        ExtensionActionRunner::GetForWebContents(web_contents);
+    if (runner && runner->WantsToRun(extension))
+      runner->RunBlockedActions(extension);
   }
 }
 

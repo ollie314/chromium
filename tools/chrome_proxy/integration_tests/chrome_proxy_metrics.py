@@ -170,25 +170,6 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'extra_via_header', 'count', extra_via_count))
 
-  def AddResultsForClientVersion(self, tab, results):
-    via_count = 0
-    for resp in self.IterResponses(tab):
-      r = resp.response
-      if resp.response.status != 200:
-        raise ChromeProxyMetricException, ('%s: Response is not 200: %d' %
-                                           (r.url, r.status))
-      if not resp.IsValidByViaHeader():
-        raise ChromeProxyMetricException, ('%s: Response missing via header' %
-                                           (r.url))
-      via_count += 1
-
-    if via_count == 0:
-      raise ChromeProxyMetricException, (
-          'Expected at least one response through the proxy, but zero such '
-          'responses were received.')
-    results.AddValue(scalar.ScalarValue(
-        results.current_page, 'responses_via_proxy', 'count', via_count))
-
   def GetClientTypeFromRequests(self, tab):
     """Get the Chrome-Proxy client type value from requests made in this tab.
 
@@ -275,12 +256,56 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
         results.current_page, 'lo_fi_response', 'count', lo_fi_response_count))
     super(ChromeProxyMetric, self).AddResults(tab, results)
 
+
+  def AddResultsForLoFiCache(self, tab, results, is_lo_fi):
+    request_count = 0
+    response_count = 0
+
+    for resp in self.IterResponses(tab):
+      if not resp.response.url.endswith('png'):
+        continue
+      if not resp.response.request_headers:
+        continue
+
+      if is_lo_fi != resp.HasChromeProxyLoFiRequest():
+        raise ChromeProxyMetricException, (
+            '%s: LoFi %s expected in request header.' % (resp.response.url,
+                    '' if is_lo_fi else 'not'))
+      else:
+        request_count += 1
+
+      if is_lo_fi != resp.HasChromeProxyLoFiResponse():
+        raise ChromeProxyMetricException, (
+            '%s: LoFi %s expected in response header.' % (resp.response.url,
+                    '' if is_lo_fi else 'not'))
+      else:
+        response_count += 1
+
+      if is_lo_fi != (resp.content_length < 100):
+        raise ChromeProxyMetricException, (
+            'Image %s is %d bytes. Expecting %s than 100 bytes.' %
+            (resp.response.url, resp.content_length,
+             'less' if is_lo_fi else 'more'))
+
+    if request_count == 0:
+      raise ChromeProxyMetricException, (
+          'Expected at least one %s LoFi request, but zero such requests were '
+          'sent.' % ('' if is_lo_fi else 'non'))
+    if response_count == 0:
+      raise ChromeProxyMetricException, (
+          'Expected at least one %s LoFi response, but zero such responses '
+          'were received.' % ('' if is_lo_fi else 'non'))
+
+    super(ChromeProxyMetric, self).AddResults(tab, results)
+
   def AddResultsForLoFiPreview(self, tab, results):
-    lo_fi_request_count = 0
     lo_fi_preview_request_count = 0
+    lo_fi_preview_exp_request_count = 0
     lo_fi_preview_response_count = 0
 
     for resp in self.IterResponses(tab):
+      if '/csi?' in resp.response.url:
+        continue
       if 'favicon.ico' in resp.response.url:
         continue
       if resp.response.url.startswith('data:'):
@@ -288,19 +313,26 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
 
       if resp.HasChromeProxyLoFiPreviewRequest():
         lo_fi_preview_request_count += 1
-      elif resp.HasChromeProxyLoFiRequest():
-        lo_fi_request_count += 1
-      else:
-        raise ChromeProxyMetricException, (
-            '%s: LoFi not in request header.' % (resp.response.url))
+
+      if resp.HasChromeProxyLoFiPreviewExpRequest():
+        lo_fi_preview_exp_request_count += 1
 
       if resp.HasChromeProxyLoFiPreviewResponse():
         lo_fi_preview_response_count += 1
+
+      if resp.HasChromeProxyLoFiRequest():
+        raise ChromeProxyMetricException, (
+        '%s: Lo-Fi directive should not be in preview request header.' %
+        (resp.response.url))
 
     if lo_fi_preview_request_count == 0:
       raise ChromeProxyMetricException, (
           'Expected at least one LoFi preview request, but zero such requests '
           'were sent.')
+    if lo_fi_preview_exp_request_count == 0:
+      raise ChromeProxyMetricException, (
+          'Expected at least one LoFi preview exp=ignore_preview_blacklist '
+          'request, but zero such requests were sent.')
     if lo_fi_preview_response_count == 0:
       raise ChromeProxyMetricException, (
           'Expected at least one LoFi preview response, but zero such '
@@ -312,8 +344,8 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
             'count', lo_fi_preview_request_count))
     results.AddValue(
         scalar.ScalarValue(
-            results.current_page, 'lo_fi_request',
-            'count', lo_fi_request_count))
+            results.current_page, 'lo_fi_preview_exp_request',
+            'count', lo_fi_preview_exp_request_count))
     results.AddValue(
         scalar.ScalarValue(
             results.current_page, 'lo_fi_preview_response',

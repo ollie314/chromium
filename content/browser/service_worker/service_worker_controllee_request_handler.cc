@@ -4,9 +4,9 @@
 
 #include "content/browser/service_worker/service_worker_controllee_request_handler.h"
 
+#include <memory>
 #include <string>
 
-#include "base/memory/scoped_ptr.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_metrics.h"
@@ -20,7 +20,7 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/resource_response_info.h"
 #include "net/base/load_flags.h"
-#include "net/base/net_util.h"
+#include "net/base/url_util.h"
 #include "net/url_request/url_request.h"
 
 namespace content {
@@ -100,11 +100,13 @@ net::URLRequestJob* ServiceWorkerControlleeRequestHandler::MaybeCreateJob(
   }
 
   // It's for original request (A) or redirect case (B-a or B-b).
-  scoped_ptr<ServiceWorkerURLRequestJob> job(new ServiceWorkerURLRequestJob(
-      request, network_delegate, provider_host_->client_uuid(),
-      blob_storage_context_, resource_context, request_mode_, credentials_mode_,
-      redirect_mode_, is_main_resource_load_, request_context_type_,
-      frame_type_, body_, this));
+  std::unique_ptr<ServiceWorkerURLRequestJob> job(
+      new ServiceWorkerURLRequestJob(
+          request, network_delegate, provider_host_->client_uuid(),
+          blob_storage_context_, resource_context, request_mode_,
+          credentials_mode_, redirect_mode_, resource_type_,
+          request_context_type_, frame_type_, body_,
+          ServiceWorkerFetchType::FETCH, this));
   job_ = job->GetWeakPtr();
 
   resource_context_ = resource_context;
@@ -143,6 +145,8 @@ void ServiceWorkerControlleeRequestHandler::GetExtraResponseInfo(
       response_type_via_service_worker_;
   response_info->service_worker_start_time = service_worker_start_time_;
   response_info->service_worker_ready_time = service_worker_ready_time_;
+  response_info->is_in_cache_storage = response_is_in_cache_storage_;
+  response_info->cache_storage_cache_name = response_cache_storage_cache_name_;
 }
 
 void ServiceWorkerControlleeRequestHandler::PrepareForMainResource(
@@ -180,7 +184,7 @@ ServiceWorkerControlleeRequestHandler::DidLookupRegistrationForMainResource(
     return;
 
   const bool need_to_update = !force_update_started_ && registration &&
-                              registration->force_update_on_page_load();
+                              context_->force_update_on_page_load();
 
   if (provider_host_ && !need_to_update)
     provider_host_->SetAllowAssociation(true);
@@ -233,11 +237,9 @@ ServiceWorkerControlleeRequestHandler::DidLookupRegistrationForMainResource(
   if (active_version.get() &&
       active_version->status() == ServiceWorkerVersion::ACTIVATING) {
     provider_host_->SetAllowAssociation(false);
-    registration->active_version()->RegisterStatusChangeCallback(
-        base::Bind(&self::OnVersionStatusChanged,
-                   weak_factory_.GetWeakPtr(),
-                   registration,
-                   active_version));
+    registration->active_version()->RegisterStatusChangeCallback(base::Bind(
+        &self::OnVersionStatusChanged, weak_factory_.GetWeakPtr(),
+        base::RetainedRef(registration), base::RetainedRef(active_version)));
     TRACE_EVENT_ASYNC_END2(
         "ServiceWorker",
         "ServiceWorkerControlleeRequestHandler::PrepareForMainResource",
@@ -389,11 +391,15 @@ void ServiceWorkerControlleeRequestHandler::OnStartCompleted(
     const GURL& original_url_via_service_worker,
     blink::WebServiceWorkerResponseType response_type_via_service_worker,
     base::TimeTicks service_worker_start_time,
-    base::TimeTicks service_worker_ready_time) {
+    base::TimeTicks service_worker_ready_time,
+    bool response_is_in_cache_storage,
+    const std::string& response_cache_storage_cache_name) {
   was_fetched_via_service_worker_ = was_fetched_via_service_worker;
   was_fallback_required_ = was_fallback_required;
   original_url_via_service_worker_ = original_url_via_service_worker;
   response_type_via_service_worker_ = response_type_via_service_worker;
+  response_is_in_cache_storage_ = response_is_in_cache_storage;
+  response_cache_storage_cache_name_ = response_cache_storage_cache_name;
 
   // Update times, if not already set by a previous Job.
   if (service_worker_start_time_.is_null()) {
@@ -433,11 +439,6 @@ void ServiceWorkerControlleeRequestHandler::MainResourceLoadFailed() {
   provider_host_->NotifyControllerLost();
 }
 
-GURL ServiceWorkerControlleeRequestHandler::GetRequestingOrigin() {
-  DCHECK(provider_host_);
-  return provider_host_->document_url().GetOrigin();
-}
-
 void ServiceWorkerControlleeRequestHandler::ClearJob() {
   job_.reset();
   was_fetched_via_service_worker_ = false;
@@ -445,6 +446,8 @@ void ServiceWorkerControlleeRequestHandler::ClearJob() {
   original_url_via_service_worker_ = GURL();
   response_type_via_service_worker_ =
       blink::WebServiceWorkerResponseTypeDefault;
+  response_is_in_cache_storage_ = false;
+  response_cache_storage_cache_name_ = std::string();
 }
 
 }  // namespace content

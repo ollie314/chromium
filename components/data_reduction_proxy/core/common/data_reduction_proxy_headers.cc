@@ -31,7 +31,8 @@ const char kActionValueDelimiter = '=';
 
 const char kChromeProxyLoFiDirective[] = "q=low";
 const char kChromeProxyLoFiPreviewDirective[] = "q=preview";
-const char kChromeProxyLoFiExperimentDirective[] = "exp=lofi_active_control";
+const char kChromeProxyLoFiIngorePreviewBlacklistDirective[] =
+    "exp=ignore_preview_blacklist";
 
 const char kChromeProxyActionBlockOnce[] = "block-once";
 const char kChromeProxyActionBlock[] = "block";
@@ -70,8 +71,8 @@ const char* chrome_proxy_lo_fi_preview_directive() {
   return kChromeProxyLoFiPreviewDirective;
 }
 
-const char* chrome_proxy_lo_fi_experiment_directive() {
-  return kChromeProxyLoFiExperimentDirective;
+const char* chrome_proxy_lo_fi_ignore_preview_blacklist_directive() {
+  return kChromeProxyLoFiIngorePreviewBlacklistDirective;
 }
 
 bool GetDataReductionProxyActionValue(
@@ -82,7 +83,7 @@ bool GetDataReductionProxyActionValue(
   DCHECK(!action_prefix.empty());
   // A valid action does not include a trailing '='.
   DCHECK(action_prefix[action_prefix.size() - 1] != kActionValueDelimiter);
-  void* iter = NULL;
+  size_t iter = 0;
   std::string value;
   std::string prefix = action_prefix + kActionValueDelimiter;
 
@@ -106,7 +107,7 @@ bool ParseHeadersAndSetBypassDuration(const net::HttpResponseHeaders* headers,
   DCHECK(!action_prefix.empty());
   // A valid action does not include a trailing '='.
   DCHECK(action_prefix[action_prefix.size() - 1] != kActionValueDelimiter);
-  void* iter = NULL;
+  size_t iter = 0;
   std::string value;
   std::string prefix = action_prefix + kActionValueDelimiter;
 
@@ -188,7 +189,7 @@ bool HasDataReductionProxyViaHeader(const net::HttpResponseHeaders* headers,
   const size_t kVersionSize = 4;
   const char kDataReductionProxyViaValue[] = "Chrome-Compression-Proxy";
   size_t value_len = strlen(kDataReductionProxyViaValue);
-  void* iter = NULL;
+  size_t iter = 0;
   std::string value;
 
   // Case-sensitive comparison of |value|. Assumes the received protocol and the
@@ -258,10 +259,10 @@ DataReductionProxyBypassType GetDataReductionProxyBypassType(
         headers->response_code() < net::HTTP_INTERNAL_SERVER_ERROR) {
       // At this point, any 4xx response that is missing the via header
       // indicates an issue that is scoped to only the current request, so only
-      // bypass the data reduction proxy for a second.
-      // TODO(sclittle): Change this to only bypass the current request once
-      // that is fully supported, see http://crbug.com/418342.
-      data_reduction_proxy_info->bypass_duration = TimeDelta::FromSeconds(1);
+      // bypass the data reduction proxy for the current request.
+      data_reduction_proxy_info->bypass_all = true;
+      data_reduction_proxy_info->mark_proxies_as_bad = false;
+      data_reduction_proxy_info->bypass_duration = TimeDelta();
       return BYPASS_EVENT_TYPE_MISSING_VIA_HEADER_4XX;
     }
 
@@ -318,7 +319,7 @@ void GetDataReductionProxyHeaderWithFingerprintRemoved(
       kChromeProxyActionFingerprintChromeProxy) + kActionValueDelimiter;
 
   std::string value;
-  void* iter = NULL;
+  size_t iter = 0;
   while (headers->EnumerateHeader(&iter, kChromeProxyHeader, &value)) {
     if (value.size() > chrome_proxy_fingerprint_prefix.size()) {
       if (base::StartsWith(value, chrome_proxy_fingerprint_prefix,

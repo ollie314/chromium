@@ -98,8 +98,17 @@ class TabController {
   // in the same window will redraw on top of the the favicon area of any tab.
   virtual bool CanPaintThrobberToLayer() const = 0;
 
-  // Returns true if tabs painted in the rectangular light-bar style.
+  // Returns true if the tabs are in an incognito window.  This is used in
+  // determining which theme may have applied to them, so this determination
+  // should match the one in ThemeService::GetThemeProviderForProfile().
+  virtual bool IsIncognito() const = 0;
+
+  // Returns true if tabs should be painted in the rectangular light-bar style.
   virtual bool IsImmersiveStyle() const = 0;
+
+  // Returns COLOR_TOOLBAR_TOP_SEPARATOR[,_INACTIVE] depending on the activation
+  // state of the window.
+  virtual SkColor GetToolbarTopSeparatorColor() const = 0;
 
   // Returns the resource ID for the image to use as the tab background.
   // |custom_image| is an outparam set to true if either the tab or the frame
@@ -108,7 +117,7 @@ class TabController {
 
   // Adds private information to the tab's accessibility state.
   virtual void UpdateTabAccessibilityState(const Tab* tab,
-                                        ui::AXViewState* state) = 0;
+                                           ui::AXViewState* state) = 0;
 
  protected:
   virtual ~TabController() {}

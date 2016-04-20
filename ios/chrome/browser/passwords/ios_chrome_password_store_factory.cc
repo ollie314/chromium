@@ -4,6 +4,7 @@
 
 #include "ios/chrome/browser/passwords/ios_chrome_password_store_factory.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/command_line.h"
@@ -19,10 +20,10 @@
 #include "components/password_manager/core/browser/password_store_factory_util.h"
 #include "components/sync_driver/sync_service.h"
 #include "ios/chrome/browser/browser_state/browser_state_otr_helper.h"
+#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/sync/glue/sync_start_util.h"
 #include "ios/chrome/browser/sync/ios_chrome_profile_sync_service_factory.h"
 #include "ios/chrome/browser/web_data_service_factory.h"
-#include "ios/public/provider/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/web/public/web_thread.h"
 
 // static
@@ -73,7 +74,7 @@ IOSChromePasswordStoreFactory::~IOSChromePasswordStoreFactory() {}
 scoped_refptr<RefcountedKeyedService>
 IOSChromePasswordStoreFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
-  scoped_ptr<password_manager::LoginDatabase> login_db(
+  std::unique_ptr<password_manager::LoginDatabase> login_db(
       password_manager::CreateLoginDatabase(context->GetStatePath()));
 
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner(

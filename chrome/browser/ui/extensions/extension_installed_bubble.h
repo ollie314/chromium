@@ -28,6 +28,8 @@ class Extension;
 //                      bar which is shown while the Bubble is shown.
 //    GENERIC        -> The app menu. This case includes page actions that
 //                      don't specify a default icon.
+// NB: This bubble is using the temporarily-deprecated bubble manager interface
+// BubbleUi. Do not copy this pattern.
 class ExtensionInstalledBubble : public BubbleDelegate {
  public:
   // The behavior and content of this Bubble comes in these varieties:
@@ -74,14 +76,15 @@ class ExtensionInstalledBubble : public BubbleDelegate {
   const Browser* browser() const { return browser_; }
   const SkBitmap& icon() const { return icon_; }
   BubbleType type() const { return type_; }
-  bool has_command_keybinding() const { return action_command_; }
+  bool has_command_keybinding() const { return !!action_command_; }
   int options() const { return options_; }
   AnchorPosition anchor_position() const { return anchor_position_; }
 
   // BubbleDelegate:
-  scoped_ptr<BubbleUi> BuildBubbleUi() override;
+  std::unique_ptr<BubbleUi> BuildBubbleUi() override;
   bool ShouldClose(BubbleCloseReason reason) const override;
   std::string GetName() const override;
+  const content::RenderFrameHost* OwningFrame() const override;
 
   // Returns false if the bubble could not be shown immediately, because of an
   // animation (eg. adding a new browser action to the toolbar).
@@ -108,7 +111,7 @@ class ExtensionInstalledBubble : public BubbleDelegate {
   AnchorPosition anchor_position_;
 
   // The command to execute the extension action, if one exists.
-  scoped_ptr<extensions::Command> action_command_;
+  std::unique_ptr<extensions::Command> action_command_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionInstalledBubble);
 };

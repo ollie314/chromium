@@ -24,6 +24,7 @@
 #include "content/renderer/p2p/socket_client_impl.h"
 #include "content/renderer/p2p/socket_dispatcher.h"
 #include "jingle/glue/utils.h"
+#include "net/base/ip_address.h"
 #include "third_party/webrtc/base/asyncpacketsocket.h"
 
 namespace content {
@@ -317,7 +318,7 @@ bool IpcPacketSocket::Init(P2PSocketType type,
 
     if (remote_address.IsUnresolvedIP()) {
       remote_endpoint =
-          net::IPEndPoint(net::IPAddressNumber(), remote_address.port());
+          net::IPEndPoint(net::IPAddress(), remote_address.port());
     } else {
       if (!jingle_glue::SocketAddressToIPEndPoint(remote_address,
                                                   &remote_endpoint)) {
@@ -420,7 +421,7 @@ int IpcPacketSocket::SendTo(const void *data, size_t data_size,
 
   net::IPEndPoint address_chrome;
   if (address.IsUnresolvedIP()) {
-    address_chrome = net::IPEndPoint(net::IPAddressNumber(), address.port());
+    address_chrome = net::IPEndPoint(net::IPAddress(), address.port());
   } else {
     if (!jingle_glue::SocketAddressToIPEndPoint(address, &address_chrome)) {
       LOG(WARNING) << "Failed to convert remote address to IPEndPoint: address="
@@ -582,7 +583,7 @@ void IpcPacketSocket::OnIncomingTcpConnection(
     P2PSocketClient* client) {
   DCHECK_EQ(base::MessageLoop::current(), message_loop_);
 
-  scoped_ptr<IpcPacketSocket> socket(new IpcPacketSocket());
+  std::unique_ptr<IpcPacketSocket> socket(new IpcPacketSocket());
 
   rtc::SocketAddress remote_address;
   if (!jingle_glue::IPEndPointToSocketAddress(address, &remote_address)) {
@@ -745,7 +746,7 @@ rtc::AsyncPacketSocket* IpcPacketSocketFactory::CreateUdpSocket(
   rtc::SocketAddress crome_address;
   P2PSocketClientImpl* socket_client =
       new P2PSocketClientImpl(socket_dispatcher_);
-  scoped_ptr<IpcPacketSocket> socket(new IpcPacketSocket());
+  std::unique_ptr<IpcPacketSocket> socket(new IpcPacketSocket());
   // TODO(sergeyu): Respect local_address and port limits here (need
   // to pass them over IPC channel to the browser).
   if (!socket->Init(P2P_SOCKET_UDP, socket_client,
@@ -768,7 +769,7 @@ rtc::AsyncPacketSocket* IpcPacketSocketFactory::CreateServerTcpSocket(
       P2P_SOCKET_STUN_TCP_SERVER : P2P_SOCKET_TCP_SERVER;
   P2PSocketClientImpl* socket_client =
       new P2PSocketClientImpl(socket_dispatcher_);
-  scoped_ptr<IpcPacketSocket> socket(new IpcPacketSocket());
+  std::unique_ptr<IpcPacketSocket> socket(new IpcPacketSocket());
   if (!socket->Init(type, socket_client, local_address,
                     rtc::SocketAddress())) {
     return NULL;
@@ -794,7 +795,7 @@ rtc::AsyncPacketSocket* IpcPacketSocketFactory::CreateClientTcpSocket(
   }
   P2PSocketClientImpl* socket_client =
       new P2PSocketClientImpl(socket_dispatcher_);
-  scoped_ptr<IpcPacketSocket> socket(new IpcPacketSocket());
+  std::unique_ptr<IpcPacketSocket> socket(new IpcPacketSocket());
   if (!socket->Init(type, socket_client, local_address, remote_address))
     return NULL;
   return socket.release();
@@ -802,8 +803,8 @@ rtc::AsyncPacketSocket* IpcPacketSocketFactory::CreateClientTcpSocket(
 
 rtc::AsyncResolverInterface*
 IpcPacketSocketFactory::CreateAsyncResolver() {
-  scoped_ptr<AsyncAddressResolverImpl> resolver(
-    new AsyncAddressResolverImpl(socket_dispatcher_));
+  std::unique_ptr<AsyncAddressResolverImpl> resolver(
+      new AsyncAddressResolverImpl(socket_dispatcher_));
   return resolver.release();
 }
 

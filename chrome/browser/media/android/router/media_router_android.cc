@@ -4,7 +4,9 @@
 
 #include "chrome/browser/media/android/router/media_router_android.h"
 
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
@@ -12,12 +14,15 @@
 #include "base/android/jni_string.h"
 #include "base/guid.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/scoped_vector.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/media/router/media_routes_observer.h"
 #include "chrome/browser/media/router/media_sinks_observer.h"
 #include "chrome/browser/media/router/presentation_session_messages_observer.h"
+#include "chrome/browser/media/router/route_request_result.h"
+#include "content/public/browser/browser_context.h"
 #include "jni/ChromeMediaRouter_jni.h"
 #include "url/gurl.h"
 
@@ -71,23 +76,28 @@ void MediaRouterAndroid::CreateRoute(
     const MediaSink::Id& sink_id,
     const GURL& origin,
     content::WebContents* web_contents,
-    const std::vector<MediaRouteResponseCallback>& callbacks) {
+    const std::vector<MediaRouteResponseCallback>& callbacks,
+    base::TimeDelta timeout,
+    bool off_the_record) {
+  // TODO(avayvod): Implement timeouts (crbug.com/583036).
   if (!origin.is_valid()) {
+    std::unique_ptr<RouteRequestResult> result = RouteRequestResult::FromError(
+        "Invalid origin", RouteRequestResult::INVALID_ORIGIN);
     for (const MediaRouteResponseCallback& callback : callbacks)
-      callback.Run(nullptr, "", "Invalid origin");
+      callback.Run(*result);
     return;
   }
 
-  // TODO(avayvod): unify presentation id generation code between platforms.
-  // https://crbug.com/522239
-  std::string presentation_id("mr_");
-  presentation_id += base::GenerateGUID();
+  std::string presentation_id = MediaRouterBase::CreatePresentationId();
 
   int tab_id = -1;
   TabAndroid* tab = web_contents
       ? TabAndroid::FromWebContents(web_contents) : nullptr;
   if (tab)
     tab_id = tab->GetAndroidId();
+
+  bool is_incognito = web_contents
+      && web_contents->GetBrowserContext()->IsOffTheRecord();
 
   MediaRouteRequest* request = new MediaRouteRequest(
       MediaSource(source_id),
@@ -113,6 +123,7 @@ void MediaRouterAndroid::CreateRoute(
       jpresentation_id.obj(),
       jorigin.obj(),
       tab_id,
+      is_incognito,
       route_request_id);
 }
 
@@ -121,7 +132,9 @@ void MediaRouterAndroid::ConnectRouteByRouteId(
     const MediaRoute::Id& route_id,
     const GURL& origin,
     content::WebContents* web_contents,
-    const std::vector<MediaRouteResponseCallback>& callbacks) {
+    const std::vector<MediaRouteResponseCallback>& callbacks,
+    base::TimeDelta timeout,
+    bool off_the_record) {
   NOTIMPLEMENTED();
 }
 
@@ -130,10 +143,15 @@ void MediaRouterAndroid::JoinRoute(
     const std::string& presentation_id,
     const GURL& origin,
     content::WebContents* web_contents,
-    const std::vector<MediaRouteResponseCallback>& callbacks) {
+    const std::vector<MediaRouteResponseCallback>& callbacks,
+    base::TimeDelta timeout,
+    bool off_the_record) {
+  // TODO(avayvod): Implement timeouts (crbug.com/583036).
   if (!origin.is_valid()) {
+    std::unique_ptr<RouteRequestResult> result = RouteRequestResult::FromError(
+        "Invalid origin", RouteRequestResult::INVALID_ORIGIN);
     for (const MediaRouteResponseCallback& callback : callbacks)
-      callback.Run(nullptr, "", "Invalid origin");
+      callback.Run(*result);
     return;
   }
 
@@ -176,6 +194,7 @@ void MediaRouterAndroid::TerminateRoute(const MediaRoute::Id& route_id) {
           base::android::ConvertUTF8ToJavaString(env, route_id);
   Java_ChromeMediaRouter_closeRoute(
       env, java_media_router_.obj(), jroute_id.obj());
+  OnRouteTerminated(route_id);
 }
 
 void MediaRouterAndroid::SendRouteMessage(
@@ -199,7 +218,7 @@ void MediaRouterAndroid::SendRouteMessage(
 
 void MediaRouterAndroid::SendRouteBinaryMessage(
     const MediaRoute::Id& route_id,
-    scoped_ptr<std::vector<uint8_t>> data,
+    std::unique_ptr<std::vector<uint8_t>> data,
     const SendRouteMessageCallback& callback) {
   int callback_id =
       message_callbacks_.Add(new SendRouteMessageCallback(callback));
@@ -221,17 +240,15 @@ void MediaRouterAndroid::ClearIssue(const Issue::Id& issue_id) {
   NOTIMPLEMENTED();
 }
 
+void MediaRouterAndroid::OnUserGesture() {
+}
+
 void MediaRouterAndroid::DetachRoute(const MediaRoute::Id& route_id) {
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jstring> jroute_id =
           base::android::ConvertUTF8ToJavaString(env, route_id);
   Java_ChromeMediaRouter_detachRoute(
       env, java_media_router_.obj(), jroute_id.obj());
-}
-
-bool MediaRouterAndroid::HasLocalDisplayRoute() const {
-  NOTIMPLEMENTED();
-  return false;
 }
 
 bool MediaRouterAndroid::RegisterMediaSinksObserver(
@@ -241,7 +258,7 @@ bool MediaRouterAndroid::RegisterMediaSinksObserver(
       sinks_observers_.get(source_id);
   if (!observer_list) {
     observer_list = new base::ObserverList<MediaSinksObserver>;
-    sinks_observers_.add(source_id, make_scoped_ptr(observer_list));
+    sinks_observers_.add(source_id, base::WrapUnique(observer_list));
   } else {
     DCHECK(!observer_list->HasObserver(observer));
   }
@@ -306,7 +323,7 @@ void MediaRouterAndroid::RegisterPresentationSessionMessagesObserver(
   auto* observer_list = messages_observers_.get(route_id);
   if (!observer_list) {
     observer_list = new base::ObserverList<PresentationSessionMessagesObserver>;
-    messages_observers_.add(route_id, make_scoped_ptr(observer_list));
+    messages_observers_.add(route_id, base::WrapUnique(observer_list));
   } else {
     DCHECK(!observer_list->HasObserver(observer));
   }
@@ -323,16 +340,6 @@ void MediaRouterAndroid::UnregisterPresentationSessionMessagesObserver(
   observer_list->RemoveObserver(observer);
   if (!observer_list->might_have_observers())
     messages_observers_.erase(route_id);
-}
-
-void MediaRouterAndroid::RegisterLocalMediaRoutesObserver(
-    LocalMediaRoutesObserver* observer) {
-  NOTIMPLEMENTED();
-}
-
-void MediaRouterAndroid::UnregisterLocalMediaRoutesObserver(
-    LocalMediaRoutesObserver* observer) {
-  NOTIMPLEMENTED();
 }
 
 void MediaRouterAndroid::OnSinksReceived(
@@ -358,8 +365,9 @@ void MediaRouterAndroid::OnSinksReceived(
   std::string source_urn = ConvertJavaStringToUTF8(env, jsource_urn);
   auto it = sinks_observers_.find(source_urn);
   if (it != sinks_observers_.end()) {
+    // TODO(imcheng): Pass origins to OnSinksUpdated (crbug.com/594858).
     FOR_EACH_OBSERVER(MediaSinksObserver, *it->second,
-                      OnSinksReceived(sinks_converted));
+                      OnSinksUpdated(sinks_converted, std::vector<GURL>()));
   }
 }
 
@@ -380,8 +388,12 @@ void MediaRouterAndroid::OnRouteCreated(
                    jis_local, std::string(),
                    true);  // TODO(avayvod): Populate for_display.
 
+  // TODO(crbug.com/588239): Call OnOffTheRecordRouteCreated() if |route|
+  // is OTR
+  std::unique_ptr<RouteRequestResult> result = RouteRequestResult::FromSuccess(
+      base::WrapUnique(new MediaRoute(route)), request->presentation_id);
   for (const MediaRouteResponseCallback& callback : request->callbacks)
-    callback.Run(&route, request->presentation_id, std::string());
+    callback.Run(*result);
 
   route_requests_.Remove(jroute_request_id);
 
@@ -399,10 +411,12 @@ void MediaRouterAndroid::OnRouteRequestError(
   if (!request)
     return;
 
-  std::string error_text = ConvertJavaStringToUTF8(env, jerror_text);
-
+  // TODO(imcheng): Provide a more specific result code.
+  std::unique_ptr<RouteRequestResult> result =
+      RouteRequestResult::FromError(ConvertJavaStringToUTF8(env, jerror_text),
+                                    RouteRequestResult::UNKNOWN_ERROR);
   for (const MediaRouteResponseCallback& callback : request->callbacks)
-    callback.Run(nullptr, std::string(), error_text);
+    callback.Run(*result);
 
   route_requests_.Remove(jroute_request_id);
 }
@@ -420,6 +434,23 @@ void MediaRouterAndroid::OnRouteClosed(
 
   FOR_EACH_OBSERVER(MediaRoutesObserver, routes_observers_,
       OnRoutesUpdated(active_routes_, std::vector<MediaRoute::Id>()));
+  NotifyPresentationConnectionStateChange(
+      route_id, content::PRESENTATION_CONNECTION_STATE_TERMINATED);
+}
+
+void MediaRouterAndroid::OnRouteClosedWithError(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& jmedia_route_id,
+    const JavaParamRef<jstring>& jmessage) {
+  MediaRoute::Id route_id = ConvertJavaStringToUTF8(env, jmedia_route_id);
+  std::string message = ConvertJavaStringToUTF8(env, jmessage);
+  NotifyPresentationConnectionClose(
+      route_id,
+      content::PRESENTATION_CONNECTION_CLOSE_REASON_CONNECTION_ERROR,
+      message);
+
+  OnRouteClosed(env, obj, jmedia_route_id);
 }
 
 void MediaRouterAndroid::OnMessageSentResult(JNIEnv* env,
@@ -442,7 +473,7 @@ void MediaRouterAndroid::OnMessage(JNIEnv* env,
     return;
 
   ScopedVector<content::PresentationSessionMessage> session_messages;
-  scoped_ptr<content::PresentationSessionMessage> message(
+  std::unique_ptr<content::PresentationSessionMessage> message(
       new content::PresentationSessionMessage(content::TEXT));
   message->message = ConvertJavaStringToUTF8(env, jmessage);
   session_messages.push_back(std::move(message));

@@ -66,6 +66,16 @@ no-historical-ligatures
 contextual
 no-contextual
 
+// font-variant-caps:
+//
+// normal
+small-caps
+all-small-caps
+petite-caps
+all-petite-caps
+unicase
+titling-caps
+
 //
 // font-weigth
 //
@@ -188,8 +198,9 @@ windowtext
 currentcolor
 grey
 //
-// colors in non strict mode
--webkit-text mode=QuirksOrUASheet
+// Value used to implement the behavior in:
+// https://quirks.spec.whatwg.org/#the-tables-inherit-color-from-body-quirk
+-internal-quirk-inherit
 //
 // background-repeat
 //
@@ -200,7 +211,7 @@ no-repeat
 // round
 // space
 //
-// -webkit-background-composite
+// -webkit-mask-composite
 //
 clear
 copy
@@ -241,6 +252,7 @@ justify
 -webkit-right
 -webkit-center
 -webkit-match-parent
+-internal-center
 //
 // text-justify
 //
@@ -641,10 +653,6 @@ searchfield-decoration
 searchfield-results-decoration
 searchfield-cancel-button
 textfield
-relevancy-level-indicator
-continuous-capacity-level-indicator
-discrete-capacity-level-indicator
-rating-level-indicator
 textarea
 // An appearance value that should not be accepted by the parser:
 caps-lock-indicator
@@ -976,6 +984,7 @@ linear-gradient
 radial-gradient
 repeating-linear-gradient
 repeating-radial-gradient
+paint
 -webkit-cross-fade
 -webkit-gradient
 -webkit-linear-gradient
@@ -1063,5 +1072,16 @@ paint
 style
 layout
 
+// grid auto-repeat
+auto-fill
+auto-fit
+
 var
 -internal-variable-value
+
+// break-before, break-after, break-inside
+avoid-page
+page
+recto
+verso
+avoid-column

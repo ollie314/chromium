@@ -41,12 +41,8 @@ static_library("user_prefs_tracked") {
     "tracked_split_preference.h",
   ]
 
-  if (is_win || (is_mac && !is_ios)) {
+  if (is_win || is_mac) {
     sources -= [ "device_id_stub.cc" ]
-  }
-
-  if (is_ios) {
-    sources -= [ "device_id_mac.cc" ]
   }
 
   # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
@@ -54,8 +50,8 @@ static_library("user_prefs_tracked") {
 
   deps = [
     "//base:base",
-    "//base:prefs",
     "//components/pref_registry",
+    "//components/prefs",
     "//crypto:crypto",
   ]
 }
@@ -89,8 +85,7 @@ source_set("unit_tests") {
     ":user_prefs_tracked",
     ":user_prefs_tracked_test_support",
     "//base:base",
-    "//base:prefs",
-    "//base:prefs_test_support",
+    "//components/prefs:test_support",
     "//testing/gtest",
   ]
 }

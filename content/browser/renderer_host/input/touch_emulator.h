@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_RENDERER_HOST_INPUT_TOUCH_EMULATOR_H_
 
 #include "base/macros.h"
+#include "base/memory/scoped_ptr.h"
 #include "content/browser/renderer_host/input/touch_emulator_client.h"
 #include "content/common/cursors/webcursor.h"
 #include "content/common/input/input_event_ack_state.h"
@@ -30,7 +31,7 @@ class CONTENT_EXPORT TouchEmulator : public ui::GestureProviderClient {
 
   // Note that TouchEmulator should always listen to touch events and their acks
   // (even in disabled state) to track native stream presence.
-  bool enabled() const { return gesture_provider_; }
+  bool enabled() const { return !!gesture_provider_; }
 
   // Returns |true| if the event was consumed. Consumed event should not
   // propagate any further.
@@ -80,7 +81,7 @@ class CONTENT_EXPORT TouchEmulator : public ui::GestureProviderClient {
   // Emulator is enabled iff gesture provider is created.
   // Disabled emulator does only process touch acks left from previous
   // emulation. It does not intercept any events.
-  scoped_ptr<ui::FilteredGestureProvider> gesture_provider_;
+  std::unique_ptr<ui::FilteredGestureProvider> gesture_provider_;
   ui::GestureProviderConfigType gesture_provider_config_type_;
   bool double_tap_enabled_;
 

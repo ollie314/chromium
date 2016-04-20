@@ -49,18 +49,18 @@ using testing::Return;
 namespace blink {
 namespace {
 
-class MockWebFrameClient : public WebFrameClient {
+class MockWebFrameClient : public FrameTestHelpers::TestWebFrameClient {
 public:
     ~MockWebFrameClient() override { }
 
-    MOCK_METHOD1(userAgentOverride, WebString(WebLocalFrame*));
+    MOCK_METHOD0(userAgentOverride, WebString());
 };
 
 class FrameLoaderClientImplTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        ON_CALL(m_webFrameClient, userAgentOverride(_)).WillByDefault(Return(WebString()));
+        ON_CALL(m_webFrameClient, userAgentOverride()).WillByDefault(Return(WebString()));
 
         FrameTestHelpers::TestWebViewClient webViewClient;
         m_webView = WebView::create(&webViewClient);
@@ -101,12 +101,12 @@ TEST_F(FrameLoaderClientImplTest, UserAgentOverride)
     const WebString overrideUserAgent = WebString::fromUTF8("dummy override");
 
     // Override the user agent and make sure we get it back.
-    EXPECT_CALL(webFrameClient(), userAgentOverride(_)).WillOnce(Return(overrideUserAgent));
+    EXPECT_CALL(webFrameClient(), userAgentOverride()).WillOnce(Return(overrideUserAgent));
     EXPECT_TRUE(overrideUserAgent.equals(userAgent()));
     Mock::VerifyAndClearExpectations(&webFrameClient());
 
     // Remove the override and make sure we get the original back.
-    EXPECT_CALL(webFrameClient(), userAgentOverride(_)).WillOnce(Return(WebString()));
+    EXPECT_CALL(webFrameClient(), userAgentOverride()).WillOnce(Return(WebString()));
     EXPECT_TRUE(defaultUserAgent.equals(userAgent()));
 }
 

@@ -7,20 +7,18 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "net/base/network_delegate_impl.h"
-
-#if !defined(OS_IOS)
 #include "components/data_use_measurement/content/data_use_measurement.h"
-#endif
+#include "components/metrics/data_use_tracker.h"
+#include "net/base/network_delegate_impl.h"
 
 class ChromeExtensionsNetworkDelegate;
 class PrefService;
@@ -70,19 +68,19 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
   // |enable_referrers| (and all of the other optional PrefMembers) should be
   // initialized on the UI thread (see below) beforehand. This object's owner is
   // responsible for cleaning them up at shutdown.
-  ChromeNetworkDelegate(extensions::EventRouterForwarder* event_router,
-                        BooleanPrefMember* enable_referrers);
+  ChromeNetworkDelegate(
+      extensions::EventRouterForwarder* event_router,
+      BooleanPrefMember* enable_referrers,
+      const metrics::UpdateUsagePrefCallbackType& metrics_data_use_forwarder);
   ~ChromeNetworkDelegate() override;
 
   // Pass through to ChromeExtensionsNetworkDelegate::set_extension_info_map().
   void set_extension_info_map(extensions::InfoMap* extension_info_map);
 
-#if defined(ENABLE_CONFIGURATION_POLICY)
   void set_url_blacklist_manager(
       const policy::URLBlacklistManager* url_blacklist_manager) {
     url_blacklist_manager_ = url_blacklist_manager;
   }
-#endif
 
   // If |profile| is NULL or not set, events will be broadcast to all profiles,
   // otherwise they will only be sent to the specified profile.
@@ -196,13 +194,13 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
                             int64_t tx_bytes,
                             int64_t rx_bytes);
 
-  scoped_ptr<ChromeExtensionsNetworkDelegate> extensions_delegate_;
+  std::unique_ptr<ChromeExtensionsNetworkDelegate> extensions_delegate_;
 
   void* profile_;
   base::FilePath profile_path_;
   scoped_refptr<content_settings::CookieSettings> cookie_settings_;
 
-  scoped_ptr<chrome_browser_net::ConnectInterceptor> connect_interceptor_;
+  std::unique_ptr<chrome_browser_net::ConnectInterceptor> connect_interceptor_;
 
   // Weak, owned by our owner.
   BooleanPrefMember* enable_referrers_;
@@ -211,18 +209,14 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
   BooleanPrefMember* force_youtube_safety_mode_;
 
   // Weak, owned by our owner.
-#if defined(ENABLE_CONFIGURATION_POLICY)
   const policy::URLBlacklistManager* url_blacklist_manager_;
-#endif
   domain_reliability::DomainReliabilityMonitor* domain_reliability_monitor_;
 
   // When true, allow access to all file:// URLs.
   static bool g_allow_file_access_;
 
-// Component to measure data use.
-#if !defined(OS_IOS)
+  // Component to measure data use.
   data_use_measurement::DataUseMeasurement data_use_measurement_;
-#endif
 
   bool experimental_web_platform_features_enabled_;
 

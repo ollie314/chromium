@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
@@ -24,13 +25,12 @@
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
-#include "components/sync_driver/backup_rollback_controller.h"
 #include "components/sync_driver/data_type_controller.h"
 #include "components/sync_driver/data_type_manager.h"
 #include "components/sync_driver/data_type_manager_observer.h"
 #include "components/sync_driver/data_type_status_table.h"
-#include "components/sync_driver/device_info_sync_service.h"
 #include "components/sync_driver/glue/sync_backend_host.h"
 #include "components/sync_driver/local_device_info_provider.h"
 #include "components/sync_driver/protocol_event_observer.h"
@@ -70,11 +70,16 @@ class SessionsSyncManager;
 namespace sync_driver {
 class DataTypeManager;
 class DeviceInfoSyncService;
+class DeviceInfoTracker;
 class LocalDeviceInfoProvider;
 class OpenTabsUIDelegate;
 class SyncApiComponentFactory;
 class SyncClient;
 }  // namespace sync_driver
+
+namespace sync_driver_v2 {
+class DeviceInfoService;
+}
 
 namespace syncer {
 class BaseTransaction;
@@ -159,21 +164,15 @@ class EncryptedData;
 //   types until the user has finished setting up sync. There are two APIs
 //   that control the initial sync download:
 //
-//    * SetSyncSetupCompleted()
+//    * SetFirstSetupComplete()
 //    * SetSetupInProgress()
 //
-//   SetSyncSetupCompleted() should be called once the user has finished setting
+//   SetFirstSetupComplete() should be called once the user has finished setting
 //   up sync at least once on their account. SetSetupInProgress(true) should be
 //   called while the user is actively configuring their account, and then
 //   SetSetupInProgress(false) should be called when configuration is complete.
-//   When SetSyncSetupCompleted() == false, but SetSetupInProgress(true) has
-//   been called, then the sync engine knows not to download any user data.
-//
-//   When initial sync is complete, the UI code should call
-//   SetSyncSetupCompleted() followed by SetSetupInProgress(false) - this will
-//   tell the sync engine that setup is completed and it can begin downloading
-//   data from the sync server.
-//
+//   Once both these conditions have been met, CanConfigureDataTypes() will
+//   return true and datatype configuration can begin.
 class ProfileSyncService : public sync_driver::SyncService,
                            public sync_driver::SyncFrontend,
                            public sync_driver::SyncPrefObserver,
@@ -182,7 +181,8 @@ class ProfileSyncService : public sync_driver::SyncService,
                            public KeyedService,
                            public OAuth2TokenService::Consumer,
                            public OAuth2TokenService::Observer,
-                           public SigninManagerBase::Observer {
+                           public SigninManagerBase::Observer,
+                           public GaiaCookieManagerService::Observer {
  public:
   typedef browser_sync::SyncBackendHost::Status Status;
   typedef base::Callback<bool(void)> PlatformSyncAllowedProvider;
@@ -219,16 +219,14 @@ class ProfileSyncService : public sync_driver::SyncService,
     SETUP_INCOMPLETE,
     DATATYPES_NOT_INITIALIZED,
     INITIALIZED,
-    BACKUP_USER_DATA,
-    ROLLBACK_USER_DATA,
     UNKNOWN_ERROR,
   };
 
-  enum BackendMode {
-    IDLE,       // No backend.
-    SYNC,       // Backend for syncing.
-    BACKUP,     // Backend for backup.
-    ROLLBACK    // Backend for rollback.
+  // If AUTO_START, sync will set IsFirstSetupComplete() automatically and sync
+  // will begin syncing without the user needing to confirm sync settings.
+  enum StartBehavior {
+    AUTO_START,
+    MANUAL_START,
   };
 
   // Bundles the arguments for ProfileSyncService construction. This is a
@@ -243,8 +241,8 @@ class ProfileSyncService : public sync_driver::SyncService,
     scoped_ptr<sync_driver::SyncClient> sync_client;
     scoped_ptr<SigninManagerWrapper> signin_wrapper;
     ProfileOAuth2TokenService* oauth2_token_service = nullptr;
-    browser_sync::ProfileSyncServiceStartBehavior start_behavior =
-        browser_sync::MANUAL_START;
+    GaiaCookieManagerService* gaia_cookie_manager_service = nullptr;
+    StartBehavior start_behavior = MANUAL_START;
     syncer::NetworkTimeUpdateCallback network_time_update_callback;
     base::FilePath base_directory;
     scoped_refptr<net::URLRequestContextGetter> url_request_context;
@@ -267,7 +265,7 @@ class ProfileSyncService : public sync_driver::SyncService,
   void Initialize();
 
   // sync_driver::SyncService implementation
-  bool HasSyncSetupCompleted() const override;
+  bool IsFirstSetupComplete() const override;
   bool IsSyncAllowed() const override;
   bool IsSyncActive() const override;
   void TriggerRefresh(const syncer::ModelTypeSet& types) override;
@@ -280,7 +278,7 @@ class ProfileSyncService : public sync_driver::SyncService,
   syncer::ModelTypeSet GetPreferredDataTypes() const override;
   void OnUserChoseDatatypes(bool sync_everything,
                             syncer::ModelTypeSet chosen_types) override;
-  void SetSyncSetupCompleted() override;
+  void SetFirstSetupComplete() override;
   bool IsFirstSetupInProgress() const override;
   void SetSetupInProgress(bool setup_in_progress) override;
   bool IsSetupInProgress() const override;
@@ -350,6 +348,9 @@ class ProfileSyncService : public sync_driver::SyncService,
   // Returns the SyncableService for syncer::DEVICE_INFO.
   virtual syncer::SyncableService* GetDeviceInfoSyncableService();
 
+  // Returns the ModelTypeService for syncer::DEVICE_INFO.
+  virtual syncer_v2::ModelTypeService* GetDeviceInfoService();
+
   // Returns synced devices tracker.
   virtual sync_driver::DeviceInfoTracker* GetDeviceInfoTracker() const;
 
@@ -409,6 +410,11 @@ class ProfileSyncService : public sync_driver::SyncService,
   void GoogleSignedOut(const std::string& account_id,
                        const std::string& username) override;
 
+  // GaiaCookieManagerService::Observer implementation.
+  void OnGaiaAccountsInCookieUpdated(
+      const std::vector<gaia::ListedAccount>& accounts,
+      const GoogleServiceAuthError& error) override;
+
   // Get the sync status code.
   SyncStatusSummary QuerySyncStatusSummary();
 
@@ -428,7 +434,7 @@ class ProfileSyncService : public sync_driver::SyncService,
   // Returns true if sync is requested to be running by the user.
   // Note that this does not mean that sync WILL be running; e.g. if
   // IsSyncAllowed() is false then sync won't start, and if the user
-  // doesn't confirm their settings (HasSyncSetupCompleted), sync will
+  // doesn't confirm their settings (IsFirstSetupComplete), sync will
   // never become active. Use IsSyncActive to see if sync is running.
   virtual bool IsSyncRequested() const;
 
@@ -518,9 +524,6 @@ class ProfileSyncService : public sync_driver::SyncService,
 
   SigninManagerBase* signin() const;
 
-  // Used by tests.
-  bool auto_start_enabled() const;
-
   SyncErrorController* sync_error_controller() {
     return sync_error_controller_.get();
   }
@@ -567,11 +570,6 @@ class ProfileSyncService : public sync_driver::SyncService,
 
   virtual bool IsDataTypeControllerRunning(syncer::ModelType type) const;
 
-  // Returns the current mode the backend is in.
-  BackendMode backend_mode() const;
-
-  base::Time GetDeviceBackupTimeForTesting() const;
-
   // This triggers a Directory::SaveChanges() call on the sync thread.
   // It should be used to persist data to disk when the process might be
   // killed in the near future.
@@ -608,10 +606,6 @@ class ProfileSyncService : public sync_driver::SyncService,
 
   virtual syncer::WeakHandle<syncer::JsEventHandler> GetJsEventHandler();
 
-  const sync_driver::DataTypeController::TypeMap& data_type_controllers() {
-    return data_type_controllers_;
-  }
-
   // Helper method for managing encryption UI.
   bool IsEncryptedDatatypeEnabled() const;
 
@@ -622,8 +616,6 @@ class ProfileSyncService : public sync_driver::SyncService,
       const tracked_objects::Location& from_here,
       const std::string& message,
       bool delete_sync_database);
-
-  virtual bool NeedBackup() const;
 
   // This is a cache of the last authentication response we received from the
   // sync server. The UI queries this to display appropriate messaging to the
@@ -733,9 +725,8 @@ class ProfileSyncService : public sync_driver::SyncService,
 
   void ClearUnrecoverableError();
 
-  // Starts up the backend sync components. |mode| specifies the kind of
-  // backend to start, one of SYNC, BACKUP or ROLLBACK.
-  virtual void StartUpSlowBackendComponents(BackendMode mode);
+  // Starts up the backend sync components.
+  virtual void StartUpSlowBackendComponents();
 
   // Collects preferred sync data types from |preference_providers_|.
   syncer::ModelTypeSet GetDataTypesFromPreferenceProviders() const;
@@ -759,9 +750,6 @@ class ProfileSyncService : public sync_driver::SyncService,
                                     bool delete_sync_database,
                                     UnrecoverableErrorReason reason);
 
-  // Returns the type of manager to use according to |backend_mode_|.
-  syncer::SyncManagerFactory::MANAGER_TYPE GetManagerType() const;
-
   // Update UMA for syncing backend.
   void UpdateBackendInitUMA(bool success);
 
@@ -771,27 +759,18 @@ class ProfileSyncService : public sync_driver::SyncService,
   // Whether sync has been authenticated with an account ID.
   bool IsSignedIn() const;
 
+  // The backend can only start if sync can start and has an auth token. This is
+  // different fron CanSyncStart because it represents whether the backend can
+  // be started at this moment, whereas CanSyncStart represents whether sync can
+  // conceptually start without further user action (acquiring a token is an
+  // automatic process).
+  bool CanBackendStart() const;
+
   // True if a syncing backend exists.
   bool HasSyncingBackend() const;
 
   // Update first sync time stored in preferences
   void UpdateFirstSyncTimePref();
-
-  // Clear browsing data since first sync during rollback.
-  void ClearBrowsingDataSinceFirstSync();
-
-  // Post background task to check sync backup DB state if needed.
-  void CheckSyncBackupIfNeeded();
-
-  // Callback to receive backup DB check result.
-  void CheckSyncBackupCallback(base::Time backup_time);
-
-  // Callback function to call |startup_controller_|.TryStart() after
-  // backup/rollback finishes;
-  void TryStartSyncAfterBackup();
-
-  // Clean up prefs and backup DB when rollback is not needed.
-  void CleanUpBackup();
 
   // Tell the sync server that this client has disabled sync.
   void RemoveClientFromServer() const;
@@ -818,6 +797,9 @@ class ProfileSyncService : public sync_driver::SyncService,
 
   // Restarts sync clearing directory in the process.
   void OnClearServerDataDone();
+
+  // True if setup has been completed at least once and is not in progress.
+  bool CanConfigureDataTypes() const;
 
   // This profile's SyncClient, which abstracts away non-Sync dependencies and
   // the Sync API component factory.
@@ -858,7 +840,7 @@ class ProfileSyncService : public sync_driver::SyncService,
   base::SequencedWorkerPool* blocking_pool_;
 
   // Indicates if this is the first time sync is being configured.  This value
-  // is equal to !HasSyncSetupCompleted() at the time of OnBackendInitialized().
+  // is equal to !IsFirstSetupComplete() at the time of OnBackendInitialized().
   bool is_first_time_sync_configure_;
 
   // List of available data type controllers.
@@ -976,33 +958,21 @@ class ProfileSyncService : public sync_driver::SyncService,
   GoogleServiceAuthError last_get_token_error_;
   base::Time next_token_request_time_;
 
+  // The gaia cookie manager. Used for monitoring cookie jar changes to detect
+  // when the user signs out of the content area.
+  GaiaCookieManagerService* const gaia_cookie_manager_service_;
+
   scoped_ptr<sync_driver::LocalDeviceInfoProvider> local_device_;
 
-  // Locally owned SyncableService implementations.
+  // Locally owned SyncableService and ModelTypeService implementations.
   scoped_ptr<browser_sync::SessionsSyncManager> sessions_sync_manager_;
   scoped_ptr<sync_driver::DeviceInfoSyncService> device_info_sync_service_;
+  scoped_ptr<sync_driver_v2::DeviceInfoService> device_info_service_;
 
   scoped_ptr<syncer::NetworkResources> network_resources_;
 
-  browser_sync::ProfileSyncServiceStartBehavior start_behavior_;
+  StartBehavior start_behavior_;
   scoped_ptr<browser_sync::StartupController> startup_controller_;
-
-  scoped_ptr<sync_driver::BackupRollbackController> backup_rollback_controller_;
-
-  // Mode of current backend.
-  BackendMode backend_mode_;
-
-  // Whether backup is needed before sync starts.
-  bool need_backup_;
-
-  // Whether backup is finished.
-  bool backup_finished_;
-
-  base::Time backup_start_time_;
-
-  // Last time when pre-sync data was saved. NULL pointer means backup data
-  // state is unknown. If time value is null, backup data doesn't exist.
-  scoped_ptr<base::Time> last_backup_time_;
 
   // The full path to the sync data directory.
   base::FilePath directory_path_;

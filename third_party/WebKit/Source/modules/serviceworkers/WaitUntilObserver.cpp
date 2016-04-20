@@ -12,11 +12,8 @@
 #include "core/dom/ExecutionContext.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScope.h"
 #include "platform/LayoutTestSupport.h"
-#include "platform/NotImplemented.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerEventResult.h"
 #include "wtf/Assertions.h"
-#include "wtf/RefCounted.h"
-#include "wtf/RefPtr.h"
 #include <v8.h>
 
 namespace blink {
@@ -69,7 +66,7 @@ private:
         ASSERT(m_resolveType == Fulfilled || m_resolveType == Rejected);
         if (m_resolveType == Rejected) {
             m_observer->reportError(value);
-            value = ScriptPromise::reject(value.scriptState(), value).scriptValue();
+            value = ScriptPromise::reject(value.getScriptState(), value).getScriptValue();
         }
         m_observer->decrementPendingActivity();
         m_observer = nullptr;
@@ -93,7 +90,7 @@ void WaitUntilObserver::willDispatchEvent()
     // waitUntil() isn't called, that means between willDispatchEvent() and
     // didDispatchEvent().
     if (m_type == NotificationClick)
-        executionContext()->allowWindowInteraction();
+        getExecutionContext()->allowWindowInteraction();
 
     incrementPendingActivity();
 }
@@ -113,7 +110,7 @@ void WaitUntilObserver::waitUntil(ScriptState* scriptState, ScriptPromise script
         return;
     }
 
-    if (!executionContext())
+    if (!getExecutionContext())
         return;
 
     // When handling a notificationclick event, we want to allow one window to
@@ -144,7 +141,7 @@ WaitUntilObserver::WaitUntilObserver(ExecutionContext* context, EventType type, 
 void WaitUntilObserver::reportError(const ScriptValue& value)
 {
     // FIXME: Propagate error message to the client for onerror handling.
-    notImplemented();
+    NOTIMPLEMENTED();
 
     m_hasError = true;
 }
@@ -157,10 +154,10 @@ void WaitUntilObserver::incrementPendingActivity()
 void WaitUntilObserver::decrementPendingActivity()
 {
     ASSERT(m_pendingActivity > 0);
-    if (!executionContext() || (!m_hasError && --m_pendingActivity))
+    if (!getExecutionContext() || (!m_hasError && --m_pendingActivity))
         return;
 
-    ServiceWorkerGlobalScopeClient* client = ServiceWorkerGlobalScopeClient::from(executionContext());
+    ServiceWorkerGlobalScopeClient* client = ServiceWorkerGlobalScopeClient::from(getExecutionContext());
     WebServiceWorkerEventResult result = m_hasError ? WebServiceWorkerEventResultRejected : WebServiceWorkerEventResultCompleted;
     switch (m_type) {
     case Activate:
@@ -169,10 +166,16 @@ void WaitUntilObserver::decrementPendingActivity()
     case Install:
         client->didHandleInstallEvent(m_eventID, result);
         break;
+    case Message:
+        client->didHandleExtendableMessageEvent(m_eventID, result);
+        break;
     case NotificationClick:
         client->didHandleNotificationClickEvent(m_eventID, result);
         m_consumeWindowInteractionTimer.stop();
         consumeWindowInteraction(nullptr);
+        break;
+    case NotificationClose:
+        client->didHandleNotificationCloseEvent(m_eventID, result);
         break;
     case Push:
         client->didHandlePushEvent(m_eventID, result);
@@ -186,9 +189,9 @@ void WaitUntilObserver::decrementPendingActivity()
 
 void WaitUntilObserver::consumeWindowInteraction(Timer<WaitUntilObserver>*)
 {
-    if (!executionContext())
+    if (!getExecutionContext())
         return;
-    executionContext()->consumeWindowInteraction();
+    getExecutionContext()->consumeWindowInteraction();
 }
 
 DEFINE_TRACE(WaitUntilObserver)

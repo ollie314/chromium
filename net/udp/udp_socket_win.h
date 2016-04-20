@@ -9,10 +9,11 @@
 #include <stdint.h>
 #include <winsock2.h>
 
+#include <memory>
+
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/win/object_watcher.h"
 #include "base/win/scoped_handle.h"
@@ -28,6 +29,8 @@
 #include "net/udp/diff_serv_code_point.h"
 
 namespace net {
+
+class IPAddress;
 
 class NET_EXPORT UDPSocketWin
     : NON_EXPORTED_BASE(public base::NonThreadSafe),
@@ -91,23 +94,19 @@ class NET_EXPORT UDPSocketWin
   // |address| is a buffer provided by the caller for receiving the sender
   //   address information about the received data.  This buffer must be kept
   //   alive by the caller until the callback is placed.
-  // |address_length| is a ptr to the length of the |address| buffer.  This
-  //   is an input parameter containing the maximum size |address| can hold
-  //   and also an output parameter for the size of |address| upon completion.
   // |callback| is the callback on completion of the RecvFrom.
   // Returns a net error code, or ERR_IO_PENDING if the IO is in progress.
-  // If ERR_IO_PENDING is returned, the caller must keep |buf|, |address|,
-  // and |address_length| alive until the callback is called.
+  // If ERR_IO_PENDING is returned, the caller must keep |buf| and |address|,
+  // alive until the callback is called.
   int RecvFrom(IOBuffer* buf,
                int buf_len,
                IPEndPoint* address,
                const CompletionCallback& callback);
 
   // Sends to a socket with a particular destination.
-  // |buf| is the buffer to send
-  // |buf_len| is the number of bytes to send
+  // |buf| is the buffer to send.
+  // |buf_len| is the number of bytes to send.
   // |address| is the recipient address.
-  // |address_length| is the size of the recipient address
   // |callback| is the user callback function to call on complete.
   // Returns a net error code, or ERR_IO_PENDING if the IO is in progress.
   // If ERR_IO_PENDING is returned, the caller must keep |buf| and |address|
@@ -144,7 +143,7 @@ class NET_EXPORT UDPSocketWin
   // |group_address| is the group address to join, could be either
   // an IPv4 or IPv6 address.
   // Returns a net error code.
-  int JoinGroup(const IPAddressNumber& group_address) const;
+  int JoinGroup(const IPAddress& group_address) const;
 
   // Leaves the multicast group.
   // |group_address| is the group address to leave, could be either
@@ -153,7 +152,7 @@ class NET_EXPORT UDPSocketWin
   // It's optional to leave the multicast group before destroying
   // the socket. It will be done by the OS.
   // Return a net error code.
-  int LeaveGroup(const IPAddressNumber& group_address) const;
+  int LeaveGroup(const IPAddress& group_address) const;
 
   // Sets interface to use for multicast. If |interface_index| set to 0,
   // default interface is used.
@@ -249,7 +248,7 @@ class NET_EXPORT UDPSocketWin
   int SetMulticastOptions();
   int DoBind(const IPEndPoint& address);
   // Binds to a random port on |address|.
-  int RandomBind(const IPAddressNumber& address);
+  int RandomBind(const IPAddress& address);
 
   SOCKET socket_;
   int addr_family_;
@@ -275,8 +274,8 @@ class NET_EXPORT UDPSocketWin
 
   // These are mutable since they're just cached copies to make
   // GetPeerAddress/GetLocalAddress smarter.
-  mutable scoped_ptr<IPEndPoint> local_address_;
-  mutable scoped_ptr<IPEndPoint> remote_address_;
+  mutable std::unique_ptr<IPEndPoint> local_address_;
+  mutable std::unique_ptr<IPEndPoint> remote_address_;
 
   // The core of the socket that can live longer than the socket itself. We pass
   // resources to the Windows async IO functions and we have to make sure that
@@ -303,7 +302,7 @@ class NET_EXPORT UDPSocketWin
 
   // Cached copy of the current address we're sending to, if any.  Used for
   // logging.
-  scoped_ptr<IPEndPoint> send_to_address_;
+  std::unique_ptr<IPEndPoint> send_to_address_;
 
   // External callback; called when read is complete.
   CompletionCallback read_callback_;

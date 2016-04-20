@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-module arc;
+module arc.mojom;
 
 // Enumerates the types of wake lock the ARC instance can request from the
 // host.
+[Extensible]
 enum DisplayWakeLockType {
   // Does not allow the screen to dim, turn off, or lock; prevents
   // idle suspend.
@@ -18,11 +19,17 @@ enum DisplayWakeLockType {
 
 interface PowerHost {
   // Acquire and release wake locks on the host side.
-  OnAcquireDisplayWakeLock(DisplayWakeLockType type);
-  OnReleaseDisplayWakeLock(DisplayWakeLockType type);
+  OnAcquireDisplayWakeLock@0(DisplayWakeLockType type);
+  OnReleaseDisplayWakeLock@1(DisplayWakeLockType type);
+
+  // Checks if there is a display on.
+  [MinVersion=1] IsDisplayOn@2() => (bool is_on);
 };
 
 interface PowerInstance {
   // Establishes full-duplex communication with the host.
-  Init(PowerHost host_ptr);
+  Init@0(PowerHost host_ptr);
+
+  // Alerts the instance to a change in interactive state.
+  [MinVersion=1] SetInteractive@1(bool enabled);
 };

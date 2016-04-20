@@ -62,11 +62,11 @@ CustomElementDefinition* CustomElementRegistry::registerElement(Document* docume
     if (!constructorBuilder->validateOptions(type, tagName, exceptionState))
         return 0;
 
-    ASSERT(tagName.namespaceURI() == HTMLNames::xhtmlNamespaceURI || tagName.namespaceURI() == SVGNames::svgNamespaceURI);
+    DCHECK(tagName.namespaceURI() == HTMLNames::xhtmlNamespaceURI || tagName.namespaceURI() == SVGNames::svgNamespaceURI);
 
-    ASSERT(!m_documentWasDetached);
+    DCHECK(!m_documentWasDetached);
 
-    RefPtrWillBeRawPtr<CustomElementLifecycleCallbacks> lifecycleCallbacks = constructorBuilder->createCallbacks();
+    CustomElementLifecycleCallbacks* lifecycleCallbacks = constructorBuilder->createCallbacks();
 
     // Consulting the constructor builder could execute script and
     // kill the document.
@@ -76,20 +76,20 @@ CustomElementDefinition* CustomElementRegistry::registerElement(Document* docume
     }
 
     const CustomElementDescriptor descriptor(type, tagName.namespaceURI(), tagName.localName());
-    RefPtrWillBeRawPtr<CustomElementDefinition> definition = CustomElementDefinition::create(descriptor, lifecycleCallbacks);
+    CustomElementDefinition* definition = CustomElementDefinition::create(descriptor, lifecycleCallbacks);
 
-    if (!constructorBuilder->createConstructor(document, definition.get(), exceptionState))
+    if (!constructorBuilder->createConstructor(document, definition, exceptionState))
         return 0;
 
     m_definitions.add(descriptor, definition);
     m_registeredTypeNames.add(descriptor.type());
 
-    if (!constructorBuilder->didRegisterDefinition(definition.get())) {
+    if (!constructorBuilder->didRegisterDefinition()) {
         CustomElementException::throwException(CustomElementException::ContextDestroyedRegisteringDefinition, type, exceptionState);
         return 0;
     }
 
-    return definition.get();
+    return definition;
 }
 
 CustomElementDefinition* CustomElementRegistry::find(const CustomElementDescriptor& descriptor) const
@@ -99,9 +99,7 @@ CustomElementDefinition* CustomElementRegistry::find(const CustomElementDescript
 
 DEFINE_TRACE(CustomElementRegistry)
 {
-#if ENABLE(OILPAN)
     visitor->trace(m_definitions);
-#endif
 }
 
 } // namespace blink

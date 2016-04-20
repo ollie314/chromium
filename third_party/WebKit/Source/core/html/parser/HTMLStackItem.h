@@ -32,15 +32,13 @@
 #include "core/dom/Element.h"
 #include "core/html/parser/AtomicHTMLToken.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "wtf/RefCounted.h"
-#include "wtf/RefPtr.h"
 #include "wtf/text/AtomicString.h"
 
 namespace blink {
 
 class ContainerNode;
 
-class HTMLStackItem : public RefCountedWillBeGarbageCollectedFinalized<HTMLStackItem> {
+class HTMLStackItem : public GarbageCollectedFinalized<HTMLStackItem> {
 public:
     enum ItemType {
         ItemForContextElement,
@@ -48,15 +46,15 @@ public:
     };
 
     // Used by document fragment node and context element.
-    static PassRefPtrWillBeRawPtr<HTMLStackItem> create(PassRefPtrWillBeRawPtr<ContainerNode> node, ItemType type)
+    static HTMLStackItem* create(ContainerNode* node, ItemType type)
     {
-        return adoptRefWillBeNoop(new HTMLStackItem(node, type));
+        return new HTMLStackItem(node, type);
     }
 
     // Used by HTMLElementStack and HTMLFormattingElementList.
-    static PassRefPtrWillBeRawPtr<HTMLStackItem> create(PassRefPtrWillBeRawPtr<ContainerNode> node, AtomicHTMLToken* token, const AtomicString& namespaceURI = HTMLNames::xhtmlNamespaceURI)
+    static HTMLStackItem* create(ContainerNode* node, AtomicHTMLToken* token, const AtomicString& namespaceURI = HTMLNames::xhtmlNamespaceURI)
     {
-        return adoptRefWillBeNoop(new HTMLStackItem(node, token, namespaceURI));
+        return new HTMLStackItem(node, token, namespaceURI);
     }
 
     Element* element() const { return toElement(m_node.get()); }
@@ -212,7 +210,7 @@ public:
     DEFINE_INLINE_TRACE() { visitor->trace(m_node); }
 
 private:
-    HTMLStackItem(PassRefPtrWillBeRawPtr<ContainerNode> node, ItemType type)
+    HTMLStackItem(ContainerNode* node, ItemType type)
         : m_node(node)
     {
         switch (type) {
@@ -227,7 +225,7 @@ private:
         }
     }
 
-    HTMLStackItem(PassRefPtrWillBeRawPtr<ContainerNode> node, AtomicHTMLToken* token, const AtomicString& namespaceURI = HTMLNames::xhtmlNamespaceURI)
+    HTMLStackItem(ContainerNode* node, AtomicHTMLToken* token, const AtomicString& namespaceURI = HTMLNames::xhtmlNamespaceURI)
         : m_node(node)
         , m_tokenLocalName(token->name())
         , m_tokenAttributes(token->attributes())
@@ -236,7 +234,7 @@ private:
     {
     }
 
-    RefPtrWillBeMember<ContainerNode> m_node;
+    Member<ContainerNode> m_node;
 
     AtomicString m_tokenLocalName;
     Vector<Attribute> m_tokenAttributes;

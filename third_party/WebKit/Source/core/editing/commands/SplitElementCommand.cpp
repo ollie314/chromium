@@ -33,14 +33,14 @@
 
 namespace blink {
 
-SplitElementCommand::SplitElementCommand(PassRefPtrWillBeRawPtr<Element> element, PassRefPtrWillBeRawPtr<Node> atChild)
+SplitElementCommand::SplitElementCommand(Element* element, Node* atChild)
     : SimpleEditCommand(element->document())
     , m_element2(element)
     , m_atChild(atChild)
 {
-    ASSERT(m_element2);
-    ASSERT(m_atChild);
-    ASSERT(m_atChild->parentNode() == m_element2);
+    DCHECK(m_element2);
+    DCHECK(m_atChild);
+    DCHECK_EQ(m_atChild->parentNode(), m_element2);
 }
 
 void SplitElementCommand::executeApply()
@@ -48,7 +48,7 @@ void SplitElementCommand::executeApply()
     if (m_atChild->parentNode() != m_element2)
         return;
 
-    WillBeHeapVector<RefPtrWillBeMember<Node>> children;
+    HeapVector<Member<Node>> children;
     for (Node* node = m_element2->firstChild(); node != m_atChild; node = node->nextSibling())
         children.append(node);
 
@@ -68,7 +68,7 @@ void SplitElementCommand::executeApply()
         m_element1->appendChild(child, exceptionState);
 }
 
-void SplitElementCommand::doApply()
+void SplitElementCommand::doApply(EditingState*)
 {
     m_element1 = m_element2->cloneElementWithoutChildren();
 
@@ -83,10 +83,10 @@ void SplitElementCommand::doUnapply()
     NodeVector children;
     getChildNodes(*m_element1, children);
 
-    RefPtrWillBeRawPtr<Node> refChild = m_element2->firstChild();
+    Node* refChild = m_element2->firstChild();
 
     for (const auto& child : children)
-        m_element2->insertBefore(child.get(), refChild.get(), IGNORE_EXCEPTION);
+        m_element2->insertBefore(child, refChild, IGNORE_EXCEPTION);
 
     // Recover the id attribute of the original element.
     const AtomicString& id = m_element1->getAttribute(HTMLNames::idAttr);

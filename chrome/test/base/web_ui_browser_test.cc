@@ -32,6 +32,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_message_handler.h"
+#include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/base/filename_util.h"
@@ -259,7 +260,7 @@ class PrintContentBrowserClient : public ChromeContentBrowserClient {
   }
 
   WebUIBrowserTest* browser_test_;
-  scoped_ptr<WebUIJsInjectionReadyObserver> observer_;
+  std::unique_ptr<WebUIJsInjectionReadyObserver> observer_;
   std::string preload_test_fixture_;
   std::string preload_test_name_;
   content::WebContents* preview_dialog_;
@@ -383,6 +384,8 @@ void WebUIBrowserTest::SetUpOnMainThread() {
   content::WebUIControllerFactory::RegisterFactory(test_factory_.get());
 
   test_factory_->AddFactoryOverride(GURL(kDummyURL).host(),
+                                    mock_provider_.Pointer());
+  test_factory_->AddFactoryOverride(content::kChromeUIResourcesHost,
                                     mock_provider_.Pointer());
 }
 

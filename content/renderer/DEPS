@@ -6,21 +6,20 @@ include_rules = [
   "+components/url_formatter",
 
   "+cc/blink",
-  "+components/startup_metric_utils/common",
   "+content/public/child",
   "+content/public/renderer",
   "+content/child",
   "+device/battery",  # For battery status service.
-  "+device/devices_app/public",
+  "+device/usb/public",
   "+device/vibration",
   "+gin",
   "+jingle/glue",
   "+media",  # For audio input/output and audio/video decoding.
   "+mojo",
+  "+services",
   "-storage/browser",
   "+third_party/hyphen/hyphen.h",
   "+third_party/libjingle",
-  "+third_party/tcmalloc",
   "+v8/include",
   "+v8/src/third_party/vtune",
 ]

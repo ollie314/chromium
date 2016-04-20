@@ -6,11 +6,11 @@
 
 #include <stddef.h>
 #include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
@@ -21,12 +21,13 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/screenlock_private/screenlock_private_api.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
-#include "chrome/browser/profiles/profile_info_cache.h"
-#include "chrome/browser/profiles/profile_info_cache_observer.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profile_statistics.h"
+#include "chrome/browser/profiles/profile_statistics_factory.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/signin/local_auth.h"
@@ -39,13 +40,16 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/user_manager.h"
+#include "chrome/browser/ui/webui/profile_helper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_service.h"
 #include "components/proximity_auth/screenlock_bridge.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
@@ -101,32 +105,14 @@ const int kMaxOAuthRetries = 3;
 void HandleAndDoNothing(const base::ListValue* args) {
 }
 
-// This callback is run if the only profile has been deleted, and a new
-// profile has been created to replace it.
-void OpenNewWindowForProfile(
-    chrome::HostDesktopType desktop_type,
-    Profile* profile,
-    Profile::CreateStatus status) {
-  if (status != Profile::CREATE_STATUS_INITIALIZED)
-    return;
-  profiles::FindOrCreateNewWindowForProfile(
-    profile,
-    chrome::startup::IS_PROCESS_STARTUP,
-    chrome::startup::IS_FIRST_RUN,
-    desktop_type,
-    false);
-}
-
-std::string GetAvatarImageAtIndex(
-    size_t index, ProfileInfoCache* info_cache) {
-  bool is_gaia_picture =
-      info_cache->IsUsingGAIAPictureOfProfileAtIndex(index) &&
-      info_cache->GetGAIAPictureOfProfileAtIndex(index);
+std::string GetAvatarImage(const ProfileAttributesEntry* entry) {
+  bool is_gaia_picture = entry->IsUsingGAIAPicture() &&
+                         entry->GetGAIAPicture() != nullptr;
 
   // If the avatar is too small (i.e. the old-style low resolution avatar),
   // it will be pixelated when displayed in the User Manager, so we should
   // return the placeholder avatar instead.
-  gfx::Image avatar_image = info_cache->GetAvatarIconOfProfileAtIndex(index);
+  gfx::Image avatar_image = entry->GetAvatarIcon();
   if (avatar_image.Width() <= profiles::kAvatarIconWidth ||
       avatar_image.Height() <= profiles::kAvatarIconHeight ) {
     avatar_image = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
@@ -175,7 +161,6 @@ class UrlHashHelper : public chrome::BrowserListObserver {
  private:
   Browser* browser_;
   Profile* profile_;
-  chrome::HostDesktopType desktop_type_;
   std::string hash_;
 
   DISALLOW_COPY_AND_ASSIGN(UrlHashHelper);
@@ -184,7 +169,6 @@ class UrlHashHelper : public chrome::BrowserListObserver {
 UrlHashHelper::UrlHashHelper(Browser* browser, const std::string& hash)
     : browser_(browser),
       profile_(browser->profile()),
-      desktop_type_(browser->host_desktop_type()),
       hash_(hash) {
   BrowserList::AddObserver(this);
 }
@@ -200,14 +184,14 @@ void UrlHashHelper::OnBrowserRemoved(Browser* browser) {
 
 void UrlHashHelper::ExecuteUrlHash() {
   if (hash_ == profiles::kUserManagerSelectProfileAppLauncher) {
-    AppListService* app_list_service = AppListService::Get(desktop_type_);
+    AppListService* app_list_service = AppListService::Get();
     app_list_service->ShowForProfile(profile_);
     return;
   }
 
   Browser* target_browser = browser_;
   if (!target_browser) {
-    target_browser = chrome::FindLastActiveWithProfile(profile_, desktop_type_);
+    target_browser = chrome::FindLastActiveWithProfile(profile_);
     if (!target_browser)
       return;
   }
@@ -218,8 +202,6 @@ void UrlHashHelper::ExecuteUrlHash() {
     chrome::ShowAboutChrome(target_browser);
   else if (hash_ == profiles::kUserManagerSelectProfileChromeSettings)
     chrome::ShowSettings(target_browser);
-  else if (hash_ == profiles::kUserManagerSelectProfileChromeMemory)
-    chrome::ShowMemory(target_browser);
 }
 
 void HandleLogRemoveUserWarningShown(const base::ListValue* args) {
@@ -232,7 +214,7 @@ void HandleLogRemoveUserWarningShown(const base::ListValue* args) {
 // ProfileUpdateObserver ------------------------------------------------------
 
 class UserManagerScreenHandler::ProfileUpdateObserver
-    : public ProfileInfoCacheObserver {
+    : public ProfileAttributesStorage::Observer {
  public:
   ProfileUpdateObserver(
       ProfileManager* profile_manager, UserManagerScreenHandler* handler)
@@ -240,16 +222,16 @@ class UserManagerScreenHandler::ProfileUpdateObserver
         user_manager_handler_(handler) {
     DCHECK(profile_manager_);
     DCHECK(user_manager_handler_);
-    profile_manager_->GetProfileInfoCache().AddObserver(this);
+    profile_manager_->GetProfileAttributesStorage().AddObserver(this);
   }
 
   ~ProfileUpdateObserver() override {
     DCHECK(profile_manager_);
-    profile_manager_->GetProfileInfoCache().RemoveObserver(this);
+    profile_manager_->GetProfileAttributesStorage().RemoveObserver(this);
   }
 
  private:
-  // ProfileInfoCacheObserver implementation:
+  // ProfileAttributesStorage::Observer implementation:
   // If any change has been made to a profile, propagate it to all the
   // visible user manager screens.
   void OnProfileAdded(const base::FilePath& profile_path) override {
@@ -301,10 +283,8 @@ class UserManagerScreenHandler::ProfileUpdateObserver
 
 // UserManagerScreenHandler ---------------------------------------------------
 
-UserManagerScreenHandler::UserManagerScreenHandler()
-    : desktop_type_(chrome::GetActiveDesktop()),
-      weak_ptr_factory_(this) {
-  profileInfoCacheObserver_.reset(
+UserManagerScreenHandler::UserManagerScreenHandler() : weak_ptr_factory_(this) {
+  profile_attributes_storage_observer_.reset(
       new UserManagerScreenHandler::ProfileUpdateObserver(
           g_browser_process->profile_manager(), this));
 }
@@ -324,7 +304,8 @@ void UserManagerScreenHandler::ShowUserPodCustomIcon(
     const AccountId& account_id,
     const proximity_auth::ScreenlockBridge::UserPodCustomIconOptions&
         icon_options) {
-  scoped_ptr<base::DictionaryValue> icon = icon_options.ToDictionaryValue();
+  std::unique_ptr<base::DictionaryValue> icon =
+      icon_options.ToDictionaryValue();
   if (!icon || icon->empty())
     return;
   web_ui()->CallJavascriptFunction(
@@ -391,11 +372,9 @@ void UserManagerScreenHandler::HandleInitialize(const base::ListValue* args) {
   args->GetString(0, &url_hash_);
 
   SendUserList();
-  web_ui()->CallJavascriptFunction("cr.ui.Oobe.showUserManagerScreen",
+  web_ui()->CallJavascriptFunction("cr.ui.UserManager.showUserManagerScreen",
       base::FundamentalValue(IsGuestModeEnabled()),
       base::FundamentalValue(IsAddPersonEnabled()));
-  desktop_type_ = chrome::GetHostDesktopTypeForNativeView(
-      web_ui()->GetWebContents()->GetNativeView());
 
   proximity_auth::ScreenlockBridge::Get()->SetLockHandler(this);
 }
@@ -407,7 +386,6 @@ void UserManagerScreenHandler::HandleAddUser(const base::ListValue* args) {
     return;
   }
   profiles::CreateAndSwitchToNewProfile(
-      desktop_type_,
       base::Bind(&UserManagerScreenHandler::OnSwitchToProfileComplete,
                  weak_ptr_factory_.GetWeakPtr()),
       ProfileMetrics::ADD_NEW_USER_MANAGER);
@@ -423,12 +401,11 @@ void UserManagerScreenHandler::HandleAuthenticatedLaunchUser(
   if (!base::GetValueAsFilePath(*profile_path_value, &profile_path))
     return;
 
-  ProfileInfoCache& info_cache =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
-
   ProfileAttributesEntry* entry;
-  if (!info_cache.GetProfileAttributesWithPath(profile_path, &entry))
+  if (!g_browser_process->profile_manager()->GetProfileAttributesStorage().
+          GetProfileAttributesWithPath(profile_path, &entry)) {
     return;
+  }
 
   base::string16 email_address;
   if (!args->GetString(1, &email_address))
@@ -443,12 +420,8 @@ void UserManagerScreenHandler::HandleAuthenticatedLaunchUser(
 
   // Only try to validate locally or check the password change detection
   // if we actually have a local credential saved.
-  size_t profile_index = info_cache.GetIndexOfProfileWithPath(profile_path);
-  const bool has_local_credential =
-      !info_cache.GetLocalAuthCredentialsOfProfileAtIndex(profile_index)
-          .empty();
-  if (has_local_credential) {
-    if (LocalAuth::ValidateLocalAuthCredentials(profile_index, password)) {
+  if (!entry->GetLocalAuthCredentials().empty()) {
+    if (LocalAuth::ValidateLocalAuthCredentials(entry, password)) {
       ReportAuthenticationResult(true, ProfileMetrics::AUTH_LOCAL);
       return;
     }
@@ -458,8 +431,9 @@ void UserManagerScreenHandler::HandleAuthenticatedLaunchUser(
     // change makes use of a token so we do that... if it's available.
     if (!oauth_client_) {
       oauth_client_.reset(new gaia::GaiaOAuthClient(
-          web_ui()->GetWebContents()->GetBrowserContext()
-              ->GetRequestContext()));
+          content::BrowserContext::GetDefaultStoragePartition(
+              web_ui()->GetWebContents()->GetBrowserContext())->
+                  GetURLRequestContext()));
     }
 
     const std::string token = entry->GetPasswordChangeDetectionToken();
@@ -494,9 +468,10 @@ void UserManagerScreenHandler::HandleRemoveUser(const base::ListValue* args) {
     return;
   }
 
+  // The callback is run if the only profile has been deleted, and a new
+  // profile has been created to replace it.
   g_browser_process->profile_manager()->ScheduleProfileForDeletion(
-      profile_path,
-      base::Bind(&OpenNewWindowForProfile, desktop_type_));
+      profile_path, base::Bind(&webui::OpenNewWindowForProfile));
   ProfileMetrics::LogProfileDeleteUser(
       ProfileMetrics::DELETE_PROFILE_USER_MANAGER);
 }
@@ -504,7 +479,6 @@ void UserManagerScreenHandler::HandleRemoveUser(const base::ListValue* args) {
 void UserManagerScreenHandler::HandleLaunchGuest(const base::ListValue* args) {
   if (IsGuestModeEnabled()) {
     profiles::SwitchToGuestProfile(
-        desktop_type_,
         base::Bind(&UserManagerScreenHandler::OnSwitchToProfileComplete,
                    weak_ptr_factory_.GetWeakPtr()));
   } else {
@@ -523,11 +497,9 @@ void UserManagerScreenHandler::HandleLaunchUser(const base::ListValue* args) {
   if (!base::GetValueAsFilePath(*profile_path_value, &profile_path))
     return;
 
-  const ProfileInfoCache& info_cache =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
-  size_t profile_index = info_cache.GetIndexOfProfileWithPath(profile_path);
-
-  if (profile_index == std::string::npos) {
+  ProfileAttributesEntry* entry;
+  if (!g_browser_process->profile_manager()->GetProfileAttributesStorage().
+          GetProfileAttributesWithPath(profile_path, &entry)) {
     NOTREACHED();
     return;
   }
@@ -537,14 +509,12 @@ void UserManagerScreenHandler::HandleLaunchUser(const base::ListValue* args) {
   // unauthenticated version of "launch" instead of the proper one.  Thus,
   // we have to validate in (secure) C++ code that it really is a profile
   // not needing authentication.  If it is, just ignore the "launch" request.
-  if (info_cache.ProfileIsSigninRequiredAtIndex(profile_index))
+  if (entry->IsSigninRequired())
     return;
   ProfileMetrics::LogProfileAuthResult(ProfileMetrics::AUTH_UNNECESSARY);
 
   profiles::SwitchToProfile(
-      profile_path,
-      desktop_type_,
-      false,  /* reuse any existing windows */
+      profile_path, false, /* reuse any existing windows */
       base::Bind(&UserManagerScreenHandler::OnSwitchToProfileComplete,
                  weak_ptr_factory_.GetWeakPtr()),
       ProfileMetrics::SWITCH_PROFILE_MANAGER);
@@ -589,18 +559,20 @@ void UserManagerScreenHandler::HandleRemoveUserWarningLoadStats(
   if (!profile)
     return;
 
-  if (!chrome::FindAnyBrowser(profile, true, desktop_type_)) {
+  if (!chrome::FindAnyBrowser(profile, true)) {
     // If no windows are open for that profile, the statistics in
-    // ProfileInfoCache are up to date. The statistics in ProfileInfoCache are
-    // returned because the copy in user_pod_row.js may be outdated. However, if
-    // some statistics are missing in ProfileInfoCache (i.e. |item.success| is
-    // false), then the actual statistics are queried instead.
+    // ProfileAttributesStorage are up to date. The statistics in
+    // ProfileAttributesStorage are returned because the copy in user_pod_row.js
+    // may be outdated. However, if some statistics are missing in
+    // ProfileAttributesStorage (i.e. |item.success| is false), then the actual
+    // statistics are queried instead.
     base::DictionaryValue return_value;
     profiles::ProfileCategoryStats stats =
-        profiles::GetProfileStatisticsFromCache(profile_path);
+        ProfileStatistics::GetProfileStatisticsFromAttributesStorage(
+            profile_path);
     bool stats_success = true;
     for (const auto& item : stats) {
-      scoped_ptr<base::DictionaryValue> stat(new base::DictionaryValue);
+      std::unique_ptr<base::DictionaryValue> stat(new base::DictionaryValue);
       stat->SetIntegerWithoutPathExpansion("count", item.count);
       stat->SetBooleanWithoutPathExpansion("success", item.success);
       return_value.SetWithoutPathExpansion(item.category, std::move(stat));
@@ -614,12 +586,10 @@ void UserManagerScreenHandler::HandleRemoveUserWarningLoadStats(
     }
   }
 
-  profiles::GatherProfileStatistics(
-      profile,
+  ProfileStatisticsFactory::GetForProfile(profile)->GatherStatistics(
       base::Bind(
           &UserManagerScreenHandler::RemoveUserDialogLoadStatsCallback,
-          weak_ptr_factory_.GetWeakPtr(), profile_path),
-      &tracker_);
+          weak_ptr_factory_.GetWeakPtr(), profile_path));
 }
 
 void UserManagerScreenHandler::RemoveUserDialogLoadStatsCallback(
@@ -628,7 +598,7 @@ void UserManagerScreenHandler::RemoveUserDialogLoadStatsCallback(
   // Copy result into return_value.
   base::DictionaryValue return_value;
   for (const auto& item : result) {
-    scoped_ptr<base::DictionaryValue> stat(new base::DictionaryValue);
+    std::unique_ptr<base::DictionaryValue> stat(new base::DictionaryValue);
     stat->SetIntegerWithoutPathExpansion("count", item.count);
     stat->SetBooleanWithoutPathExpansion("success", item.success);
     return_value.SetWithoutPathExpansion(item.category, std::move(stat));
@@ -673,7 +643,7 @@ void UserManagerScreenHandler::HandleGetRemoveWarningDialogMessage(
 }
 
 void UserManagerScreenHandler::OnGetTokenInfoResponse(
-    scoped_ptr<base::DictionaryValue> token_info) {
+    std::unique_ptr<base::DictionaryValue> token_info) {
   // Password is unchanged so user just mistyped it.  Ask again.
   ReportAuthenticationResult(false, ProfileMetrics::AUTH_FAILED);
 }
@@ -864,8 +834,9 @@ void UserManagerScreenHandler::GetLocalizedValues(
 
 void UserManagerScreenHandler::SendUserList() {
   base::ListValue users_list;
-  ProfileInfoCache* info_cache =
-      &g_browser_process->profile_manager()->GetProfileInfoCache();
+  std::vector<ProfileAttributesEntry*> entries =
+      g_browser_process->profile_manager()->GetProfileAttributesStorage().
+          GetAllProfilesAttributesSortedByName();
   user_auth_type_map_.clear();
 
   // Profile deletion is not allowed in Metro mode.
@@ -874,45 +845,40 @@ void UserManagerScreenHandler::SendUserList() {
   can_remove = !ash::Shell::HasInstance();
 #endif
 
-  for (size_t i = 0; i < info_cache->GetNumberOfProfiles(); ++i) {
+  for (const ProfileAttributesEntry* entry : entries) {
     // Don't show profiles still in the middle of being set up as new legacy
     // supervised users.
-    if (info_cache->IsOmittedProfileAtIndex(i))
+    if (entry->IsOmitted())
       continue;
 
     base::DictionaryValue* profile_value = new base::DictionaryValue();
-    base::FilePath profile_path = info_cache->GetPathOfProfileAtIndex(i);
+    base::FilePath profile_path = entry->GetPath();
 
-    profile_value->SetString(
-        kKeyUsername, info_cache->GetUserNameOfProfileAtIndex(i));
-    profile_value->SetString(
-        kKeyEmailAddress, info_cache->GetUserNameOfProfileAtIndex(i));
-    profile_value->SetString(
-        kKeyDisplayName,
-        profiles::GetAvatarNameForProfile(profile_path));
-    profile_value->Set(
-        kKeyProfilePath, base::CreateFilePathValue(profile_path));
+    profile_value->SetString(kKeyUsername, entry->GetUserName());
+    profile_value->SetString(kKeyEmailAddress, entry->GetUserName());
+    profile_value->SetString(kKeyDisplayName,
+                             profiles::GetAvatarNameForProfile(profile_path));
+    profile_value->Set(kKeyProfilePath,
+                       base::CreateFilePathValue(profile_path));
     profile_value->SetBoolean(kKeyPublicAccount, false);
     profile_value->SetBoolean(kKeyLegacySupervisedUser,
-                              info_cache->ProfileIsLegacySupervisedAtIndex(i));
-    profile_value->SetBoolean(
-        kKeyChildUser, info_cache->ProfileIsChildAtIndex(i));
-    profile_value->SetBoolean(
-        kKeyNeedsSignin, info_cache->ProfileIsSigninRequiredAtIndex(i));
-    profile_value->SetBoolean(
-        kKeyHasLocalCreds,
-        !info_cache->GetLocalAuthCredentialsOfProfileAtIndex(i).empty());
+                              entry->IsLegacySupervised());
+    profile_value->SetBoolean(kKeyChildUser, entry->IsChild());
+    profile_value->SetBoolean(kKeyNeedsSignin, entry->IsSigninRequired());
+    profile_value->SetBoolean(kKeyHasLocalCreds,
+                              !entry->GetLocalAuthCredentials().empty());
     profile_value->SetBoolean(kKeyIsOwner, false);
     profile_value->SetBoolean(kKeyCanRemove, can_remove);
     profile_value->SetBoolean(kKeyIsDesktop, true);
-    profile_value->SetString(
-        kKeyAvatarUrl, GetAvatarImageAtIndex(i, info_cache));
+    profile_value->SetString(kKeyAvatarUrl, GetAvatarImage(entry));
 
     profiles::ProfileCategoryStats stats =
-        profiles::GetProfileStatisticsFromCache(profile_path);
-    scoped_ptr<base::DictionaryValue> stats_dict(new base::DictionaryValue);
+        ProfileStatistics::GetProfileStatisticsFromAttributesStorage(
+            profile_path);
+    std::unique_ptr<base::DictionaryValue> stats_dict(
+        new base::DictionaryValue);
     for (const auto& item : stats) {
-      scoped_ptr<base::DictionaryValue> stat(new base::DictionaryValue);
+      std::unique_ptr<base::DictionaryValue> stat(new base::DictionaryValue);
       stat->SetIntegerWithoutPathExpansion("count", item.count);
       stat->SetBooleanWithoutPathExpansion("success", item.success);
       stats_dict->SetWithoutPathExpansion(item.category, std::move(stat));
@@ -946,15 +912,13 @@ void UserManagerScreenHandler::ReportAuthenticationResult(
 
   if (success) {
     profiles::SwitchToProfile(
-        authenticating_profile_path_,
-        desktop_type_,
-        true,
+        authenticating_profile_path_, true,
         base::Bind(&UserManagerScreenHandler::OnSwitchToProfileComplete,
                    weak_ptr_factory_.GetWeakPtr()),
         ProfileMetrics::SWITCH_PROFILE_UNLOCK);
   } else {
     web_ui()->CallJavascriptFunction(
-        "cr.ui.Oobe.showSignInError",
+        "cr.ui.UserManager.showSignInError",
         base::FundamentalValue(0),
         base::StringValue(l10n_util::GetStringUTF8(
             auth == ProfileMetrics::AUTH_FAILED_OFFLINE ?
@@ -972,11 +936,12 @@ void UserManagerScreenHandler::OnBrowserWindowReady(Browser* browser) {
   // Unlock the profile after browser opens so startup can read the lock bit.
   // Any necessary authentication must have been successful to reach this point.
   if (!browser->profile()->IsGuestSession()) {
-    ProfileInfoCache& info_cache =
-        g_browser_process->profile_manager()->GetProfileInfoCache();
-    size_t index = info_cache.GetIndexOfProfileWithPath(
-        browser->profile()->GetPath());
-    info_cache.SetProfileSigninRequiredAtIndex(index, false);
+    ProfileAttributesEntry* entry = nullptr;
+    bool has_entry = g_browser_process->profile_manager()->
+        GetProfileAttributesStorage().
+        GetProfileAttributesWithPath(browser->profile()->GetPath(), &entry);
+    DCHECK(has_entry);
+    entry->SetIsSigninRequired(false);
   }
 
   if (!url_hash_.empty()) {
@@ -1014,7 +979,7 @@ void UserManagerScreenHandler::Observe(
 // cause Chrome to close.
 void UserManagerScreenHandler::OnSwitchToProfileComplete(
     Profile* profile, Profile::CreateStatus profile_create_status) {
-  Browser* browser = chrome::FindAnyBrowser(profile, false, desktop_type_);
+  Browser* browser = chrome::FindAnyBrowser(profile, false);
   if (browser && browser->window()) {
     OnBrowserWindowReady(browser);
   } else {

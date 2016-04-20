@@ -49,25 +49,16 @@ static Document* parentDocument(LocalFrame* frame)
     return &ownerElement->document();
 }
 
-
-static Document* ownerDocument(LocalFrame* frame)
+DocumentInit::DocumentInit(const KURL& url, LocalFrame* frame, Document* contextDocument, HTMLImportsController* importsController)
+    : DocumentInit(nullptr, url, frame, contextDocument, importsController)
 {
-    if (!frame)
-        return 0;
-
-    Frame* ownerFrame = frame->tree().parent();
-    if (!ownerFrame)
-        ownerFrame = frame->loader().opener();
-    if (!ownerFrame || !ownerFrame->isLocalFrame())
-        return 0;
-    return toLocalFrame(ownerFrame)->document();
 }
 
-DocumentInit::DocumentInit(const KURL& url, LocalFrame* frame, WeakPtrWillBeRawPtr<Document> contextDocument, HTMLImportsController* importsController)
+DocumentInit::DocumentInit(Document* ownerDocument, const KURL& url, LocalFrame* frame, Document* contextDocument, HTMLImportsController* importsController)
     : m_url(url)
     , m_frame(frame)
     , m_parent(parentDocument(frame))
-    , m_owner(ownerDocument(frame))
+    , m_owner(ownerDocument)
     , m_contextDocument(contextDocument)
     , m_importsController(importsController)
     , m_createNewRegistrationContext(false)
@@ -75,18 +66,7 @@ DocumentInit::DocumentInit(const KURL& url, LocalFrame* frame, WeakPtrWillBeRawP
 {
 }
 
-DocumentInit::DocumentInit(const DocumentInit& other)
-    : m_url(other.m_url)
-    , m_frame(other.m_frame)
-    , m_parent(other.m_parent)
-    , m_owner(other.m_owner)
-    , m_contextDocument(other.m_contextDocument)
-    , m_importsController(other.m_importsController)
-    , m_registrationContext(other.m_registrationContext)
-    , m_createNewRegistrationContext(other.m_createNewRegistrationContext)
-    , m_shouldReuseDefaultView(other.m_shouldReuseDefaultView)
-{
-}
+DocumentInit::DocumentInit(const DocumentInit&) = default;
 
 DocumentInit::~DocumentInit()
 {
@@ -112,27 +92,37 @@ LocalFrame* DocumentInit::frameForSecurityContext() const
     return 0;
 }
 
-SandboxFlags DocumentInit::sandboxFlags() const
+SandboxFlags DocumentInit::getSandboxFlags() const
 {
-    ASSERT(frameForSecurityContext());
-    return frameForSecurityContext()->loader().effectiveSandboxFlags();
+    DCHECK(frameForSecurityContext());
+    FrameLoader* loader = &frameForSecurityContext()->loader();
+    SandboxFlags flags = loader->effectiveSandboxFlags();
+
+    // If the load was blocked by X-Frame-Options or CSP, force the Document's
+    // origin to be unique, so that the blocked document appears to be a normal
+    // cross-origin document's load per CSP spec:
+    // https://www.w3.org/TR/CSP2/#directive-frame-ancestors
+    if (loader->documentLoader() && loader->documentLoader()->wasBlockedAfterXFrameOptionsOrCSP())
+        flags |= SandboxOrigin;
+
+    return flags;
 }
 
 bool DocumentInit::shouldEnforceStrictMixedContentChecking() const
 {
-    ASSERT(frameForSecurityContext());
+    DCHECK(frameForSecurityContext());
     return frameForSecurityContext()->loader().shouldEnforceStrictMixedContentChecking();
 }
 
-SecurityContext::InsecureRequestsPolicy DocumentInit::insecureRequestsPolicy() const
+SecurityContext::InsecureRequestsPolicy DocumentInit::getInsecureRequestsPolicy() const
 {
-    ASSERT(frameForSecurityContext());
-    return frameForSecurityContext()->loader().insecureRequestsPolicy();
+    DCHECK(frameForSecurityContext());
+    return frameForSecurityContext()->loader().getInsecureRequestsPolicy();
 }
 
 SecurityContext::InsecureNavigationsSet* DocumentInit::insecureNavigationsToUpgrade() const
 {
-    ASSERT(frameForSecurityContext());
+    DCHECK(frameForSecurityContext());
     return frameForSecurityContext()->loader().insecureNavigationsToUpgrade();
 }
 
@@ -149,7 +139,7 @@ bool DocumentInit::isHostedInReservedIPRange() const
 
 Settings* DocumentInit::settings() const
 {
-    ASSERT(frameForSecurityContext());
+    DCHECK(frameForSecurityContext());
     return frameForSecurityContext()->settings();
 }
 
@@ -160,19 +150,21 @@ KURL DocumentInit::parentBaseURL() const
 
 DocumentInit& DocumentInit::withRegistrationContext(CustomElementRegistrationContext* registrationContext)
 {
-    ASSERT(!m_createNewRegistrationContext && !m_registrationContext);
+    DCHECK(!m_createNewRegistrationContext);
+    DCHECK(!m_registrationContext);
     m_registrationContext = registrationContext;
     return *this;
 }
 
 DocumentInit& DocumentInit::withNewRegistrationContext()
 {
-    ASSERT(!m_createNewRegistrationContext && !m_registrationContext);
+    DCHECK(!m_createNewRegistrationContext);
+    DCHECK(!m_registrationContext);
     m_createNewRegistrationContext = true;
     return *this;
 }
 
-PassRefPtrWillBeRawPtr<CustomElementRegistrationContext> DocumentInit::registrationContext(Document* document) const
+CustomElementRegistrationContext* DocumentInit::registrationContext(Document* document) const
 {
     if (!document->isHTMLDocument() && !document->isXHTMLDocument())
         return nullptr;
@@ -183,15 +175,14 @@ PassRefPtrWillBeRawPtr<CustomElementRegistrationContext> DocumentInit::registrat
     return m_registrationContext.get();
 }
 
-WeakPtrWillBeRawPtr<Document> DocumentInit::contextDocument() const
+Document* DocumentInit::contextDocument() const
 {
     return m_contextDocument;
 }
 
-DocumentInit DocumentInit::fromContext(WeakPtrWillBeRawPtr<Document> contextDocument, const KURL& url)
+DocumentInit DocumentInit::fromContext(Document* contextDocument, const KURL& url)
 {
     return DocumentInit(url, 0, contextDocument, 0);
 }
 
 } // namespace blink
-

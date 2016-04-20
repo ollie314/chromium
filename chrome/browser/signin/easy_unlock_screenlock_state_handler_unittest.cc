@@ -139,9 +139,7 @@ class TestLockHandler : public proximity_auth::ScreenlockBridge::LockHandler {
   }
 
   // Whether the custom icon is set.
-  bool HasCustomIcon() const {
-    return last_custom_icon_;
-  }
+  bool HasCustomIcon() const { return !!last_custom_icon_; }
 
   // If custom icon is set, returns the icon's id.
   // If there is no icon, or if it doesn't have an id set, returns an empty
@@ -205,7 +203,7 @@ class TestLockHandler : public proximity_auth::ScreenlockBridge::LockHandler {
 
   // The last icon set using |SetUserPodCustomIcon|. Call to
   // |HideUserPodcustomIcon| resets it.
-  scoped_ptr<base::DictionaryValue> last_custom_icon_;
+  std::unique_ptr<base::DictionaryValue> last_custom_icon_;
   size_t show_icon_count_;
 
   // Auth type and value set using |SetAuthType|.
@@ -241,14 +239,14 @@ class EasyUnlockScreenlockStateHandlerTest : public testing::Test {
 
  protected:
   // The state handler that is being tested.
-  scoped_ptr<EasyUnlockScreenlockStateHandler> state_handler_;
+  std::unique_ptr<EasyUnlockScreenlockStateHandler> state_handler_;
 
   // The user associated with |state_handler_|.
   const AccountId account_id_ = AccountId::FromUserEmail("test_user@gmail.com");
 
   // Faked lock handler given to proximity_auth::ScreenlockBridge during the
   // test. Abstracts the screen lock UI.
-  scoped_ptr<TestLockHandler> lock_handler_;
+  std::unique_ptr<TestLockHandler> lock_handler_;
 };
 
 TEST_F(EasyUnlockScreenlockStateHandlerTest, AuthenticatedTrialRun) {

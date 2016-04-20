@@ -6,7 +6,6 @@
 
 #include "base/auto_reset.h"
 #include "base/macros.h"
-#include "base/prefs/pref_service.h"
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
@@ -34,6 +33,7 @@
 #include "components/mime_util/mime_util.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
@@ -61,16 +61,15 @@ TabRendererData::NetworkState TabContentsNetworkState(
   return TabRendererData::NETWORK_STATE_LOADING;
 }
 
-bool DetermineTabStripLayoutStacked(
-    PrefService* prefs,
-    chrome::HostDesktopType host_desktop_type,
-    bool* adjust_layout) {
+bool DetermineTabStripLayoutStacked(PrefService* prefs, bool* adjust_layout) {
   *adjust_layout = false;
   // For ash, always allow entering stacked mode.
-  if (host_desktop_type != chrome::HOST_DESKTOP_TYPE_ASH)
-    return false;
+#if defined(USE_ASH)
   *adjust_layout = true;
   return prefs->GetBoolean(prefs::kTabStripStackedLayout);
+#else
+  return false;
+#endif
 }
 
 // Get the MIME type of the file pointed to by the url, based on the file's
@@ -161,8 +160,8 @@ class BrowserTabStripController::TabContextMenuContents
   }
 
  private:
-  scoped_ptr<TabMenuModel> model_;
-  scoped_ptr<views::MenuRunner> menu_runner_;
+  std::unique_ptr<TabMenuModel> model_;
+  std::unique_ptr<views::MenuRunner> menu_runner_;
 
   // The tab we're showing a menu for.
   Tab* tab_;
@@ -266,15 +265,6 @@ bool BrowserTabStripController::IsTabPinned(int model_index) const {
   return model_->ContainsIndex(model_index) && model_->IsTabPinned(model_index);
 }
 
-bool BrowserTabStripController::IsNewTabPage(int model_index) const {
-  if (!model_->ContainsIndex(model_index))
-    return false;
-
-  const WebContents* contents = model_->GetWebContentsAt(model_index);
-  return contents && (contents->GetURL() == GURL(chrome::kChromeUINewTabURL) ||
-                      search::IsInstantNTP(contents));
-}
-
 void BrowserTabStripController::SelectTab(int model_index) {
   model_->ActivateTabAt(model_index, true);
 }
@@ -305,7 +295,7 @@ void BrowserTabStripController::CloseTab(int model_index,
 void BrowserTabStripController::ToggleTabAudioMute(int model_index) {
   content::WebContents* const contents = model_->GetWebContentsAt(model_index);
   chrome::SetTabAudioMuted(contents, !contents->IsAudioMuted(),
-                           TAB_MUTED_REASON_AUDIO_INDICATOR, std::string());
+                           TabMutedReason::AUDIO_INDICATOR, std::string());
 }
 
 void BrowserTabStripController::ShowContextMenuForTab(
@@ -384,15 +374,13 @@ void BrowserTabStripController::CreateNewTabWithLocation(
 }
 
 bool BrowserTabStripController::IsIncognito() {
-  return browser_->profile()->IsOffTheRecord();
+  return browser_->profile()->GetProfileType() == Profile::INCOGNITO_PROFILE;
 }
 
 void BrowserTabStripController::StackedLayoutMaybeChanged() {
   bool adjust_layout = false;
-  bool stacked_layout =
-      DetermineTabStripLayoutStacked(g_browser_process->local_state(),
-                                     browser_->host_desktop_type(),
-                                     &adjust_layout);
+  bool stacked_layout = DetermineTabStripLayoutStacked(
+      g_browser_process->local_state(), &adjust_layout);
   if (!adjust_layout || stacked_layout == tabstrip_->stacked_layout())
     return;
 
@@ -425,6 +413,11 @@ void BrowserTabStripController::CheckFileSupported(const GURL& url) {
       base::Bind(&BrowserTabStripController::OnFindURLMimeTypeCompleted,
                  weak_ptr_factory_.GetWeakPtr(),
                  url));
+}
+
+SkColor BrowserTabStripController::GetToolbarTopSeparatorColor() const {
+  return BrowserView::GetBrowserViewForBrowser(browser_)->frame()
+      ->GetFrameView()->GetToolbarTopSeparatorColor();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -512,7 +505,7 @@ void BrowserTabStripController::SetTabRendererDataFromModel(
   data->show_icon = data->pinned || favicon::ShouldDisplayFavicon(contents);
   data->blocked = model_->IsTabBlocked(model_index);
   data->app = extensions::TabHelper::FromWebContents(contents)->is_app();
-  data->media_state = chrome::GetTabMediaStateForContents(contents);
+  data->alert_state = chrome::GetTabAlertStateForContents(contents);
 }
 
 void BrowserTabStripController::SetTabDataAt(content::WebContents* web_contents,
@@ -562,10 +555,8 @@ void BrowserTabStripController::AddTab(WebContents* contents,
 
 void BrowserTabStripController::UpdateStackedLayout() {
   bool adjust_layout = false;
-  bool stacked_layout =
-      DetermineTabStripLayoutStacked(g_browser_process->local_state(),
-                                     browser_->host_desktop_type(),
-                                     &adjust_layout);
+  bool stacked_layout = DetermineTabStripLayoutStacked(
+      g_browser_process->local_state(), &adjust_layout);
   tabstrip_->set_adjust_layout(adjust_layout);
   tabstrip_->SetStackedLayout(stacked_layout);
 }

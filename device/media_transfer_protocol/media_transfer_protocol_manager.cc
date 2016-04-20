@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <queue>
 #include <set>
 #include <utility>
@@ -664,7 +665,7 @@ class MediaTransferProtocolManagerImpl : public MediaTransferProtocolManager {
   }
 
   // Mtpd DBus client.
-  scoped_ptr<MediaTransferProtocolDaemonClient> mtp_client_;
+  std::unique_ptr<MediaTransferProtocolDaemonClient> mtp_client_;
 
 #if !defined(OS_CHROMEOS)
   // And a D-Bus session for talking to mtpd.

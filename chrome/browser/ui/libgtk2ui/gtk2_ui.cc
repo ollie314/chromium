@@ -39,6 +39,7 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkShader.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/display.h"
@@ -281,9 +282,9 @@ struct GtkIconInfoDeleter {
     G_GNUC_END_IGNORE_DEPRECATIONS
   }
 };
-typedef scoped_ptr<GIcon, GObjectDeleter> ScopedGIcon;
-typedef scoped_ptr<GtkIconInfo, GtkIconInfoDeleter> ScopedGtkIconInfo;
-typedef scoped_ptr<GdkPixbuf, GObjectDeleter> ScopedGdkPixbuf;
+typedef std::unique_ptr<GIcon, GObjectDeleter> ScopedGIcon;
+typedef std::unique_ptr<GtkIconInfo, GtkIconInfoDeleter> ScopedGtkIconInfo;
+typedef std::unique_ptr<GdkPixbuf, GObjectDeleter> ScopedGdkPixbuf;
 
 // Prefix for app indicator ids
 const char kAppIndicatorIdPrefix[] = "chrome_app_indicator_";
@@ -311,6 +312,10 @@ const double kInactiveSaturation = 0.3;
 const color_utils::HSL kDefaultTintFrameIncognito = { -1, 0.2f, 0.35f };
 const color_utils::HSL kDefaultTintFrameIncognitoInactive = { -1, 0.3f, 0.6f };
 const color_utils::HSL kDefaultTintBackgroundTab = { -1, 0.5, 0.75 };
+
+#if GTK_MAJOR_VERSION == 3
+const color_utils::HSL kDefaultTintFrameInactive = { -1, -1, 0.75f };
+#endif
 
 // Picks a button tint from a set of background colors. While
 // |accent_color| will usually be the same color through a theme, this
@@ -449,7 +454,7 @@ double GetPixelsInPoint(float device_scale_factor) {
 }
 
 views::LinuxUI::NonClientMiddleClickAction GetDefaultMiddleClickAction() {
-  scoped_ptr<base::Environment> env(base::Environment::Create());
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
   switch (base::nix::GetDesktopEnvironment(env.get())) {
     case base::nix::DESKTOP_ENVIRONMENT_KDE4:
     case base::nix::DESKTOP_ENVIRONMENT_KDE5:
@@ -511,6 +516,10 @@ void Gtk2UI::Initialize() {
   Gtk2EventLoop::GetInstance();
 }
 
+void Gtk2UI::MaterialDesignControllerReady() {
+  UpdateMaterialDesignColors();
+}
+
 Gtk2UI::~Gtk2UI() {
   ClearAllThemeData();
 }
@@ -534,10 +543,17 @@ gfx::Image Gtk2UI::GetThemeImageNamed(int id) const {
 }
 
 bool Gtk2UI::GetTint(int id, color_utils::HSL* tint) const {
-  // We don't set any tints and the default tints don't work so well so make
-  // sure this is never called by mistake. All colors that might make use of
-  // tint should have an entry in |colors_|.
-  NOTREACHED();
+  switch (id) {
+    case ThemeProperties::TINT_BACKGROUND_TAB:
+      // Tints for which the cross-platform default is fine. Before adding new
+      // values here, specifically verify they work well on Linux.
+      break;
+    default:
+      // Assume any tints not specifically verified on Linux aren't usable.
+      // TODO(pkasting): Try to remove values from |colors_| that could just be
+      // added to the group above instead.
+      NOTREACHED();
+  }
   return false;
 }
 
@@ -623,7 +639,7 @@ void Gtk2UI::SetNativeThemeOverride(const NativeThemeGetter& callback) {
 }
 
 bool Gtk2UI::GetDefaultUsesSystemTheme() const {
-  scoped_ptr<base::Environment> env(base::Environment::Create());
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
 
   switch (base::nix::GetDesktopEnvironment(env.get())) {
     case base::nix::DESKTOP_ENVIRONMENT_GNOME:
@@ -655,18 +671,17 @@ bool Gtk2UI::IsStatusIconSupported() const {
   return true;
 }
 
-scoped_ptr<views::StatusIconLinux> Gtk2UI::CreateLinuxStatusIcon(
+std::unique_ptr<views::StatusIconLinux> Gtk2UI::CreateLinuxStatusIcon(
     const gfx::ImageSkia& image,
     const base::string16& tool_tip) const {
   if (AppIndicatorIcon::CouldOpen()) {
     ++indicators_count;
-    return scoped_ptr<views::StatusIconLinux>(new AppIndicatorIcon(
+    return std::unique_ptr<views::StatusIconLinux>(new AppIndicatorIcon(
         base::StringPrintf("%s%d", kAppIndicatorIdPrefix, indicators_count),
-        image,
-        tool_tip));
-  } else {
-    return scoped_ptr<views::StatusIconLinux>(new Gtk2StatusIcon(
         image, tool_tip));
+  } else {
+    return std::unique_ptr<views::StatusIconLinux>(
+        new Gtk2StatusIcon(image, tool_tip));
   }
 }
 
@@ -702,13 +717,13 @@ gfx::Image Gtk2UI::GetIconForContentType(
   return gfx::Image();
 }
 
-scoped_ptr<views::Border> Gtk2UI::CreateNativeBorder(
+std::unique_ptr<views::Border> Gtk2UI::CreateNativeBorder(
     views::LabelButton* owning_button,
-    scoped_ptr<views::LabelButtonBorder> border) {
+    std::unique_ptr<views::LabelButtonBorder> border) {
   if (owning_button->GetNativeTheme() != NativeThemeGtk2::instance())
     return std::move(border);
 
-  scoped_ptr<views::LabelButtonAssetBorder> gtk_border(
+  std::unique_ptr<views::LabelButtonAssetBorder> gtk_border(
       new views::LabelButtonAssetBorder(owning_button->style()));
 
   gtk_border->set_insets(border->GetInsets());
@@ -793,10 +808,10 @@ void Gtk2UI::SetNonClientMiddleClickAction(NonClientMiddleClickAction action) {
   middle_click_action_ = action;
 }
 
-scoped_ptr<ui::LinuxInputMethodContext> Gtk2UI::CreateInputMethodContext(
+std::unique_ptr<ui::LinuxInputMethodContext> Gtk2UI::CreateInputMethodContext(
     ui::LinuxInputMethodContextDelegate* delegate,
     bool is_simple) const {
-  return scoped_ptr<ui::LinuxInputMethodContext>(
+  return std::unique_ptr<ui::LinuxInputMethodContext>(
       new X11InputMethodContextImplGtk2(delegate, is_simple));
 }
 
@@ -880,7 +895,6 @@ void Gtk2UI::LoadGtkValues() {
 
   colors_[ThemeProperties::COLOR_TAB_TEXT] = label_color;
   colors_[ThemeProperties::COLOR_BOOKMARK_TEXT] = label_color;
-  colors_[ThemeProperties::COLOR_STATUS_BAR_TEXT] = label_color;
 
   UpdateDefaultFont();
 
@@ -962,6 +976,18 @@ void Gtk2UI::LoadGtkValues() {
       theme->GetSystemColor(ui::NativeTheme::kColorId_ThrobberSpinningColor);
   colors_[ThemeProperties::COLOR_TAB_THROBBER_WAITING] =
       theme->GetSystemColor(ui::NativeTheme::kColorId_ThrobberWaitingColor);
+}
+
+void Gtk2UI::UpdateMaterialDesignColors() {
+  // TODO(varkha): This should be merged back into LoadGtkValues() once Material
+  // Design is on unconditionally.
+  if (ui::MaterialDesignController::IsModeMaterial()) {
+    NativeThemeGtk2* theme = NativeThemeGtk2::instance();
+    SkColor label_color =
+        theme->GetSystemColor(ui::NativeTheme::kColorId_LabelEnabledColor);
+    colors_[ThemeProperties::COLOR_BACKGROUND_TAB_TEXT] =
+        color_utils::BlendTowardOppositeLuma(label_color, 50);
+  }
 }
 
 SkColor Gtk2UI::BuildFrameColors() {
@@ -1086,9 +1112,13 @@ gfx::Image Gtk2UI::GenerateGtkThemeImage(int id) const {
 
   return gfx::Image();
 }
+
 SkBitmap Gtk2UI::GenerateGtkThemeBitmap(int id) const {
   switch (id) {
     case IDR_THEME_TOOLBAR: {
+      if (ui::MaterialDesignController::IsModeMaterial())
+        break;
+
       SkBitmap bitmap;
       bitmap.allocN32Pixels(kToolbarImageWidth, kToolbarImageHeight);
       bitmap.eraseColor(
@@ -1097,15 +1127,9 @@ SkBitmap Gtk2UI::GenerateGtkThemeBitmap(int id) const {
       return bitmap;
     }
 
-    // TODO(erg): We list both the normal and *_DESKTOP versions of these
-    // images because in some contexts, we don't go through the
-    // chrome::MapThemeImage interface. That should be fixed, but tracking that
-    // down is Hard.
     case IDR_THEME_TAB_BACKGROUND:
-    case IDR_THEME_TAB_BACKGROUND_DESKTOP:
       return GenerateTabImage(IDR_THEME_FRAME);
     case IDR_THEME_TAB_BACKGROUND_INCOGNITO:
-    case IDR_THEME_TAB_BACKGROUND_INCOGNITO_DESKTOP:
       return GenerateTabImage(IDR_THEME_FRAME_INCOGNITO);
     case IDR_FRAME:
     case IDR_THEME_FRAME:
@@ -1155,6 +1179,9 @@ SkBitmap Gtk2UI::GenerateFrameImage(
     int color_id,
     const char* gradient_name) const {
 #if GTK_MAJOR_VERSION == 2
+  if (ui::MaterialDesignController::IsModeMaterial())
+    return SkBitmap();
+
   ColorMap::const_iterator it = colors_.find(color_id);
   DCHECK(it != colors_.end());
   SkColor base = it->second;
@@ -1176,12 +1203,11 @@ SkBitmap Gtk2UI::GenerateFrameImage(
                        NULL);
 
   if (gradient_size) {
-    skia::RefPtr<SkShader> shader = gfx::CreateGradientShader(
-        0, gradient_size, gradient_top_color, base);
     SkPaint paint;
     paint.setStyle(SkPaint::kFill_Style);
     paint.setAntiAlias(true);
-    paint.setShader(shader.get());
+    paint.setShader(gfx::CreateGradientShader(
+        0, gradient_size, gradient_top_color, base));
 
     canvas.DrawRect(gfx::Rect(0, 0, kToolbarImageWidth, gradient_size), paint);
   }
@@ -1189,14 +1215,12 @@ SkBitmap Gtk2UI::GenerateFrameImage(
   canvas.FillRect(gfx::Rect(0, gradient_size, kToolbarImageWidth,
                             kToolbarImageHeight - gradient_size), base);
   return canvas.ExtractImageRep().sk_bitmap();
-
 #else
   // Render a GtkHeaderBar as our title bar, cropping out any curved edges on
   // the left and right sides. Also remove the bottom border for good measure.
   SkBitmap bitmap;
   bitmap.allocN32Pixels(kToolbarImageWidth, 40);
   bitmap.eraseColor(0);
-
 
   static GtkWidget* title = NULL;
   if (!title) {
@@ -1237,6 +1261,9 @@ SkBitmap Gtk2UI::GenerateFrameImage(
 }
 
 SkBitmap Gtk2UI::GenerateTabImage(int base_id) const {
+  if (ui::MaterialDesignController::IsModeMaterial())
+    return SkBitmap();
+
   const SkBitmap* base_image = GetThemeImageNamed(base_id).ToSkBitmap();
   SkBitmap bg_tint = SkBitmapOperations::CreateHSLShiftedBitmap(
       *base_image, kDefaultTintBackgroundTab);
@@ -1343,6 +1370,9 @@ void Gtk2UI::UpdateDefaultFont() {
 void Gtk2UI::ResetStyle() {
   ClearAllThemeData();
   LoadGtkValues();
+  // TODO(varkha): There will be no need to call UpdateMaterialDesignColors()
+  // once Material Design is on unconditionally.
+  UpdateMaterialDesignColors();
   NativeThemeGtk2::instance()->NotifyObservers();
 }
 
@@ -1356,10 +1386,10 @@ float Gtk2UI::GetDeviceScaleFactor() const {
     return gfx::Display::GetForcedDeviceScaleFactor();
   const int kCSSDefaultDPI = 96;
   const float scale = GetDPI() / kCSSDefaultDPI;
-  // Round to 1 decimal, e.g. to 1.4.
-  const float rounded = roundf(scale * 10) / 10;
-  // See crbug.com/484400
-  return rounded < 1.3 ? 1.0 : rounded;
+
+  // Blacklist scaling factors <130% (crbug.com/484400) and round
+  // to 1 decimal to prevent rendering problems (crbug.com/485183).
+  return scale < 1.3f ? 1.0f : roundf(scale * 10) / 10;
 }
 
 }  // namespace libgtk2ui

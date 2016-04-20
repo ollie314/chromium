@@ -4,11 +4,11 @@
 
 #include "net/quic/quic_crypto_stream.h"
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/quic/crypto/crypto_handshake.h"
 #include "net/quic/crypto/crypto_protocol.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
@@ -64,7 +64,7 @@ class QuicCryptoStreamTest : public ::testing::Test {
   MockQuicSpdySession session_;
   MockQuicCryptoStream stream_;
   CryptoHandshakeMessage message_;
-  scoped_ptr<QuicData> message_data_;
+  std::unique_ptr<QuicData> message_data_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicCryptoStreamTest);
@@ -95,8 +95,8 @@ TEST_F(QuicCryptoStreamTest, ProcessBadData) {
   EXPECT_EQ(1, bad[kFirstTagIndex]);
   bad[kFirstTagIndex] = 0x7F;  // out of order tag
 
-  EXPECT_CALL(*connection_, SendConnectionCloseWithDetails(
-                                QUIC_CRYPTO_TAGS_OUT_OF_ORDER, testing::_));
+  EXPECT_CALL(*connection_, CloseConnection(QUIC_CRYPTO_TAGS_OUT_OF_ORDER,
+                                            testing::_, testing::_));
   stream_.OnStreamFrame(
       QuicStreamFrame(kCryptoStreamId, /*fin=*/false, /*offset=*/0, bad));
 }

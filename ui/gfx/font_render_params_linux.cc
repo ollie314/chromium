@@ -8,32 +8,29 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/command_line.h"
 #include "base/containers/mru_cache.h"
 #include "base/hash.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "build/build_config.h"
-#include "ui/gfx/display.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/linux_font_delegate.h"
-#include "ui/gfx/screen.h"
 #include "ui/gfx/switches.h"
 
 namespace gfx {
 
 namespace {
 
-#if defined(OS_CHROMEOS)
-// A device scale factor for an internal display (if any)
-// that is used to determine if subpixel positioning should be used.
-float device_scale_factor_for_internal_display = 1.0f;
-#endif
+// A device scale factor used to determine if subpixel positioning
+// should be used.
+float device_scale_factor_ = 1.0f;
 
 // Number of recent GetFontRenderParams() results to cache.
 const size_t kCacheSize = 256;
@@ -96,7 +93,7 @@ bool QueryFontconfig(const FontRenderParamsQuery& query,
   struct FcPatternDeleter {
     void operator()(FcPattern* ptr) const { FcPatternDestroy(ptr); }
   };
-  typedef scoped_ptr<FcPattern, FcPatternDeleter> ScopedFcPattern;
+  typedef std::unique_ptr<FcPattern, FcPatternDeleter> ScopedFcPattern;
 
   ScopedFcPattern query_pattern(FcPatternCreate());
   CHECK(query_pattern);
@@ -204,19 +201,9 @@ uint32_t HashFontRenderParamsQuery(const FontRenderParamsQuery& query) {
 FontRenderParams GetFontRenderParams(const FontRenderParamsQuery& query,
                                      std::string* family_out) {
   FontRenderParamsQuery actual_query(query);
-  if (actual_query.device_scale_factor == 0) {
-#if defined(OS_CHROMEOS)
-    actual_query.device_scale_factor = device_scale_factor_for_internal_display;
-#else
-    // Linux does not support per-display DPI, so we use a slightly simpler
-    // code path than on Chrome OS to figure out the device scale factor.
-    gfx::Screen* screen = gfx::Screen::GetScreenByType(gfx::SCREEN_TYPE_NATIVE);
-    if (screen) {
-      gfx::Display display = screen->GetPrimaryDisplay();
-      actual_query.device_scale_factor = display.device_scale_factor();
-    }
-#endif
-  }
+  if (actual_query.device_scale_factor == 0)
+    actual_query.device_scale_factor = device_scale_factor_;
+
   const uint32_t hash = HashFontRenderParamsQuery(actual_query);
   SynchronizedCache* synchronized_cache = g_synchronized_cache.Pointer();
 
@@ -279,14 +266,12 @@ void ClearFontRenderParamsCacheForTest() {
   synchronized_cache->cache.Clear();
 }
 
-#if defined(OS_CHROMEOS)
 float GetFontRenderParamsDeviceScaleFactor() {
-  return device_scale_factor_for_internal_display;
+  return device_scale_factor_;
 }
 
 void SetFontRenderParamsDeviceScaleFactor(float device_scale_factor) {
-  device_scale_factor_for_internal_display = device_scale_factor;
+  device_scale_factor_ = device_scale_factor;
 }
-#endif
 
 }  // namespace gfx

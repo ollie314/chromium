@@ -27,7 +27,7 @@ class ArcBridgeBootstrap;
 // The Chrome-side service that handles ARC instances and ARC bridge creation.
 // This service handles the lifetime of ARC instances and sets up the
 // communication channel (the ARC bridge) used to send and receive messages.
-class ArcBridgeService : public ArcBridgeHost {
+class ArcBridgeService : public mojom::ArcBridgeHost {
  public:
   // The possible states of the bridge.  In the normal flow, the state changes
   // in the following sequence:
@@ -77,25 +77,45 @@ class ArcBridgeService : public ArcBridgeHost {
     virtual void OnAppInstanceReady() {}
     virtual void OnAppInstanceClosed() {}
 
+    // Called whenever the ARC audio interface state changes.
+    virtual void OnAudioInstanceReady() {}
+    virtual void OnAudioInstanceClosed() {}
+
     // Called whenever the ARC auth interface state changes.
     virtual void OnAuthInstanceReady() {}
     virtual void OnAuthInstanceClosed() {}
+
+    // Called whenever ARC Bluetooth instance is ready.
+    virtual void OnBluetoothInstanceReady() {}
+    virtual void OnBluetoothInstanceClosed() {}
 
     // Called whenever the ARC clipboard interface state changes.
     virtual void OnClipboardInstanceReady() {}
     virtual void OnClipboardInstanceClosed() {}
 
+    // Called whenever the ARC crash collector interface state changes.
+    virtual void OnCrashCollectorInstanceReady() {}
+    virtual void OnCrashCollectorInstanceClosed() {}
+
     // Called whenever the ARC IME interface state changes.
     virtual void OnImeInstanceReady() {}
     virtual void OnImeInstanceClosed() {}
 
-    // Called whenever the ARC input interface state changes.
-    virtual void OnInputInstanceReady() {}
-    virtual void OnInputInstanceClosed() {}
+    // Called whenever the ARC intent helper interface state changes.
+    virtual void OnIntentHelperInstanceReady() {}
+    virtual void OnIntentHelperInstanceClosed() {}
 
     // Called whenever the ARC notification interface state changes.
     virtual void OnNotificationsInstanceReady() {}
     virtual void OnNotificationsInstanceClosed() {}
+
+    // Called whenever the ARC net interface state changes.
+    virtual void OnNetInstanceReady() {}
+    virtual void OnNetInstanceClosed() {}
+
+    // Called whenever the ARC policy interface state changes.
+    virtual void OnPolicyInstanceReady() {}
+    virtual void OnPolicyInstanceClosed() {}
 
     // Called whenever the ARC power interface state changes.
     virtual void OnPowerInstanceReady() {}
@@ -104,10 +124,6 @@ class ArcBridgeService : public ArcBridgeHost {
     // Called whenever the ARC process interface state changes.
     virtual void OnProcessInstanceReady() {}
     virtual void OnProcessInstanceClosed() {}
-
-    // Called whenever the ARC settings interface state changes.
-    virtual void OnSettingsInstanceReady() {}
-    virtual void OnSettingsInstanceClosed() {}
 
     // Called whenever the ARC video interface state changes.
     virtual void OnVideoInstanceReady() {}
@@ -127,10 +143,10 @@ class ArcBridgeService : public ArcBridgeHost {
   // switch.
   static bool GetEnabled(const base::CommandLine* command_line);
 
-  // DetectAvailability() should be called once D-Bus is available. It will
-  // call CheckArcAvailability() on the session_manager. This can only be
-  // called on the thread that this class was created on.
-  virtual void DetectAvailability() = 0;
+  // SetDetectedAvailability() should be called once CheckArcAvailability() on
+  // the session_manager is called. This can only be called on the thread that
+  // this class was created on.
+  virtual void SetDetectedAvailability(bool availability) = 0;
 
   // HandleStartup() should be called upon profile startup.  This will only
   // launch an instance if the instance service is available and it is enabled.
@@ -150,42 +166,68 @@ class ArcBridgeService : public ArcBridgeHost {
   // nullptr if that particular service is not ready yet. Use an Observer if
   // you want to be notified when this is ready. This can only be called on the
   // thread that this class was created on.
-  AppInstance* app_instance() { return app_ptr_.get(); }
-  AuthInstance* auth_instance() { return auth_ptr_.get(); }
-  ClipboardInstance* clipboard_instance() { return clipboard_ptr_.get(); }
-  ImeInstance* ime_instance() { return ime_ptr_.get(); }
-  InputInstance* input_instance() { return input_ptr_.get(); }
-  NotificationsInstance* notifications_instance() {
+  mojom::AppInstance* app_instance() { return app_ptr_.get(); }
+  mojom::AudioInstance* audio_instance() { return audio_ptr_.get(); }
+  mojom::AuthInstance* auth_instance() { return auth_ptr_.get(); }
+  mojom::BluetoothInstance* bluetooth_instance() {
+    return bluetooth_ptr_.get();
+  }
+  mojom::ClipboardInstance* clipboard_instance() {
+    return clipboard_ptr_.get();
+  }
+  mojom::CrashCollectorInstance* crash_collector_instance() {
+    return crash_collector_ptr_.get();
+  }
+  mojom::ImeInstance* ime_instance() { return ime_ptr_.get(); }
+  mojom::IntentHelperInstance* intent_helper_instance() {
+    return intent_helper_ptr_.get();
+  }
+  mojom::NetInstance* net_instance() { return net_ptr_.get(); }
+  mojom::NotificationsInstance* notifications_instance() {
     return notifications_ptr_.get();
   }
-  PowerInstance* power_instance() { return power_ptr_.get(); }
-  ProcessInstance* process_instance() { return process_ptr_.get(); }
-  SettingsInstance* settings_instance() { return settings_ptr_.get(); }
-  VideoInstance* video_instance() { return video_ptr_.get(); }
+  mojom::PolicyInstance* policy_instance() { return policy_ptr_.get(); }
+  mojom::PowerInstance* power_instance() { return power_ptr_.get(); }
+  mojom::ProcessInstance* process_instance() { return process_ptr_.get(); }
+  mojom::VideoInstance* video_instance() { return video_ptr_.get(); }
 
   int32_t app_version() const { return app_ptr_.version(); }
+  int32_t audio_version() const { return audio_ptr_.version(); }
+  int32_t bluetooth_version() const { return bluetooth_ptr_.version(); }
   int32_t auth_version() const { return auth_ptr_.version(); }
   int32_t clipboard_version() const { return clipboard_ptr_.version(); }
+  int32_t crash_collector_version() const {
+    return crash_collector_ptr_.version();
+  }
   int32_t ime_version() const { return ime_ptr_.version(); }
-  int32_t input_version() const { return input_ptr_.version(); }
+  int32_t intent_helper_version() const { return intent_helper_ptr_.version(); }
+  int32_t net_version() const { return net_ptr_.version(); }
   int32_t notifications_version() const { return notifications_ptr_.version(); }
+  int32_t policy_version() const { return policy_ptr_.version(); }
   int32_t power_version() const { return power_ptr_.version(); }
   int32_t process_version() const { return process_ptr_.version(); }
-  int32_t settings_version() const { return settings_ptr_.version(); }
   int32_t video_version() const { return video_ptr_.version(); }
 
   // ArcHost:
-  void OnAppInstanceReady(AppInstancePtr app_ptr) override;
-  void OnAuthInstanceReady(AuthInstancePtr auth_ptr) override;
-  void OnClipboardInstanceReady(ClipboardInstancePtr clipboard_ptr) override;
-  void OnImeInstanceReady(ImeInstancePtr ime_ptr) override;
-  void OnInputInstanceReady(InputInstancePtr input_ptr) override;
+  void OnAppInstanceReady(mojom::AppInstancePtr app_ptr) override;
+  void OnAudioInstanceReady(mojom::AudioInstancePtr audio_ptr) override;
+  void OnAuthInstanceReady(mojom::AuthInstancePtr auth_ptr) override;
+  void OnBluetoothInstanceReady(
+      mojom::BluetoothInstancePtr bluetooth_ptr) override;
+  void OnClipboardInstanceReady(
+      mojom::ClipboardInstancePtr clipboard_ptr) override;
+  void OnCrashCollectorInstanceReady(
+      mojom::CrashCollectorInstancePtr crash_collector_ptr) override;
+  void OnImeInstanceReady(mojom::ImeInstancePtr ime_ptr) override;
+  void OnIntentHelperInstanceReady(
+      mojom::IntentHelperInstancePtr intent_helper_ptr) override;
+  void OnNetInstanceReady(mojom::NetInstancePtr net_ptr) override;
   void OnNotificationsInstanceReady(
-      NotificationsInstancePtr notifications_ptr) override;
-  void OnPowerInstanceReady(PowerInstancePtr power_ptr) override;
-  void OnProcessInstanceReady(ProcessInstancePtr process_ptr) override;
-  void OnSettingsInstanceReady(SettingsInstancePtr process_ptr) override;
-  void OnVideoInstanceReady(VideoInstancePtr video_ptr) override;
+      mojom::NotificationsInstancePtr notifications_ptr) override;
+  void OnPolicyInstanceReady(mojom::PolicyInstancePtr policy_ptr) override;
+  void OnPowerInstanceReady(mojom::PowerInstancePtr power_ptr) override;
+  void OnProcessInstanceReady(mojom::ProcessInstancePtr process_ptr) override;
+  void OnVideoInstanceReady(mojom::VideoInstancePtr video_ptr) override;
 
   // Gets the current state of the bridge service.
   State state() const { return state_; }
@@ -218,39 +260,51 @@ class ArcBridgeService : public ArcBridgeHost {
 
   // Called when one of the individual channels is closed.
   void CloseAppChannel();
+  void CloseAudioChannel();
   void CloseAuthChannel();
+  void CloseBluetoothChannel();
   void CloseClipboardChannel();
+  void CloseCrashCollectorChannel();
   void CloseImeChannel();
-  void CloseInputChannel();
+  void CloseIntentHelperChannel();
+  void CloseNetChannel();
   void CloseNotificationsChannel();
+  void ClosePolicyChannel();
   void ClosePowerChannel();
   void CloseProcessChannel();
-  void CloseSettingsChannel();
   void CloseVideoChannel();
 
   // Callbacks for QueryVersion.
   void OnAppVersionReady(int32_t version);
+  void OnAudioVersionReady(int32_t version);
   void OnAuthVersionReady(int32_t version);
+  void OnBluetoothVersionReady(int32_t version);
   void OnClipboardVersionReady(int32_t version);
+  void OnCrashCollectorVersionReady(int32_t version);
   void OnImeVersionReady(int32_t version);
-  void OnInputVersionReady(int32_t version);
+  void OnIntentHelperVersionReady(int32_t version);
+  void OnNetVersionReady(int32_t version);
   void OnNotificationsVersionReady(int32_t version);
+  void OnPolicyVersionReady(int32_t version);
   void OnPowerVersionReady(int32_t version);
   void OnProcessVersionReady(int32_t version);
-  void OnSettingsVersionReady(int32_t version);
   void OnVideoVersionReady(int32_t version);
 
   // Mojo interfaces.
-  AppInstancePtr app_ptr_;
-  AuthInstancePtr auth_ptr_;
-  ClipboardInstancePtr clipboard_ptr_;
-  ImeInstancePtr ime_ptr_;
-  InputInstancePtr input_ptr_;
-  NotificationsInstancePtr notifications_ptr_;
-  PowerInstancePtr power_ptr_;
-  ProcessInstancePtr process_ptr_;
-  SettingsInstancePtr settings_ptr_;
-  VideoInstancePtr video_ptr_;
+  mojom::AppInstancePtr app_ptr_;
+  mojom::AudioInstancePtr audio_ptr_;
+  mojom::AuthInstancePtr auth_ptr_;
+  mojom::BluetoothInstancePtr bluetooth_ptr_;
+  mojom::ClipboardInstancePtr clipboard_ptr_;
+  mojom::CrashCollectorInstancePtr crash_collector_ptr_;
+  mojom::ImeInstancePtr ime_ptr_;
+  mojom::IntentHelperInstancePtr intent_helper_ptr_;
+  mojom::NetInstancePtr net_ptr_;
+  mojom::NotificationsInstancePtr notifications_ptr_;
+  mojom::PolicyInstancePtr policy_ptr_;
+  mojom::PowerInstancePtr power_ptr_;
+  mojom::ProcessInstancePtr process_ptr_;
+  mojom::VideoInstancePtr video_ptr_;
 
   // Temporary Mojo interfaces.  After a Mojo interface pointer has been
   // received from the other endpoint, we still need to asynchronously query
@@ -258,16 +312,20 @@ class ArcBridgeService : public ArcBridgeHost {
   // the xxx_instance() functions.
   // To keep the xxx_instance() functions being trivial, store the instance
   // pointer in a temporary variable to avoid losing its reference.
-  AppInstancePtr temporary_app_ptr_;
-  AuthInstancePtr temporary_auth_ptr_;
-  ClipboardInstancePtr temporary_clipboard_ptr_;
-  ImeInstancePtr temporary_ime_ptr_;
-  InputInstancePtr temporary_input_ptr_;
-  NotificationsInstancePtr temporary_notifications_ptr_;
-  PowerInstancePtr temporary_power_ptr_;
-  ProcessInstancePtr temporary_process_ptr_;
-  SettingsInstancePtr temporary_settings_ptr_;
-  VideoInstancePtr temporary_video_ptr_;
+  mojom::AppInstancePtr temporary_app_ptr_;
+  mojom::AudioInstancePtr temporary_audio_ptr_;
+  mojom::AuthInstancePtr temporary_auth_ptr_;
+  mojom::BluetoothInstancePtr temporary_bluetooth_ptr_;
+  mojom::ClipboardInstancePtr temporary_clipboard_ptr_;
+  mojom::CrashCollectorInstancePtr temporary_crash_collector_ptr_;
+  mojom::ImeInstancePtr temporary_ime_ptr_;
+  mojom::IntentHelperInstancePtr temporary_intent_helper_ptr_;
+  mojom::NetInstancePtr temporary_net_ptr_;
+  mojom::NotificationsInstancePtr temporary_notifications_ptr_;
+  mojom::PolicyInstancePtr temporary_policy_ptr_;
+  mojom::PowerInstancePtr temporary_power_ptr_;
+  mojom::ProcessInstancePtr temporary_process_ptr_;
+  mojom::VideoInstancePtr temporary_video_ptr_;
 
   base::ObserverList<Observer> observer_list_;
 

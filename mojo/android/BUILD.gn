@@ -45,10 +45,8 @@ source_set("libsystem_java") {
   deps = [
     ":system_java_jni_headers",
     "//base",
-    "//mojo/environment:chromium",
+    "//mojo/edk/system",
     "//mojo/message_pump",
-    "//mojo/public/cpp/environment",
-    "//third_party/mojo/src/mojo/edk/system",
   ]
 }
 
@@ -100,6 +98,8 @@ android_library("mojo_javatests") {
     "//base:base_java",
     "//base:base_java_test_support",
     "//mojo/public/interfaces/bindings/tests:test_interfaces_java",
+    "//mojo/public/interfaces/bindings/tests:test_mojom_import2_java",
+    "//mojo/public/interfaces/bindings/tests:test_mojom_import_java",
     "//mojo/public/java:bindings",
     "//mojo/public/java:system",
   ]
@@ -123,17 +123,15 @@ shared_library("mojo_java_unittests") {
     "//base",
     "//base/test/:test_support",
     "//build/config/sanitizers:deps",
+    "//mojo/edk/system",
     "//mojo/message_pump",
     "//mojo/public/cpp/bindings/tests:mojo_public_bindings_test_utils",
-    "//mojo/public/cpp/environment",
     "//mojo/public/cpp/test_support:test_utils",
-    "//third_party/mojo/src/mojo/edk/system",
   ]
   defines = [ "UNIT_TEST" ]
 }
 
-android_apk("mojo_test_apk") {
-  testonly = true
+instrumentation_test_apk("mojo_test_apk") {
   deps = [
     ":mojo_java_unittests",
     ":mojo_javatests",

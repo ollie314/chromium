@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 
+#include <memory>
 #include <vector>
 
 #include "base/bind.h"
@@ -11,10 +12,8 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -61,6 +60,7 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/user_manager/known_user.h"
@@ -85,6 +85,19 @@
 namespace chromeos {
 
 namespace {
+
+// Enum types for Login.PasswordChangeFlow.
+// Don't change the existing values and update LoginPasswordChangeFlow in
+// histogram.xml when making changes here.
+enum LoginPasswordChangeFlow {
+  // User is sent to the password changed flow. This is the normal case.
+  LOGIN_PASSWORD_CHANGE_FLOW_PASSWORD_CHANGED = 0,
+  // User is sent to the unrecoverable cryptohome failure flow. This is the
+  // case when http://crbug.com/547857 happens.
+  LOGIN_PASSWORD_CHANGE_FLOW_CRYPTOHOME_FAILURE = 1,
+
+  LOGIN_PASSWORD_CHANGE_FLOW_COUNT,  // Must be the last entry.
+};
 
 // Delay for transferring the auth cache to the system profile.
 const long int kAuthCacheTransferDelayMs = 2000;
@@ -139,27 +152,26 @@ bool CanShowDebuggingFeatures() {
          !user_manager::UserManager::Get()->IsSessionStarted();
 }
 
+void RecordPasswordChangeFlow(LoginPasswordChangeFlow flow) {
+  UMA_HISTOGRAM_ENUMERATION("Login.PasswordChangeFlow", flow,
+                            LOGIN_PASSWORD_CHANGE_FLOW_COUNT);
+}
+
 }  // namespace
 
 // static
-ExistingUserController* ExistingUserController::current_controller_ = NULL;
+ExistingUserController* ExistingUserController::current_controller_ = nullptr;
 
 ////////////////////////////////////////////////////////////////////////////////
 // ExistingUserController, public:
 
 ExistingUserController::ExistingUserController(LoginDisplayHost* host)
-    : auth_status_consumer_(NULL),
-      host_(host),
+    : host_(host),
       login_display_(host_->CreateLoginDisplay(this)),
-      num_login_attempts_(0),
       cros_settings_(CrosSettings::Get()),
-      is_login_in_progress_(false),
-      password_changed_(false),
-      auth_mode_(LoginPerformer::AUTH_MODE_EXTENSION),
-      signin_screen_ready_(false),
       network_state_helper_(new login::NetworkStateHelper),
       weak_factory_(this) {
-  DCHECK(current_controller_ == NULL);
+  DCHECK(current_controller_ == nullptr);
   current_controller_ = this;
 
   registrar_.Add(this,
@@ -216,25 +228,29 @@ void ExistingUserController::UpdateLoginDisplay(
 
   cros_settings_->GetBoolean(kAccountsPrefShowUserNamesOnSignIn,
                              &show_users_on_signin);
-  for (user_manager::UserList::const_iterator it = users.begin();
-       it != users.end();
-       ++it) {
+  for (const auto& user : users) {
+    // Skip kiosk apps for login screen user list. Kiosk apps as pods (aka new
+    // kiosk UI) is currently disabled and it gets the apps directly from
+    // KioskAppManager.
+    if (user->GetType() == user_manager::USER_TYPE_KIOSK_APP)
+      continue;
+
     // TODO(xiyuan): Clean user profile whose email is not in whitelist.
-    bool meets_supervised_requirements =
-        (*it)->GetType() != user_manager::USER_TYPE_SUPERVISED ||
+    const bool meets_supervised_requirements =
+        user->GetType() != user_manager::USER_TYPE_SUPERVISED ||
         user_manager::UserManager::Get()->AreSupervisedUsersAllowed();
-    bool meets_whitelist_requirements =
-        CrosSettings::IsWhitelisted((*it)->email(), NULL) ||
-        !(*it)->HasGaiaAccount();
+    const bool meets_whitelist_requirements =
+        CrosSettings::IsWhitelisted(user->email(), nullptr) ||
+        !user->HasGaiaAccount();
 
     // Public session accounts are always shown on login screen.
-    bool meets_show_users_requirements =
+    const bool meets_show_users_requirements =
         show_users_on_signin ||
-        (*it)->GetType() == user_manager::USER_TYPE_PUBLIC_ACCOUNT;
+        user->GetType() == user_manager::USER_TYPE_PUBLIC_ACCOUNT;
     if (meets_supervised_requirements &&
         meets_whitelist_requirements &&
         meets_show_users_requirements) {
-      filtered_users.push_back(*it);
+      filtered_users.push_back(user);
     }
   }
 
@@ -292,8 +308,8 @@ void ExistingUserController::Observe(
     content::BrowserThread::PostDelayedTask(
         content::BrowserThread::IO, FROM_HERE,
         base::Bind(&TransferContextAuthenticationsOnIOThread,
-                   signin_profile_context_getter,
-                   browser_process_context_getter),
+                   base::RetainedRef(signin_profile_context_getter),
+                   base::RetainedRef(browser_process_context_getter)),
         base::TimeDelta::FromMilliseconds(kAuthCacheTransferDelayMs));
   }
 }
@@ -305,7 +321,7 @@ ExistingUserController::~ExistingUserController() {
   UserSessionManager::GetInstance()->DelegateDeleted(this);
 
   if (current_controller_ == this) {
-    current_controller_ = NULL;
+    current_controller_ = nullptr;
   } else {
     NOTREACHED() << "More than one controller are alive.";
   }
@@ -317,16 +333,20 @@ ExistingUserController::~ExistingUserController() {
 //
 
 void ExistingUserController::CancelPasswordChangedFlow() {
-  login_performer_.reset(NULL);
+  login_performer_.reset(nullptr);
   PerformLoginFinishedActions(true /* start public session timer */);
 }
 
 void ExistingUserController::CompleteLogin(const UserContext& user_context) {
-  login_display_->set_signin_completed(true);
   if (!host_) {
     // Complete login event was generated already from UI. Ignore notification.
     return;
   }
+
+  if (is_login_in_progress_)
+    return;
+
+  is_login_in_progress_ = true;
 
   ContinueLoginIfDeviceNotDisabled(base::Bind(
       &ExistingUserController::DoCompleteLogin,
@@ -344,6 +364,24 @@ bool ExistingUserController::IsSigninInProgress() const {
 
 void ExistingUserController::Login(const UserContext& user_context,
                                    const SigninSpecifics& specifics) {
+  if (is_login_in_progress_) {
+    // If there is another login in progress, bail out. Do not re-enable
+    // clicking on other windows and the status area. Do not start the
+    // auto-login timer.
+    return;
+  }
+
+  is_login_in_progress_ = true;
+
+  if (user_context.GetUserType() != user_manager::USER_TYPE_REGULAR &&
+      user_manager::UserManager::Get()->IsUserLoggedIn()) {
+    // Multi-login is only allowed for regular users. If we are attempting to
+    // do multi-login as another type of user somehow, bail out. Do not
+    // re-enable clicking on other windows and the status area. Do not start the
+    // auto-login timer.
+    return;
+  }
+
   ContinueLoginIfDeviceNotDisabled(base::Bind(
       &ExistingUserController::DoLogin,
       weak_factory_.GetWeakPtr(),
@@ -365,7 +403,7 @@ void ExistingUserController::PerformLogin(
   // such as Authenticator instance.
   if (!login_performer_.get() || num_login_attempts_ <= 1) {
     // Only one instance of LoginPerformer should exist at a time.
-    login_performer_.reset(NULL);
+    login_performer_.reset(nullptr);
     login_performer_.reset(new ChromeLoginPerformer(this));
   }
 
@@ -382,10 +420,11 @@ void ExistingUserController::PerformLogin(
 
 void ExistingUserController::MigrateUserData(const std::string& old_password) {
   // LoginPerformer instance has state of the user so it should exist.
-  if (login_performer_.get())
+  if (login_performer_.get()) {
+    VLOG(1) << "Migrate the existing cryptohome to new password.";
     login_performer_->RecoverEncryptedData(old_password);
+  }
 }
-
 
 void ExistingUserController::OnSigninScreenReady() {
   signin_screen_ready_ = true;
@@ -422,8 +461,10 @@ void ExistingUserController::OnStartKioskAutolaunchScreen() {
 
 void ExistingUserController::ResyncUserData() {
   // LoginPerformer instance has state of the user so it should exist.
-  if (login_performer_.get())
+  if (login_performer_.get()) {
+    VLOG(1) << "Create a new cryptohome and resync user data.";
     login_performer_->ResyncEncryptedData();
+  }
 }
 
 void ExistingUserController::SetDisplayEmail(const std::string& email) {
@@ -500,6 +541,25 @@ void ExistingUserController::ShowTPMError() {
   login_display_->ShowErrorScreen(LoginDisplay::TPM_ERROR);
 }
 
+void ExistingUserController::ShowPasswordChangedDialog() {
+  RecordPasswordChangeFlow(LOGIN_PASSWORD_CHANGE_FLOW_PASSWORD_CHANGED);
+
+  VLOG(1) << "Show password changed dialog"
+          << ", count=" << login_performer_->password_changed_callback_count();
+
+  // True if user has already made an attempt to enter old password and failed.
+  bool show_invalid_old_password_error =
+      login_performer_->password_changed_callback_count() > 1;
+
+  // Note: We allow owner using "full sync" mode which will recreate
+  // cryptohome and deal with owner private key being lost. This also allows
+  // us to recover from a lost owner password/homedir.
+  // TODO(gspencer): We shouldn't have to erase stateful data when
+  // doing this.  See http://crosbug.com/9115 http://crosbug.com/7792
+  login_display_->ShowPasswordChangedDialog(show_invalid_old_password_error,
+                                            display_email_);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ExistingUserController, LoginPerformer::Delegate implementation:
 //
@@ -553,6 +613,9 @@ void ExistingUserController::OnAuthFailure(const AuthFailure& failure) {
           ShowError(IDS_LOGIN_ERROR_AUTHENTICATING, error);
       }
     }
+    if (auth_flow_offline_)
+      UMA_HISTOGRAM_BOOLEAN("Login.OfflineFailure.IsKnownUser", is_known_user);
+
     login_display_->ClearAndEnablePassword();
     StartPublicSessionAutoLoginTimer();
   }
@@ -603,8 +666,12 @@ void ExistingUserController::OnAuthSuccess(const UserContext& user_context) {
       user_context.GetAuthFlow() != UserContext::AUTH_FLOW_EASY_BOOTSTRAP;
 
   // LoginPerformer instance will delete itself in case of successful auth.
-  login_performer_->set_delegate(NULL);
+  login_performer_->set_delegate(nullptr);
   ignore_result(login_performer_.release());
+
+  if (user_context.GetAuthFlow() == UserContext::AUTH_FLOW_OFFLINE)
+    UMA_HISTOGRAM_COUNTS_100("Login.OfflineSuccess.Attempts",
+                             num_login_attempts_);
 
   UserSessionManager::StartSessionType start_session_type =
       UserAddingScreen::Get()->IsRunning()
@@ -629,7 +696,7 @@ void ExistingUserController::OnProfilePrepared(Profile* profile,
   login_display_->SetUIEnabled(true);
 
   if (browser_launched)
-    host_ = NULL;
+    host_ = nullptr;
 
   // Inform |auth_status_consumer_| about successful login.
   // TODO(nkostylev): Pass UserContext back crbug.com/424550
@@ -670,20 +737,23 @@ void ExistingUserController::OnPasswordChangeDetected() {
     return;
   }
 
-  // True if user has already made an attempt to enter old password and failed.
-  bool show_invalid_old_password_error =
-      login_performer_->password_changed_callback_count() > 1;
-
-  // Note: We allow owner using "full sync" mode which will recreate
-  // cryptohome and deal with owner private key being lost. This also allows
-  // us to recover from a lost owner password/homedir.
-  // TODO(gspencer): We shouldn't have to erase stateful data when
-  // doing this.  See http://crosbug.com/9115 http://crosbug.com/7792
-  login_display_->ShowPasswordChangedDialog(show_invalid_old_password_error,
-                                            display_email_);
-
   if (auth_status_consumer_)
     auth_status_consumer_->OnPasswordChangeDetected();
+
+  // If the password change happens after an online auth, do a TokenHandle check
+  // to find out whether the user password is really changed or not.
+  if (auth_mode() == LoginPerformer::AUTH_MODE_EXTENSION) {
+    token_handle_util_.reset(new TokenHandleUtil);
+    if (token_handle_util_->HasToken(last_login_attempt_account_id_)) {
+      token_handle_util_->CheckToken(
+          last_login_attempt_account_id_,
+          base::Bind(&ExistingUserController::OnTokenHandleChecked,
+                     weak_factory_.GetWeakPtr()));
+      return;
+    }
+  }
+
+  ShowPasswordChangedDialog();
 }
 
 void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
@@ -706,13 +776,17 @@ void ExistingUserController::PolicyLoadFailed() {
   display_email_.clear();
 }
 
+void ExistingUserController::SetAuthFlowOffline(bool offline) {
+  auth_flow_offline_ = offline;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ExistingUserController, private:
 
 void ExistingUserController::DeviceSettingsChanged() {
   // If login was already completed, we should avoid any signin screen
   // transitions, see http://crbug.com/461604 for example.
-  if (host_ != NULL && !login_display_->is_signin_completed()) {
+  if (host_ != nullptr && !login_display_->is_signin_completed()) {
     // Signed settings or user list changed. Notify views and update them.
     UpdateLoginDisplay(user_manager::UserManager::Get()->GetUsers());
     ConfigurePublicSessionAutoLogin();
@@ -734,8 +808,8 @@ bool ExistingUserController::password_changed() const {
 }
 
 void ExistingUserController::LoginAsGuest() {
-  PerformPreLoginActions(UserContext(user_manager::USER_TYPE_GUEST,
-                                     login::GuestAccountId().GetUserEmail()));
+  PerformPreLoginActions(
+      UserContext(user_manager::USER_TYPE_GUEST, login::GuestAccountId()));
 
   bool allow_guest;
   cros_settings_->GetBoolean(kAccountsPrefAllowGuest, &allow_guest);
@@ -748,7 +822,7 @@ void ExistingUserController::LoginAsGuest() {
   }
 
   // Only one instance of LoginPerformer should exist at a time.
-  login_performer_.reset(NULL);
+  login_performer_.reset(nullptr);
   login_performer_.reset(new ChromeLoginPerformer(this));
   login_performer_->LoginOffTheRecord();
   SendAccessibilityAlert(
@@ -784,7 +858,7 @@ void ExistingUserController::LoginAsPublicSession(
             ->store()
             ->policy_map()
             .Get(policy::key::kSessionLocales);
-    base::ListValue const* list = NULL;
+    base::ListValue const* list = nullptr;
     if (entry &&
         entry->level == policy::POLICY_LEVEL_RECOMMENDED &&
         entry->value &&
@@ -838,20 +912,21 @@ void ExistingUserController::ConfigurePublicSessionAutoLogin() {
   const std::vector<policy::DeviceLocalAccount> device_local_accounts =
       policy::GetDeviceLocalAccounts(cros_settings_);
 
-  public_session_auto_login_username_.clear();
+  public_session_auto_login_account_id_ = EmptyAccountId();
   for (std::vector<policy::DeviceLocalAccount>::const_iterator
            it = device_local_accounts.begin();
        it != device_local_accounts.end(); ++it) {
     if (it->account_id == auto_login_account_id) {
-      public_session_auto_login_username_ = it->user_id;
+      public_session_auto_login_account_id_ =
+          AccountId::FromUserEmail(it->user_id);
       break;
     }
   }
 
   const user_manager::User* user = user_manager::UserManager::Get()->FindUser(
-      AccountId::FromUserEmail(public_session_auto_login_username_));
+      public_session_auto_login_account_id_);
   if (!user || user->GetType() != user_manager::USER_TYPE_PUBLIC_ACCOUNT)
-    public_session_auto_login_username_.clear();
+    public_session_auto_login_account_id_ = EmptyAccountId();
 
   if (!cros_settings_->GetInteger(
           kAccountsPrefDeviceLocalAccountAutoLoginDelay,
@@ -859,7 +934,7 @@ void ExistingUserController::ConfigurePublicSessionAutoLogin() {
     public_session_auto_login_delay_ = 0;
   }
 
-  if (!public_session_auto_login_username_.empty())
+  if (public_session_auto_login_account_id_.is_valid())
     StartPublicSessionAutoLoginTimer();
   else
     StopPublicSessionAutoLoginTimer();
@@ -874,9 +949,10 @@ void ExistingUserController::ResetPublicSessionAutoLoginTimer() {
 }
 
 void ExistingUserController::OnPublicSessionAutoLoginTimerFire() {
-  CHECK(signin_screen_ready_ && !public_session_auto_login_username_.empty());
+  CHECK(signin_screen_ready_ &&
+        public_session_auto_login_account_id_.is_valid());
   Login(UserContext(user_manager::USER_TYPE_PUBLIC_ACCOUNT,
-                    public_session_auto_login_username_),
+                    public_session_auto_login_account_id_),
         SigninSpecifics());
 }
 
@@ -886,9 +962,8 @@ void ExistingUserController::StopPublicSessionAutoLoginTimer() {
 }
 
 void ExistingUserController::StartPublicSessionAutoLoginTimer() {
-  if (!signin_screen_ready_ ||
-      is_login_in_progress_ ||
-      public_session_auto_login_username_.empty()) {
+  if (!signin_screen_ready_ || is_login_in_progress_ ||
+      !public_session_auto_login_account_id_.is_valid()) {
     return;
   }
 
@@ -952,11 +1027,11 @@ void ExistingUserController::SendAccessibilityAlert(
 
 void ExistingUserController::SetPublicSessionKeyboardLayoutAndLogin(
     const UserContext& user_context,
-    scoped_ptr<base::ListValue> keyboard_layouts) {
+    std::unique_ptr<base::ListValue> keyboard_layouts) {
   UserContext new_user_context = user_context;
   std::string keyboard_layout;
   for (size_t i = 0; i < keyboard_layouts->GetSize(); ++i) {
-    base::DictionaryValue* entry = NULL;
+    base::DictionaryValue* entry = nullptr;
     keyboard_layouts->GetDictionary(i, &entry);
     bool selected = false;
     entry->GetBoolean("selected", &selected);
@@ -974,7 +1049,7 @@ void ExistingUserController::SetPublicSessionKeyboardLayoutAndLogin(
 void ExistingUserController::LoginAsPublicSessionInternal(
     const UserContext& user_context) {
   // Only one instance of LoginPerformer should exist at a time.
-  login_performer_.reset(NULL);
+  login_performer_.reset(nullptr);
   login_performer_.reset(new ChromeLoginPerformer(this));
   login_performer_->LoginAsPublicSession(user_context);
   SendAccessibilityAlert(
@@ -990,14 +1065,7 @@ void ExistingUserController::PerformPreLoginActions(
     last_login_attempt_account_id_ = user_context.GetAccountId();
     num_login_attempts_ = 0;
   }
-
-  // Guard in cases when we're called twice but login process is still active.
-  // This might happen when login process is paused till signed settings status
-  // is verified which results in Login* method called again as a callback.
-  if (!is_login_in_progress_)
-    num_login_attempts_++;
-
-  is_login_in_progress_ = true;
+  num_login_attempts_++;
 
   // Stop the auto-login timer when attempting login.
   StopPublicSessionAutoLoginTimer();
@@ -1117,22 +1185,6 @@ void ExistingUserController::DoCompleteLogin(
 
 void ExistingUserController::DoLogin(const UserContext& user_context,
                                      const SigninSpecifics& specifics) {
-  if (is_login_in_progress_) {
-    // If there is another login in progress, bail out. Do not re-enable
-    // clicking on other windows and the status area. Do not start the
-    // auto-login timer.
-    return;
-  }
-
-  if (user_context.GetUserType() != user_manager::USER_TYPE_REGULAR &&
-      user_manager::UserManager::Get()->IsUserLoggedIn()) {
-    // Multi-login is only allowed for regular users. If we are attempting to
-    // do multi-login as another type of user somehow, bail out. Do not
-    // re-enable clicking on other windows and the status area. Do not start the
-    // auto-login timer.
-    return;
-  }
-
   if (user_context.GetUserType() == user_manager::USER_TYPE_GUEST) {
     if (!specifics.guest_mode_url.empty()) {
       guest_mode_url_ = GURL(specifics.guest_mode_url);
@@ -1200,6 +1252,24 @@ void ExistingUserController::OnOAuth2TokensFetched(
   }
   UserSessionManager::GetInstance()->OnOAuth2TokensFetched(user_context);
   PerformLogin(user_context, LoginPerformer::AUTH_MODE_EXTENSION);
+}
+
+void ExistingUserController::OnTokenHandleChecked(
+    const AccountId&,
+    TokenHandleUtil::TokenHandleStatus token_handle_status) {
+  // If TokenHandle is invalid or unknown, continue with regular password
+  // changed flow.
+  if (token_handle_status != TokenHandleUtil::VALID) {
+    VLOG(1) << "Checked TokenHandle status=" << token_handle_status;
+    ShowPasswordChangedDialog();
+    return;
+  }
+
+  // Otherwise, show the unrecoverable cryptohome error UI and ask user's
+  // permission to collect a feedback.
+  RecordPasswordChangeFlow(LOGIN_PASSWORD_CHANGE_FLOW_CRYPTOHOME_FAILURE);
+  VLOG(1) << "Show unrecoverable cryptohome error dialog.";
+  login_display_->ShowUnrecoverableCrypthomeErrorDialog();
 }
 
 }  // namespace chromeos

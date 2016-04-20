@@ -7,13 +7,13 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "content/public/browser/content_browser_client.h"
@@ -25,6 +25,7 @@ class CommandLine;
 }
 
 namespace content {
+class BrowserContext;
 class QuotaPermissionContext;
 }
 
@@ -56,6 +57,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void PostAfterStartupTask(const tracked_objects::Location& from_here,
                             const scoped_refptr<base::TaskRunner>& task_runner,
                             const base::Closure& task) override;
+  bool IsBrowserStartupComplete() override;
   std::string GetStoragePartitionIdForSite(
       content::BrowserContext* browser_context,
       const GURL& site) override;
@@ -84,16 +86,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void GetAdditionalWebUIHostsToIgnoreParititionCheck(
       std::vector<std::string>* hosts) override;
   bool LogWebUIUrl(const GURL& web_ui_url) const override;
-  net::URLRequestContextGetter* CreateRequestContext(
-      content::BrowserContext* browser_context,
-      content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector request_interceptors) override;
-  net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
-      content::BrowserContext* browser_context,
-      const base::FilePath& partition_path,
-      bool in_memory,
-      content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector request_interceptors) override;
   bool IsHandledURL(const GURL& url) override;
   bool CanCommitURL(content::RenderProcessHost* process_host,
                     const GURL& url) override;
@@ -126,6 +118,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   std::string GetApplicationLocale() override;
   std::string GetAcceptLangs(content::BrowserContext* context) override;
   const gfx::ImageSkia* GetDefaultFavicon() override;
+  bool IsDataSaverEnabled(content::BrowserContext* context) override;
   bool AllowAppCache(const GURL& manifest_url,
                      const GURL& first_party,
                      content::ResourceContext* context) override;
@@ -148,13 +141,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                       int render_frame_id,
                       const net::CookieOptions& options) override;
   bool AllowSaveLocalState(content::ResourceContext* context) override;
-  bool AllowWorkerDatabase(
-      const GURL& url,
-      const base::string16& name,
-      const base::string16& display_name,
-      unsigned long estimated_size,
-      content::ResourceContext* context,
-      const std::vector<std::pair<int, int>>& render_frames) override;
   void AllowWorkerFileSystem(
       const GURL& url,
       content::ResourceContext* context,
@@ -165,21 +151,23 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const base::string16& name,
       content::ResourceContext* context,
       const std::vector<std::pair<int, int>>& render_frames) override;
-
 #if defined(ENABLE_WEBRTC)
   bool AllowWebRTCIdentityCache(const GURL& url,
                                 const GURL& first_party_url,
                                 content::ResourceContext* context) override;
 #endif  // defined(ENABLE_WEBRTC)
-
   bool AllowKeygen(const GURL& url, content::ResourceContext* context) override;
-
+  AllowWebBluetoothResult AllowWebBluetooth(
+      content::BrowserContext* browser_context,
+      const url::Origin& requesting_origin,
+      const url::Origin& embedding_origin) override;
+  std::string GetWebBluetoothBlacklist() override;
   net::URLRequestContext* OverrideRequestContextForURL(
       const GURL& url,
       content::ResourceContext* context) override;
   content::QuotaPermissionContext* CreateQuotaPermissionContext() override;
-  scoped_ptr<storage::QuotaEvictionPolicy> GetTemporaryStorageEvictionPolicy(
-      content::BrowserContext* context) override;
+  std::unique_ptr<storage::QuotaEvictionPolicy>
+  GetTemporaryStorageEvictionPolicy(content::BrowserContext* context) override;
   void AllowCertificateError(
       content::WebContents* web_contents,
       int cert_error,
@@ -194,7 +182,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void SelectClientCertificate(
       content::WebContents* web_contents,
       net::SSLCertRequestInfo* cert_request_info,
-      scoped_ptr<content::ClientCertificateDelegate> delegate) override;
+      std::unique_ptr<content::ClientCertificateDelegate> delegate) override;
   void AddCertificate(net::CertificateMimeType cert_type,
                       const void* cert_data,
                       size_t cert_size,
@@ -279,6 +267,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool PreSpawnRenderer(sandbox::TargetPolicy* policy) override;
   base::string16 GetAppContainerSidForSandboxType(
       int sandbox_type) const override;
+  bool IsWin32kLockdownEnabledForMimeType(
+      const std::string& mime_type) const override;
+  bool ShouldUseWindowsPrefetchArgument() const override;
 #endif
   void RegisterFrameMojoShellServices(
       content::ServiceRegistry* registry,
@@ -286,6 +277,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void RegisterRenderFrameMojoServices(
       content::ServiceRegistry* registry,
       content::RenderFrameHost* render_frame_host) override;
+  void RegisterInProcessMojoApplications(
+      StaticMojoApplicationMap* apps) override;
   void RegisterOutOfProcessMojoApplications(
       OutOfProcessMojoApplicationMap* apps) override;
   void OpenURL(content::BrowserContext* browser_context,

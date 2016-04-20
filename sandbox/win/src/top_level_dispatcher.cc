@@ -8,10 +8,8 @@
 #include <string.h>
 
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "sandbox/win/src/crosscall_server.h"
 #include "sandbox/win/src/filesystem_dispatcher.h"
-#include "sandbox/win/src/handle_dispatcher.h"
 #include "sandbox/win/src/interception.h"
 #include "sandbox/win/src/internal_types.h"
 #include "sandbox/win/src/ipc_tags.h"
@@ -47,6 +45,7 @@ TopLevelDispatcher::TopLevelDispatcher(PolicyBase* policy) : policy_(policy) {
   ipc_targets_[IPC_CREATEPROCESSW_TAG] = dispatcher;
   ipc_targets_[IPC_NTOPENPROCESSTOKEN_TAG] = dispatcher;
   ipc_targets_[IPC_NTOPENPROCESSTOKENEX_TAG] = dispatcher;
+  ipc_targets_[IPC_CREATETHREAD_TAG] = dispatcher;
   thread_process_dispatcher_.reset(dispatcher);
 
   dispatcher = new SyncDispatcher(policy_);
@@ -58,10 +57,6 @@ TopLevelDispatcher::TopLevelDispatcher(PolicyBase* policy) : policy_(policy) {
   ipc_targets_[IPC_NTCREATEKEY_TAG] = dispatcher;
   ipc_targets_[IPC_NTOPENKEY_TAG] = dispatcher;
   registry_dispatcher_.reset(dispatcher);
-
-  dispatcher = new HandleDispatcher(policy_);
-  ipc_targets_[IPC_DUPLICATEHANDLEPROXY_TAG] = dispatcher;
-  handle_dispatcher_.reset(dispatcher);
 
   dispatcher = new ProcessMitigationsWin32KDispatcher(policy_);
   ipc_targets_[IPC_GDI_GDIDLLINITIALIZE_TAG] = dispatcher;

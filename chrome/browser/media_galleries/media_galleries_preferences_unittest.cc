@@ -8,15 +8,14 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -28,6 +27,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/storage_monitor/media_storage_util.h"
 #include "components/storage_monitor/storage_monitor.h"
 #include "components/storage_monitor/test_storage_monitor.h"
@@ -182,8 +182,8 @@ class MediaGalleriesPreferencesTest : public testing::Test {
 
   void RemovePersistedDefaultGalleryValues() {
     PrefService* prefs = profile_->GetPrefs();
-    scoped_ptr<ListPrefUpdate> update(new ListPrefUpdate(
-        prefs, prefs::kMediaGalleriesRememberedGalleries));
+    std::unique_ptr<ListPrefUpdate> update(
+        new ListPrefUpdate(prefs, prefs::kMediaGalleriesRememberedGalleries));
     base::ListValue* list = update->Get();
 
     for (base::ListValue::iterator iter = list->begin();
@@ -376,8 +376,8 @@ class MediaGalleriesPreferencesTest : public testing::Test {
 #endif
 
   TestStorageMonitor monitor_;
-  scoped_ptr<TestingProfile> profile_;
-  scoped_ptr<MediaGalleriesPreferences> gallery_prefs_;
+  std::unique_ptr<TestingProfile> profile_;
+  std::unique_ptr<MediaGalleriesPreferences> gallery_prefs_;
 
   uint64_t default_galleries_count_;
 

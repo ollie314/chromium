@@ -41,8 +41,8 @@ public:
 
     DOMArrayBufferView* full() const
     {
-        ASSERT(isFull());
-        return m_full.get();
+        DCHECK(isFull());
+        return m_full;
     }
 
     // WARNING: The pointer returned by baseAddressMaybeOnStack() may point to
@@ -50,26 +50,26 @@ public:
     // FlexibleArrayBufferView object.
     void* baseAddressMaybeOnStack() const
     {
-        ASSERT(!isEmpty());
+        DCHECK(!isEmpty());
         return isFull() ? m_full->baseAddress() : m_smallData;
     }
 
     unsigned byteOffset() const
     {
-        ASSERT(!isEmpty());
+        DCHECK(!isEmpty());
         return isFull() ? m_full->byteOffset() : 0;
     }
 
     unsigned byteLength() const
     {
-        ASSERT(!isEmpty());
+        DCHECK(!isEmpty());
         return isFull() ? m_full->byteLength() : m_smallLength;
     }
 
     operator bool() const { return !isEmpty(); }
 
 private:
-    RefPtr<DOMArrayBufferView> m_full;
+    Member<DOMArrayBufferView> m_full;
 
     void* m_smallData;
     size_t m_smallLength;

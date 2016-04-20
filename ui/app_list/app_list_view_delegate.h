@@ -41,6 +41,7 @@ class APP_LIST_EXPORT AppListViewDelegate {
   // A user of the app list.
   struct APP_LIST_EXPORT User {
     User();
+    User(const User& other);
     ~User();
 
     // Whether or not this user is the current user of the app list.
@@ -116,9 +117,6 @@ class APP_LIST_EXPORT AppListViewDelegate {
   // Invoked when the app list is closing.
   virtual void ViewClosing() = 0;
 
-  // Returns the icon to be displayed in the window and taskbar.
-  virtual gfx::ImageSkia GetWindowIcon() = 0;
-
   // Open the settings UI.
   virtual void OpenSettings() = 0;
 
@@ -164,6 +162,21 @@ class APP_LIST_EXPORT AppListViewDelegate {
   // Adds/removes an observer for profile changes.
   virtual void AddObserver(AppListViewDelegateObserver* observer) {}
   virtual void RemoveObserver(AppListViewDelegateObserver* observer) {}
+
+#if !defined(OS_CHROMEOS)
+  // Methods to retrieve properties of the message displayed on the app launcher
+  // above the apps grid.
+  virtual base::string16 GetMessageTitle() const;
+  // Returns the message text (with the placeholder symbol removed).
+  // |message_break| is set to the index where the placeholder was in the
+  // string.
+  virtual base::string16 GetMessageText(size_t* message_break) const;
+  virtual base::string16 GetAppsShortcutName() const;
+  virtual base::string16 GetLearnMoreText() const;
+  virtual base::string16 GetLearnMoreLink() const;
+  virtual gfx::ImageSkia* GetAppsIcon() const;
+  virtual void OpenLearnMoreLink();
+#endif
 };
 
 }  // namespace app_list

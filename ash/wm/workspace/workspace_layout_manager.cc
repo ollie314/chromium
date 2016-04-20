@@ -9,16 +9,18 @@
 #include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
 #include "ash/session/session_state_delegate.h"
-#include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/wm/always_on_top_controller.h"
+#include "ash/wm/aura/wm_window_aura.h"
+#include "ash/wm/common/wm_event.h"
+#include "ash/wm/common/workspace/workspace_layout_manager_delegate.h"
 #include "ash/wm/window_animations.h"
 #include "ash/wm/window_positioner.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/wm_event.h"
-#include "ash/wm/workspace/workspace_layout_manager_delegate.h"
+#include "ash/wm/workspace/workspace_layout_manager_backdrop_delegate.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
@@ -34,15 +36,19 @@ using aura::Window;
 
 namespace ash {
 
-WorkspaceLayoutManager::WorkspaceLayoutManager(aura::Window* window)
-    : shelf_(NULL),
-      window_(window),
+WorkspaceLayoutManager::WorkspaceLayoutManager(
+    aura::Window* window,
+    std::unique_ptr<wm::WorkspaceLayoutManagerDelegate> delegate)
+    : window_(window),
       root_window_(window->GetRootWindow()),
+      delegate_(std::move(delegate)),
       work_area_in_parent_(ScreenUtil::ConvertRectFromScreen(
           window_,
-          Shell::GetScreen()->GetDisplayNearestWindow(window_).work_area())),
-      is_fullscreen_(GetRootWindowController(
-          window->GetRootWindow())->GetWindowForFullscreenMode() != NULL) {
+          gfx::Screen::GetScreen()
+              ->GetDisplayNearestWindow(window_)
+              .work_area())),
+      is_fullscreen_(GetRootWindowController(window->GetRootWindow())
+                         ->GetWindowForFullscreenMode() != NULL) {
   Shell::GetInstance()->activation_client()->AddObserver(this);
   Shell::GetInstance()->AddShellObserver(this);
   root_window_->AddObserver(this);
@@ -58,12 +64,12 @@ WorkspaceLayoutManager::~WorkspaceLayoutManager() {
   Shell::GetInstance()->activation_client()->RemoveObserver(this);
 }
 
-void WorkspaceLayoutManager::SetShelf(ShelfLayoutManager* shelf) {
-  shelf_ = shelf;
+void WorkspaceLayoutManager::DeleteDelegate() {
+  delegate_.reset();
 }
 
 void WorkspaceLayoutManager::SetMaximizeBackdropDelegate(
-    scoped_ptr<WorkspaceLayoutManagerDelegate> delegate) {
+    std::unique_ptr<WorkspaceLayoutManagerBackdropDelegate> delegate) {
   backdrop_delegate_.reset(delegate.release());
 }
 
@@ -81,7 +87,7 @@ void WorkspaceLayoutManager::OnWindowAddedToLayout(Window* child) {
   UpdateFullscreenState();
   if (backdrop_delegate_)
     backdrop_delegate_->OnWindowAddedToLayout(child);
-  WindowPositioner::RearrangeVisibleWindowOnShow(child);
+  WindowPositioner::RearrangeVisibleWindowOnShow(wm::WmWindowAura::Get(child));
 }
 
 void WorkspaceLayoutManager::OnWillRemoveWindowFromLayout(Window* child) {
@@ -89,8 +95,10 @@ void WorkspaceLayoutManager::OnWillRemoveWindowFromLayout(Window* child) {
   child->RemoveObserver(this);
   wm::GetWindowState(child)->RemoveObserver(this);
 
-  if (child->TargetVisibility())
-    WindowPositioner::RearrangeVisibleWindowOnHideOrRemove(child);
+  if (child->TargetVisibility()) {
+    WindowPositioner::RearrangeVisibleWindowOnHideOrRemove(
+        wm::WmWindowAura::Get(child));
+  }
 }
 
 void WorkspaceLayoutManager::OnWindowRemovedFromLayout(Window* child) {
@@ -107,10 +115,13 @@ void WorkspaceLayoutManager::OnChildWindowVisibilityChanged(Window* child,
   if (visible && window_state->IsMinimized())
     window_state->Unminimize();
 
-  if (child->TargetVisibility())
-    WindowPositioner::RearrangeVisibleWindowOnShow(child);
-  else
-    WindowPositioner::RearrangeVisibleWindowOnHideOrRemove(child);
+  if (child->TargetVisibility()) {
+    WindowPositioner::RearrangeVisibleWindowOnShow(
+        wm::WmWindowAura::Get(child));
+  } else {
+    WindowPositioner::RearrangeVisibleWindowOnHideOrRemove(
+        wm::WmWindowAura::Get(child));
+  }
   UpdateFullscreenState();
   UpdateShelfVisibility();
   if (backdrop_delegate_)
@@ -167,7 +178,7 @@ void WorkspaceLayoutManager::OnKeyboardBoundsChanging(
 void WorkspaceLayoutManager::OnDisplayWorkAreaInsetsChanged() {
   const gfx::Rect work_area(ScreenUtil::ConvertRectFromScreen(
       window_,
-      Shell::GetScreen()->GetDisplayNearestWindow(window_).work_area()));
+      gfx::Screen::GetScreen()->GetDisplayNearestWindow(window_).work_area()));
   if (work_area != work_area_in_parent_) {
     const wm::WMEvent event(wm::WM_EVENT_WORKAREA_BOUNDS_CHANGED);
     AdjustAllWindowsBoundsForWorkAreaChange(&event);
@@ -196,10 +207,12 @@ void WorkspaceLayoutManager::OnFullscreenStateChanged(
   WindowSet windows(windows_);
   for (auto window : windows) {
     wm::WindowState* window_state = wm::GetWindowState(window);
-    if (is_fullscreen)
-      window_state->DisableAlwaysOnTop(fullscreen_window);
-    else
+    if (is_fullscreen) {
+      window_state->DisableAlwaysOnTop(
+          wm::WmWindowAura::Get(fullscreen_window));
+    } else {
       window_state->RestoreAlwaysOnTop();
+    }
   }
 }
 
@@ -305,7 +318,7 @@ void WorkspaceLayoutManager::AdjustAllWindowsBoundsForWorkAreaChange(
 
   work_area_in_parent_ = ScreenUtil::ConvertRectFromScreen(
       window_,
-      Shell::GetScreen()->GetDisplayNearestWindow(window_).work_area());
+      gfx::Screen::GetScreen()->GetDisplayNearestWindow(window_).work_area());
 
   // Don't do any adjustments of the insets while we are in screen locked mode.
   // This would happen if the launcher was auto hidden before the login screen
@@ -327,8 +340,8 @@ void WorkspaceLayoutManager::AdjustAllWindowsBoundsForWorkAreaChange(
 }
 
 void WorkspaceLayoutManager::UpdateShelfVisibility() {
-  if (shelf_)
-    shelf_->UpdateVisibilityState();
+  if (delegate_)
+    delegate_->UpdateShelfVisibility();
 }
 
 void WorkspaceLayoutManager::UpdateFullscreenState() {
@@ -337,13 +350,12 @@ void WorkspaceLayoutManager::UpdateFullscreenState() {
   // only windows in the default workspace container will go fullscreen but
   // this should really be tracked by the RootWindowController since
   // technically any container could get a fullscreen window.
-  if (!shelf_)
+  if (!delegate_)
     return;
   bool is_fullscreen = GetRootWindowController(
       window_->GetRootWindow())->GetWindowForFullscreenMode() != NULL;
   if (is_fullscreen != is_fullscreen_) {
-    ash::Shell::GetInstance()->NotifyFullscreenStateChange(
-        is_fullscreen, window_->GetRootWindow());
+    delegate_->OnFullscreenStateChanged(is_fullscreen);
     is_fullscreen_ = is_fullscreen;
   }
 }

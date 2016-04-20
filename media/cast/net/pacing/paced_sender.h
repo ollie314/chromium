@@ -42,6 +42,11 @@ struct PacketKey {
   uint32_t frame_id;
   uint16_t packet_id;
 
+  bool operator==(const PacketKey& key) const {
+    return std::tie(capture_time, ssrc, frame_id, packet_id) ==
+           std::tie(key.capture_time, key.ssrc, key.frame_id, key.packet_id);
+  }
+
   bool operator<(const PacketKey& key) const {
     return std::tie(capture_time, ssrc, frame_id, packet_id) <
            std::tie(key.capture_time, key.ssrc, key.frame_id, key.packet_id);
@@ -100,7 +105,7 @@ class PacedSender : public PacedPacketSender,
       size_t max_burst_size,     // Should normally be kMaxBurstSize.
       base::TickClock* clock,
       std::vector<PacketEvent>* recent_packet_events,
-      PacketSender* external_transport,
+      PacketTransport* external_transport,
       const scoped_refptr<base::SingleThreadTaskRunner>& transport_task_runner);
 
   ~PacedSender() final;
@@ -130,6 +135,13 @@ class PacedSender : public PacedPacketSender,
                      const DedupInfo& dedup_info) final;
   bool SendRtcpPacket(uint32_t ssrc, PacketRef packet) final;
   void CancelSendingPacket(const PacketKey& packet_key) final;
+
+  void SetTargetBurstSize(int burst_size) {
+    target_burst_size_ = current_max_burst_size_ = next_max_burst_size_ =
+        next_next_max_burst_size_ = burst_size;
+  }
+
+  void SetMaxBurstSize(int burst_size) { max_burst_size_ = burst_size; }
 
  private:
   // Actually sends the packets to the transport.
@@ -171,9 +183,12 @@ class PacedSender : public PacedPacketSender,
   bool empty() const;
   size_t size() const;
 
-  // Returns the next packet to send. RTCP packets have highest priority,
-  // resend packets have second highest priority and then comes everything
-  // else.
+  // Returns the next packet to send. RTCP packets have highest priority, then
+  // high-priority RTP packets, then normal-priority RTP packets.  Packets
+  // within a frame are selected based on fairness to ensure all have an equal
+  // chance of being sent.  Therefore, it is up to client code to ensure that
+  // packets acknowledged in NACK messages are removed from PacedSender (see
+  // CancelSendingPacket()), to avoid wasteful retransmission.
   PacketRef PopNextPacket(PacketType* packet_type,
                           PacketKey* packet_key);
 
@@ -183,7 +198,7 @@ class PacedSender : public PacedPacketSender,
   // These are externally-owned objects injected via the constructor.
   base::TickClock* const clock_;
   std::vector<PacketEvent>* const recent_packet_events_;
-  PacketSender* const transport_;
+  PacketTransport* const transport_;
 
   scoped_refptr<base::SingleThreadTaskRunner> transport_task_runner_;
   uint32_t audio_ssrc_;
@@ -203,6 +218,7 @@ class PacedSender : public PacedPacketSender,
                              // packet was sent.
     int64_t last_byte_sent_for_audio;  // Number of bytes sent to network from
                                        // audio stream just before this packet.
+    int cancel_count;  // Number of times the packet was canceled (debugging).
   };
   typedef std::map<PacketKey, PacketSendRecord> PacketSendHistory;
   PacketSendHistory send_history_;

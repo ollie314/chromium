@@ -7,6 +7,8 @@
 
 #include <stddef.h>
 
+#include "cc/playback/raster_source.h"
+#include "cc/raster/task_graph_runner.h"
 #include "cc/raster/tile_task_runner.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
@@ -16,7 +18,6 @@ class SequencedTaskRunner;
 }
 
 namespace cc {
-class DisplayListRasterSource;
 class RenderingStatsInstrumentation;
 
 class CC_EXPORT TileTaskWorkerPool {
@@ -26,7 +27,7 @@ class CC_EXPORT TileTaskWorkerPool {
 
   // Utility function that can be used to call ::ScheduleOnOriginThread() for
   // each task in |graph|.
-  static void ScheduleTasksOnOriginThread(TileTaskClient* client,
+  static void ScheduleTasksOnOriginThread(RasterBufferProvider* provider,
                                           TaskGraph* graph);
 
   // Utility function that will create a temporary bitmap and copy pixels to
@@ -35,15 +36,16 @@ class CC_EXPORT TileTaskWorkerPool {
   // that will cover the resulting |memory|. The |canvas_playback_rect| can be a
   // smaller contained rect inside the |canvas_bitmap_rect| if the |memory| is
   // already partially complete, and only the subrect needs to be played back.
-  static void PlaybackToMemory(void* memory,
-                               ResourceFormat format,
-                               const gfx::Size& size,
-                               size_t stride,
-                               const DisplayListRasterSource* raster_source,
-                               const gfx::Rect& canvas_bitmap_rect,
-                               const gfx::Rect& canvas_playback_rect,
-                               float scale,
-                               bool include_images);
+  static void PlaybackToMemory(
+      void* memory,
+      ResourceFormat format,
+      const gfx::Size& size,
+      size_t stride,
+      const RasterSource* raster_source,
+      const gfx::Rect& canvas_bitmap_rect,
+      const gfx::Rect& canvas_playback_rect,
+      float scale,
+      const RasterSource::PlaybackSettings& playback_settings);
 
   // Type-checking downcast routine.
   virtual TileTaskRunner* AsTileTaskRunner() = 0;

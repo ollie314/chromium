@@ -10,7 +10,6 @@
 #include "base/metrics/histogram.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -18,6 +17,7 @@
 #include "chromeos/login/user_names.h"
 #include "chromeos/login_event_recorder.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "net/cookies/cookie_monster.h"
@@ -58,11 +58,13 @@ void LoginPerformer::OnAuthFailure(const AuthFailure& failure) {
                             failure.reason(),
                             AuthFailure::NUM_FAILURE_REASONS);
 
-  DVLOG(1) << "failure.reason " << failure.reason();
-  DVLOG(1) << "failure.error.state " << failure.error().state();
+  LOG(ERROR) << "Login failure, reason=" << failure.reason()
+             << ", error.state=" << failure.error().state();
 
   last_login_failure_ = failure;
   if (delegate_) {
+    delegate_->SetAuthFlowOffline(user_context_.GetAuthFlow() ==
+                                  UserContext::AUTH_FLOW_OFFLINE);
     delegate_->OnAuthFailure(failure);
     return;
   } else {
@@ -226,14 +228,13 @@ void LoginPerformer::LoginOffTheRecord() {
       base::Bind(&Authenticator::LoginOffTheRecord, authenticator_.get()));
 }
 
-void LoginPerformer::LoginAsKioskAccount(const std::string& app_user_id,
+void LoginPerformer::LoginAsKioskAccount(const AccountId& app_account_id,
                                          bool use_guest_mount) {
   EnsureAuthenticator();
-  task_runner_->PostTask(FROM_HERE,
-                         base::Bind(&Authenticator::LoginAsKioskAccount,
-                                    authenticator_.get(),
-                                    app_user_id,
-                                    use_guest_mount));
+  task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&Authenticator::LoginAsKioskAccount, authenticator_.get(),
+                 app_account_id, use_guest_mount));
 }
 
 void LoginPerformer::RecoverEncryptedData(const std::string& old_password) {
@@ -259,7 +260,7 @@ void LoginPerformer::EnsureExtendedAuthenticator() {
 }
 
 void LoginPerformer::StartLoginCompletion() {
-  DVLOG(1) << "Login completion started";
+  VLOG(1) << "Online login completion started.";
   chromeos::LoginEventRecorder::Get()->AddLoginTimeMarker("AuthStarted", false);
   content::BrowserContext* browser_context = GetSigninContext();
   EnsureAuthenticator();
@@ -272,7 +273,7 @@ void LoginPerformer::StartLoginCompletion() {
 }
 
 void LoginPerformer::StartAuthentication() {
-  DVLOG(1) << "Auth started";
+  VLOG(1) << "Offline auth started.";
   chromeos::LoginEventRecorder::Get()->AddLoginTimeMarker("AuthStarted", false);
   if (delegate_) {
     EnsureAuthenticator();

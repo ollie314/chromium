@@ -10,7 +10,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -20,6 +19,7 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/sync_data.h"
@@ -207,13 +207,13 @@ void SupervisedUserSyncService::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
-scoped_ptr<base::DictionaryValue> SupervisedUserSyncService::CreateDictionary(
-    const std::string& name,
-    const std::string& master_key,
-    const std::string& signature_key,
-    const std::string& encryption_key,
-    int avatar_index) {
-  scoped_ptr<base::DictionaryValue> result(new base::DictionaryValue());
+std::unique_ptr<base::DictionaryValue>
+SupervisedUserSyncService::CreateDictionary(const std::string& name,
+                                            const std::string& master_key,
+                                            const std::string& signature_key,
+                                            const std::string& encryption_key,
+                                            int avatar_index) {
+  std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   result->SetString(kName, name);
   result->SetString(kMasterKey, master_key);
   result->SetString(kPasswordSignatureKey, signature_key);
@@ -274,7 +274,7 @@ void SupervisedUserSyncService::UpdateSupervisedUserImpl(
     bool add_user) {
   DictionaryPrefUpdate update(prefs_, prefs::kSupervisedUsers);
   base::DictionaryValue* dict = update.Get();
-  scoped_ptr<base::DictionaryValue> value = CreateDictionary(
+  std::unique_ptr<base::DictionaryValue> value = CreateDictionary(
       name, master_key, signature_key, encryption_key, avatar_index);
 
   DCHECK_EQ(add_user, !dict->HasKey(id));
@@ -407,8 +407,8 @@ void SupervisedUserSyncService::Shutdown() {
 SyncMergeResult SupervisedUserSyncService::MergeDataAndStartSyncing(
     ModelType type,
     const SyncDataList& initial_sync_data,
-    scoped_ptr<SyncChangeProcessor> sync_processor,
-    scoped_ptr<SyncErrorFactory> error_handler) {
+    std::unique_ptr<SyncChangeProcessor> sync_processor,
+    std::unique_ptr<SyncErrorFactory> error_handler) {
   DCHECK_EQ(SUPERVISED_USERS, type);
   sync_processor_ = std::move(sync_processor);
   error_handler_ = std::move(error_handler);

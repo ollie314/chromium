@@ -10,7 +10,6 @@
 
 #include "base/command_line.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/browser_permissions_policy_delegate.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/extensions/extension_webkit_preferences.h"
@@ -47,6 +46,7 @@
 #include "extensions/common/manifest_handlers/app_isolation_info.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/manifest_handlers/web_accessible_resources_info.h"
+#include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/switches.h"
 
 using content::BrowserContext;
@@ -121,7 +121,6 @@ RenderProcessHostPrivilege GetProcessPrivilege(
 
 ChromeContentBrowserClientExtensionsPart::
     ChromeContentBrowserClientExtensionsPart() {
-  permissions_policy_delegate_.reset(new BrowserPermissionsPolicyDelegate());
 }
 
 ChromeContentBrowserClientExtensionsPart::
@@ -218,6 +217,14 @@ bool ChromeContentBrowserClientExtensionsPart::ShouldLockToOrigin(
             ->enabled_extensions()
             .GetExtensionOrAppByURL(effective_site_url);
     if (extension && extension->is_hosted_app())
+      return false;
+
+    // http://crbug.com/600441 workaround: Extension process reuse, implemented
+    // in ShouldTryToUseExistingProcessHost(), means that extension processes
+    // aren't always actually dedicated to a single origin, even in
+    // --isolate-extensions. TODO(nick): Fix this.
+    if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+            ::switches::kSitePerProcess))
       return false;
   }
   return true;

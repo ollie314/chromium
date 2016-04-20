@@ -29,8 +29,8 @@
 
         <ImageButton android:id="@+id/security_button"
             style="@style/LocationBarButton"
-            android:layout_height="match_parent"
             android:layout_width="match_parent"
+            android:layout_height="match_parent"
             android:scaleType="center"
             android:layout_gravity="center"
             android:alpha="0"
@@ -38,6 +38,8 @@
             android:contentDescription="@string/accessibility_toolbar_btn_site_info" />
 
     </FrameLayout>
+
+    <include layout="@layout/location_bar_status" />
 
     <include
         android:id="@+id/url_container"
@@ -64,18 +66,18 @@
 
             <org.chromium.chrome.browser.widget.TintedImageButton
                 android:id="@+id/document_menu_button"
-                style="@style/LocationBarButton"
-                android:layout_height="match_parent"
-                android:layout_width="match_parent"
+                style="@style/LocationBarMenuButton"
                 android:src="@drawable/btn_menu"
                 android:contentDescription="@string/accessibility_toolbar_btn_menu" />
 
             <ImageView
                 android:id="@+id/document_menu_badge"
-                style="@style/UpdateMenuBadge"
-                android:src="@drawable/badge_update"
-                android:layout_marginEnd="3.5dp"
-                android:contentDescription="@null" />
+                style="@style/LocationBarMenuButton"
+                android:src="@drawable/badge_update_dark"
+                android:scaleType="center"
+                android:contentDescription="@null"
+                android:importantForAccessibility="no"
+                android:visibility="invisible" />
 
         </FrameLayout>
 

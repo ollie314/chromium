@@ -18,7 +18,6 @@
 #include "chrome/browser/ui/app_list/extension_app_item.h"
 #include "chrome/browser/ui/app_list/extension_app_model_builder.h"
 #include "chrome/browser/ui/app_list/model_pref_updater.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -265,13 +264,8 @@ void AppListSyncableService::BuildModel() {
   // TODO(calamity): make this a DCHECK after a dev channel release.
   CHECK(extension_system_->extension_service() &&
         extension_system_->extension_service()->is_ready());
-  // For now, use the AppListControllerDelegate associated with the native
-  // desktop. TODO(stevenjb): Remove ExtensionAppModelBuilder controller
-  // dependency and move the dependent methods from AppListControllerDelegate
-  // to an extension service delegate associated with this class.
   AppListControllerDelegate* controller = NULL;
-  AppListService* service =
-      AppListService::Get(chrome::HOST_DESKTOP_TYPE_NATIVE);
+  AppListService* service = AppListService::Get();
   if (service)
     controller = service->GetControllerDelegate();
   apps_builder_.reset(new ExtensionAppModelBuilder(controller));
@@ -367,7 +361,7 @@ AppListModel* AppListSyncableService::GetModel() {
   return model_.get();
 }
 
-void AppListSyncableService::AddItem(scoped_ptr<AppListItem> app_item) {
+void AppListSyncableService::AddItem(std::unique_ptr<AppListItem> app_item) {
   SyncItem* sync_item = FindOrAddSyncItem(app_item.get());
   if (!sync_item)
     return;  // Item is not valid.
@@ -592,8 +586,8 @@ void AppListSyncableService::PruneEmptySyncFolders() {
 syncer::SyncMergeResult AppListSyncableService::MergeDataAndStartSyncing(
     syncer::ModelType type,
     const syncer::SyncDataList& initial_sync_data,
-    scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-    scoped_ptr<syncer::SyncErrorFactory> error_handler) {
+    std::unique_ptr<syncer::SyncChangeProcessor> sync_processor,
+    std::unique_ptr<syncer::SyncErrorFactory> error_handler) {
   DCHECK(!sync_processor_.get());
   DCHECK(sync_processor.get());
   DCHECK(error_handler.get());
@@ -936,7 +930,7 @@ void AppListSyncableService::DeleteSyncItemSpecifics(
 std::string AppListSyncableService::FindOrCreateOemFolder() {
   AppListFolderItem* oem_folder = model_->FindFolderItem(kOemFolderId);
   if (!oem_folder) {
-    scoped_ptr<AppListFolderItem> new_folder(new AppListFolderItem(
+    std::unique_ptr<AppListFolderItem> new_folder(new AppListFolderItem(
         kOemFolderId, AppListFolderItem::FOLDER_TYPE_OEM));
     oem_folder =
         static_cast<AppListFolderItem*>(model_->AddItem(std::move(new_folder)));

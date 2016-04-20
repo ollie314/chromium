@@ -14,14 +14,19 @@
 namespace content {
 
 TestNavigationURLLoader::TestNavigationURLLoader(
-    scoped_ptr<NavigationRequestInfo> request_info,
+    std::unique_ptr<NavigationRequestInfo> request_info,
     NavigationURLLoaderDelegate* delegate)
     : request_info_(std::move(request_info)),
       delegate_(delegate),
-      redirect_count_(0) {}
+      redirect_count_(0),
+      response_proceeded_(false) {}
 
 void TestNavigationURLLoader::FollowRedirect() {
   redirect_count_++;
+}
+
+void TestNavigationURLLoader::ProceedWithResponse() {
+  response_proceeded_ = true;
 }
 
 void TestNavigationURLLoader::SimulateServerRedirect(const GURL& redirect_url) {
@@ -46,7 +51,7 @@ void TestNavigationURLLoader::CallOnRequestRedirected(
 
 void TestNavigationURLLoader::CallOnResponseStarted(
     const scoped_refptr<ResourceResponse>& response,
-    scoped_ptr<StreamHandle> body) {
+    std::unique_ptr<StreamHandle> body) {
   delegate_->OnResponseStarted(response, std::move(body));
 }
 

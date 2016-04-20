@@ -8,9 +8,6 @@
 
 #include <string>
 
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
@@ -20,6 +17,9 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
 #include "components/metrics/proto/system_profile.pb.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/process_type.h"
@@ -298,9 +298,9 @@ void PluginMetricsProvider::LogPluginLoadingError(
   ChildProcessStats& stats = child_process_stats_buffer_[plugin.name];
   // Initialize the type if this entry is new.
   if (stats.process_type == content::PROCESS_TYPE_UNKNOWN) {
-    // The plugin process might not actually be of type PLUGIN (which means
-    // NPAPI), but we only care that it is *a* plugin process.
-    stats.process_type = content::PROCESS_TYPE_PLUGIN;
+    // The plugin process might not actually be of type PPAPI_PLUGIN, but we
+    // only care that it is *a* plugin process.
+    stats.process_type = content::PROCESS_TYPE_PPAPI_PLUGIN;
   } else {
     DCHECK(IsPluginProcess(stats.process_type));
   }
@@ -315,8 +315,7 @@ void PluginMetricsProvider::SetPluginsForTesting(
 
 // static
 bool PluginMetricsProvider::IsPluginProcess(int process_type) {
-  return (process_type == content::PROCESS_TYPE_PLUGIN ||
-          process_type == content::PROCESS_TYPE_PPAPI_PLUGIN ||
+  return (process_type == content::PROCESS_TYPE_PPAPI_PLUGIN ||
           process_type == content::PROCESS_TYPE_PPAPI_BROKER);
 }
 
@@ -353,12 +352,6 @@ void PluginMetricsProvider::BrowserChildProcessCrashed(
     const content::ChildProcessData& data,
     int exit_code) {
   GetChildProcessStats(data).process_crashes++;
-  RecordCurrentStateWithDelay(kRecordStateDelayMs);
-}
-
-void PluginMetricsProvider::BrowserChildProcessInstanceCreated(
-    const content::ChildProcessData& data) {
-  GetChildProcessStats(data).instances++;
   RecordCurrentStateWithDelay(kRecordStateDelayMs);
 }
 

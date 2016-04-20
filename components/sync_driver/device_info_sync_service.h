@@ -14,7 +14,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "components/sync_driver/device_info_tracker.h"
+#include "sync/api/sync_change.h"
 #include "sync/api/sync_change_processor.h"
 #include "sync/api/sync_data.h"
 #include "sync/api/sync_error_factory.h"
@@ -23,6 +26,13 @@
 namespace sync_driver {
 
 class LocalDeviceInfoProvider;
+
+// The delay between periodic updates to the entry corresponding to this device.
+extern const base::TimeDelta kDeviceInfoPulseInterval;
+
+// The amount of time a device can go without an updates before we consider it
+// stale/inactive, and start ignoring it for active device counts.
+extern const base::TimeDelta kStaleDeviceInfoThreshold;
 
 // SyncableService implementation for DEVICE_INFO model type.
 class DeviceInfoSyncService : public syncer::SyncableService,
@@ -51,14 +61,12 @@ class DeviceInfoSyncService : public syncer::SyncableService,
   ScopedVector<DeviceInfo> GetAllDeviceInfo() const override;
   void AddObserver(Observer* observer) override;
   void RemoveObserver(Observer* observer) override;
-
-  // Called to update local device backup time.
-  void UpdateLocalDeviceBackupTime(base::Time backup_time);
-  // Gets the most recently set local device backup time.
-  base::Time GetLocalDeviceBackupTime() const;
+  int CountActiveDevices() const override;
 
  private:
-  // Create SyncData from local DeviceInfo and |local_device_backup_time_|.
+  friend class DeviceInfoSyncServiceTest;
+
+  // Create SyncData from local DeviceInfo.
   syncer::SyncData CreateLocalData(const DeviceInfo* info);
   // Create SyncData from EntitySpecifics.
   static syncer::SyncData CreateLocalData(
@@ -74,24 +82,32 @@ class DeviceInfoSyncService : public syncer::SyncableService,
   // Notify all registered observers.
   void NotifyObservers();
 
-  // Updates backup time in place in |sync_data| if it is different than
-  // the one stored in |local_device_backup_time_|.
-  // Returns true if backup time was updated.
-  bool UpdateBackupTime(syncer::SyncData* sync_data);
+  // Find the timestamp for the last time this |device_info| was edited.
+  static base::Time GetLastUpdateTime(const syncer::SyncData& device_info);
 
-  // |local_device_backup_time_| accessors.
-  int64_t local_device_backup_time() const { return local_device_backup_time_; }
-  bool has_local_device_backup_time() const {
-    return local_device_backup_time_ >= 0;
-  }
-  void set_local_device_backup_time(int64_t value) {
-    local_device_backup_time_ = value;
-  }
-  void clear_local_device_backup_time() { local_device_backup_time_ = -1; }
+  // Finds the amount of time since this |device_info| was last edited. If this
+  // |device_info| claims to have been edited in the future, the smallest age
+  // this returns will be an age of zero and never negative.
+  static base::TimeDelta GetLastUpdateAge(const syncer::SyncData& device_info,
+                                          const base::Time now);
 
-  // Local device last set backup time (in proto format).
-  // -1 if the value hasn't been specified
-  int64_t local_device_backup_time_;
+  // Determines the amount of time before we should pulse and update the entity
+  // that corresponds to this device. This value is calculated by looking at
+  // time |now|, the last updated timestamp in |device_info|, and using the
+  // pulse interval. The smallest delay this will ever return will be the
+  // instant delay and never negative.
+  static base::TimeDelta CalculatePulseDelay(
+      const syncer::SyncData& device_info,
+      const base::Time now);
+
+  // Sends a copy of the current device's state to the processor/sync.
+  void SendLocalData(const syncer::SyncChange::SyncChangeType change_type);
+
+  // Counts the number of active devices relative to |now|. The activeness of a
+  // device depends on the amount of time since it was updated, which means
+  // comparing it against the current time. |now| is passed into this method to
+  // allow unit tests to control expected results.
+  int CountActiveDevices(const base::Time now) const;
 
   // |local_device_info_provider_| isn't owned.
   const LocalDeviceInfoProvider* const local_device_info_provider_;
@@ -107,6 +123,9 @@ class DeviceInfoSyncService : public syncer::SyncableService,
 
   // Registered observers, not owned.
   base::ObserverList<Observer, true> observers_;
+
+  // Used to update our local device info once every pulse interval.
+  base::OneShotTimer pulse_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(DeviceInfoSyncService);
 };

@@ -23,7 +23,7 @@ WebInspector.FilteredListWidget = function(delegate, renderAsTwoRows)
 
     this._promptElement = this.contentElement.createChild("div", "monospace filtered-list-widget-input");
     this._promptElement.setAttribute("spellcheck", "false");
-    this._promptElement.setAttribute("contenteditable", "true");
+    this._promptElement.setAttribute("contenteditable", "plaintext-only");
     this._prompt = new WebInspector.TextPrompt(this._autocomplete.bind(this));
     this._prompt.renderAsBlock();
     this._prompt.addEventListener(WebInspector.TextPrompt.Events.ItemAccepted, this._onAutocompleted, this);
@@ -62,7 +62,7 @@ WebInspector.FilteredListWidget.filterRegex = function(query)
         if (toEscape.indexOf(c) !== -1)
             c = "\\" + c;
         if (i)
-            regexString += "[^" + c + "]*";
+            regexString += "[^\\0" + c + "]*";
         regexString += c;
     }
     return new RegExp(regexString, "i");
@@ -97,9 +97,9 @@ WebInspector.FilteredListWidget.prototype = {
      */
     _onEnter: function(event)
     {
+        event.preventDefault();
         if (!this._delegate.itemCount())
             return;
-        event.preventDefault();
         var selectedIndex = this._shouldShowMatchingItems() && this._selectedIndexInFiltered < this._filteredItems.length ? this._filteredItems[this._selectedIndexInFiltered] : null;
         this._delegate.selectItemWithQuery(selectedIndex, this._value());
         if (this._dialog)
@@ -220,7 +220,7 @@ WebInspector.FilteredListWidget.prototype = {
 
                 // Find its index in the scores array (earlier elements have bigger scores).
                 if (score > minBestScore || bestScores.length < bestItemsToCollect) {
-                    var index = insertionIndexForObjectInListSortedByFunction(score, bestScores, compareIntegers, true);
+                    var index =  bestScores.upperBound(score, compareIntegers);
                     bestScores.splice(index, 0, score);
                     bestItems.splice(index, 0, i);
                     if (bestScores.length > bestItemsToCollect) {
@@ -296,13 +296,13 @@ WebInspector.FilteredListWidget.prototype = {
         switch (event.keyCode) {
         case WebInspector.KeyboardShortcut.Keys.Down.code:
             if (++newSelectedIndex >= this._filteredItems.length)
-                newSelectedIndex = this._filteredItems.length - 1;
+                newSelectedIndex = 0;
             this._updateSelection(newSelectedIndex, true);
             event.consume(true);
             break;
         case WebInspector.KeyboardShortcut.Keys.Up.code:
             if (--newSelectedIndex < 0)
-                newSelectedIndex = 0;
+                newSelectedIndex = this._filteredItems.length - 1;
             this._updateSelection(newSelectedIndex, false);
             event.consume(true);
             break;
@@ -502,13 +502,21 @@ WebInspector.FilteredListWidget.Delegate.prototype = {
 
         var text = element.textContent;
         var ranges = rangesForMatch(text, query);
-        if (!ranges)
+        if (!ranges || !this.caseSensitive())
             ranges = rangesForMatch(text.toUpperCase(), query.toUpperCase());
         if (ranges) {
             WebInspector.highlightRangesWithStyleClass(element, ranges, "highlight");
             return true;
         }
         return false;
+    },
+
+    /**
+     * @return {boolean}
+     */
+    caseSensitive: function()
+    {
+        return true;
     },
 
     /**

@@ -10,8 +10,6 @@
 #include "base/json/json_reader.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -19,6 +17,8 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
 #include "grit/browser_resources.h"
@@ -175,7 +175,7 @@ void PluginFinder::Init() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   // Load the built-in plugin list first. If we have a newer version stored
   // locally or download one, we will replace this one with it.
-  scoped_ptr<base::DictionaryValue> plugin_list(LoadBuiltInPluginList());
+  std::unique_ptr<base::DictionaryValue> plugin_list(LoadBuiltInPluginList());
 
   // Gracefully handle the case where we couldn't parse the built-in plugin list
   // for some reason (https://crbug.com/388560). TODO(bauerb): Change back to a
@@ -193,7 +193,7 @@ base::DictionaryValue* PluginFinder::LoadBuiltInPluginList() {
           IDR_PLUGIN_DB_JSON));
   std::string error_str;
   int error_code = base::JSONReader::JSON_NO_ERROR;
-  scoped_ptr<base::Value> value = base::JSONReader::ReadAndReturnError(
+  std::unique_ptr<base::Value> value = base::JSONReader::ReadAndReturnError(
       json_resource, base::JSON_PARSE_RFC, &error_code, &error_str);
   if (!value) {
     DLOG(ERROR) << error_str;
@@ -252,26 +252,12 @@ PluginFinder::~PluginFinder() {
   STLDeleteValues(&identifier_plugin_);
 }
 
-base::string16 PluginFinder::FindPluginName(const std::string& mime_type,
-                                            const std::string& language) {
-  base::AutoLock lock(mutex_);
-
-  for (auto plugin : identifier_plugin_) {
-    if (language == plugin.second->language() &&
-        plugin.second->HasMimeType(mime_type)) {
-      return plugin.second->name();
-    }
-  }
-
-  return base::UTF8ToUTF16(mime_type);
-}
-
 #if defined(ENABLE_PLUGIN_INSTALLATION)
 bool PluginFinder::FindPlugin(
     const std::string& mime_type,
     const std::string& language,
     PluginInstaller** installer,
-    scoped_ptr<PluginMetadata>* plugin_metadata) {
+    std::unique_ptr<PluginMetadata>* plugin_metadata) {
   if (g_browser_process->local_state()->GetBoolean(prefs::kDisablePluginFinder))
     return false;
 
@@ -295,7 +281,7 @@ bool PluginFinder::FindPlugin(
 bool PluginFinder::FindPluginWithIdentifier(
     const std::string& identifier,
     PluginInstaller** installer,
-    scoped_ptr<PluginMetadata>* plugin_metadata) {
+    std::unique_ptr<PluginMetadata>* plugin_metadata) {
   base::AutoLock lock(mutex_);
   PluginMap::const_iterator metadata_it = identifier_plugin_.find(identifier);
   if (metadata_it == identifier_plugin_.end())
@@ -342,18 +328,7 @@ void PluginFinder::ReinitializePlugins(
   }
 }
 
-base::string16 PluginFinder::FindPluginNameWithIdentifier(
-    const std::string& identifier) {
-  base::AutoLock lock(mutex_);
-  PluginMap::const_iterator it = identifier_plugin_.find(identifier);
-  base::string16 name;
-  if (it != identifier_plugin_.end())
-    name = it->second->name();
-
-  return name.empty() ? base::UTF8ToUTF16(identifier) : name;
-}
-
-scoped_ptr<PluginMetadata> PluginFinder::GetPluginMetadata(
+std::unique_ptr<PluginMetadata> PluginFinder::GetPluginMetadata(
     const content::WebPluginInfo& plugin) {
   base::AutoLock lock(mutex_);
   for (PluginMap::const_iterator it = identifier_plugin_.begin();

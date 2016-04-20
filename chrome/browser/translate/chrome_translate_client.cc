@@ -8,7 +8,6 @@
 
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/string_split.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -25,6 +24,7 @@
 #include "chrome/browser/ui/translate/translate_bubble_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "components/translate/content/common/cld_data_source.h"
 #include "components/translate/content/common/translate_messages.h"
 #include "components/translate/core/browser/language_state.h"
@@ -92,14 +92,14 @@ translate::LanguageState& ChromeTranslateClient::GetLanguageState() {
 }
 
 // static
-scoped_ptr<translate::TranslatePrefs>
+std::unique_ptr<translate::TranslatePrefs>
 ChromeTranslateClient::CreateTranslatePrefs(PrefService* prefs) {
 #if defined(OS_CHROMEOS)
   const char* preferred_languages_prefs = prefs::kLanguagePreferredLanguages;
 #else
   const char* preferred_languages_prefs = NULL;
 #endif
-  scoped_ptr<translate::TranslatePrefs> translate_prefs(
+  std::unique_ptr<translate::TranslatePrefs> translate_prefs(
       new translate::TranslatePrefs(prefs, prefs::kAcceptLanguages,
                                     preferred_languages_prefs));
 
@@ -153,7 +153,7 @@ void ChromeTranslateClient::GetTranslateLanguages(
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   Profile* original_profile = profile->GetOriginalProfile();
   PrefService* prefs = original_profile->GetPrefs();
-  scoped_ptr<translate::TranslatePrefs> translate_prefs =
+  std::unique_ptr<translate::TranslatePrefs> translate_prefs =
       CreateTranslatePrefs(prefs);
   if (!web_contents->GetBrowserContext()->IsOffTheRecord()) {
     std::string auto_translate_language =
@@ -228,7 +228,7 @@ PrefService* ChromeTranslateClient::GetPrefs() {
   return profile->GetOriginalProfile()->GetPrefs();
 }
 
-scoped_ptr<translate::TranslatePrefs>
+std::unique_ptr<translate::TranslatePrefs>
 ChromeTranslateClient::GetTranslatePrefs() {
   DCHECK(web_contents());
   Profile* profile =
@@ -313,7 +313,7 @@ void ChromeTranslateClient::ShowBubble(
     translate::TranslateStep step,
     translate::TranslateErrors::Type error_type) {
 // The bubble is implemented only on the desktop platforms.
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
 
   // |browser| might be NULL when testing. In this case, Show(...) should be
@@ -331,10 +331,8 @@ void ChromeTranslateClient::ShowBubble(
   // because the bubble takes the focus from the other widgets including the
   // browser windows. So it is checked that |browser| is the last activated
   // browser, not is now activated.
-  if (browser !=
-      chrome::FindLastActiveWithHostDesktopType(browser->host_desktop_type())) {
+  if (browser != chrome::FindLastActive())
     return;
-  }
 
   // During auto-translating, the bubble should not be shown.
   if (step == translate::TRANSLATE_STEP_TRANSLATING ||

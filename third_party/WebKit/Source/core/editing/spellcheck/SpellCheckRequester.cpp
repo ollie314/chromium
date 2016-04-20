@@ -36,8 +36,8 @@
 namespace blink {
 
 SpellCheckRequest::SpellCheckRequest(
-    PassRefPtrWillBeRawPtr<Range> checkingRange,
-    PassRefPtrWillBeRawPtr<Range> paragraphRange,
+    Range* checkingRange,
+    Range* paragraphRange,
     const String& text,
     TextCheckingTypeMask mask,
     TextCheckingProcessType processType,
@@ -51,11 +51,11 @@ SpellCheckRequest::SpellCheckRequest(
     , m_requestData(unrequestedTextCheckingSequence, text, mask, processType, documentMarkersInRange, documentMarkerOffsets)
     , m_requestNumber(requestNumber)
 {
-    ASSERT(m_checkingRange);
-    ASSERT(m_checkingRange->inDocument());
-    ASSERT(m_paragraphRange);
-    ASSERT(m_paragraphRange->inDocument());
-    ASSERT(m_rootEditableElement);
+    DCHECK(m_checkingRange);
+    DCHECK(m_checkingRange->inShadowIncludingDocument());
+    DCHECK(m_paragraphRange);
+    DCHECK(m_paragraphRange->inShadowIncludingDocument());
+    DCHECK(m_rootEditableElement);
 }
 
 SpellCheckRequest::~SpellCheckRequest()
@@ -80,7 +80,7 @@ void SpellCheckRequest::dispose()
 }
 
 // static
-PassRefPtrWillBeRawPtr<SpellCheckRequest> SpellCheckRequest::create(TextCheckingTypeMask textCheckingOptions, TextCheckingProcessType processType, const EphemeralRange& checkingRange, const EphemeralRange& paragraphRange, int requestNumber)
+SpellCheckRequest* SpellCheckRequest::create(TextCheckingTypeMask textCheckingOptions, TextCheckingProcessType processType, const EphemeralRange& checkingRange, const EphemeralRange& paragraphRange, int requestNumber)
 {
     if (checkingRange.isNull())
         return nullptr;
@@ -91,8 +91,8 @@ PassRefPtrWillBeRawPtr<SpellCheckRequest> SpellCheckRequest::create(TextChecking
     if (text.isEmpty())
         return nullptr;
 
-    RefPtrWillBeRawPtr<Range> checkingRangeObject = createRange(checkingRange);
-    RefPtrWillBeRawPtr<Range> paragraphRangeObject = nullptr;
+    Range* checkingRangeObject = createRange(checkingRange);
+    Range* paragraphRangeObject = nullptr;
     // Share identical Range objects.
     if (checkingRange == paragraphRange)
         paragraphRangeObject = checkingRangeObject;
@@ -107,7 +107,7 @@ PassRefPtrWillBeRawPtr<SpellCheckRequest> SpellCheckRequest::create(TextChecking
         offsets[i] = markers[i]->startOffset();
     }
 
-    return adoptRefWillBeNoop(new SpellCheckRequest(checkingRangeObject, paragraphRangeObject, text, textCheckingOptions, processType, hashes, offsets, requestNumber));
+    return new SpellCheckRequest(checkingRangeObject, paragraphRangeObject, text, textCheckingOptions, processType, hashes, offsets, requestNumber);
 }
 
 const TextCheckingRequestData& SpellCheckRequest::data() const
@@ -117,7 +117,7 @@ const TextCheckingRequestData& SpellCheckRequest::data() const
 
 bool SpellCheckRequest::isValid() const
 {
-    return m_checkingRange->inDocument() && m_paragraphRange->inDocument() && m_rootEditableElement->inDocument();
+    return m_checkingRange->inShadowIncludingDocument() && m_paragraphRange->inShadowIncludingDocument() && m_rootEditableElement->inShadowIncludingDocument();
 }
 
 void SpellCheckRequest::didSucceed(const Vector<TextCheckingResult>& results)
@@ -140,18 +140,11 @@ void SpellCheckRequest::didCancel()
 
 void SpellCheckRequest::setCheckerAndSequence(SpellCheckRequester* requester, int sequence)
 {
-    ASSERT(!m_requester);
-    ASSERT(m_requestData.sequence() == unrequestedTextCheckingSequence);
+    DCHECK(!m_requester);
+    DCHECK_EQ(m_requestData.sequence(), unrequestedTextCheckingSequence);
     m_requester = requester;
     m_requestData.m_sequence = sequence;
 }
-
-#if !ENABLE(OILPAN)
-void SpellCheckRequest::requesterDestroyed()
-{
-    m_requester = nullptr;
-}
-#endif
 
 SpellCheckRequester::SpellCheckRequester(LocalFrame& frame)
     : m_frame(&frame)
@@ -163,12 +156,6 @@ SpellCheckRequester::SpellCheckRequester(LocalFrame& frame)
 
 SpellCheckRequester::~SpellCheckRequester()
 {
-#if !ENABLE(OILPAN)
-    if (m_processingRequest)
-        m_processingRequest->requesterDestroyed();
-    for (const auto& requestQueue : m_requestQueue)
-        requestQueue->requesterDestroyed();
-#endif
 }
 
 TextCheckerClient& SpellCheckRequester::client() const
@@ -178,7 +165,7 @@ TextCheckerClient& SpellCheckRequester::client() const
 
 void SpellCheckRequester::timerFiredToProcessQueuedRequest(Timer<SpellCheckRequester>*)
 {
-    ASSERT(!m_requestQueue.isEmpty());
+    DCHECK(!m_requestQueue.isEmpty());
     if (m_requestQueue.isEmpty())
         return;
 
@@ -200,12 +187,12 @@ bool SpellCheckRequester::isCheckable(Range* range) const
     return true;
 }
 
-void SpellCheckRequester::requestCheckingFor(PassRefPtrWillBeRawPtr<SpellCheckRequest> request)
+void SpellCheckRequester::requestCheckingFor(SpellCheckRequest* request)
 {
-    if (!request || !canCheckAsynchronously(request->paragraphRange().get()))
+    if (!request || !canCheckAsynchronously(request->paragraphRange()))
         return;
 
-    ASSERT(request->data().sequence() == unrequestedTextCheckingSequence);
+    DCHECK_EQ(request->data().sequence(), unrequestedTextCheckingSequence);
     int sequence = ++m_lastRequestSequence;
     if (sequence == unrequestedTextCheckingSequence)
         sequence = ++m_lastRequestSequence;
@@ -226,9 +213,22 @@ void SpellCheckRequester::cancelCheck()
         m_processingRequest->didCancel();
 }
 
-void SpellCheckRequester::invokeRequest(PassRefPtrWillBeRawPtr<SpellCheckRequest> request)
+void SpellCheckRequester::prepareForLeakDetection()
 {
-    ASSERT(!m_processingRequest);
+    m_timerToProcessQueuedRequest.stop();
+    // Empty the queue of pending requests to prevent it being a leak source.
+    // Pending spell checker requests are cancellable requests not representing
+    // leaks, just async work items waiting to be processed.
+    //
+    // Rather than somehow wait for this async queue to drain before running
+    // the leak detector, they're all cancelled to prevent flaky leaks being
+    // reported.
+    m_requestQueue.clear();
+}
+
+void SpellCheckRequester::invokeRequest(SpellCheckRequest* request)
+{
+    DCHECK(!m_processingRequest);
     m_processingRequest = request;
     client().requestCheckingOfString(m_processingRequest);
 }
@@ -242,12 +242,12 @@ void SpellCheckRequester::clearProcessingRequest()
     m_processingRequest.clear();
 }
 
-void SpellCheckRequester::enqueueRequest(PassRefPtrWillBeRawPtr<SpellCheckRequest> request)
+void SpellCheckRequester::enqueueRequest(SpellCheckRequest* request)
 {
-    ASSERT(request);
+    DCHECK(request);
     bool continuation = false;
     if (!m_requestQueue.isEmpty()) {
-        RefPtrWillBeRawPtr<SpellCheckRequest> lastRequest = m_requestQueue.last();
+        SpellCheckRequest* lastRequest = m_requestQueue.last();
         // It's a continuation if the number of the last request got incremented in the new one and
         // both apply to the same editable.
         continuation = request->rootEditableElement() == lastRequest->rootEditableElement()
@@ -270,8 +270,8 @@ void SpellCheckRequester::enqueueRequest(PassRefPtrWillBeRawPtr<SpellCheckReques
 
 void SpellCheckRequester::didCheck(int sequence, const Vector<TextCheckingResult>& results)
 {
-    ASSERT(m_processingRequest);
-    ASSERT(m_processingRequest->data().sequence() == sequence);
+    DCHECK(m_processingRequest);
+    DCHECK_EQ(m_processingRequest->data().sequence(), sequence);
     if (m_processingRequest->data().sequence() != sequence) {
         m_requestQueue.clear();
         return;
@@ -297,8 +297,8 @@ void SpellCheckRequester::didCheckSucceed(int sequence, const Vector<TextCheckin
         if (!requestData.maskContains(TextCheckingTypeGrammar))
             markers.remove(DocumentMarker::Grammar);
         if (m_processingRequest->isValid()) {
-            RefPtrWillBeRawPtr<Range> checkingRange = m_processingRequest->checkingRange();
-            frame().document()->markers().removeMarkers(EphemeralRange(checkingRange.get()), markers);
+            Range* checkingRange = m_processingRequest->checkingRange();
+            frame().document()->markers().removeMarkers(EphemeralRange(checkingRange), markers);
         }
     }
     didCheck(sequence, results);

@@ -9,8 +9,8 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
@@ -41,6 +41,7 @@
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_result.h"
 #include "components/omnibox/browser/search_provider.h"
+#include "components/prefs/pref_service.h"
 #include "components/search/search.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/navigation_controller.h"
@@ -133,17 +134,17 @@ ChromeOmniboxClient::~ChromeOmniboxClient() {
     image_service->CancelRequest(request_id_);
 }
 
-scoped_ptr<AutocompleteProviderClient>
+std::unique_ptr<AutocompleteProviderClient>
 ChromeOmniboxClient::CreateAutocompleteProviderClient() {
-  return make_scoped_ptr(new ChromeAutocompleteProviderClient(profile_));
+  return base::WrapUnique(new ChromeAutocompleteProviderClient(profile_));
 }
 
-scoped_ptr<OmniboxNavigationObserver>
+std::unique_ptr<OmniboxNavigationObserver>
 ChromeOmniboxClient::CreateOmniboxNavigationObserver(
     const base::string16& text,
     const AutocompleteMatch& match,
     const AutocompleteMatch& alternate_nav_match) {
-  return make_scoped_ptr(new ChromeOmniboxNavigationObserver(
+  return base::WrapUnique(new ChromeOmniboxNavigationObserver(
       profile_, text, match, alternate_nav_match));
 }
 
@@ -290,7 +291,7 @@ void ChromeOmniboxClient::OnResultChanged(
 
   const auto match = std::find_if(
       result.begin(), result.end(),
-      [](const AutocompleteMatch& current)->bool { return current.answer; });
+      [](const AutocompleteMatch& current) { return !!current.answer; });
   if (match != result.end()) {
     BitmapFetcherService* image_service =
         BitmapFetcherServiceFactory::GetForBrowserContext(profile_);

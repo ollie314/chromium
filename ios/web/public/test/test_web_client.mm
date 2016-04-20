@@ -4,42 +4,36 @@
 
 #import "ios/web/public/test/test_web_client.h"
 
-#include "base/strings/sys_string_conversions.h"
+#include "base/logging.h"
 
 namespace web {
 
 TestWebClient::TestWebClient()
-    : early_page_scripts_([[NSMutableDictionary alloc] init]) {
+    : last_cert_error_code_(0), last_cert_error_overridable_(true) {}
+
+TestWebClient::~TestWebClient() {}
+
+NSString* TestWebClient::GetEarlyPageScript() const {
+  return early_page_script_ ? early_page_script_.get() : @"";
 }
 
-TestWebClient::~TestWebClient() {
+void TestWebClient::SetEarlyPageScript(NSString* page_script) {
+  early_page_script_.reset([page_script copy]);
 }
 
-std::string TestWebClient::GetUserAgent(bool desktop_user_agent) const {
-  return desktop_user_agent ? desktop_user_agent_ : user_agent_;
-}
+void TestWebClient::AllowCertificateError(
+    WebState* web_state,
+    int cert_error,
+    const net::SSLInfo& ssl_info,
+    const GURL& request_url,
+    bool overridable,
+    const base::Callback<void(bool)>& callback) {
+  last_cert_error_code_ = cert_error;
+  last_cert_error_ssl_info_ = ssl_info;
+  last_cert_error_request_url_ = request_url;
+  last_cert_error_overridable_ = overridable;
 
-void TestWebClient::SetUserAgent(const std::string& user_agent,
-                                 bool is_desktop_user_agent) {
-  if (is_desktop_user_agent)
-    desktop_user_agent_ = user_agent;
-  else
-    user_agent_ = user_agent;
-}
-
-NSString* TestWebClient::GetEarlyPageScript(
-    web::WebViewType web_view_type) const {
-  NSString* result = [early_page_scripts_ objectForKey:@(web_view_type)];
-  return result ? result : @"";
-}
-
-bool TestWebClient::WebViewsNeedActiveStateManager() const {
-  return true;
-}
-
-void TestWebClient::SetEarlyPageScript(NSString* page_script,
-                                       web::WebViewType web_view_type) {
-  [early_page_scripts_ setObject:page_script forKey:@(web_view_type)];
+  callback.Run(false);
 }
 
 }  // namespace web

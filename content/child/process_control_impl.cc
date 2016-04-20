@@ -6,10 +6,9 @@
 
 #include <utility>
 
-#include "base/stl_util.h"
+#include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "content/public/common/content_client.h"
-#include "mojo/shell/static_application_loader.h"
-#include "url/gurl.h"
 
 namespace content {
 
@@ -17,30 +16,36 @@ ProcessControlImpl::ProcessControlImpl() {
 }
 
 ProcessControlImpl::~ProcessControlImpl() {
-  STLDeleteValues(&url_to_loader_map_);
 }
 
 void ProcessControlImpl::LoadApplication(
-    const mojo::String& url,
-    mojo::InterfaceRequest<mojo::Application> request,
+    const mojo::String& name,
+    shell::mojom::ShellClientRequest request,
     const LoadApplicationCallback& callback) {
-  // Only register loaders when we need it.
-  if (!has_registered_loaders_) {
-    DCHECK(url_to_loader_map_.empty());
-    RegisterApplicationLoaders(&url_to_loader_map_);
-    has_registered_loaders_ = true;
+  // Only register apps on first run.
+  if (!has_registered_apps_) {
+    DCHECK(apps_.empty());
+    ApplicationFactoryMap app_factories;
+    RegisterApplicationFactories(&app_factories);
+    for (const auto& factory : app_factories) {
+      std::unique_ptr<EmbeddedApplicationRunner> runner(
+          new EmbeddedApplicationRunner(factory.second, nullptr));
+      runner->SetQuitClosure(base::Bind(&ProcessControlImpl::OnApplicationQuit,
+                                        base::Unretained(this)));
+      apps_.insert(std::make_pair(factory.first, std::move(runner)));
+    }
+    has_registered_apps_ = true;
   }
 
-  GURL application_url = GURL(url.To<std::string>());
-  auto it = url_to_loader_map_.find(application_url);
-  if (it == url_to_loader_map_.end()) {
+  auto it = apps_.find(name);
+  if (it == apps_.end()) {
     callback.Run(false);
     OnLoadFailed();
     return;
   }
 
   callback.Run(true);
-  it->second->Load(application_url, std::move(request));
+  it->second->BindShellClientRequest(std::move(request));
 }
 
 }  // namespace content

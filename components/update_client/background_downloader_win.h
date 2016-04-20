@@ -20,7 +20,6 @@
 namespace base {
 class FilePath;
 class SequencedTaskRunner;
-class SingleThreadTaskRunner;
 }
 
 namespace update_client {
@@ -86,6 +85,10 @@ class BackgroundDownloader : public CrxDownloader {
   void StartTimer();
   void OnTimer();
 
+  // Returns true if the timer is running or false if the timer is not
+  // created or not running at all.
+  bool TimerIsRunning() const;
+
   HRESULT QueueBitsJob(const GURL& url, IBackgroundCopyJob** job);
   HRESULT CreateOrOpenJob(const GURL& url, IBackgroundCopyJob** job);
   HRESULT InitializeNewJob(
@@ -115,12 +118,7 @@ class BackgroundDownloader : public CrxDownloader {
   // Ensures that we are running on the same thread we created the object on.
   base::ThreadChecker thread_checker_;
 
-  // Used to post responses back to the main thread. Initialized on the main
-  // loop but accessed from the task runner.
-  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
-
   net::URLRequestContextGetter* context_getter_;
-  scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   // The timer has thread affinity. This member is initialized and destroyed
   // on the main task runner.

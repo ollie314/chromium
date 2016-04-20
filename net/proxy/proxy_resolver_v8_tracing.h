@@ -5,9 +5,10 @@
 #ifndef NET_PROXY_PROXY_RESOLVER_V8_TRACING_H_
 #define NET_PROXY_PROXY_RESOLVER_V8_TRACING_H_
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "net/base/net_export.h"
 #include "net/proxy/proxy_resolver.h"
 #include "net/proxy/proxy_resolver_factory.h"
@@ -56,7 +57,7 @@ class NET_EXPORT ProxyResolverV8Tracing {
                               ProxyInfo* results,
                               const CompletionCallback& callback,
                               ProxyResolver::RequestHandle* request,
-                              scoped_ptr<Bindings> bindings) = 0;
+                              std::unique_ptr<Bindings> bindings) = 0;
 
   // Cancels |request|.
   virtual void CancelRequest(ProxyResolver::RequestHandle request) = 0;
@@ -78,16 +79,65 @@ class NET_EXPORT ProxyResolverV8TracingFactory {
 
   virtual void CreateProxyResolverV8Tracing(
       const scoped_refptr<ProxyResolverScriptData>& pac_script,
-      scoped_ptr<ProxyResolverV8Tracing::Bindings> bindings,
-      scoped_ptr<ProxyResolverV8Tracing>* resolver,
+      std::unique_ptr<ProxyResolverV8Tracing::Bindings> bindings,
+      std::unique_ptr<ProxyResolverV8Tracing>* resolver,
       const CompletionCallback& callback,
-      scoped_ptr<ProxyResolverFactory::Request>* request) = 0;
+      std::unique_ptr<ProxyResolverFactory::Request>* request) = 0;
 
-  static scoped_ptr<ProxyResolverV8TracingFactory> Create();
+  static std::unique_ptr<ProxyResolverV8TracingFactory> Create();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ProxyResolverV8TracingFactory);
 };
+
+// This enum is used by an UMA histogram, so the values shouldn't be reordered
+// or renumbered.
+//
+// TODO(eroman): Remove when done gathering data for crbug.com/593759
+enum class PacResultForStrippedUrl {
+  // Did NOT measure the impact of running FindProxyForURL() with a modified
+  // URL path, because the original URL could not complete using the
+  // non-blocking DNS mode.
+  SKIPPED_FALLBACK_BLOCKING_DNS = 0,
+
+  // The result of running FindProxyForURL() with a modified URL path appears
+  // to be indistinguishable. (Although there may have been sideffects to the
+  // script state that won't manifest until later invocations).
+  SUCCESS = 1,
+
+  // Calling FindProxyForURL() with a modified URL path returned the same proxy
+  // list, but had measurable sideffects in calls to alert().
+  SUCCESS_DIFFERENT_ALERTS = 2,
+
+  // Calling FindProxyForURL() with a modified URL path returned the same proxy
+  // list, but invoked a different sequence of DNS resolutions. This would
+  // require a rather unusual script to trigger.
+  SUCCESS_DIFFERENT_NUM_DNS = 3,
+
+  // Calling FindProxyForURL() with a modified URL path resulted in a different
+  // set of DNS dependencies.
+  FAIL_ABANDONED = 4,
+
+  // Calling FindProxyForURL() with a modified URL path caused a different
+  // execution flow. Whereas with the original URL it succeeded with
+  // non-blocking DNS, this attempt requires fallback to blocking DNS (and was
+  // not attempted).
+  FAIL_FALLBACK_BLOCKING_DNS = 5,
+
+  // Calling FindProxyForURL() with a modified URL path caused a script error.
+  FAIL_ERROR = 6,
+
+  // Calling FindProxyForURL() with a modified URL path returned a different
+  // proxy list.
+  FAIL_DIFFERENT_PROXY_LIST = 7,
+
+  MAX_VALUE,
+};
+
+// TODO(eroman): Remove when done gathering data for crbug.com/593759
+//
+// This histogram name is exported only for the sake of unit-tests.
+extern NET_EXPORT_PRIVATE const char kHistogramPacResultForStrippedUrl[];
 
 }  // namespace net
 

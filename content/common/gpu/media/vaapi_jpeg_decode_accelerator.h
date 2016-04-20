@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -15,6 +17,7 @@
 #include "base/threading/non_thread_safe.h"
 #include "base/threading/thread.h"
 #include "content/common/content_export.h"
+#include "content/common/gpu/media/shared_memory_region.h"
 #include "content/common/gpu/media/vaapi_jpeg_decoder.h"
 #include "content/common/gpu/media/vaapi_wrapper.h"
 #include "media/base/bitstream_buffer.h"
@@ -47,13 +50,13 @@ class CONTENT_EXPORT VaapiJpegDecodeAccelerator
   // An input buffer and the corresponding output video frame awaiting
   // consumption, provided by the client.
   struct DecodeRequest {
-    DecodeRequest(const media::BitstreamBuffer& bitstream_buffer,
-                  scoped_ptr<base::SharedMemory> shm,
+    DecodeRequest(int32_t bitstream_buffer_id,
+                  std::unique_ptr<SharedMemoryRegion> shm,
                   const scoped_refptr<media::VideoFrame>& video_frame);
     ~DecodeRequest();
 
-    media::BitstreamBuffer bitstream_buffer;
-    scoped_ptr<base::SharedMemory> shm;
+    int32_t bitstream_buffer_id;
+    std::unique_ptr<SharedMemoryRegion> shm;
     scoped_refptr<media::VideoFrame> video_frame;
   };
 
@@ -64,7 +67,7 @@ class CONTENT_EXPORT VaapiJpegDecodeAccelerator
   void VideoFrameReady(int32_t bitstream_buffer_id);
 
   // Processes one decode |request|.
-  void DecodeTask(const scoped_ptr<DecodeRequest>& request);
+  void DecodeTask(const std::unique_ptr<DecodeRequest>& request);
 
   // Puts contents of |va_surface| into given |video_frame|, releases the
   // surface and passes the |input_buffer_id| of the resulting picture to
@@ -94,7 +97,7 @@ class CONTENT_EXPORT VaapiJpegDecodeAccelerator
 
   // Comes after vaapi_wrapper_ to ensure its destructor is executed before
   // |vaapi_wrapper_| is destroyed.
-  scoped_ptr<VaapiJpegDecoder> decoder_;
+  std::unique_ptr<VaapiJpegDecoder> decoder_;
   base::Thread decoder_thread_;
   // Use this to post tasks to |decoder_thread_| instead of
   // |decoder_thread_.task_runner()| because the latter will be NULL once

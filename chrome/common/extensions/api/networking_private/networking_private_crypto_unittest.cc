@@ -35,154 +35,143 @@ class NetworkingPrivateCryptoTest : public testing::Test {
 
 // Test that networking_private_crypto::VerifyCredentials behaves as expected.
 TEST_F(NetworkingPrivateCryptoTest, VerifyCredentials) {
-  std::string keys =
-      "CrMCCiBSnZzWf+XraY5w3SbX2PEmWfHm5SNIv2pc9xbhP0EOcxKOAjCCAQoCggEBALwigL2A"
-      "9johADuudl41fz3DZFxVlIY0LwWHKM33aYwXs1CnuIL638dDLdZ+q6BvtxNygKRHFcEgmVDN"
-      "7BRiCVukmM3SQbY2Tv/oLjIwSoGoQqNsmzNuyrL1U2bgJ1OGGoUepzk/SneO+1RmZvtYVMBe"
-      "Ocf1UAYL4IrUzuFqVR+LFwDmaaMn5gglaTwSnY0FLNYuojHetFJQ1iBJ3nGg+a0gQBLx3SXr"
-      "1ea4NvTWj3/KQ9zXEFvmP1GKhbPz//YDLcsjT5ytGOeTBYysUpr3TOmZer5ufk0K48YcqZP6"
-      "OqWRXRy9ZuvMYNyGdMrP+JIcmH1X+mFHnquAt+RIgCqSxRsCAwEAAQqzAgogmNZt6BxWR4RN"
-      "lkNNN8SNws5/CHJQGee26JJ/VtaBqhgSjgIwggEKAoIBAQC8IoC9gPY6IQA7rnZeNX89w2Rc"
-      "VZSGNC8FhyjN92mMF7NQp7iC+t/HQy3Wfqugb7cTcoCkRxXBIJlQzewUYglbpJjN0kG2Nk7/"
-      "6C4yMEqBqEKjbJszbsqy9VNm4CdThhqFHqc5P0p3jvtUZmb7WFTAXjnH9VAGC+CK1M7halUf"
-      "ixcA5mmjJ+YIJWk8Ep2NBSzWLqIx3rRSUNYgSd5xoPmtIEAS8d0l69XmuDb01o9/ykPc1xBb"
-      "5j9RioWz8//2Ay3LI0+crRjnkwWMrFKa90zpmXq+bn5NCuPGHKmT+jqlkV0cvWbrzGDchnTK"
-      "z/iSHJh9V/phR56rgLfkSIAqksUbAgMBAAE=";
-  std::string signature =
-      "eHMoa7dP2ByNtDnxM/Q6yV3ZyUyihBFgOthq937yuiu2uwW2X/i8h1YrJFaWrA0iTTfSLAa6"
-      "PBAN1hhnwXlWYy8MvViJ9eJqf5FfCCkOjdRN0QIFPpmIJm/EcIv91bNMWnOGANgSW1Hons+s"
-      "C0/kROPbPABPLLwfgGizBDSZNapxgj8G+iDvi1JRRvvNdmjUs2AUIPNrSp3Knt3FyZ5F2Smk"
-      "Khpo7XVTWgSuWOzUJu6zNHn2krm64Ymd2HxRDyKTm1DBzy1MoXv4/8mbLYdj+KAvhqKJfRcr"
-      "GkUXVK++wCHERwxcvfk7e6lN6adcCVYP9pZPMhE/UyAJY6/uE1X0cw==";
-  EXPECT_TRUE(
-      cast_crypto::SetTrustedCertificateAuthoritiesForTest(keys, signature));
-
+  // This certificate chain and signature are duplicated from:
+  //
+  //   extensions/test/data/cast_certificates/chromecast_gen1.pem
+  //   extensions/test/data/cast_signeddata/2ZZBG9_FA8FCA3EF91A.pem
+  //
+  // TODO(eroman): Avoid duplicating the data.
   static const char kCertData[] =
       "-----BEGIN CERTIFICATE-----"
-      "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"
+      "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"
       "-----END CERTIFICATE-----";
+
   static const char kICAData[] =
       "-----BEGIN CERTIFICATE-----"
-      "MIIDzTCCArWgAwIBAgIBAzANBgkqhkiG9w0BAQUFADB1MQswCQYDVQQGEwJVUzET"
+      "MIIDhzCCAm+gAwIBAgIBATANBgkqhkiG9w0BAQUFADB8MQswCQYDVQQGEwJVUzET"
       "MBEGA1UECAwKQ2FsaWZvcm5pYTEWMBQGA1UEBwwNTW91bnRhaW4gVmlldzETMBEG"
-      "A1UECgwKR29vZ2xlIEluYzENMAsGA1UECwwEQ2FzdDEVMBMGA1UEAwwMQ2FzdCBS"
-      "b290IENBMB4XDTE0MDQwMjIwNTg1NFoXDTE5MDQwMjIwNTg1NFowfTELMAkGA1UE"
-      "BhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExFjAUBgNVBAcMDU1vdW50YWluIFZp"
-      "ZXcxEzARBgNVBAoMCkdvb2dsZSBJbmMxEjAQBgNVBAsMCUdvb2dsZSBUVjEYMBYG"
-      "A1UEAwwPRXVyZWthIEdlbjEgSUNBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIB"
-      "CgKCAQEAvCKAvYD2OiEAO652XjV/PcNkXFWUhjQvBYcozfdpjBezUKe4gvrfx0Mt"
-      "1n6roG+3E3KApEcVwSCZUM3sFGIJW6SYzdJBtjZO/+guMjBKgahCo2ybM27KsvVT"
-      "ZuAnU4YahR6nOT9Kd477VGZm+1hUwF45x/VQBgvgitTO4WpVH4sXAOZpoyfmCCVp"
-      "PBKdjQUs1i6iMd60UlDWIEnecaD5rSBAEvHdJevV5rg29NaPf8pD3NcQW+Y/UYqF"
-      "s/P/9gMtyyNPnK0Y55MFjKxSmvdM6Zl6vm5+TQrjxhypk/o6pZFdHL1m68xg3IZ0"
-      "ys/4khyYfVf6YUeeq4C35EiAKpLFGwIDAQABo2AwXjAPBgNVHRMECDAGAQH/AgEA"
-      "MB0GA1UdDgQWBBQyr35sod0oQuWz4VmnWjnJ/4pinzAfBgNVHSMEGDAWgBR8mh59"
-      "33lUvNfMXsqZhkV5ZXQoGTALBgNVHQ8EBAMCAQYwDQYJKoZIhvcNAQEFBQADggEB"
-      "ABPENY9iGt6qsc5yq4JOO6EEqYbKVtkSf1AqW2yJc4M4EZ65eA6bpj9EVIKvDxYq"
-      "NI7q40f7jCXiS+Y73OXFaC3Xue8+DV7WVjAvf9QYy79ohnbqadA4U/Sb7vw4AzwT"
-      "KCMlH2fUJ5PCNFfTj6lAkeZOhxtegnEMTIB8zvXEb42H0hN4UxRRhCeKS9tIlAmI"
-      "Ql1ib0jTDDN6IgQYslrx0dyZzBAsRocq/d3ycXX71iMykoIHZ7rNJ2bDMddRdFk2"
-      "D0Ljj4fZjrQNyD4mot/9mqSrF1Q2/AdWQO3pJONcXRWRynJ4Ian3sWdq2B5Dq8Iz"
-      "kqrjM7lOq9YEQ+hMRdmOHP4="
+      "A1UECgwKR29vZ2xlIEluYzESMBAGA1UECwwJR29vZ2xlIFRWMRcwFQYDVQQDDA5F"
+      "dXJla2EgUm9vdCBDQTAeFw0xMjEyMTkwMDQ3MTJaFw0zMjEyMTQwMDQ3MTJaMH0x"
+      "CzAJBgNVBAYTAlVTMRMwEQYDVQQIDApDYWxpZm9ybmlhMRYwFAYDVQQHDA1Nb3Vu"
+      "dGFpbiBWaWV3MRMwEQYDVQQKDApHb29nbGUgSW5jMRIwEAYDVQQLDAlHb29nbGUg"
+      "VFYxGDAWBgNVBAMMD0V1cmVrYSBHZW4xIElDQTCCASIwDQYJKoZIhvcNAQEBBQAD"
+      "ggEPADCCAQoCggEBALwigL2A9johADuudl41fz3DZFxVlIY0LwWHKM33aYwXs1Cn"
+      "uIL638dDLdZ+q6BvtxNygKRHFcEgmVDN7BRiCVukmM3SQbY2Tv/oLjIwSoGoQqNs"
+      "mzNuyrL1U2bgJ1OGGoUepzk/SneO+1RmZvtYVMBeOcf1UAYL4IrUzuFqVR+LFwDm"
+      "aaMn5gglaTwSnY0FLNYuojHetFJQ1iBJ3nGg+a0gQBLx3SXr1ea4NvTWj3/KQ9zX"
+      "EFvmP1GKhbPz//YDLcsjT5ytGOeTBYysUpr3TOmZer5ufk0K48YcqZP6OqWRXRy9"
+      "ZuvMYNyGdMrP+JIcmH1X+mFHnquAt+RIgCqSxRsCAwEAAaMTMBEwDwYDVR0TBAgw"
+      "BgEB/wIBATANBgkqhkiG9w0BAQUFAAOCAQEAi9Shsc9dzXtsSEpBH1MvGC0yRf+e"
+      "q9NzPh8i1+r6AeZzAw8rxiW7pe7F9UXLJBIqrcJdBfR69cKbEBZa0QpzxRY5oBDK"
+      "0WiFnvueJoOOWPN3oE7l25e+LQBf9ZTbsZ1la/3w0QRR38ySppktcfVN1SP+Mxyp"
+      "tKvFvxq40YDvicniH5xMSDui+gIK3IQBiocC+1nup0wEfXSZh2olRK0WquxONRt8"
+      "e4TJsT/hgnDlDefZbfqVtsXkHugRm9iy86T9E/ODT/cHFCC7IqWmj9a126l0eOKT"
+      "DeUjLwUX4LKXZzRND5x2Q3umIUpWBfYqfPJ/EpSCJikH8AtsbHkUsHTVbA=="
       "-----END CERTIFICATE-----";
-  static const char kName[] = "eureka8997";
-  static const char kSsdpUdn[] = "c5b2a83b-5958-7ce6-b179-e1f44699429b";
-  static const char kHotspotBssid[] = "00:1A:11:FF:AC:DF";
-  static const char kPublicKey[] =
-      "MIGJAoGBAK3SXmWZBOhJibv8It05qIbgHXXhnCXxHkW+C6jNMHR5sZgDpFaOY1xwXERjKdJx"
-      "cwrEy3VAT5Uv9MgHPBvxxJku76HYh1yVfIw1rhLnHBTHSxwUzJNCrgc3l3t/UACacLjVNIzc"
-      "cDpYf2vnOcA+t1t6IXRjzuU2NdwY4dJXNtWPAgMBAAE=";
-  static const char kNonce[] = "+6KSGuRu833m1+TP";
-  static const char kSignedData[] =
-      "vwMBgANrp5XpCswLyk/OTXT56ORPeIWjH7xAdCk3qgjkwI6+8o56zJS02+tC5hhIHWh7oppT"
-      "mWYF4tKvBQ3GeCz7IW9f7HWDMtO7x7yRWxzJyehaJbCfXvLdfs0/WKllzvGVBgNpcIAwU2NS"
-      "FUG/jpXclntFzds0EUJG9wHxS6PXXSYRu+PlIFdCDcQJsUlnwO9AGFOJRV/aARGh8YUTWCFI"
-      "QPOtPEqT5eegt+TLf01Gq0YcrRwSTKy1I3twOnWiMfIdkJdQKPtBwwbvuAyGuqYFocfjKABb"
-      "nH9Tvl04yyO3euKbYlSqaF/l8CXmzDJTyO7tDOFK59bV9auE4KljrQ==";
-  static const char kBadSubjectCertData[] =
-      "-----BEGIN CERTIFICATE-----"
-      "MIIDejCCAmICBFEtN4wwDQYJKoZIhvcNAQEFBQAwfTELMAkGA1UEBhMCVVMxEzARBgNVBAgM"
-      "CkNhbGlmb3JuaWExFjAUBgNVBAcMDU1vdW50YWluIFZpZXcxEzARBgNVBAoMCkdvb2dsZSBJ"
-      "bmMxEjAQBgNVBAsMCUdvb2dsZSBUVjEYMBYGA1UEAwwPRXVyZWthIEdlbjEgSUNBMB4XDTEz"
-      "MDIyNjIyMzAzNloXDTMzMDIyMTIyMzAzNlowdzETMBEGA1UECBMKQ2FsaWZvcm5pYTELMAkG"
-      "A1UEBhMCVVMxFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxEjAQBgNVBAsTCUdvb2dsZSBUVjET"
-      "MBEGA1UEChMKR29vZ2xlIEluYzESMBAGA1UEAxQJZXZ0X2UxMjYyMIIBIjANBgkqhkiG9w0B"
-      "AQEFAAOCAQ8AMIIBCgKCAQEAo7Uu+bdyCjtiUYpmNU4ZvRjDg6VkEh/g0YPDG2pICBU4XKvs"
-      "qHH1i0hbtWp1J79hV9Rqst1yHT02Oeh3o1SOd2zeamYzmvXRVN7AZqfQlzWxwxk/ltpXGwew"
-      "m+EIR2bP4kpvyEKvvziTMtTxviOK+A395QyodMhMXClKTus/Gme2r1fBoQqJJR/zrmwXCsl5"
-      "kpdhj7FOIII3BCYV0zejjQquzywjsKfCVON28VGgJdaKgmXxkeRYYWVNnuTNna57vXe16FP6"
-      "hS1ty1U77ESffLTpNJ/M4tsd2dMVVTDuGeX3q8Ix4TN8cqpqu1AKEf59hygys9j6cHZRKR/d"
-      "iv0+uQIDAQABow0wCzAJBgNVHRMEAjAAMA0GCSqGSIb3DQEBBQUAA4IBAQAZx6XyEK9SLHE+"
-      "rbKCVsLN9+hTEa50aikPmxOZt+lFuB4+VJZ/GCPQCZJIde2tlWUe2YBgoZw2xUKgIsM3Yq42"
-      "Gawi35/oZ3qycTgYU8KJP9kUMbYNAH90mz9BDH7MmnRID5dFexHyBCG88EJ+ZvxmUVn0EVDc"
-      "sSMt11wIAZ/T+/gsE1120d/GxhjYQ9YZz7SZXBQfRdqCdcPNl2+QSHHl+WvYLzdJa2xYj39/"
-      "kQu47Vp7X5rZrHSBvzdVymH0Od2D18t+Q6lxbSdyUNhP1MVhdkT1Ct4OmRS3FJ4aannXMhfq"
-      "Ng7k4Sfif5iktYT4VRKpThe0EGJNfqKJKYtvHEVC"
-      "-----END CERTIFICATE-----";
+
+  unsigned char kData[] = {0x53, 0x54, 0x52, 0x49, 0x4e, 0x47};
+
+  unsigned char kSignature[] = {
+      0x0a, 0xda, 0xb5, 0x40, 0x5c, 0x8e, 0x53, 0x89, 0xda, 0x67, 0x47, 0x28,
+      0xab, 0x64, 0x0d, 0xec, 0xb8, 0x1f, 0xd6, 0x75, 0x28, 0x97, 0x5f, 0xe0,
+      0x11, 0x51, 0x35, 0x2a, 0x70, 0xd8, 0xf6, 0x4d, 0xe8, 0xd0, 0x2e, 0xe0,
+      0x79, 0x75, 0x3a, 0x25, 0xbf, 0x40, 0x0f, 0x6d, 0xd1, 0x20, 0xe3, 0x82,
+      0xbd, 0x05, 0x87, 0x57, 0x01, 0x1e, 0x76, 0xb7, 0xf4, 0xd7, 0xb3, 0x10,
+      0x4a, 0x6c, 0x8a, 0xf9, 0x3d, 0xe7, 0xeb, 0x62, 0xe9, 0x5f, 0x73, 0xab,
+      0x6e, 0x22, 0xf5, 0x59, 0x4d, 0xc4, 0xa3, 0x95, 0xc3, 0xbe, 0x7b, 0x04,
+      0x5a, 0x36, 0x67, 0xee, 0x71, 0xb2, 0xe8, 0x60, 0xbe, 0xaa, 0x2c, 0x90,
+      0x36, 0xd7, 0xf0, 0x42, 0x28, 0xd4, 0x29, 0x9f, 0x30, 0xaa, 0x10, 0x4f,
+      0x2a, 0xe1, 0x72, 0x67, 0xcc, 0xb5, 0x44, 0x7b, 0x7f, 0x89, 0x45, 0x9f,
+      0xc3, 0x9d, 0x6a, 0xf0, 0x78, 0x77, 0x6d, 0x9f, 0x13, 0x58, 0x35, 0x09,
+      0x8c, 0x71, 0xaf, 0x34, 0x4b, 0x18, 0xc7, 0x07, 0xd2, 0xf2, 0x03, 0x48,
+      0xe2, 0x40, 0x75, 0x3b, 0xeb, 0x33, 0x74, 0x8d, 0x33, 0xb4, 0x45, 0xe2,
+      0x59, 0x56, 0x8b, 0xc7, 0x4e, 0x60, 0xc7, 0xec, 0xc8, 0xd3, 0x32, 0x16,
+      0x20, 0xb0, 0xc7, 0x0d, 0x14, 0x4b, 0x68, 0xbf, 0x79, 0xad, 0x7e, 0x47,
+      0x5d, 0x5d, 0xb5, 0x8c, 0xb6, 0xc3, 0x27, 0xb9, 0xd8, 0x25, 0x70, 0xc0,
+      0x8d, 0x12, 0x26, 0x51, 0xe8, 0xad, 0xde, 0xf8, 0xe8, 0x3e, 0x47, 0xd0,
+      0xdf, 0x11, 0x7d, 0x34, 0x50, 0xa8, 0x89, 0x89, 0x59, 0x93, 0x8a, 0x3d,
+      0x88, 0xaf, 0xd5, 0x1e, 0xe8, 0x34, 0x2e, 0x98, 0x62, 0x39, 0xc1, 0x22,
+      0x06, 0xf7, 0x3e, 0x98, 0xfd, 0x6f, 0x3a, 0x45, 0xd0, 0xb7, 0x3a, 0xe5,
+      0xaa, 0x38, 0x35, 0x2c, 0xe9, 0x78, 0x71, 0xe2, 0xf0, 0x6f, 0x60, 0x95,
+      0xc0, 0x60, 0x5f, 0xc3,
+  };
+
+  static const char kHotspotBssid[] = "FA:8F:CA:3E:F9:1A";
+
   static const char kBadCertData[] = "not a certificate";
-  static const char kBadNonce[] = "bad nonce";
   static const char kBadHotspotBssid[] = "bad bssid";
 
-  std::string unsigned_data = base::StringPrintf(
-      "%s,%s,%s,%s,%s", kName, kSsdpUdn, kHotspotBssid, kPublicKey, kNonce);
-  std::string signed_data;
-  base::Base64Decode(kSignedData, &signed_data);
+  // April 1, 2016
+  base::Time::Exploded time = {0};
+  time.year = 2016;
+  time.month = 4;
+  time.day_of_month = 1;
+
+  // September 1, 2035
+  base::Time::Exploded expired_time = {0};
+  expired_time.year = 2035;
+  expired_time.month = 9;
+  expired_time.day_of_month = 1;
+
+  std::string unsigned_data = std::string(std::begin(kData), std::end(kData));
+  std::string signed_data =
+      std::string(std::begin(kSignature), std::end(kSignature));
+
+  // Check that verification fails when the intermediaries are not provided.
+  EXPECT_FALSE(networking_private_crypto::VerifyCredentialsAtTime(
+      kCertData, std::vector<std::string>(), signed_data, unsigned_data,
+      kHotspotBssid, time));
 
   // Checking basic verification operation.
-  EXPECT_TRUE(networking_private_crypto::VerifyCredentials(
-      kCertData, std::vector<std::string>(), signed_data, unsigned_data,
-      kHotspotBssid));
-
-  // Checking verification operation with an ICA
   std::vector<std::string> icas;
   icas.push_back(kICAData);
-  EXPECT_TRUE(networking_private_crypto::VerifyCredentials(
-      kCertData, icas, signed_data, unsigned_data, kHotspotBssid));
 
-  // Checking that verification fails when the certificate is signed, but
-  // subject is malformed.
-  EXPECT_FALSE(networking_private_crypto::VerifyCredentials(
-      kBadSubjectCertData, std::vector<std::string>(), signed_data,
-      unsigned_data, kHotspotBssid));
+  EXPECT_TRUE(networking_private_crypto::VerifyCredentialsAtTime(
+      kCertData, icas, signed_data, unsigned_data, kHotspotBssid, time));
+
+  // Checking that verification fails when the certificate is expired.
+  EXPECT_FALSE(networking_private_crypto::VerifyCredentialsAtTime(
+      kCertData, icas, signed_data, unsigned_data, kHotspotBssid,
+      expired_time));
 
   // Checking that verification fails when certificate has invalid format.
-  EXPECT_FALSE(networking_private_crypto::VerifyCredentials(
-      kBadCertData, std::vector<std::string>(), signed_data, unsigned_data,
-      kHotspotBssid));
+  EXPECT_FALSE(networking_private_crypto::VerifyCredentialsAtTime(
+      kBadCertData, icas, signed_data, unsigned_data, kHotspotBssid, time));
 
   // Checking that verification fails if we supply a bad ICA.
   std::vector<std::string> bad_icas;
   bad_icas.push_back(kCertData);
-  EXPECT_FALSE(networking_private_crypto::VerifyCredentials(
-      kCertData, bad_icas, signed_data, unsigned_data, kHotspotBssid));
+  EXPECT_FALSE(networking_private_crypto::VerifyCredentialsAtTime(
+      kCertData, bad_icas, signed_data, unsigned_data, kHotspotBssid, time));
 
-  // Checking that verification fails when Hotspot Bssid is invalid.
-  EXPECT_FALSE(networking_private_crypto::VerifyCredentials(
-      kCertData, std::vector<std::string>(), signed_data, unsigned_data,
-      kBadHotspotBssid));
+  // Checking that verification fails when Hotspot Bssid does not match the
+  // certificate's common name.
+  EXPECT_FALSE(networking_private_crypto::VerifyCredentialsAtTime(
+      kCertData, icas, signed_data, unsigned_data, kBadHotspotBssid, time));
 
-  // Checking that verification fails when there is bad nonce in unsigned_data.
-  unsigned_data = base::StringPrintf(
-      "%s,%s,%s,%s,%s", kName, kSsdpUdn, kHotspotBssid, kPublicKey, kBadNonce);
-  EXPECT_FALSE(networking_private_crypto::VerifyCredentials(
-      kCertData, std::vector<std::string>(), signed_data, unsigned_data,
-      kHotspotBssid));
+  // Checking that verification fails when the signature is wrong.
+  unsigned_data = "bad data";
+  EXPECT_FALSE(networking_private_crypto::VerifyCredentialsAtTime(
+      kCertData, icas, signed_data, unsigned_data, kHotspotBssid, time));
 }
 
 // Test that networking_private_crypto::EncryptByteString behaves as expected.

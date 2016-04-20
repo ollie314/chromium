@@ -44,8 +44,6 @@
       'common/ini_parser.h',
       'common/instant_types.cc',
       'common/instant_types.h',
-      'common/localized_error.cc',
-      'common/localized_error.h',
       'common/logging_chrome.cc',
       'common/logging_chrome.h',
       'common/mac/app_shim_launch.h',
@@ -64,6 +62,8 @@
       'common/multi_process_lock_linux.cc',
       'common/multi_process_lock_mac.cc',
       'common/multi_process_lock_win.cc',
+      'common/origin_trials/origin_trial_key_manager.cc',
+      'common/origin_trials/origin_trial_key_manager.h',
       'common/partial_circular_buffer.cc',
       'common/partial_circular_buffer.h',
       'common/pref_names_util.cc',
@@ -106,8 +106,6 @@
       'common/web_application_info.h',
       'common/widevine_cdm_constants.cc',
       'common/widevine_cdm_constants.h',
-      'common/worker_thread_ticker.cc',
-      'common/worker_thread_ticker.h',
     ],
     'chrome_common_extensions_sources': [
       'common/cast_messages.cc',
@@ -287,10 +285,6 @@
       'common/extensions/api/networking_private/networking_private_crypto.cc',
       'common/extensions/api/networking_private/networking_private_crypto.h',
     ],
-    'chrome_common_mac_sources': [
-      'common/media_galleries/iphoto_library.cc',
-      'common/media_galleries/iphoto_library.h',
-    ]
   },
   'targets': [
     {
@@ -319,7 +313,6 @@
         'safe_browsing_proto',
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/base/base.gyp:base_i18n',
-        '<(DEPTH)/base/base.gyp:base_prefs',
         '<(DEPTH)/base/base.gyp:base_static',
         '<(DEPTH)/chrome/chrome_features.gyp:chrome_common_features',
         '<(DEPTH)/chrome/chrome_resources.gyp:chrome_resources',
@@ -339,11 +332,16 @@
         '<(DEPTH)/components/components.gyp:metrics',
         '<(DEPTH)/components/components.gyp:metrics_net',
         '<(DEPTH)/components/components.gyp:omnibox_common',
+        '<(DEPTH)/components/components.gyp:policy',
         '<(DEPTH)/components/components.gyp:policy_component_common',
+        # TODO(fdoray): Remove this once the PreRead field trial has expired.
+        # crbug.com/577698
+        '<(DEPTH)/components/components.gyp:startup_metric_utils_common',
         '<(DEPTH)/components/components.gyp:translate_core_common',
         '<(DEPTH)/components/components.gyp:variations',
         '<(DEPTH)/components/components.gyp:version_info',
         '<(DEPTH)/components/components_strings.gyp:components_strings',
+        '<(DEPTH)/components/prefs/prefs.gyp:prefs',
         '<(DEPTH)/components/url_formatter/url_formatter.gyp:url_formatter',
         '<(DEPTH)/content/content.gyp:content_common',
         '<(DEPTH)/crypto/crypto.gyp:crypto',
@@ -355,8 +353,10 @@
         '<(DEPTH)/third_party/kasko/kasko.gyp:kasko_features',
         '<(DEPTH)/third_party/zlib/google/zip.gyp:zip',
         '<(DEPTH)/ui/gfx/ipc/gfx_ipc.gyp:gfx_ipc',
+        '<(DEPTH)/ui/gfx/ipc/skia/gfx_ipc_skia.gyp:gfx_ipc_skia',
         '<(DEPTH)/ui/resources/ui_resources.gyp:ui_resources',
         '<(DEPTH)/url/url.gyp:url_lib',
+        '<(DEPTH)/url/ipc/url_ipc.gyp:url_ipc',
       ],
       'sources': [
         '<@(chrome_common_sources)'
@@ -400,17 +400,13 @@
             '../third_party/boringssl/boringssl.gyp:boringssl',
           ],
         }],
-        ['OS=="mac"', {
-          'sources': [ '<@(chrome_common_mac_sources)' ],
-          'dependencies': [ 'app_mode_app_support' ],
-        }],
         ['OS != "ios"', {
           'dependencies': [
             'common_mojo_bindings',
             '<(DEPTH)/components/components.gyp:autofill_core_common',
             '<(DEPTH)/components/components.gyp:autofill_content_common',
+            '<(DEPTH)/components/components.gyp:password_manager_content_mojo_bindings',
             '<(DEPTH)/components/components.gyp:password_manager_core_common',
-            '<(DEPTH)/components/components.gyp:password_manager_content_common',
             '<(DEPTH)/components/components.gyp:signin_core_common',
             '<(DEPTH)/components/components.gyp:translate_content_common',
             '<(DEPTH)/components/components.gyp:visitedlink_common',
@@ -495,7 +491,10 @@
           ],
         }, {
           # Non-Android.
-          'sources': [ '<@(chrome_common_importer_sources)' ]
+          'sources': [ '<@(chrome_common_importer_sources)' ],
+          'dependencies': [
+            '<(DEPTH)/url/ipc/url_ipc.gyp:url_ipc',
+        ],
         }],
         ['OS=="win"', {
           'include_dirs': [
@@ -504,6 +503,22 @@
           'dependencies': [
             '<(DEPTH)/components/components.gyp:dom_distiller_core',  # Needed by chrome_content_client.cc.
           ],
+          'all_dependent_settings': {
+            'msvs_settings': {
+              'VCLinkerTool': {
+                'AdditionalDependencies': [
+                  'wintrust.lib',
+                ],
+              },
+            },
+          },
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'AdditionalDependencies': [
+                'wintrust.lib',
+              ],
+            },
+          },
         }],
         ['OS=="mac"', {
           'dependencies': [
@@ -518,11 +533,6 @@
           'sources!': [
             'common/media/webrtc_logging_messages.h',
           ]
-        }],
-        ['configuration_policy==1', {
-          'dependencies': [
-            '<(DEPTH)/components/components.gyp:policy',
-          ],
         }],
         ['safe_browsing==1', {
           'sources': [ '<@(chrome_common_full_safe_browsing_sources)', ],
@@ -612,8 +622,8 @@
     },
     {
       # Protobuf compiler / generator for the safebrowsing client
-      # model proto and the client-side detection (csd) request
-      # protocol buffer.
+      # model proto, the client-side detection (csd) request
+      # proto, and the download file types proto.
 
       # GN version: //chrome/common/safe_browsing:proto
       'target_name': 'safe_browsing_proto',
@@ -621,7 +631,8 @@
       'sources': [
         'common/safe_browsing/client_model.proto',
         'common/safe_browsing/crx_info.proto',
-        'common/safe_browsing/csd.proto'
+        'common/safe_browsing/csd.proto',
+        'common/safe_browsing/download_file_types.proto',
       ],
       'variables': {
         'proto_in_dir': 'common/safe_browsing',
@@ -634,15 +645,35 @@
       'target_name': 'common_mojo_bindings',
       'type': 'static_library',
       'includes': [
-        '../third_party/mojo/mojom_bindings_generator.gypi'
+        '../mojo/mojom_bindings_generator.gypi'
       ],
       'sources': [
+        'common/image_decoder.mojom',
         'common/resource_usage_reporter.mojom',
       ],
       'dependencies': [
-        '../mojo/mojo_base.gyp:mojo_environment_chromium',
-        '../third_party/mojo/mojo_public.gyp:mojo_cpp_bindings',
+        '../mojo/mojo_public.gyp:mojo_cpp_bindings',
+        '../skia/skia.gyp:skia_mojo',
       ],
     },
+  ],
+  'conditions': [
+    ['OS == "win"', {
+      'targets': [
+        {
+          # GN version: //chrome/common:metrics_constants_util_win
+          'target_name': 'metrics_constants_util_win',
+          'type': 'static_library',
+          'sources': [
+            'common/metrics_constants_util_win.cc',
+            'common/metrics_constants_util_win.h',
+          ],
+          'dependencies': [
+            'installer_util',
+            '../base/base.gyp:base',
+          ],
+        },
+      ],
+    }],
   ],
 }

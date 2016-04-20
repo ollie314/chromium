@@ -35,14 +35,18 @@ protected:
 class PLATFORM_EXPORT RecordingImageBufferSurface : public ImageBufferSurface {
     WTF_MAKE_NONCOPYABLE(RecordingImageBufferSurface); USING_FAST_MALLOC(RecordingImageBufferSurface);
 public:
-    RecordingImageBufferSurface(const IntSize&, PassOwnPtr<RecordingImageBufferFallbackSurfaceFactory> fallbackFactory, OpacityMode = NonOpaque);
+    // If the fallbackFactory is null the buffer surface should only be used
+    // for one frame and should not be used for any operations which need a
+    // raster surface, (i.e. writePixels).
+    // Only #getPicture should be used to access the resulting frame.
+    RecordingImageBufferSurface(const IntSize&, PassOwnPtr<RecordingImageBufferFallbackSurfaceFactory> fallbackFactory = nullptr, OpacityMode = NonOpaque);
     ~RecordingImageBufferSurface() override;
 
     // Implementation of ImageBufferSurface interfaces
     SkCanvas* canvas() override;
-    void disableDeferral() override;
+    void disableDeferral(DisableDeferralReason) override;
     PassRefPtr<SkPicture> getPicture() override;
-    void flush() override;
+    void flush(FlushReason) override;
     void didDraw(const FloatRect&) override;
     bool isValid() const override { return true; }
     bool isRecording() const override { return !m_fallbackSurface; }
@@ -50,7 +54,7 @@ public:
     void willOverwriteCanvas() override;
     virtual void finalizeFrame(const FloatRect&);
     void setImageBuffer(ImageBuffer*) override;
-    PassRefPtr<SkImage> newImageSnapshot(AccelerationHint) override;
+    PassRefPtr<SkImage> newImageSnapshot(AccelerationHint, SnapshotReason) override;
     void draw(GraphicsContext&, const FloatRect& destRect, const FloatRect& srcRect, SkXfermode::Mode) override;
     bool isExpensiveToPaint() override;
     void setHasExpensiveOp() override { m_currentFrameHasExpensiveOp = true; }
@@ -61,11 +65,33 @@ public:
     bool isAccelerated() const override;
     void setIsHidden(bool) override;
 
+    enum FallbackReason {
+        FallbackReasonUnknown = 0, // This value should never appear in production histograms
+        FallbackReasonCanvasNotClearedBetweenFrames = 1,
+        FallbackReasonRunawayStateStack = 2,
+        FallbackReasonWritePixels = 3,
+        FallbackReasonFlushInitialClear = 4,
+        FallbackReasonFlushForDrawImageOfWebGL = 5,
+        FallbackReasonSnapshotForGetImageData = 6,
+        FallbackReasonSnapshotForCopyToWebGLTexture = 7,
+        FallbackReasonSnapshotForPaint = 8,
+        FallbackReasonSnapshotForToDataURL = 9,
+        FallbackReasonSnapshotForToBlob = 10,
+        FallbackReasonSnapshotForCanvasListenerCapture = 11,
+        FallbackReasonSnapshotForDrawImage = 12,
+        FallbackReasonSnapshotForCreatePattern = 13,
+        FallbackReasonExpensiveOverdrawHeuristic = 14,
+        FallbackReasonTextureBackedPattern = 15,
+        FallbackReasonDrawImageOfVideo = 16,
+        FallbackReasonDrawImageOfAnimated2dCanvas = 17,
+        FallbackReasonSubPixelTextAntiAliasingSupport = 18,
+        FallbackReasonCount,
+    };
 private:
     friend class RecordingImageBufferSurfaceTest; // for unit testing
-    void fallBackToRasterCanvas();
-    bool initializeCurrentFrame();
-    bool finalizeFrameInternal();
+    void fallBackToRasterCanvas(FallbackReason);
+    void initializeCurrentFrame();
+    bool finalizeFrameInternal(FallbackReason*);
     int approximateOpCount();
 
     OwnPtr<SkPictureRecorder> m_currentFrame;

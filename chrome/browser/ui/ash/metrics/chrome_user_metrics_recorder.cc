@@ -9,7 +9,6 @@
 #include "ash/shell.h"
 #include "base/logging.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 
 ChromeUserMetricsRecorder::ChromeUserMetricsRecorder()
@@ -19,7 +18,7 @@ ChromeUserMetricsRecorder::ChromeUserMetricsRecorder()
 }
 
 ChromeUserMetricsRecorder::~ChromeUserMetricsRecorder() {
-  DCHECK(BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH)->empty());
+  DCHECK(BrowserList::GetInstance()->empty());
 }
 
 void ChromeUserMetricsRecorder::ActiveTabChanged(

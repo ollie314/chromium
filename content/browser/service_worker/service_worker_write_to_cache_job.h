@@ -40,8 +40,9 @@ class ServiceWorkerVersions;
 // incumbent script is detected. The incumbent script is progressively compared
 // with the new script as it is read from network. Once a change is detected,
 // everything that matched is copied to disk, and from then on the script is
-// written as it continues to be read from network. If the scripts were
-// identical, the job fails so the worker can be discarded.
+// written as it continues to be read from network. If the scripts are
+// identical, the resulting ServiceWorkerScriptCacheMap's main script status is
+// set to kIdenticalScriptError.
 class CONTENT_EXPORT ServiceWorkerWriteToCacheJob
     : public net::URLRequestJob,
       public net::URLRequest::Delegate {
@@ -55,6 +56,10 @@ class CONTENT_EXPORT ServiceWorkerWriteToCacheJob
                                int64_t resource_id,
                                int64_t incumbent_resource_id);
 
+  // The error code used when update fails because the new
+  // script is byte-by-byte identical to the incumbent script.
+  const static net::Error kIdenticalScriptError;
+
  private:
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerContextRequestHandlerTest,
                            UpdateBefore24Hours);
@@ -62,6 +67,8 @@ class CONTENT_EXPORT ServiceWorkerWriteToCacheJob
                            UpdateAfter24Hours);
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerContextRequestHandlerTest,
                            UpdateForceBypassCache);
+  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerContextRequestHandlerTest,
+                           ServiceWorkerDataRequestAnnotation);
 
   ~ServiceWorkerWriteToCacheJob() override;
 
@@ -130,8 +137,8 @@ class CONTENT_EXPORT ServiceWorkerWriteToCacheJob
   net::Error NotifyFinishedCaching(net::URLRequestStatus status,
                                    const std::string& status_message);
 
-  scoped_ptr<ServiceWorkerResponseReader> CreateCacheResponseReader();
-  scoped_ptr<ServiceWorkerResponseWriter> CreateCacheResponseWriter();
+  std::unique_ptr<ServiceWorkerResponseReader> CreateCacheResponseReader();
+  std::unique_ptr<ServiceWorkerResponseWriter> CreateCacheResponseWriter();
 
   ResourceType resource_type_;  // Differentiate main script and imports
   scoped_refptr<net::IOBuffer> io_buffer_;
@@ -140,11 +147,11 @@ class CONTENT_EXPORT ServiceWorkerWriteToCacheJob
   GURL url_;
   int64_t resource_id_;
   int64_t incumbent_resource_id_;
-  scoped_ptr<net::URLRequest> net_request_;
-  scoped_ptr<net::HttpResponseInfo> http_info_;
-  scoped_ptr<ServiceWorkerResponseWriter> writer_;
+  std::unique_ptr<net::URLRequest> net_request_;
+  std::unique_ptr<net::HttpResponseInfo> http_info_;
+  std::unique_ptr<ServiceWorkerResponseWriter> writer_;
   scoped_refptr<ServiceWorkerVersion> version_;
-  scoped_ptr<ServiceWorkerCacheWriter> cache_writer_;
+  std::unique_ptr<ServiceWorkerCacheWriter> cache_writer_;
   bool has_been_killed_;
   bool did_notify_started_;
   bool did_notify_finished_;

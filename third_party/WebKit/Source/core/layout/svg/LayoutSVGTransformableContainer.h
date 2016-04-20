@@ -26,6 +26,7 @@
 namespace blink {
 
 class SVGGraphicsElement;
+
 class LayoutSVGTransformableContainer final : public LayoutSVGContainer {
 public:
     explicit LayoutSVGTransformableContainer(SVGGraphicsElement*);
@@ -33,15 +34,15 @@ public:
     bool isChildAllowed(LayoutObject*, const ComputedStyle&) const override;
 
     bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectSVGTransformableContainer || LayoutSVGContainer::isOfType(type); }
-    const AffineTransform& localToParentTransform() const override { return m_localTransform; }
+    const AffineTransform& localToSVGParentTransform() const override { return m_localTransform; }
     const FloatSize& additionalTranslation() const { return m_additionalTranslation; }
 
     void setNeedsTransformUpdate() override { m_needsTransformUpdate = true; }
-    bool didTransformToRootUpdate() override { return m_didTransformToRootUpdate; }
+    bool didTransformToRootUpdate() const override { return m_didTransformToRootUpdate; }
 
 private:
     bool calculateLocalTransform() override;
-    AffineTransform localTransform() const override { return m_localTransform; }
+    AffineTransform localSVGTransform() const override { return m_localTransform; }
 
     bool m_needsTransformUpdate : 1;
     bool m_didTransformToRootUpdate : 1;
@@ -51,6 +52,6 @@ private:
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutSVGTransformableContainer, isSVGTransformableContainer());
 
-}
+} // namespace blink
 
 #endif // LayoutSVGTransformableContainer_h

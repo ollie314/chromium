@@ -216,7 +216,7 @@ class CopyOrMoveOperationTestHelper {
     if (dest_type_ == storage::kFileSystemTypeTest) {
       TestFileSystemBackend* test_backend =
           static_cast<TestFileSystemBackend*>(backend);
-      scoped_ptr<storage::CopyOrMoveFileValidatorFactory> factory(
+      std::unique_ptr<storage::CopyOrMoveFileValidatorFactory> factory(
           new TestValidatorFactory);
       test_backend->set_require_copy_or_move_validator(
           require_copy_or_move_validator);
@@ -619,8 +619,10 @@ TEST(LocalFileSystemCopyOrMoveOperationTest,
   ASSERT_TRUE(helper.DirectoryExists(src));
   ASSERT_TRUE(helper.DirectoryExists(dest));
 
+  // In the move operation, [file 0, file 2, file 3] are processed as LIFO.
+  // After file 3 is processed, file 2 is rejected by the validator and the
+  // operation fails. That is, only file 3 should be in dest.
   FileSystemTestCaseRecord kMoveDirResultCases[] = {
-    {false, FILE_PATH_LITERAL("file 0"), 38},
     {false, FILE_PATH_LITERAL("file 3"), 0},
   };
 
@@ -736,11 +738,11 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, StreamCopyHelper) {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
       file_thread.task_runner();
 
-  scoped_ptr<storage::FileStreamReader> reader(
+  std::unique_ptr<storage::FileStreamReader> reader(
       storage::FileStreamReader::CreateForLocalFile(
           task_runner.get(), source_path, 0, base::Time()));
 
-  scoped_ptr<FileStreamWriter> writer(FileStreamWriter::CreateForLocalFile(
+  std::unique_ptr<FileStreamWriter> writer(FileStreamWriter::CreateForLocalFile(
       task_runner.get(), dest_path, 0, FileStreamWriter::CREATE_NEW_FILE));
 
   std::vector<int64_t> progress;
@@ -792,11 +794,11 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, StreamCopyHelperWithFlush) {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
       file_thread.task_runner();
 
-  scoped_ptr<storage::FileStreamReader> reader(
+  std::unique_ptr<storage::FileStreamReader> reader(
       storage::FileStreamReader::CreateForLocalFile(
           task_runner.get(), source_path, 0, base::Time()));
 
-  scoped_ptr<FileStreamWriter> writer(FileStreamWriter::CreateForLocalFile(
+  std::unique_ptr<FileStreamWriter> writer(FileStreamWriter::CreateForLocalFile(
       task_runner.get(), dest_path, 0, FileStreamWriter::CREATE_NEW_FILE));
 
   std::vector<int64_t> progress;
@@ -843,11 +845,11 @@ TEST(LocalFileSystemCopyOrMoveOperationTest, StreamCopyHelper_Cancel) {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
       file_thread.task_runner();
 
-  scoped_ptr<storage::FileStreamReader> reader(
+  std::unique_ptr<storage::FileStreamReader> reader(
       storage::FileStreamReader::CreateForLocalFile(
           task_runner.get(), source_path, 0, base::Time()));
 
-  scoped_ptr<FileStreamWriter> writer(FileStreamWriter::CreateForLocalFile(
+  std::unique_ptr<FileStreamWriter> writer(FileStreamWriter::CreateForLocalFile(
       task_runner.get(), dest_path, 0, FileStreamWriter::CREATE_NEW_FILE));
 
   std::vector<int64_t> progress;

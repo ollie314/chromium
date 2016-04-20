@@ -5,6 +5,7 @@
 #include "content/browser/android/synchronous_compositor_base.h"
 
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "base/supports_user_data.h"
 #include "content/browser/android/in_process/synchronous_compositor_impl.h"
 #include "content/browser/android/synchronous_compositor_host.h"
@@ -20,27 +21,25 @@ class SynchronousCompositorClient;
 
 namespace {
 
-gpu::SyncPointManager* g_sync_point_manager = nullptr;
+base::LazyInstance<scoped_refptr<gpu::InProcessCommandBuffer::Service>>
+    g_gpu_service = LAZY_INSTANCE_INITIALIZER;
 
 base::Thread* CreateInProcessGpuThreadForSynchronousCompositor(
-    const InProcessChildThreadParams& params) {
-  DCHECK(g_sync_point_manager);
-  return new InProcessGpuThread(params, g_sync_point_manager);
+    const InProcessChildThreadParams& params,
+    const gpu::GpuPreferences& gpu_preferences) {
+  DCHECK(g_gpu_service.Get());
+  return new InProcessGpuThread(params, gpu_preferences,
+                                g_gpu_service.Get()->sync_point_manager());
 }
 
 }  // namespace
 
 void SynchronousCompositor::SetGpuService(
     scoped_refptr<gpu::InProcessCommandBuffer::Service> service) {
-  DCHECK(!g_sync_point_manager);
-  g_sync_point_manager = service->sync_point_manager();
+  DCHECK(!g_gpu_service.Get());
+  g_gpu_service.Get() = service;
   GpuProcessHost::RegisterGpuMainThreadFactory(
       CreateInProcessGpuThreadForSynchronousCompositor);
-
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kIPCSyncCompositing)) {
-    SynchronousCompositorImpl::SetGpuServiceInProc(service);
-  }
 }
 
 // static
@@ -56,7 +55,7 @@ void SynchronousCompositor::SetClientForWebContents(
 }
 
 // static
-scoped_ptr<SynchronousCompositorBase> SynchronousCompositorBase::Create(
+std::unique_ptr<SynchronousCompositorBase> SynchronousCompositorBase::Create(
     RenderWidgetHostViewAndroid* rwhva,
     WebContents* web_contents) {
   DCHECK(web_contents);
@@ -65,12 +64,17 @@ scoped_ptr<SynchronousCompositorBase> SynchronousCompositorBase::Create(
   if (!web_contents_android->synchronous_compositor_client())
     return nullptr;  // Not using sync compositing.
 
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kIPCSyncCompositing)) {
-    return make_scoped_ptr(new SynchronousCompositorHost(
-        rwhva, web_contents_android->synchronous_compositor_client()));
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kIPCSyncCompositing)) {
+    bool async_input =
+        !command_line->HasSwitch(switches::kSyncInputForSyncCompositor);
+    bool use_in_proc_software_draw =
+        command_line->HasSwitch(switches::kSingleProcess);
+    return base::WrapUnique(new SynchronousCompositorHost(
+        rwhva, web_contents_android->synchronous_compositor_client(),
+        async_input, use_in_proc_software_draw));
   }
-  return make_scoped_ptr(new SynchronousCompositorImpl(
+  return base::WrapUnique(new SynchronousCompositorImpl(
       rwhva, web_contents_android->synchronous_compositor_client()));
 }
 

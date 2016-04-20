@@ -115,13 +115,14 @@ void AwRenderViewHostExt::SmoothScroll(int target_x,
                                        long duration_ms) {
   Send(
       new AwViewMsg_SmoothScroll(web_contents()->GetMainFrame()->GetRoutingID(),
-                                 target_x, target_y, duration_ms));
+                                 target_x, target_y,
+                                 static_cast<int>(duration_ms)));
 }
 
 void AwRenderViewHostExt::RenderViewCreated(
     content::RenderViewHost* render_view_host) {
-  Send(new AwViewMsg_SetBackgroundColor(web_contents()->GetRoutingID(),
-                                        background_color_));
+  Send(new AwViewMsg_SetBackgroundColor(
+      web_contents()->GetMainFrame()->GetRoutingID(), background_color_));
 }
 
 void AwRenderViewHostExt::RenderProcessGone(base::TerminationStatus status) {

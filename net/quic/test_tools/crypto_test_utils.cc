@@ -4,6 +4,7 @@
 
 #include "net/quic/test_tools/crypto_test_utils.h"
 
+#include "base/strings/string_util.h"
 #include "net/quic/crypto/channel_id.h"
 #include "net/quic/crypto/common_cert_set.h"
 #include "net/quic/crypto/crypto_handshake.h"
@@ -16,6 +17,7 @@
 #include "net/quic/quic_crypto_server_stream.h"
 #include "net/quic/quic_crypto_stream.h"
 #include "net/quic/quic_server_id.h"
+#include "net/quic/quic_utils.h"
 #include "net/quic/test_tools/quic_connection_peer.h"
 #include "net/quic/test_tools/quic_framer_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
@@ -82,7 +84,7 @@ class AsyncTestChannelIDSource : public ChannelIDSource,
 
   // ChannelIDSource implementation.
   QuicAsyncStatus GetChannelIDKey(const string& hostname,
-                                  scoped_ptr<ChannelIDKey>* channel_id_key,
+                                  std::unique_ptr<ChannelIDKey>* channel_id_key,
                                   ChannelIDSourceCallback* callback) override {
     // Synchronous mode.
     if (!callback) {
@@ -108,9 +110,9 @@ class AsyncTestChannelIDSource : public ChannelIDSource,
   }
 
  private:
-  scoped_ptr<ChannelIDSource> sync_source_;
-  scoped_ptr<ChannelIDSourceCallback> callback_;
-  scoped_ptr<ChannelIDKey> channel_id_key_;
+  std::unique_ptr<ChannelIDSource> sync_source_;
+  std::unique_ptr<ChannelIDSourceCallback> callback_;
+  std::unique_ptr<ChannelIDKey> channel_id_key_;
 };
 
 }  // anonymous namespace
@@ -136,11 +138,14 @@ int CryptoTestUtils::HandshakeWithFakeServer(
   QuicCryptoServerConfig crypto_config(QuicCryptoServerConfig::TESTING,
                                        QuicRandom::GetInstance(),
                                        ProofSourceForTesting());
+  QuicCompressedCertsCache compressed_certs_cache(
+      QuicCompressedCertsCache::kQuicCompressedCertsCacheSize);
   SetupCryptoServerConfigForTest(server_conn->clock(),
                                  server_conn->random_generator(), &config,
                                  &crypto_config, options);
 
-  TestQuicSpdyServerSession server_session(server_conn, config, &crypto_config);
+  TestQuicSpdyServerSession server_session(server_conn, config, &crypto_config,
+                                           &compressed_certs_cache);
 
   // The client's handshake must have been started already.
   CHECK_NE(0u, client_conn->encrypted_packets_.size());
@@ -180,6 +185,8 @@ int CryptoTestUtils::HandshakeWithFakeClient(
   TestQuicSpdyClientSession client_session(client_conn, DefaultQuicConfig(),
                                            server_id, &crypto_config);
 
+  EXPECT_CALL(client_session, OnProofValid(testing::_))
+      .Times(testing::AnyNumber());
   client_session.GetCryptoStream()->CryptoConnect();
   CHECK_EQ(1u, client_conn->encrypted_packets_.size());
 
@@ -190,7 +197,7 @@ int CryptoTestUtils::HandshakeWithFakeClient(
   CompareClientAndServerKeys(client_session.GetCryptoStream(), server);
 
   if (options.channel_id_enabled) {
-    scoped_ptr<ChannelIDKey> channel_id_key;
+    std::unique_ptr<ChannelIDKey> channel_id_key;
     QuicAsyncStatus status = crypto_config.channel_id_source()->GetChannelIDKey(
         server_id.host(), &channel_id_key, nullptr);
     EXPECT_EQ(QUIC_SUCCESS, status);
@@ -214,7 +221,7 @@ void CryptoTestUtils::SetupCryptoServerConfigForTest(
   QuicCryptoServerConfig::ConfigOptions options;
   options.channel_id_enabled = true;
   options.token_binding_enabled = fake_options.token_binding_enabled;
-  scoped_ptr<CryptoHandshakeMessage> scfg(
+  std::unique_ptr<CryptoHandshakeMessage> scfg(
       crypto_config->AddDefaultConfig(rand, clock, options));
 }
 
@@ -438,12 +445,16 @@ void CryptoTestUtils::CompareClientAndServerKeys(
   const size_t kSampleOutputLength = 32;
   string client_key_extraction;
   string server_key_extraction;
+  string client_tb_ekm;
+  string server_tb_ekm;
   EXPECT_TRUE(client->ExportKeyingMaterial(kSampleLabel, kSampleContext,
                                            kSampleOutputLength,
                                            &client_key_extraction));
   EXPECT_TRUE(server->ExportKeyingMaterial(kSampleLabel, kSampleContext,
                                            kSampleOutputLength,
                                            &server_key_extraction));
+  EXPECT_TRUE(client->ExportTokenBindingKeyingMaterial(&client_tb_ekm));
+  EXPECT_TRUE(server->ExportTokenBindingKeyingMaterial(&server_tb_ekm));
 
   CompareCharArraysWithHexError("client write key", client_encrypter_key.data(),
                                 client_encrypter_key.length(),
@@ -489,6 +500,10 @@ void CryptoTestUtils::CompareClientAndServerKeys(
       "sample key extraction", client_key_extraction.data(),
       client_key_extraction.length(), server_key_extraction.data(),
       server_key_extraction.length());
+
+  CompareCharArraysWithHexError("token binding key extraction",
+                                client_tb_ekm.data(), client_tb_ekm.length(),
+                                server_tb_ekm.data(), server_tb_ekm.length());
 }
 
 // static
@@ -560,7 +575,7 @@ CryptoHandshakeMessage CryptoTestUtils::Message(const char* message_tag, ...) {
       len--;
 
       CHECK_EQ(0u, len % 2);
-      scoped_ptr<uint8_t[]> buf(new uint8_t[len / 2]);
+      std::unique_ptr<uint8_t[]> buf(new uint8_t[len / 2]);
 
       for (size_t i = 0; i < len / 2; i++) {
         uint8_t v = 0;
@@ -580,8 +595,8 @@ CryptoHandshakeMessage CryptoTestUtils::Message(const char* message_tag, ...) {
 
   // The CryptoHandshakeMessage needs to be serialized and parsed to ensure
   // that any padding is included.
-  scoped_ptr<QuicData> bytes(CryptoFramer::ConstructHandshakeMessage(msg));
-  scoped_ptr<CryptoHandshakeMessage> parsed(
+  std::unique_ptr<QuicData> bytes(CryptoFramer::ConstructHandshakeMessage(msg));
+  std::unique_ptr<CryptoHandshakeMessage> parsed(
       CryptoFramer::ParseMessage(bytes->AsStringPiece()));
   CHECK(parsed.get());
 

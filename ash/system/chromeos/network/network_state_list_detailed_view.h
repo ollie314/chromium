@@ -5,13 +5,13 @@
 #ifndef ASH_SYSTEM_CHROMEOS_NETWORK_NETWORK_STATE_LIST_DETAILED_VIEW_H_
 #define ASH_SYSTEM_CHROMEOS_NETWORK_NETWORK_STATE_LIST_DETAILED_VIEW_H_
 
+#include <memory>
 #include <string>
 
 #include "ash/system/chromeos/network/network_detailed_view.h"
 #include "ash/system/tray/view_click_listener.h"
 #include "ash/system/user/login_status.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/chromeos/network/network_list_delegate.h"
 #include "ui/gfx/image/image.h"
@@ -27,6 +27,7 @@ class NetworkListViewBase;
 
 namespace views {
 class BubbleDelegateView;
+class ImageButton;
 }
 
 namespace ash {
@@ -55,9 +56,6 @@ class NetworkStateListDetailedView
   void Init() override;
   DetailedViewType GetViewType() const override;
   void Update() override;
-
-  // Called by the WiFi Scanning Throbber when pressed.
-  bool ThrobberPressed(views::View* sender, const ui::Event& event);
 
  protected:
   // Overridden from ButtonListener.
@@ -125,7 +123,7 @@ class NetworkStateListDetailedView
   bool wifi_scanning_;
 
   // Child views.
-  TrayPopupHeaderButton* info_icon_;
+  views::ImageButton* info_icon_;
   TrayPopupHeaderButton* button_wifi_;
   TrayPopupHeaderButton* button_mobile_;
   TrayPopupLabelButton* other_wifi_;
@@ -142,7 +140,7 @@ class NetworkStateListDetailedView
 
   gfx::Image controlled_by_extension_icon_;
 
-  scoped_ptr<ui::NetworkListViewBase> network_list_view_;
+  std::unique_ptr<ui::NetworkListViewBase> network_list_view_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkStateListDetailedView);
 };

@@ -5,6 +5,8 @@
 #include "device/serial/serial_connection.h"
 
 #include <stdint.h>
+
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -61,8 +63,8 @@ class SerialConnectionTest : public testing::Test {
       : connected_(false),
         success_(false),
         bytes_sent_(0),
-        send_error_(serial::SEND_ERROR_NONE),
-        receive_error_(serial::RECEIVE_ERROR_NONE),
+        send_error_(serial::SendError::NONE),
+        receive_error_(serial::ReceiveError::NONE),
         expected_event_(EVENT_NONE) {}
 
   void SetUp() override {
@@ -73,7 +75,7 @@ class SerialConnectionTest : public testing::Test {
             base::Bind(&SerialConnectionTest::CreateIoHandler,
                        base::Unretained(this)),
             base::ThreadTaskRunnerHandle::Get()),
-        scoped_ptr<SerialDeviceEnumerator>(new FakeSerialDeviceEnumerator),
+        std::unique_ptr<SerialDeviceEnumerator>(new FakeSerialDeviceEnumerator),
         mojo::GetProxy(&service));
     service.set_connection_error_handler(base::Bind(
         &SerialConnectionTest::OnConnectionError, base::Unretained(this)));
@@ -85,11 +87,12 @@ class SerialConnectionTest : public testing::Test {
     service->Connect("device", serial::ConnectionOptions::New(),
                      mojo::GetProxy(&connection_), mojo::GetProxy(&sink),
                      mojo::GetProxy(&source), std::move(source_client));
-    sender_.reset(new DataSender(std::move(sink), kBufferSize,
-                                 serial::SEND_ERROR_DISCONNECTED));
-    receiver_ =
-        new DataReceiver(std::move(source), std::move(source_client_request),
-                         kBufferSize, serial::RECEIVE_ERROR_DISCONNECTED);
+    sender_.reset(
+        new DataSender(std::move(sink), kBufferSize,
+                       static_cast<int32_t>(serial::SendError::DISCONNECTED)));
+    receiver_ = new DataReceiver(
+        std::move(source), std::move(source_client_request), kBufferSize,
+        static_cast<int32_t>(serial::ReceiveError::DISCONNECTED));
     connection_.set_connection_error_handler(base::Bind(
         &SerialConnectionTest::OnConnectionError, base::Unretained(this)));
     connection_->GetInfo(
@@ -152,7 +155,7 @@ class SerialConnectionTest : public testing::Test {
 
   void OnDataSent(uint32_t bytes_sent) {
     bytes_sent_ += bytes_sent;
-    send_error_ = serial::SEND_ERROR_NONE;
+    send_error_ = serial::SendError::NONE;
     EventReceived(EVENT_DATA_SENT);
   }
 
@@ -162,10 +165,10 @@ class SerialConnectionTest : public testing::Test {
     EventReceived(EVENT_SEND_ERROR);
   }
 
-  void OnDataReceived(scoped_ptr<ReadOnlyBuffer> buffer) {
+  void OnDataReceived(std::unique_ptr<ReadOnlyBuffer> buffer) {
     data_received_ += std::string(buffer->GetData(), buffer->GetSize());
     buffer->Done(buffer->GetSize());
-    receive_error_ = serial::RECEIVE_ERROR_NONE;
+    receive_error_ = serial::ReceiveError::NONE;
     EventReceived(EVENT_DATA_RECEIVED);
   }
 
@@ -190,10 +193,10 @@ class SerialConnectionTest : public testing::Test {
   std::string data_received_;
   Event expected_event_;
 
-  scoped_ptr<base::MessageLoop> message_loop_;
+  std::unique_ptr<base::MessageLoop> message_loop_;
   base::Closure stop_run_loop_;
   mojo::InterfacePtr<serial::Connection> connection_;
-  scoped_ptr<DataSender> sender_;
+  std::unique_ptr<DataSender> sender_;
   scoped_refptr<DataReceiver> receiver_;
   scoped_refptr<TestSerialIoHandler> io_handler_;
 
@@ -207,16 +210,16 @@ TEST_F(SerialConnectionTest, GetInfo) {
   // |info_| is filled in during SetUp().
   ASSERT_TRUE(info_);
   EXPECT_EQ(9600u, info_->bitrate);
-  EXPECT_EQ(serial::DATA_BITS_EIGHT, info_->data_bits);
-  EXPECT_EQ(serial::PARITY_BIT_NO, info_->parity_bit);
-  EXPECT_EQ(serial::STOP_BITS_ONE, info_->stop_bits);
+  EXPECT_EQ(serial::DataBits::EIGHT, info_->data_bits);
+  EXPECT_EQ(serial::ParityBit::NO, info_->parity_bit);
+  EXPECT_EQ(serial::StopBits::ONE, info_->stop_bits);
   EXPECT_FALSE(info_->cts_flow_control);
 }
 
 TEST_F(SerialConnectionTest, SetOptions) {
   serial::ConnectionOptionsPtr options(serial::ConnectionOptions::New());
   options->bitrate = 12345;
-  options->data_bits = serial::DATA_BITS_SEVEN;
+  options->data_bits = serial::DataBits::SEVEN;
   options->has_cts_flow_control = true;
   options->cts_flow_control = true;
   connection_->SetOptions(
@@ -227,9 +230,9 @@ TEST_F(SerialConnectionTest, SetOptions) {
   ASSERT_TRUE(success_);
   serial::ConnectionInfo* info = io_handler_->connection_info();
   EXPECT_EQ(12345u, info->bitrate);
-  EXPECT_EQ(serial::DATA_BITS_SEVEN, info->data_bits);
-  EXPECT_EQ(serial::PARITY_BIT_NO, info->parity_bit);
-  EXPECT_EQ(serial::STOP_BITS_ONE, info->stop_bits);
+  EXPECT_EQ(serial::DataBits::SEVEN, info->data_bits);
+  EXPECT_EQ(serial::ParityBit::NO, info->parity_bit);
+  EXPECT_EQ(serial::StopBits::ONE, info->stop_bits);
   EXPECT_TRUE(info->cts_flow_control);
 }
 
@@ -280,7 +283,7 @@ TEST_F(SerialConnectionTest, DisconnectWithSend) {
   io_handler_->set_send_callback(base::Bind(base::DoNothing));
   ASSERT_NO_FATAL_FAILURE(Send("data"));
   WaitForEvent(EVENT_SEND_ERROR);
-  EXPECT_EQ(serial::SEND_ERROR_DISCONNECTED, send_error_);
+  EXPECT_EQ(serial::SendError::DISCONNECTED, send_error_);
   EXPECT_EQ(0, bytes_sent_);
   EXPECT_TRUE(io_handler_->HasOneRef());
 }
@@ -289,7 +292,7 @@ TEST_F(SerialConnectionTest, DisconnectWithReceive) {
   connection_.reset();
   ASSERT_NO_FATAL_FAILURE(Receive());
   WaitForEvent(EVENT_RECEIVE_ERROR);
-  EXPECT_EQ(serial::RECEIVE_ERROR_DISCONNECTED, receive_error_);
+  EXPECT_EQ(serial::ReceiveError::DISCONNECTED, receive_error_);
   EXPECT_EQ("", data_received_);
   EXPECT_TRUE(io_handler_->HasOneRef());
 }
@@ -297,12 +300,12 @@ TEST_F(SerialConnectionTest, DisconnectWithReceive) {
 TEST_F(SerialConnectionTest, Echo) {
   ASSERT_NO_FATAL_FAILURE(Send("data"));
   WaitForEvent(EVENT_DATA_SENT);
-  EXPECT_EQ(serial::SEND_ERROR_NONE, send_error_);
+  EXPECT_EQ(serial::SendError::NONE, send_error_);
   EXPECT_EQ(4, bytes_sent_);
   ASSERT_NO_FATAL_FAILURE(Receive());
   WaitForEvent(EVENT_DATA_RECEIVED);
   EXPECT_EQ("data", data_received_);
-  EXPECT_EQ(serial::RECEIVE_ERROR_NONE, receive_error_);
+  EXPECT_EQ(serial::ReceiveError::NONE, receive_error_);
 }
 
 TEST_F(SerialConnectionTest, Cancel) {
@@ -317,22 +320,22 @@ TEST_F(SerialConnectionTest, Cancel) {
   WaitForEvent(EVENT_DATA_AT_IO_HANDLER);
   EXPECT_EQ(0, bytes_sent_);
 
-  ASSERT_TRUE(sender_->Cancel(serial::SEND_ERROR_TIMEOUT,
-                              base::Bind(&SerialConnectionTest::EventReceived,
-                                         base::Unretained(this),
-                                         EVENT_CANCEL_COMPLETE)));
+  ASSERT_TRUE(sender_->Cancel(
+      static_cast<int32_t>(serial::SendError::TIMEOUT),
+      base::Bind(&SerialConnectionTest::EventReceived, base::Unretained(this),
+                 EVENT_CANCEL_COMPLETE)));
 
   WaitForEvent(EVENT_CANCEL_COMPLETE);
-  EXPECT_EQ(serial::SEND_ERROR_TIMEOUT, send_error_);
+  EXPECT_EQ(serial::SendError::TIMEOUT, send_error_);
 
   ASSERT_NO_FATAL_FAILURE(Send("data"));
   WaitForEvent(EVENT_DATA_SENT);
-  EXPECT_EQ(serial::SEND_ERROR_NONE, send_error_);
+  EXPECT_EQ(serial::SendError::NONE, send_error_);
   EXPECT_EQ(4, bytes_sent_);
   ASSERT_NO_FATAL_FAILURE(Receive());
   WaitForEvent(EVENT_DATA_RECEIVED);
   EXPECT_EQ("data", data_received_);
-  EXPECT_EQ(serial::RECEIVE_ERROR_NONE, receive_error_);
+  EXPECT_EQ(serial::ReceiveError::NONE, receive_error_);
 }
 
 }  // namespace device

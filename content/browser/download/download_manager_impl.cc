@@ -12,6 +12,7 @@
 #include "base/debug/alias.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
@@ -45,100 +46,64 @@
 #include "net/base/request_priority.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/url_request/url_request_context.h"
+#include "storage/browser/blob/blob_url_request_job_factory.h"
 #include "url/origin.h"
 
 namespace content {
 namespace {
 
-scoped_ptr<UrlDownloader, BrowserThread::DeleteOnIOThread> BeginDownload(
-    scoped_ptr<DownloadUrlParameters> params,
+std::unique_ptr<UrlDownloader, BrowserThread::DeleteOnIOThread> BeginDownload(
+    std::unique_ptr<DownloadUrlParameters> params,
     uint32_t download_id,
     base::WeakPtr<DownloadManagerImpl> download_manager) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  // ResourceDispatcherHost{Base} is-not-a URLRequest::Delegate, and
-  // DownloadUrlParameters can-not include resource_dispatcher_host_impl.h, so
-  // we must down cast. RDHI is the only subclass of RDH as of 2012 May 4.
-  scoped_ptr<net::URLRequest> request(
-      params->resource_context()->GetRequestContext()->CreateRequest(
-          params->url(), net::DEFAULT_PRIORITY, NULL));
-  request->set_method(params->method());
-  if (!params->post_body().empty()) {
-    const std::string& body = params->post_body();
-    scoped_ptr<net::UploadElementReader> reader(
-        net::UploadOwnedBytesElementReader::CreateWithString(body));
-    request->set_upload(
-        net::ElementsUploadDataStream::CreateWithReader(std::move(reader), 0));
-  }
-  if (params->post_id() >= 0) {
-    // The POST in this case does not have an actual body, and only works
-    // when retrieving data from cache. This is done because we don't want
-    // to do a re-POST without user consent, and currently don't have a good
-    // plan on how to display the UI for that.
-    DCHECK(params->prefer_cache());
-    DCHECK_EQ("POST", params->method());
-    std::vector<scoped_ptr<net::UploadElementReader>> element_readers;
-    request->set_upload(make_scoped_ptr(new net::ElementsUploadDataStream(
-        std::move(element_readers), params->post_id())));
+
+  std::unique_ptr<net::URLRequest> url_request =
+      DownloadRequestCore::CreateRequestOnIOThread(download_id, params.get());
+  std::unique_ptr<storage::BlobDataHandle> blob_data_handle =
+      params->GetBlobDataHandle();
+  if (blob_data_handle) {
+    storage::BlobProtocolHandler::SetRequestedBlobDataHandle(
+        url_request.get(), std::move(blob_data_handle));
   }
 
-  // If we're not at the beginning of the file, retrieve only the remaining
-  // portion.
-  bool has_last_modified = !params->last_modified().empty();
-  bool has_etag = !params->etag().empty();
-
-  // If we've asked for a range, we want to make sure that we only
-  // get that range if our current copy of the information is good.
-  // We shouldn't be asked to continue if we don't have a verifier.
-  DCHECK(params->offset() == 0 || has_etag || has_last_modified);
-
-  if (params->offset() > 0 && (has_etag || has_last_modified)) {
-    request->SetExtraRequestHeaderByName(
-        "Range",
-        base::StringPrintf("bytes=%" PRId64 "-", params->offset()),
-        true);
-
-    // In accordance with RFC 2616 Section 14.27, use If-Range to specify that
-    // the server return the entire entity if the validator doesn't match.
-    // Last-Modified can be used in the absence of ETag as a validator if the
-    // response headers satisfied the HttpUtil::HasStrongValidators() predicate.
-    //
-    // This function assumes that HasStrongValidators() was true and that the
-    // ETag and Last-Modified header values supplied are valid.
-    request->SetExtraRequestHeaderByName(
-        "If-Range", has_etag ? params->etag() : params->last_modified(), true);
-  }
-
-  for (DownloadUrlParameters::RequestHeadersType::const_iterator iter
-           = params->request_headers_begin();
-       iter != params->request_headers_end();
-       ++iter) {
-    request->SetExtraRequestHeaderByName(
-        iter->first, iter->second, false /*overwrite*/);
-  }
-
-  scoped_ptr<DownloadSaveInfo> save_info(new DownloadSaveInfo());
-  save_info->file_path = params->file_path();
-  save_info->suggested_name = params->suggested_name();
-  save_info->offset = params->offset();
-  save_info->hash_state = params->hash_state();
-  save_info->prompt_for_save_location = params->prompt();
-  save_info->file = params->GetFile();
-
+  // If there's a valid renderer process associated with the request, then the
+  // request should be driven by the ResourceLoader. Pass it over to the
+  // ResourceDispatcherHostImpl which will in turn pass it along to the
+  // ResourceLoader.
   if (params->render_process_host_id() != -1) {
-    ResourceDispatcherHost::Get()->BeginDownload(
-        std::move(request), params->referrer(), params->content_initiated(),
-        params->resource_context(), params->render_process_host_id(),
-        params->render_view_host_routing_id(),
-        params->render_frame_host_routing_id(), params->prefer_cache(),
-        params->do_not_prompt_for_login(), std::move(save_info), download_id,
-        params->callback());
+    DownloadInterruptReason reason =
+        ResourceDispatcherHostImpl::Get()->BeginDownload(
+            std::move(url_request), params->referrer(),
+            params->content_initiated(), params->resource_context(),
+            params->render_process_host_id(),
+            params->render_view_host_routing_id(),
+            params->render_frame_host_routing_id(),
+            params->do_not_prompt_for_login());
+
+    // If the download was accepted, the DownloadResourceHandler is now
+    // responsible for driving the request to completion.
+    if (reason == DOWNLOAD_INTERRUPT_REASON_NONE)
+      return nullptr;
+
+    // Otherwise, create an interrupted download.
+    std::unique_ptr<DownloadCreateInfo> failed_created_info(
+        new DownloadCreateInfo(base::Time::Now(), net::BoundNetLog(),
+                               base::WrapUnique(new DownloadSaveInfo)));
+    failed_created_info->url_chain.push_back(params->url());
+    failed_created_info->result = reason;
+    std::unique_ptr<ByteStreamReader> empty_byte_stream;
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&DownloadManager::StartDownload, download_manager,
+                   base::Passed(&failed_created_info),
+                   base::Passed(&empty_byte_stream), params->callback()));
     return nullptr;
   }
-  return scoped_ptr<UrlDownloader, BrowserThread::DeleteOnIOThread>(
-      UrlDownloader::BeginDownload(download_manager, std::move(request),
-                                   params->referrer(), params->prefer_cache(),
-                                   std::move(save_info), download_id,
-                                   params->callback())
+
+  return std::unique_ptr<UrlDownloader, BrowserThread::DeleteOnIOThread>(
+      UrlDownloader::BeginDownload(download_manager, std::move(url_request),
+                                   params->referrer())
           .release());
 }
 
@@ -149,11 +114,14 @@ class DownloadItemFactoryImpl : public DownloadItemFactory {
 
   DownloadItemImpl* CreatePersistedItem(
       DownloadItemImplDelegate* delegate,
+      const std::string& guid,
       uint32_t download_id,
       const base::FilePath& current_path,
       const base::FilePath& target_path,
       const std::vector<GURL>& url_chain,
       const GURL& referrer_url,
+      const GURL& tab_url,
+      const GURL& tab_refererr_url,
       const std::string& mime_type,
       const std::string& original_mime_type,
       const base::Time& start_time,
@@ -162,31 +130,17 @@ class DownloadItemFactoryImpl : public DownloadItemFactory {
       const std::string& last_modified,
       int64_t received_bytes,
       int64_t total_bytes,
+      const std::string& hash,
       DownloadItem::DownloadState state,
       DownloadDangerType danger_type,
       DownloadInterruptReason interrupt_reason,
       bool opened,
       const net::BoundNetLog& bound_net_log) override {
     return new DownloadItemImpl(
-        delegate,
-        download_id,
-        current_path,
-        target_path,
-        url_chain,
-        referrer_url,
-        mime_type,
-        original_mime_type,
-        start_time,
-        end_time,
-        etag,
-        last_modified,
-        received_bytes,
-        total_bytes,
-        state,
-        danger_type,
-        interrupt_reason,
-        opened,
-        bound_net_log);
+        delegate, guid, download_id, current_path, target_path, url_chain,
+        referrer_url, tab_url, tab_refererr_url, mime_type, original_mime_type,
+        start_time, end_time, etag, last_modified, received_bytes, total_bytes,
+        hash, state, danger_type, interrupt_reason, opened, bound_net_log);
   }
 
   DownloadItemImpl* CreateActiveItem(
@@ -203,7 +157,7 @@ class DownloadItemFactoryImpl : public DownloadItemFactory {
       const base::FilePath& path,
       const GURL& url,
       const std::string& mime_type,
-      scoped_ptr<DownloadRequestHandleInterface> request_handle,
+      std::unique_ptr<DownloadRequestHandleInterface> request_handle,
       const net::BoundNetLog& bound_net_log) override {
     return new DownloadItemImpl(delegate, download_id, path, url, mime_type,
                                 std::move(request_handle), bound_net_log);
@@ -217,7 +171,6 @@ DownloadManagerImpl::DownloadManagerImpl(
     BrowserContext* browser_context)
     : item_factory_(new DownloadItemFactoryImpl()),
       file_factory_(new DownloadFileFactory()),
-      history_size_(0),
       shutdown_needed_(true),
       browser_context_(browser_context),
       delegate_(NULL),
@@ -240,6 +193,7 @@ DownloadItemImpl* DownloadManagerImpl::CreateActiveItem(
   DownloadItemImpl* download =
       item_factory_->CreateActiveItem(this, id, info, bound_net_log);
   downloads_[id] = download;
+  downloads_by_guid_[download->GetGuid()] = download;
   return download;
 }
 
@@ -322,13 +276,13 @@ void DownloadManagerImpl::Shutdown() {
   // dangerous downloads which will remain in history if they aren't explicitly
   // accepted or discarded. Canceling will remove the intermediate download
   // file.
-  for (DownloadMap::iterator it = downloads_.begin(); it != downloads_.end();
-       ++it) {
-    DownloadItemImpl* download = it->second;
+  for (const auto& it : downloads_) {
+    DownloadItemImpl* download = it.second;
     if (download->GetState() == DownloadItem::IN_PROGRESS)
       download->Cancel(false);
   }
   STLDeleteValues(&downloads_);
+  downloads_by_guid_.clear();
   url_downloaders_.clear();
 
   // We'll have nothing more to report to the observers after this point.
@@ -340,11 +294,16 @@ void DownloadManagerImpl::Shutdown() {
 }
 
 void DownloadManagerImpl::StartDownload(
-    scoped_ptr<DownloadCreateInfo> info,
-    scoped_ptr<ByteStreamReader> stream,
+    std::unique_ptr<DownloadCreateInfo> info,
+    std::unique_ptr<ByteStreamReader> stream,
     const DownloadUrlParameters::OnStartedCallback& on_started) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(info);
+  // |stream| is only non-nil if the download request was successful.
+  DCHECK((info->result == DOWNLOAD_INTERRUPT_REASON_NONE && stream.get()) ||
+         (info->result != DOWNLOAD_INTERRUPT_REASON_NONE && !stream.get()));
+  DVLOG(20) << __FUNCTION__ << "()"
+            << " result=" << DownloadInterruptReasonToString(info->result);
   uint32_t download_id = info->download_id;
   const bool new_download = (download_id == content::DownloadItem::kInvalidId);
   base::Callback<void(uint32_t)> got_id(base::Bind(
@@ -358,8 +317,8 @@ void DownloadManagerImpl::StartDownload(
 }
 
 void DownloadManagerImpl::StartDownloadWithId(
-    scoped_ptr<DownloadCreateInfo> info,
-    scoped_ptr<ByteStreamReader> stream,
+    std::unique_ptr<DownloadCreateInfo> info,
+    std::unique_ptr<ByteStreamReader> stream,
     const DownloadUrlParameters::OnStartedCallback& on_started,
     bool new_download,
     uint32_t id) {
@@ -380,13 +339,12 @@ void DownloadManagerImpl::StartDownloadWithId(
       if (!on_started.is_null())
         on_started.Run(NULL, DOWNLOAD_INTERRUPT_REASON_USER_CANCELED);
       // The ByteStreamReader lives and dies on the FILE thread.
-      BrowserThread::DeleteSoon(BrowserThread::FILE, FROM_HERE,
-                                stream.release());
+      if (info->result == DOWNLOAD_INTERRUPT_REASON_NONE)
+        BrowserThread::DeleteSoon(BrowserThread::FILE, FROM_HERE,
+                                  stream.release());
       return;
     }
     download = item_iterator->second;
-    DCHECK_EQ(download->GetState(), DownloadItem::IN_PROGRESS);
-    download->MergeOriginInfoOnResume(*info);
   }
 
   base::FilePath default_download_directory;
@@ -397,20 +355,23 @@ void DownloadManagerImpl::StartDownloadWithId(
                           &default_download_directory, &skip_dir_check);
   }
 
-  // Create the download file and start the download.
-  scoped_ptr<DownloadFile> download_file(file_factory_->CreateFile(
-      std::move(info->save_info), default_download_directory, info->url(),
-      info->referrer_url, delegate_ && delegate_->GenerateFileHash(),
-      std::move(stream), download->GetBoundNetLog(),
-      download->DestinationObserverAsWeakPtr()));
+  std::unique_ptr<DownloadFile> download_file;
 
-  // Attach the client ID identifying the app to the AV system.
-  if (download_file.get() && delegate_) {
-    download_file->SetClientGuid(
-        delegate_->ApplicationClientIdForFileScanning());
+  if (info->result == DOWNLOAD_INTERRUPT_REASON_NONE) {
+    DCHECK(stream.get());
+    download_file.reset(
+        file_factory_->CreateFile(std::move(info->save_info),
+                                  default_download_directory,
+                                  std::move(stream),
+                                  download->GetBoundNetLog(),
+                                  download->DestinationObserverAsWeakPtr()));
   }
+  // It is important to leave info->save_info intact in the case of an interrupt
+  // so that the DownloadItem can salvage what it can out of a failed resumption
+  // attempt.
 
-  download->Start(std::move(download_file), std::move(info->request_handle));
+  download->Start(std::move(download_file), std::move(info->request_handle),
+                  *info);
 
   // For interrupted downloads, Start() will transition the state to
   // IN_PROGRESS and consumers will be notified via OnDownloadUpdated().
@@ -426,9 +387,8 @@ void DownloadManagerImpl::StartDownloadWithId(
 
 void DownloadManagerImpl::CheckForHistoryFilesRemoval() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  for (DownloadMap::iterator it = downloads_.begin();
-       it != downloads_.end(); ++it) {
-    DownloadItemImpl* item = it->second;
+  for (const auto& it : downloads_) {
+    DownloadItemImpl* item = it.second;
     CheckForFileRemoval(item);
   }
 }
@@ -462,7 +422,7 @@ void DownloadManagerImpl::CreateSavePackageDownloadItem(
     const base::FilePath& main_file_path,
     const GURL& page_url,
     const std::string& mime_type,
-    scoped_ptr<DownloadRequestHandleInterface> request_handle,
+    std::unique_ptr<DownloadRequestHandleInterface> request_handle,
     const DownloadItemImplCreated& item_created) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   GetNextId(base::Bind(
@@ -475,7 +435,7 @@ void DownloadManagerImpl::CreateSavePackageDownloadItemWithId(
     const base::FilePath& main_file_path,
     const GURL& page_url,
     const std::string& mime_type,
-    scoped_ptr<DownloadRequestHandleInterface> request_handle,
+    std::unique_ptr<DownloadRequestHandleInterface> request_handle,
     const DownloadItemImplCreated& item_created,
     uint32_t id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -487,6 +447,8 @@ void DownloadManagerImpl::CreateSavePackageDownloadItemWithId(
       this, id, main_file_path, page_url, mime_type, std::move(request_handle),
       bound_net_log);
   downloads_[download_item->GetId()] = download_item;
+  DCHECK(!ContainsKey(downloads_by_guid_, download_item->GetGuid()));
+  downloads_by_guid_[download_item->GetGuid()] = download_item;
   FOR_EACH_OBSERVER(Observer, observers_, OnDownloadCreated(
       this, download_item));
   if (!item_created.is_null())
@@ -503,7 +465,7 @@ void DownloadManagerImpl::OnSavePackageSuccessfullyFinished(
 // ResourceDispatcherHost, and let it send us responses like a regular
 // download.
 void DownloadManagerImpl::ResumeInterruptedDownload(
-    scoped_ptr<content::DownloadUrlParameters> params,
+    std::unique_ptr<content::DownloadUrlParameters> params,
     uint32_t id) {
   RecordDownloadSource(INITIATED_BY_RESUMPTION);
   BrowserThread::PostTaskAndReplyWithResult(
@@ -515,12 +477,12 @@ void DownloadManagerImpl::ResumeInterruptedDownload(
 }
 
 void DownloadManagerImpl::SetDownloadItemFactoryForTesting(
-    scoped_ptr<DownloadItemFactory> item_factory) {
+    std::unique_ptr<DownloadItemFactory> item_factory) {
   item_factory_ = std::move(item_factory);
 }
 
 void DownloadManagerImpl::SetDownloadFileFactoryForTesting(
-    scoped_ptr<DownloadFileFactory> file_factory) {
+    std::unique_ptr<DownloadFileFactory> file_factory) {
   file_factory_ = std::move(file_factory);
 }
 
@@ -532,6 +494,8 @@ void DownloadManagerImpl::DownloadRemoved(DownloadItemImpl* download) {
   if (!download)
     return;
 
+  downloads_by_guid_.erase(download->GetGuid());
+
   uint32_t download_id = download->GetId();
   if (downloads_.erase(download_id) == 0)
     return;
@@ -539,7 +503,8 @@ void DownloadManagerImpl::DownloadRemoved(DownloadItemImpl* download) {
 }
 
 void DownloadManagerImpl::AddUrlDownloader(
-    scoped_ptr<UrlDownloader, BrowserThread::DeleteOnIOThread> downloader) {
+    std::unique_ptr<UrlDownloader, BrowserThread::DeleteOnIOThread>
+        downloader) {
   if (downloader)
     url_downloaders_.push_back(std::move(downloader));
 }
@@ -556,19 +521,18 @@ void DownloadManagerImpl::RemoveUrlDownloader(UrlDownloader* downloader) {
 
 namespace {
 
-bool RemoveDownloadBetween(base::Time remove_begin,
-                           base::Time remove_end,
-                           const DownloadItemImpl* download_item) {
-  return download_item->GetStartTime() >= remove_begin &&
-         (remove_end.is_null() || download_item->GetStartTime() < remove_end);
+bool EmptyFilter(const GURL& url) {
+  return true;
 }
 
-bool RemoveDownloadByOriginAndTime(const url::Origin& origin,
-                                   base::Time remove_begin,
-                                   base::Time remove_end,
-                                   const DownloadItemImpl* download_item) {
-  return origin.IsSameOriginWith(url::Origin(download_item->GetURL())) &&
-         RemoveDownloadBetween(remove_begin, remove_end, download_item);
+bool RemoveDownloadByURLAndTime(
+    const base::Callback<bool(const GURL&)>& url_filter,
+          base::Time remove_begin,
+          base::Time remove_end,
+          const DownloadItemImpl* download_item) {
+  return url_filter.Run(download_item->GetURL()) &&
+         download_item->GetStartTime() >= remove_begin &&
+         (remove_end.is_null() || download_item->GetStartTime() < remove_end);
 }
 
 }  // namespace
@@ -591,34 +555,27 @@ int DownloadManagerImpl::RemoveDownloads(const DownloadRemover& remover) {
   return count;
 }
 
-int DownloadManagerImpl::RemoveDownloadsByOriginAndTime(
-    const url::Origin& origin,
+int DownloadManagerImpl::RemoveDownloadsByURLAndTime(
+    const base::Callback<bool(const GURL&)>& url_filter,
     base::Time remove_begin,
     base::Time remove_end) {
-  return RemoveDownloads(base::Bind(&RemoveDownloadByOriginAndTime,
-                                    base::ConstRef(origin), remove_begin,
-                                    remove_end));
-}
-
-int DownloadManagerImpl::RemoveDownloadsBetween(base::Time remove_begin,
-                                                base::Time remove_end) {
-  return RemoveDownloads(
-      base::Bind(&RemoveDownloadBetween, remove_begin, remove_end));
-}
-
-int DownloadManagerImpl::RemoveDownloads(base::Time remove_begin) {
-  return RemoveDownloadsBetween(remove_begin, base::Time());
+  return RemoveDownloads(base::Bind(&RemoveDownloadByURLAndTime,
+                                    url_filter,
+                                    remove_begin, remove_end));
 }
 
 int DownloadManagerImpl::RemoveAllDownloads() {
+  const base::Callback<bool(const GURL&)> empty_filter =
+      base::Bind(&EmptyFilter);
   // The null times make the date range unbounded.
-  int num_deleted = RemoveDownloadsBetween(base::Time(), base::Time());
+  int num_deleted = RemoveDownloadsByURLAndTime(
+      empty_filter, base::Time(), base::Time());
   RecordClearAllSize(num_deleted);
   return num_deleted;
 }
 
 void DownloadManagerImpl::DownloadUrl(
-    scoped_ptr<DownloadUrlParameters> params) {
+    std::unique_ptr<DownloadUrlParameters> params) {
   if (params->post_id() >= 0) {
     // Check this here so that the traceback is more useful.
     DCHECK(params->prefer_cache());
@@ -641,11 +598,14 @@ void DownloadManagerImpl::RemoveObserver(Observer* observer) {
 }
 
 DownloadItem* DownloadManagerImpl::CreateDownloadItem(
+    const std::string& guid,
     uint32_t id,
     const base::FilePath& current_path,
     const base::FilePath& target_path,
     const std::vector<GURL>& url_chain,
     const GURL& referrer_url,
+    const GURL& tab_url,
+    const GURL& tab_refererr_url,
     const std::string& mime_type,
     const std::string& original_mime_type,
     const base::Time& start_time,
@@ -654,6 +614,7 @@ DownloadItem* DownloadManagerImpl::CreateDownloadItem(
     const std::string& last_modified,
     int64_t received_bytes,
     int64_t total_bytes,
+    const std::string& hash,
     DownloadItem::DownloadState state,
     DownloadDangerType danger_type,
     DownloadInterruptReason interrupt_reason,
@@ -662,27 +623,15 @@ DownloadItem* DownloadManagerImpl::CreateDownloadItem(
     NOTREACHED();
     return NULL;
   }
+  DCHECK(!ContainsKey(downloads_by_guid_, guid));
   DownloadItemImpl* item = item_factory_->CreatePersistedItem(
-      this,
-      id,
-      current_path,
-      target_path,
-      url_chain,
-      referrer_url,
-      mime_type,
-      original_mime_type,
-      start_time,
-      end_time,
-      etag,
-      last_modified,
-      received_bytes,
-      total_bytes,
-      state,
-      danger_type,
-      interrupt_reason,
-      opened,
+      this, guid, id, current_path, target_path, url_chain, referrer_url,
+      tab_url, tab_refererr_url, mime_type, original_mime_type, start_time,
+      end_time, etag, last_modified, received_bytes, total_bytes, hash, state,
+      danger_type, interrupt_reason, opened,
       net::BoundNetLog::Make(net_log_, net::NetLog::SOURCE_DOWNLOAD));
   downloads_[id] = item;
+  downloads_by_guid_[guid] = item;
   FOR_EACH_OBSERVER(Observer, observers_, OnDownloadCreated(this, item));
   DVLOG(20) << __FUNCTION__ << "() download = " << item->DebugString(true);
   return item;
@@ -690,9 +639,8 @@ DownloadItem* DownloadManagerImpl::CreateDownloadItem(
 
 int DownloadManagerImpl::InProgressCount() const {
   int count = 0;
-  for (DownloadMap::const_iterator it = downloads_.begin();
-       it != downloads_.end(); ++it) {
-    if (it->second->GetState() == DownloadItem::IN_PROGRESS)
+  for (const auto& it : downloads_) {
+    if (it.second->GetState() == DownloadItem::IN_PROGRESS)
       ++count;
   }
   return count;
@@ -700,13 +648,12 @@ int DownloadManagerImpl::InProgressCount() const {
 
 int DownloadManagerImpl::NonMaliciousInProgressCount() const {
   int count = 0;
-  for (DownloadMap::const_iterator it = downloads_.begin();
-       it != downloads_.end(); ++it) {
-    if (it->second->GetState() == DownloadItem::IN_PROGRESS &&
-        it->second->GetDangerType() != DOWNLOAD_DANGER_TYPE_DANGEROUS_URL &&
-        it->second->GetDangerType() != DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT &&
-        it->second->GetDangerType() != DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST &&
-        it->second->GetDangerType() !=
+  for (const auto& it : downloads_) {
+    if (it.second->GetState() == DownloadItem::IN_PROGRESS &&
+        it.second->GetDangerType() != DOWNLOAD_DANGER_TYPE_DANGEROUS_URL &&
+        it.second->GetDangerType() != DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT &&
+        it.second->GetDangerType() != DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST &&
+        it.second->GetDangerType() !=
             DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED) {
       ++count;
     }
@@ -715,21 +662,26 @@ int DownloadManagerImpl::NonMaliciousInProgressCount() const {
 }
 
 DownloadItem* DownloadManagerImpl::GetDownload(uint32_t download_id) {
-  return ContainsKey(downloads_, download_id) ? downloads_[download_id] : NULL;
+  return ContainsKey(downloads_, download_id) ? downloads_[download_id]
+                                              : nullptr;
+}
+
+DownloadItem* DownloadManagerImpl::GetDownloadByGuid(const std::string& guid) {
+  DCHECK(guid == base::ToUpperASCII(guid));
+  return ContainsKey(downloads_by_guid_, guid) ? downloads_by_guid_[guid]
+                                               : nullptr;
 }
 
 void DownloadManagerImpl::GetAllDownloads(DownloadVector* downloads) {
-  for (DownloadMap::iterator it = downloads_.begin();
-       it != downloads_.end(); ++it) {
-    downloads->push_back(it->second);
+  for (const auto& it : downloads_) {
+    downloads->push_back(it.second);
   }
 }
 
 void DownloadManagerImpl::OpenDownload(DownloadItemImpl* download) {
   int num_unopened = 0;
-  for (DownloadMap::iterator it = downloads_.begin();
-       it != downloads_.end(); ++it) {
-    DownloadItemImpl* item = it->second;
+  for (const auto& it : downloads_) {
+    DownloadItemImpl* item = it.second;
     if ((item->GetState() == DownloadItem::COMPLETE) &&
         !item->GetOpened())
       ++num_unopened;

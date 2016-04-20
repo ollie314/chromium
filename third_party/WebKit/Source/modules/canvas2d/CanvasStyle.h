@@ -30,7 +30,6 @@
 #include "platform/graphics/Color.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Assertions.h"
-#include "wtf/RefCounted.h"
 #include "wtf/text/WTFString.h"
 
 class SkPaint;
@@ -49,8 +48,8 @@ public:
     static CanvasStyle* createFromPattern(CanvasPattern*);
 
     String color() const { ASSERT(m_type == ColorRGBA); return Color(m_rgba).serialized(); }
-    CanvasGradient* canvasGradient() const { return m_gradient.get(); }
-    CanvasPattern* canvasPattern() const { return m_pattern; }
+    CanvasGradient* getCanvasGradient() const { return m_gradient.get(); }
+    CanvasPattern* getCanvasPattern() const { return m_pattern; }
 
     void applyToPaint(SkPaint&) const;
     RGBA32 paintColor() const;

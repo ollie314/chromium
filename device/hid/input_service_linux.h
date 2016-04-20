@@ -12,7 +12,6 @@
 #include "base/compiler_specific.h"
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
@@ -30,6 +29,7 @@ class InputServiceLinux : public base::MessageLoop::DestructionObserver {
     enum Type { TYPE_BLUETOOTH, TYPE_USB, TYPE_SERIO, TYPE_UNKNOWN };
 
     InputDeviceInfo();
+    InputDeviceInfo(const InputDeviceInfo& other);
 
     std::string id;
     std::string name;

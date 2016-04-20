@@ -6,50 +6,52 @@
 #define COMPONENTS_FONT_SERVICE_FONT_SERVICE_APP_H_
 
 #include <stdint.h>
+#include <vector>
 
 #include "base/macros.h"
 #include "components/font_service/public/interfaces/font_service.mojom.h"
-#include "mojo/common/weak_binding_set.h"
-#include "mojo/services/tracing/public/cpp/tracing_impl.h"
-#include "mojo/shell/public/cpp/application_delegate.h"
-#include "mojo/shell/public/cpp/interface_factory.h"
+#include "mojo/public/cpp/bindings/binding_set.h"
+#include "services/shell/public/cpp/interface_factory.h"
+#include "services/shell/public/cpp/shell_client.h"
+#include "services/tracing/public/cpp/tracing_impl.h"
 #include "skia/ext/skia_utils_base.h"
 
 namespace font_service {
 
-class FontServiceApp : public mojo::ApplicationDelegate,
-                       public mojo::InterfaceFactory<FontService>,
+class FontServiceApp : public shell::ShellClient,
+                       public shell::InterfaceFactory<FontService>,
                        public FontService {
  public:
   FontServiceApp();
   ~FontServiceApp() override;
 
  private:
-  // ApplicationDelegate:
-  void Initialize(mojo::ApplicationImpl* app) override;
-  bool ConfigureIncomingConnection(
-      mojo::ApplicationConnection* connection) override;
+  // shell::ShellClient:
+  void Initialize(shell::Connector* connector,
+                  const shell::Identity& identity,
+                  uint32_t id) override;
+  bool AcceptConnection(shell::Connection* connection) override;
 
-  // mojo::InterfaceFactory<FontService>:
-  void Create(mojo::ApplicationConnection* connection,
+  // shell::InterfaceFactory<FontService>:
+  void Create(shell::Connection* connection,
               mojo::InterfaceRequest<FontService> request) override;
 
   // FontService:
   void MatchFamilyName(const mojo::String& family_name,
-                       TypefaceStyle requested_style,
+                       TypefaceStylePtr requested_style,
                        const MatchFamilyNameCallback& callback) override;
   void OpenStream(uint32_t id_number,
                   const OpenStreamCallback& callback) override;
 
   int FindOrAddPath(const SkString& path);
 
-  mojo::WeakBindingSet<FontService> bindings_;
+  mojo::BindingSet<FontService> bindings_;
 
   mojo::TracingImpl tracing_;
 
   // We don't want to leak paths to our callers; we thus enumerate the paths of
   // fonts.
-  SkTDArray<SkString*> paths_;
+  std::vector<SkString> paths_;
 
   DISALLOW_COPY_AND_ASSIGN(FontServiceApp);
 };

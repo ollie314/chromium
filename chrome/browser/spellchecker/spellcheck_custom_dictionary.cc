@@ -96,14 +96,14 @@ int SanitizeWordsToAdd(const std::set<std::string>& existing,
                        std::set<std::string>* to_add) {
   DCHECK(to_add);
   // Do not add duplicate words.
-  std::set<std::string> new_words =
-      base::STLSetDifference<std::set<std::string>>(*to_add, existing);
+  std::vector<std::string> new_words =
+      base::STLSetDifference<std::vector<std::string>>(*to_add, existing);
   int result = VALID_CHANGE;
   if (to_add->size() != new_words.size())
     result |= DETECTED_DUPLICATE_WORDS;
   // Do not add invalid words.
   std::set<std::string> valid_new_words;
-  for (const std::string& word : new_words) {
+  for (const auto& word : new_words) {
     if (IsValidWord(word))
       valid_new_words.insert(valid_new_words.end(), word);
   }
@@ -116,11 +116,11 @@ int SanitizeWordsToAdd(const std::set<std::string>& existing,
 
 // Loads and returns the custom spellcheck dictionary from |path|. Must be
 // called on the file thread.
-scoped_ptr<SpellcheckCustomDictionary::LoadFileResult>
+std::unique_ptr<SpellcheckCustomDictionary::LoadFileResult>
 LoadDictionaryFileReliably(const base::FilePath& path) {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   // Load the contents and verify the checksum.
-  scoped_ptr<SpellcheckCustomDictionary::LoadFileResult> result(
+  std::unique_ptr<SpellcheckCustomDictionary::LoadFileResult> result(
       new SpellcheckCustomDictionary::LoadFileResult);
   if (LoadFile(path, &result->words) == VALID_CHECKSUM) {
     result->is_valid_file =
@@ -153,7 +153,8 @@ void SaveDictionaryFileReliably(const base::FilePath& path,
 
 void SavePassedWordsToDictionaryFileReliably(
     const base::FilePath& path,
-    scoped_ptr<SpellcheckCustomDictionary::LoadFileResult> load_file_result) {
+    std::unique_ptr<SpellcheckCustomDictionary::LoadFileResult>
+        load_file_result) {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   DCHECK(load_file_result);
   SaveDictionaryFileReliably(path, load_file_result->words);
@@ -224,7 +225,7 @@ const std::set<std::string>& SpellcheckCustomDictionary::GetWords() const {
 
 bool SpellcheckCustomDictionary::AddWord(const std::string& word) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  scoped_ptr<Change> dictionary_change(new Change);
+  std::unique_ptr<Change> dictionary_change(new Change);
   dictionary_change->AddWord(word);
   int result = dictionary_change->Sanitize(GetWords());
   Apply(*dictionary_change);
@@ -236,7 +237,7 @@ bool SpellcheckCustomDictionary::AddWord(const std::string& word) {
 
 bool SpellcheckCustomDictionary::RemoveWord(const std::string& word) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  scoped_ptr<Change> dictionary_change(new Change);
+  std::unique_ptr<Change> dictionary_change(new Change);
   dictionary_change->RemoveWord(word);
   int result = dictionary_change->Sanitize(GetWords());
   Apply(*dictionary_change);
@@ -286,8 +287,8 @@ void SpellcheckCustomDictionary::Load() {
 syncer::SyncMergeResult SpellcheckCustomDictionary::MergeDataAndStartSyncing(
     syncer::ModelType type,
     const syncer::SyncDataList& initial_sync_data,
-    scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-    scoped_ptr<syncer::SyncErrorFactory> sync_error_handler) {
+    std::unique_ptr<syncer::SyncChangeProcessor> sync_processor,
+    std::unique_ptr<syncer::SyncErrorFactory> sync_error_handler) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!sync_processor_.get());
   DCHECK(!sync_error_handler_.get());
@@ -298,7 +299,7 @@ syncer::SyncMergeResult SpellcheckCustomDictionary::MergeDataAndStartSyncing(
   sync_error_handler_ = std::move(sync_error_handler);
 
   // Build a list of words to add locally.
-  scoped_ptr<Change> to_change_locally(new Change);
+  std::unique_ptr<Change> to_change_locally(new Change);
   for (const syncer::SyncData& data : initial_sync_data) {
     DCHECK_EQ(syncer::DICTIONARY, data.GetDataType());
     to_change_locally->AddWord(data.GetSpecifics().dictionary().word());
@@ -333,13 +334,10 @@ syncer::SyncDataList SpellcheckCustomDictionary::GetAllSyncData(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_EQ(syncer::DICTIONARY, type);
   syncer::SyncDataList data;
-  std::string word;
   size_t i = 0;
-  for (auto it = words_.begin();
-       it != words_.end() &&
-       i < chrome::spellcheck_common::MAX_SYNCABLE_DICTIONARY_WORDS;
-       ++it, ++i) {
-    word = *it;
+  for (const auto& word : words_) {
+    if (i++ >= chrome::spellcheck_common::MAX_SYNCABLE_DICTIONARY_WORDS)
+      break;
     sync_pb::EntitySpecifics specifics;
     specifics.mutable_dictionary()->set_word(word);
     data.push_back(syncer::SyncData::CreateLocalData(word, word, specifics));
@@ -351,7 +349,7 @@ syncer::SyncError SpellcheckCustomDictionary::ProcessSyncChanges(
     const tracked_objects::Location& from_here,
     const syncer::SyncChangeList& change_list) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  scoped_ptr<Change> dictionary_change(new Change);
+  std::unique_ptr<Change> dictionary_change(new Change);
   for (const syncer::SyncChange& change : change_list) {
     DCHECK(change.IsValid());
     const std::string& word =
@@ -387,17 +385,17 @@ SpellcheckCustomDictionary::LoadFileResult::LoadFileResult()
 SpellcheckCustomDictionary::LoadFileResult::~LoadFileResult() {}
 
 // static
-scoped_ptr<SpellcheckCustomDictionary::LoadFileResult>
+std::unique_ptr<SpellcheckCustomDictionary::LoadFileResult>
 SpellcheckCustomDictionary::LoadDictionaryFile(const base::FilePath& path) {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
-  scoped_ptr<LoadFileResult> result = LoadDictionaryFileReliably(path);
+  std::unique_ptr<LoadFileResult> result = LoadDictionaryFileReliably(path);
   SpellCheckHostMetrics::RecordCustomWordCountStats(result->words.size());
   return result;
 }
 
 // static
 void SpellcheckCustomDictionary::UpdateDictionaryFile(
-    scoped_ptr<Change> dictionary_change,
+    std::unique_ptr<Change> dictionary_change,
     const base::FilePath& path) {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   DCHECK(dictionary_change);
@@ -405,7 +403,7 @@ void SpellcheckCustomDictionary::UpdateDictionaryFile(
   if (dictionary_change->empty())
     return;
 
-  scoped_ptr<LoadFileResult> result = LoadDictionaryFileReliably(path);
+  std::unique_ptr<LoadFileResult> result = LoadDictionaryFileReliably(path);
 
   // Add words.
   result->words.insert(dictionary_change->to_add().begin(),
@@ -417,7 +415,8 @@ void SpellcheckCustomDictionary::UpdateDictionaryFile(
                 result->words, dictionary_change->to_remove()));
 }
 
-void SpellcheckCustomDictionary::OnLoaded(scoped_ptr<LoadFileResult> result) {
+void SpellcheckCustomDictionary::OnLoaded(
+    std::unique_ptr<LoadFileResult> result) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(result);
   Change dictionary_change;
@@ -445,16 +444,12 @@ void SpellcheckCustomDictionary::Apply(const Change& dictionary_change) {
     words_.insert(dictionary_change.to_add().begin(),
                   dictionary_change.to_add().end());
   }
-  if (!dictionary_change.to_remove().empty()) {
-    std::set<std::string> updated_words =
-        base::STLSetDifference<std::set<std::string>>(
-            words_, dictionary_change.to_remove());
-    std::swap(words_, updated_words);
-  }
+  for (const auto& word : dictionary_change.to_remove())
+    words_.erase(word);
 }
 
 void SpellcheckCustomDictionary::FixInvalidFile(
-    scoped_ptr<LoadFileResult> load_file_result) {
+    std::unique_ptr<LoadFileResult> load_file_result) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
@@ -462,7 +457,8 @@ void SpellcheckCustomDictionary::FixInvalidFile(
                  custom_dictionary_path_, base::Passed(&load_file_result)));
 }
 
-void SpellcheckCustomDictionary::Save(scoped_ptr<Change> dictionary_change) {
+void SpellcheckCustomDictionary::Save(
+    std::unique_ptr<Change> dictionary_change) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   fix_invalid_file_.Cancel();
   BrowserThread::PostTask(
@@ -493,9 +489,9 @@ syncer::SyncError SpellcheckCustomDictionary::Sync(
   syncer::SyncChangeList sync_change_list;
   int i = 0;
 
-  for (auto it = dictionary_change.to_add().begin();
-       it != dictionary_change.to_add().end() && i < upload_size; ++it, ++i) {
-    const std::string& word = *it;
+  for (const auto& word : dictionary_change.to_add()) {
+    if (i++ >= upload_size)
+      break;
     sync_pb::EntitySpecifics specifics;
     specifics.mutable_dictionary()->set_word(word);
     sync_change_list.push_back(syncer::SyncChange(

@@ -9,6 +9,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.AsyncTask;
+import android.os.StrictMode;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Log;
 import android.util.Pair;
@@ -19,11 +21,12 @@ import com.google.protobuf.nano.MessageNano;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ObserverList;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.TabState;
 import org.chromium.chrome.browser.document.DocumentActivity;
 import org.chromium.chrome.browser.document.DocumentMetricIds;
-import org.chromium.chrome.browser.document.IncognitoNotificationManager;
+import org.chromium.chrome.browser.document.DocumentUtils;
+import org.chromium.chrome.browser.incognito.IncognitoNotificationManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
 import org.chromium.chrome.browser.tabmodel.TabList;
@@ -42,6 +45,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Maintains a list of Tabs displayed when Chrome is running in document-mode.
@@ -49,12 +53,8 @@ import java.util.Set;
 public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentTabModel {
     private static final String TAG = "DocumentTabModel";
 
-    @VisibleForTesting
     public static final String PREF_PACKAGE = "com.google.android.apps.chrome.document";
-
-    @VisibleForTesting
     public static final String PREF_LAST_SHOWN_TAB_ID_REGULAR = "last_shown_tab_id.regular";
-
     public static final String PREF_LAST_SHOWN_TAB_ID_INCOGNITO = "last_shown_tab_id.incognito";
 
     /** TabModel is uninitialized. */
@@ -135,6 +135,9 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
     /** ID of the last tab that was shown to the user. */
     private int mLastShownTabId = Tab.INVALID_TAB_ID;
 
+    /** Initial load time for shared preferences */
+    private long mSharedPrefsLoadTime;
+
     /**
      * Pre-load shared prefs to avoid being blocked on the
      * disk access async task in the future.
@@ -169,10 +172,9 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
         mInitializationObservers = new ObserverList<InitializationObserver>();
         mObservers = new ObserverList<TabModelObserver>();
 
-        SharedPreferences prefs = mContext.getSharedPreferences(PREF_PACKAGE, Context.MODE_PRIVATE);
-        mLastShownTabId = prefs.getInt(
-                isIncognito() ? PREF_LAST_SHOWN_TAB_ID_INCOGNITO : PREF_LAST_SHOWN_TAB_ID_REGULAR,
-                Tab.INVALID_TAB_ID);
+        long time = SystemClock.elapsedRealtime();
+        mLastShownTabId = DocumentUtils.getLastShownTabIdFromPrefs(mContext, isIncognito());
+        mSharedPrefsLoadTime = SystemClock.elapsedRealtime() - time;
 
         // Restore the tab list.
         setCurrentState(STATE_READ_RECENT_TASKS_START);
@@ -185,6 +187,11 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
     public void initializeNative() {
         if (!isNativeInitialized()) super.initializeNative();
         deserializeTabStatesAsync();
+
+        if (isNativeInitialized()) {
+            RecordHistogram.recordTimesHistogram("Android.StrictMode.DocumentModeSharedPrefs",
+                    mSharedPrefsLoadTime, TimeUnit.MILLISECONDS);
+        }
     }
 
     public StorageDelegate getStorageDelegate() {
@@ -321,7 +328,8 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
 
         int tabId = tab.getId();
         Entry entry = mEntryMap.get(tabId);
-        if (!isIncognito() && entry != null && entry.getTabState() != null) {
+        if (!isIncognito() && entry != null && entry.getTabState() != null
+                && isNativeInitialized()) {
             entry.getTabState().contentsState.createHistoricalTab();
         }
 
@@ -329,7 +337,7 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
         mTabIdList.remove(index);
         mEntryMap.remove(tabId);
 
-        for (TabModelObserver obs : mObservers) obs.didCloseTab(tab);
+        for (TabModelObserver obs : mObservers) obs.didCloseTab(tabId, tab.isIncognito());
         return true;
     }
 
@@ -350,8 +358,8 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
     }
 
     @Override
-    protected boolean createTabWithWebContents(
-            boolean isIncognito, WebContents webContents, int parentTabId) {
+    protected boolean createTabWithWebContents(Tab parent, boolean isIncognito,
+            WebContents webContents, int parentTabId) {
         // Tabs created along this pathway are currently only created via JNI, which includes
         // session restore tabs.  Differs from TabModelImpl because we explicitly open tabs in the
         // foreground -- opening tabs in affiliated mode is disallowed by ChromeLauncherActivity
@@ -497,6 +505,17 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
         mEntryMap.put(entry.tabId, entry);
     }
 
+    private void recordDocumentTabStateLoadTime(long time) {
+        try {
+            RecordHistogram.recordTimesHistogram("Android.StrictMode.DocumentTabStateLoad", time,
+                    TimeUnit.MILLISECONDS);
+        } catch (UnsatisfiedLinkError error) {
+            // Usually native is loaded when this check is called, but it is not guaranteed. Since
+            // most of the data is better than none of the data and we don't want this to crash in
+            // the case of native not being loaded, intentionally catch and ignore the linker error.
+        }
+    }
+
     // TODO(mariakhomenko): we no longer need prioritized tab id in constructor, shift it here.
     @Override
     public void startTabStateLoad() {
@@ -506,8 +525,16 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
         if (mPrioritizedTabId != Tab.INVALID_TAB_ID) {
             Entry entry = mEntryMap.get(mPrioritizedTabId);
             if (entry != null) {
-                entry.setTabState(
-                        mStorageDelegate.restoreTabState(mPrioritizedTabId, isIncognito()));
+                // Temporarily allowing disk access while fixing. TODO: http://crbug.com/543201
+                StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
+                try {
+                    long time = SystemClock.elapsedRealtime();
+                    entry.setTabState(
+                            mStorageDelegate.restoreTabState(mPrioritizedTabId, isIncognito()));
+                    recordDocumentTabStateLoadTime(SystemClock.elapsedRealtime() - time);
+                } finally {
+                    StrictMode.setThreadPolicy(oldPolicy);
+                }
                 entry.isTabStateReady = true;
             }
         }
@@ -854,6 +881,11 @@ public class DocumentTabModelImpl extends TabModelJniBridge implements DocumentT
 
         tabAddedToModel(tab);
         for (TabModelObserver obs : mObservers) obs.didAddTab(tab, type);
+    }
+
+    @Override
+    public void removeTab(Tab tab) {
+        assert false;
     }
 
     @Override

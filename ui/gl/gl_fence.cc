@@ -43,7 +43,7 @@ GLFence* GLFence::Create() {
   DCHECK(GLContext::GetCurrent())
       << "Trying to create fence with no context";
 
-  scoped_ptr<GLFence> fence;
+  std::unique_ptr<GLFence> fence;
   // Prefer ARB_sync which supports server-side wait.
   if (g_driver_gl.ext.b_GL_ARB_sync ||
       GetGLVersionInfo()->is_es3 ||
@@ -62,6 +62,15 @@ GLFence* GLFence::Create() {
 
   DCHECK_EQ(!!fence.get(), GLFence::IsSupported());
   return fence.release();
+}
+
+bool GLFence::ResetSupported() {
+  // Resetting a fence to its original state isn't supported by default.
+  return false;
+}
+
+void GLFence::ResetState() {
+  NOTIMPLEMENTED();
 }
 
 }  // namespace gfx

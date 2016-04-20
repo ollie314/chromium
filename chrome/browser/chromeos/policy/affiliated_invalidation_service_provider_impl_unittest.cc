@@ -4,11 +4,12 @@
 
 #include "chrome/browser/chromeos/policy/affiliated_invalidation_service_provider_impl.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
@@ -16,7 +17,6 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service_factory.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
-#include "chrome/browser/invalidation/fake_invalidation_service.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -24,6 +24,7 @@
 #include "chromeos/cryptohome/system_salt_getter.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/invalidation/impl/fake_invalidation_handler.h"
+#include "components/invalidation/impl/fake_invalidation_service.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/invalidation/impl/ticl_invalidation_service.h"
 #include "components/invalidation/public/invalidation_service.h"
@@ -44,13 +45,13 @@ const char kAffiliatedUserID1[] = "test_1@example.com";
 const char kAffiliatedUserID2[] = "test_2@example.com";
 const char kUnaffiliatedUserID[] = "test@other_domain.test";
 
-scoped_ptr<KeyedService> BuildProfileInvalidationProvider(
+std::unique_ptr<KeyedService> BuildProfileInvalidationProvider(
     content::BrowserContext* context) {
-  scoped_ptr<invalidation::FakeInvalidationService> invalidation_service(
+  std::unique_ptr<invalidation::FakeInvalidationService> invalidation_service(
       new invalidation::FakeInvalidationService);
   invalidation_service->SetInvalidatorState(
       syncer::TRANSIENT_INVALIDATION_ERROR);
-  return make_scoped_ptr(new invalidation::ProfileInvalidationProvider(
+  return base::WrapUnique(new invalidation::ProfileInvalidationProvider(
       std::move(invalidation_service)));
 }
 
@@ -123,8 +124,8 @@ class AffiliatedInvalidationServiceProviderImplTest : public testing::Test {
   // Ownership is not passed. The Profile is owned by the global ProfileManager.
   Profile* LogInAndReturnProfile(const std::string& user_id,
                                  bool is_affiliated);
-  scoped_ptr<AffiliatedInvalidationServiceProviderImpl> provider_;
-  scoped_ptr<FakeConsumer> consumer_;
+  std::unique_ptr<AffiliatedInvalidationServiceProviderImpl> provider_;
+  std::unique_ptr<FakeConsumer> consumer_;
   invalidation::TiclInvalidationService* device_invalidation_service_;
   invalidation::FakeInvalidationService* profile_invalidation_service_;
 
@@ -133,9 +134,9 @@ class AffiliatedInvalidationServiceProviderImplTest : public testing::Test {
   chromeos::FakeChromeUserManager* fake_user_manager_;
   chromeos::ScopedUserManagerEnabler user_manager_enabler_;
   ScopedStubEnterpriseInstallAttributes install_attributes_;
-  scoped_ptr<chromeos::ScopedTestDeviceSettingsService>
+  std::unique_ptr<chromeos::ScopedTestDeviceSettingsService>
       test_device_settings_service_;
-  scoped_ptr<chromeos::ScopedTestCrosSettings> test_cros_settings_;
+  std::unique_ptr<chromeos::ScopedTestCrosSettings> test_cros_settings_;
   TestingProfileManager profile_manager_;
 };
 
@@ -576,7 +577,8 @@ TEST_F(AffiliatedInvalidationServiceProviderImplTest, MultipleConsumers) {
 
   // Register a second consumer. Verify that the consumer is called back
   // immediately as a connected invalidation service is available.
-  scoped_ptr<FakeConsumer> second_consumer(new FakeConsumer(provider_.get()));
+  std::unique_ptr<FakeConsumer> second_consumer(
+      new FakeConsumer(provider_.get()));
   EXPECT_EQ(1, second_consumer->GetAndClearInvalidationServiceSetCount());
   EXPECT_EQ(device_invalidation_service_,
             second_consumer->GetInvalidationService());

@@ -7,12 +7,12 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "content/browser/renderer_host/render_view_host_delegate_view.h"
 #include "content/browser/web_contents/web_contents_view.h"
 #include "content/common/content_export.h"
@@ -50,6 +50,11 @@ CONTENT_EXPORT
 
 - (void)setMouseDownCanMoveWindow:(BOOL)canMove;
 - (void)setOpaque:(BOOL)opaque;
+
+// Returns the available drag operations. This is a required method for
+// NSDraggingSource. It is supposedly deprecated, but the non-deprecated API
+// -[NSWindow dragImage:...] still relies on it.
+- (NSDragOperation)draggingSourceOperationMaskForLocal:(BOOL)isLocal;
 @end
 
 namespace content {
@@ -139,12 +144,12 @@ class WebContentsViewMac : public WebContentsView,
   base::scoped_nsobject<FocusTracker> focus_tracker_;
 
   // Our optional delegate.
-  scoped_ptr<WebContentsViewDelegate> delegate_;
+  std::unique_ptr<WebContentsViewDelegate> delegate_;
 
   // Whether to allow other views.
   bool allow_other_views_;
 
-  scoped_ptr<PopupMenuHelper> popup_menu_helper_;
+  std::unique_ptr<PopupMenuHelper> popup_menu_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsViewMac);
 };

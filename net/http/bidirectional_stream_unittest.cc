@@ -4,8 +4,10 @@
 
 #include "net/http/bidirectional_stream.h"
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -16,7 +18,10 @@
 #include "net/http/bidirectional_stream_request_info.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_response_headers.h"
+#include "net/http/http_server_properties.h"
 #include "net/log/net_log.h"
+#include "net/log/test_net_log.h"
+#include "net/log/test_net_log_util.h"
 #include "net/socket/socket_test_util.h"
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_test_util_common.h"
@@ -39,11 +44,11 @@ class TestDelegateBase : public BidirectionalStream::Delegate {
   TestDelegateBase(IOBuffer* read_buf, int read_buf_len)
       : TestDelegateBase(read_buf,
                          read_buf_len,
-                         make_scoped_ptr(new base::Timer(false, false))) {}
+                         base::WrapUnique(new base::Timer(false, false))) {}
 
   TestDelegateBase(IOBuffer* read_buf,
                    int read_buf_len,
-                   scoped_ptr<base::Timer> timer)
+                   std::unique_ptr<base::Timer> timer)
       : read_buf_(read_buf),
         read_buf_len_(read_buf_len),
         timer_(std::move(timer)),
@@ -101,7 +106,7 @@ class TestDelegateBase : public BidirectionalStream::Delegate {
       loop_->Quit();
   }
 
-  void Start(scoped_ptr<BidirectionalStreamRequestInfo> request_info,
+  void Start(std::unique_ptr<BidirectionalStreamRequestInfo> request_info,
              HttpNetworkSession* session) {
     stream_.reset(new BidirectionalStream(std::move(request_info), session,
                                           this, std::move(timer_)));
@@ -173,12 +178,12 @@ class TestDelegateBase : public BidirectionalStream::Delegate {
   void QuitLoop() { loop_->Quit(); }
 
  private:
-  scoped_ptr<BidirectionalStream> stream_;
+  std::unique_ptr<BidirectionalStream> stream_;
   scoped_refptr<IOBuffer> read_buf_;
   int read_buf_len_;
-  scoped_ptr<base::Timer> timer_;
+  std::unique_ptr<base::Timer> timer_;
   std::string data_received_;
-  scoped_ptr<base::RunLoop> loop_;
+  std::unique_ptr<base::RunLoop> loop_;
   SpdyHeaderBlock response_headers_;
   SpdyHeaderBlock trailers_;
   int error_;
@@ -296,11 +301,12 @@ class MockTimer : public base::MockTimer {
 class BidirectionalStreamTest : public testing::TestWithParam<bool> {
  public:
   BidirectionalStreamTest()
-      : spdy_util_(kProtoHTTP2, false),
+      : spdy_util_(kProtoHTTP2, true),
         session_deps_(kProtoHTTP2),
         ssl_data_(SSLSocketDataProvider(ASYNC, OK)) {
     ssl_data_.SetNextProto(kProtoHTTP2);
     ssl_data_.cert = ImportCertFromFile(GetTestCertsDirectory(), "ok_cert.pem");
+    net_log_.SetCaptureMode(NetLogCaptureMode::IncludeSocketBytes());
   }
 
  protected:
@@ -322,14 +328,17 @@ class BidirectionalStreamTest : public testing::TestWithParam<bool> {
     sequenced_data_.reset(
         new SequencedSocketData(reads, reads_count, writes, writes_count));
     session_deps_.socket_factory->AddSocketDataProvider(sequenced_data_.get());
+    session_deps_.net_log = net_log_.bound().net_log();
     http_session_ = SpdySessionDependencies::SpdyCreateSession(&session_deps_);
-    session_ = CreateSecureSpdySession(http_session_.get(), key, BoundNetLog());
+    session_ =
+        CreateSecureSpdySession(http_session_.get(), key, net_log_.bound());
   }
 
+  BoundTestNetLog net_log_;
   SpdyTestUtil spdy_util_;
   SpdySessionDependencies session_deps_;
-  scoped_ptr<SequencedSocketData> sequenced_data_;
-  scoped_ptr<HttpNetworkSession> http_session_;
+  std::unique_ptr<SequencedSocketData> sequenced_data_;
+  std::unique_ptr<HttpNetworkSession> http_session_;
 
  private:
   SSLSocketDataProvider ssl_data_;
@@ -337,7 +346,7 @@ class BidirectionalStreamTest : public testing::TestWithParam<bool> {
 };
 
 TEST_F(BidirectionalStreamTest, CreateInsecureStream) {
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info(
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
       new BidirectionalStreamRequestInfo);
   request_info->method = "GET";
   request_info->url = GURL("http://www.example.org/");
@@ -345,7 +354,7 @@ TEST_F(BidirectionalStreamTest, CreateInsecureStream) {
   TestDelegateBase delegate(nullptr, 0);
   HttpNetworkSession::Params params =
       SpdySessionDependencies::CreateSessionParams(&session_deps_);
-  scoped_ptr<HttpNetworkSession> session(new HttpNetworkSession(params));
+  std::unique_ptr<HttpNetworkSession> session(new HttpNetworkSession(params));
   delegate.SetRunUntilCompletion(true);
   delegate.Start(std::move(request_info), session.get());
 
@@ -353,12 +362,12 @@ TEST_F(BidirectionalStreamTest, CreateInsecureStream) {
 }
 
 // Simulates user calling ReadData after END_STREAM has been received in
-// BidirectionalStreamSpdyJob.
+// BidirectionalStreamSpdyImpl.
 TEST_F(BidirectionalStreamTest, TestReadDataAfterClose) {
-  scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyGet("https://www.example.org", false, 1, LOWEST));
+  std::unique_ptr<SpdySerializedFrame> req(
+      spdy_util_.ConstructSpdyGet("https://www.example.org", 1, LOWEST));
   // Empty DATA frame with an END_STREAM flag.
-  scoped_ptr<SpdyFrame> end_stream(
+  std::unique_ptr<SpdySerializedFrame> end_stream(
       spdy_util_.ConstructSpdyBodyFrame(1, nullptr, 0, true));
   MockWrite writes[] = {
       CreateMockWrite(*req.get(), 0),
@@ -366,12 +375,13 @@ TEST_F(BidirectionalStreamTest, TestReadDataAfterClose) {
 
   const char* const kExtraResponseHeaders[] = {"header-name", "header-value"};
 
-  scoped_ptr<SpdyFrame> resp(
+  std::unique_ptr<SpdySerializedFrame> resp(
       spdy_util_.ConstructSpdyGetSynReply(kExtraResponseHeaders, 1, 1));
 
-  scoped_ptr<SpdyFrame> body_frame(spdy_util_.ConstructSpdyBodyFrame(1, false));
+  std::unique_ptr<SpdySerializedFrame> body_frame(
+      spdy_util_.ConstructSpdyBodyFrame(1, false));
   // Last body frame has END_STREAM flag set.
-  scoped_ptr<SpdyFrame> last_body_frame(
+  std::unique_ptr<SpdySerializedFrame> last_body_frame(
       spdy_util_.ConstructSpdyBodyFrame(1, true));
 
   MockRead reads[] = {
@@ -389,7 +399,7 @@ TEST_F(BidirectionalStreamTest, TestReadDataAfterClose) {
                      PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
 
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info(
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
       new BidirectionalStreamRequestInfo);
   request_info->method = "GET";
   request_info->url = GURL("https://www.example.org/");
@@ -398,10 +408,10 @@ TEST_F(BidirectionalStreamTest, TestReadDataAfterClose) {
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   // Create a MockTimer. Retain a raw pointer since the underlying
-  // BidirectionalStreamJob owns it.
+  // BidirectionalStreamImpl owns it.
   MockTimer* timer = new MockTimer();
-  scoped_ptr<TestDelegateBase> delegate(new TestDelegateBase(
-      read_buffer.get(), kReadBufferSize, make_scoped_ptr(timer)));
+  std::unique_ptr<TestDelegateBase> delegate(new TestDelegateBase(
+      read_buffer.get(), kReadBufferSize, base::WrapUnique(timer)));
   delegate->set_do_not_start_read(true);
 
   delegate->Start(std::move(request_info), http_session_.get());
@@ -442,27 +452,132 @@ TEST_F(BidirectionalStreamTest, TestReadDataAfterClose) {
             delegate->GetTotalReceivedBytes());
 }
 
-TEST_F(BidirectionalStreamTest, TestInterleaveReadDataAndSendData) {
-  BufferedSpdyFramer framer(spdy_util_.spdy_version(), false);
+TEST_F(BidirectionalStreamTest, TestContainFullBytes) {
+  BufferedSpdyFramer framer(spdy_util_.spdy_version());
 
-  scoped_ptr<SpdyFrame> req(spdy_util_.ConstructSpdyPost(
+  std::unique_ptr<SpdySerializedFrame> req(spdy_util_.ConstructSpdyPost(
       "https://www.example.org", 1, kBodyDataSize * 3, LOWEST, nullptr, 0));
-  scoped_ptr<SpdyFrame> data_frame1(
+  std::unique_ptr<SpdySerializedFrame> data_frame(
+      framer.CreateDataFrame(1, kBodyData, kBodyDataSize, DATA_FLAG_FIN));
+  MockWrite writes[] = {
+      CreateMockWrite(*req, 0), CreateMockWrite(*data_frame, 3),
+  };
+
+  std::unique_ptr<SpdySerializedFrame> resp(
+      spdy_util_.ConstructSpdyGetSynReply(nullptr, 0, 1));
+  std::unique_ptr<SpdySerializedFrame> response_body_frame1(
+      spdy_util_.ConstructSpdyBodyFrame(1, false));
+  std::unique_ptr<SpdySerializedFrame> response_body_frame2(
+      spdy_util_.ConstructSpdyBodyFrame(1, true));
+
+  MockRead reads[] = {
+      CreateMockRead(*resp, 1),
+      MockRead(ASYNC, ERR_IO_PENDING, 2),  // Force a pause.
+      CreateMockRead(*response_body_frame1, 4),
+      MockRead(ASYNC, ERR_IO_PENDING, 5),  // Force a pause.
+      CreateMockRead(*response_body_frame2, 6),
+      MockRead(ASYNC, 0, 7),
+  };
+
+  HostPortPair host_port_pair("www.example.org", 443);
+  SpdySessionKey key(host_port_pair, ProxyServer::Direct(),
+                     PRIVACY_MODE_DISABLED);
+  InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
+
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
+      new BidirectionalStreamRequestInfo);
+  request_info->method = "POST";
+  request_info->url = GURL("https://www.example.org/");
+  request_info->priority = LOWEST;
+  request_info->extra_headers.SetHeader(net::HttpRequestHeaders::kContentLength,
+                                        base::SizeTToString(kBodyDataSize * 3));
+
+  scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
+  MockTimer* timer = new MockTimer();
+  std::unique_ptr<TestDelegateBase> delegate(new TestDelegateBase(
+      read_buffer.get(), kReadBufferSize, base::WrapUnique(timer)));
+  delegate->set_do_not_start_read(true);
+  delegate->Start(std::move(request_info), http_session_.get());
+  // Send the request and receive response headers.
+  sequenced_data_->RunUntilPaused();
+  EXPECT_FALSE(timer->IsRunning());
+
+  scoped_refptr<StringIOBuffer> buf(
+      new StringIOBuffer(std::string(kBodyData, kBodyDataSize)));
+  // Send a DATA frame.
+  delegate->SendData(buf.get(), buf->size(), true);
+  // ReadData returns asynchronously because no data is buffered.
+  int rv = delegate->ReadData();
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+  // Deliver the first DATA frame.
+  sequenced_data_->Resume();
+  sequenced_data_->RunUntilPaused();
+  // |sequenced_data_| is now stopped after delivering first DATA frame but
+  // before the second DATA frame.
+  // Fire the timer to allow the first ReadData to complete asynchronously.
+  timer->Fire();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1, delegate->on_data_read_count());
+
+  // Now let |sequenced_data_| run until completion.
+  sequenced_data_->Resume();
+  base::RunLoop().RunUntilIdle();
+  // All data has been delivered, and OnClosed() has been invoked.
+  // Read now, and it should complete synchronously.
+  rv = delegate->ReadData();
+  EXPECT_EQ(kUploadDataSize, rv);
+  EXPECT_EQ("200", delegate->response_headers().find(":status")->second);
+  EXPECT_EQ(1, delegate->on_data_read_count());
+  EXPECT_EQ(1, delegate->on_data_sent_count());
+  EXPECT_EQ(kProtoHTTP2, delegate->GetProtocol());
+  EXPECT_EQ(CountWriteBytes(writes, arraysize(writes)),
+            delegate->GetTotalSentBytes());
+  EXPECT_EQ(CountReadBytes(reads, arraysize(reads)),
+            delegate->GetTotalReceivedBytes());
+
+  TestNetLogEntry::List entries;
+  net_log_.GetEntries(&entries);
+  // Sent bytes. Sending data is always asynchronous.
+  size_t index = ExpectLogContainsSomewhere(
+      entries, 0, NetLog::TYPE_BIDIRECTIONAL_STREAM_BYTES_SENT,
+      NetLog::PHASE_NONE);
+  TestNetLogEntry entry = entries[index];
+  EXPECT_EQ(NetLog::SOURCE_BIDIRECTIONAL_STREAM, entry.source.type);
+  // Received bytes for asynchronous read.
+  index = ExpectLogContainsSomewhere(
+      entries, index, NetLog::TYPE_BIDIRECTIONAL_STREAM_BYTES_RECEIVED,
+      NetLog::PHASE_NONE);
+  entry = entries[index];
+  EXPECT_EQ(NetLog::SOURCE_BIDIRECTIONAL_STREAM, entry.source.type);
+  // Received bytes for synchronous read.
+  index = ExpectLogContainsSomewhere(
+      entries, index, NetLog::TYPE_BIDIRECTIONAL_STREAM_BYTES_RECEIVED,
+      NetLog::PHASE_NONE);
+  entry = entries[index];
+  EXPECT_EQ(NetLog::SOURCE_BIDIRECTIONAL_STREAM, entry.source.type);
+}
+
+TEST_F(BidirectionalStreamTest, TestInterleaveReadDataAndSendData) {
+  BufferedSpdyFramer framer(spdy_util_.spdy_version());
+
+  std::unique_ptr<SpdySerializedFrame> req(spdy_util_.ConstructSpdyPost(
+      "https://www.example.org", 1, kBodyDataSize * 3, LOWEST, nullptr, 0));
+  std::unique_ptr<SpdySerializedFrame> data_frame1(
       framer.CreateDataFrame(1, kBodyData, kBodyDataSize, DATA_FLAG_NONE));
-  scoped_ptr<SpdyFrame> data_frame2(
+  std::unique_ptr<SpdySerializedFrame> data_frame2(
       framer.CreateDataFrame(1, kBodyData, kBodyDataSize, DATA_FLAG_NONE));
-  scoped_ptr<SpdyFrame> data_frame3(
+  std::unique_ptr<SpdySerializedFrame> data_frame3(
       framer.CreateDataFrame(1, kBodyData, kBodyDataSize, DATA_FLAG_FIN));
   MockWrite writes[] = {
       CreateMockWrite(*req, 0), CreateMockWrite(*data_frame1, 3),
       CreateMockWrite(*data_frame2, 6), CreateMockWrite(*data_frame3, 9),
   };
 
-  scoped_ptr<SpdyFrame> resp(
+  std::unique_ptr<SpdySerializedFrame> resp(
       spdy_util_.ConstructSpdyGetSynReply(nullptr, 0, 1));
-  scoped_ptr<SpdyFrame> response_body_frame1(
+  std::unique_ptr<SpdySerializedFrame> response_body_frame1(
       spdy_util_.ConstructSpdyBodyFrame(1, false));
-  scoped_ptr<SpdyFrame> response_body_frame2(
+  std::unique_ptr<SpdySerializedFrame> response_body_frame2(
       spdy_util_.ConstructSpdyBodyFrame(1, true));
 
   MockRead reads[] = {
@@ -480,7 +595,7 @@ TEST_F(BidirectionalStreamTest, TestInterleaveReadDataAndSendData) {
                      PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
 
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info(
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
       new BidirectionalStreamRequestInfo);
   request_info->method = "POST";
   request_info->url = GURL("https://www.example.org/");
@@ -490,8 +605,8 @@ TEST_F(BidirectionalStreamTest, TestInterleaveReadDataAndSendData) {
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   MockTimer* timer = new MockTimer();
-  scoped_ptr<TestDelegateBase> delegate(new TestDelegateBase(
-      read_buffer.get(), kReadBufferSize, make_scoped_ptr(timer)));
+  std::unique_ptr<TestDelegateBase> delegate(new TestDelegateBase(
+      read_buffer.get(), kReadBufferSize, base::WrapUnique(timer)));
   delegate->set_do_not_start_read(true);
   delegate->Start(std::move(request_info), http_session_.get());
   // Send the request and receive response headers.
@@ -549,21 +664,21 @@ TEST_F(BidirectionalStreamTest, TestInterleaveReadDataAndSendData) {
             delegate->GetTotalReceivedBytes());
 }
 
-// Tests that BidirectionalStreamSpdyJob::OnClose will complete any remaining
+// Tests that BidirectionalStreamSpdyImpl::OnClose will complete any remaining
 // read even if the read queue is empty.
 TEST_F(BidirectionalStreamTest, TestCompleteAsyncRead) {
-  scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyGet("https://www.example.org", false, 1, LOWEST));
+  std::unique_ptr<SpdySerializedFrame> req(
+      spdy_util_.ConstructSpdyGet("https://www.example.org", 1, LOWEST));
   // Empty DATA frame with an END_STREAM flag.
-  scoped_ptr<SpdyFrame> end_stream(
+  std::unique_ptr<SpdySerializedFrame> end_stream(
       spdy_util_.ConstructSpdyBodyFrame(1, nullptr, 0, true));
 
   MockWrite writes[] = {CreateMockWrite(*req.get(), 0)};
 
-  scoped_ptr<SpdyFrame> resp(
+  std::unique_ptr<SpdySerializedFrame> resp(
       spdy_util_.ConstructSpdyGetSynReply(nullptr, 0, 1));
 
-  scoped_ptr<SpdyFrame> response_body_frame(
+  std::unique_ptr<SpdySerializedFrame> response_body_frame(
       spdy_util_.ConstructSpdyBodyFrame(1, nullptr, 0, true));
 
   MockRead reads[] = {
@@ -577,7 +692,7 @@ TEST_F(BidirectionalStreamTest, TestCompleteAsyncRead) {
                      PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
 
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info(
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
       new BidirectionalStreamRequestInfo);
   request_info->method = "GET";
   request_info->url = GURL("https://www.example.org/");
@@ -586,8 +701,8 @@ TEST_F(BidirectionalStreamTest, TestCompleteAsyncRead) {
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   MockTimer* timer = new MockTimer();
-  scoped_ptr<TestDelegateBase> delegate(new TestDelegateBase(
-      read_buffer.get(), kReadBufferSize, make_scoped_ptr(timer)));
+  std::unique_ptr<TestDelegateBase> delegate(new TestDelegateBase(
+      read_buffer.get(), kReadBufferSize, base::WrapUnique(timer)));
   delegate->set_do_not_start_read(true);
   delegate->Start(std::move(request_info), http_session_.get());
   // Write request, and deliver response headers.
@@ -614,22 +729,23 @@ TEST_F(BidirectionalStreamTest, TestCompleteAsyncRead) {
 }
 
 TEST_F(BidirectionalStreamTest, TestBuffering) {
-  scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyGet("https://www.example.org", false, 1, LOWEST));
+  std::unique_ptr<SpdySerializedFrame> req(
+      spdy_util_.ConstructSpdyGet("https://www.example.org", 1, LOWEST));
   // Empty DATA frame with an END_STREAM flag.
-  scoped_ptr<SpdyFrame> end_stream(
+  std::unique_ptr<SpdySerializedFrame> end_stream(
       spdy_util_.ConstructSpdyBodyFrame(1, nullptr, 0, true));
 
   MockWrite writes[] = {CreateMockWrite(*req.get(), 0)};
 
   const char* const kExtraResponseHeaders[] = {"header-name", "header-value"};
 
-  scoped_ptr<SpdyFrame> resp(
+  std::unique_ptr<SpdySerializedFrame> resp(
       spdy_util_.ConstructSpdyGetSynReply(kExtraResponseHeaders, 1, 1));
 
-  scoped_ptr<SpdyFrame> body_frame(spdy_util_.ConstructSpdyBodyFrame(1, false));
+  std::unique_ptr<SpdySerializedFrame> body_frame(
+      spdy_util_.ConstructSpdyBodyFrame(1, false));
   // Last body frame has END_STREAM flag set.
-  scoped_ptr<SpdyFrame> last_body_frame(
+  std::unique_ptr<SpdySerializedFrame> last_body_frame(
       spdy_util_.ConstructSpdyBodyFrame(1, true));
 
   MockRead reads[] = {
@@ -646,7 +762,7 @@ TEST_F(BidirectionalStreamTest, TestBuffering) {
                      PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
 
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info(
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
       new BidirectionalStreamRequestInfo);
   request_info->method = "GET";
   request_info->url = GURL("https://www.example.org/");
@@ -655,8 +771,8 @@ TEST_F(BidirectionalStreamTest, TestBuffering) {
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   MockTimer* timer = new MockTimer();
-  scoped_ptr<TestDelegateBase> delegate(new TestDelegateBase(
-      read_buffer.get(), kReadBufferSize, make_scoped_ptr(timer)));
+  std::unique_ptr<TestDelegateBase> delegate(new TestDelegateBase(
+      read_buffer.get(), kReadBufferSize, base::WrapUnique(timer)));
   delegate->Start(std::move(request_info), http_session_.get());
   // Deliver two DATA frames together.
   sequenced_data_->RunUntilPaused();
@@ -695,10 +811,10 @@ TEST_F(BidirectionalStreamTest, TestBuffering) {
 }
 
 TEST_F(BidirectionalStreamTest, TestBufferingWithTrailers) {
-  scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyGet("https://www.example.org", false, 1, LOWEST));
+  std::unique_ptr<SpdySerializedFrame> req(
+      spdy_util_.ConstructSpdyGet("https://www.example.org", 1, LOWEST));
   // Empty DATA frame with an END_STREAM flag.
-  scoped_ptr<SpdyFrame> end_stream(
+  std::unique_ptr<SpdySerializedFrame> end_stream(
       spdy_util_.ConstructSpdyBodyFrame(1, nullptr, 0, true));
 
   MockWrite writes[] = {
@@ -707,14 +823,16 @@ TEST_F(BidirectionalStreamTest, TestBufferingWithTrailers) {
 
   const char* const kExtraResponseHeaders[] = {"header-name", "header-value"};
 
-  scoped_ptr<SpdyFrame> resp(
+  std::unique_ptr<SpdySerializedFrame> resp(
       spdy_util_.ConstructSpdyGetSynReply(kExtraResponseHeaders, 1, 1));
 
-  scoped_ptr<SpdyFrame> body_frame(spdy_util_.ConstructSpdyBodyFrame(1, false));
+  std::unique_ptr<SpdySerializedFrame> body_frame(
+      spdy_util_.ConstructSpdyBodyFrame(1, false));
 
-  const char* const kTrailers[] = {"foo", "bar"};
-  scoped_ptr<SpdyFrame> trailers(
-      spdy_util_.ConstructSpdyHeaderFrame(1, kTrailers, 1, true));
+  SpdyHeaderBlock late_headers;
+  late_headers["foo"] = "bar";
+  std::unique_ptr<SpdySerializedFrame> trailers(
+      spdy_util_.ConstructSpdyResponseHeaders(1, late_headers, true));
 
   MockRead reads[] = {
       CreateMockRead(*resp, 1),           CreateMockRead(*body_frame, 2),
@@ -730,10 +848,10 @@ TEST_F(BidirectionalStreamTest, TestBufferingWithTrailers) {
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   MockTimer* timer = new MockTimer();
-  scoped_ptr<TestDelegateBase> delegate(new TestDelegateBase(
-      read_buffer.get(), kReadBufferSize, make_scoped_ptr(timer)));
+  std::unique_ptr<TestDelegateBase> delegate(new TestDelegateBase(
+      read_buffer.get(), kReadBufferSize, base::WrapUnique(timer)));
 
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info(
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
       new BidirectionalStreamRequestInfo);
   request_info->method = "GET";
   request_info->url = GURL("https://www.example.org/");
@@ -771,13 +889,13 @@ TEST_F(BidirectionalStreamTest, TestBufferingWithTrailers) {
 }
 
 TEST_F(BidirectionalStreamTest, CancelStreamAfterSendData) {
-  BufferedSpdyFramer framer(spdy_util_.spdy_version(), false);
+  BufferedSpdyFramer framer(spdy_util_.spdy_version());
 
-  scoped_ptr<SpdyFrame> req(spdy_util_.ConstructSpdyPost(
+  std::unique_ptr<SpdySerializedFrame> req(spdy_util_.ConstructSpdyPost(
       "https://www.example.org", 1, kBodyDataSize * 3, LOWEST, nullptr, 0));
-  scoped_ptr<SpdyFrame> data_frame(
+  std::unique_ptr<SpdySerializedFrame> data_frame(
       framer.CreateDataFrame(1, kBodyData, kBodyDataSize, DATA_FLAG_NONE));
-  scoped_ptr<SpdyFrame> rst(
+  std::unique_ptr<SpdySerializedFrame> rst(
       spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
 
   MockWrite writes[] = {
@@ -785,9 +903,9 @@ TEST_F(BidirectionalStreamTest, CancelStreamAfterSendData) {
       CreateMockWrite(*rst, 5),
   };
 
-  scoped_ptr<SpdyFrame> resp(
+  std::unique_ptr<SpdySerializedFrame> resp(
       spdy_util_.ConstructSpdyGetSynReply(nullptr, 0, 1));
-  scoped_ptr<SpdyFrame> response_body_frame(
+  std::unique_ptr<SpdySerializedFrame> response_body_frame(
       spdy_util_.ConstructSpdyBodyFrame(1, false));
 
   MockRead reads[] = {
@@ -802,7 +920,7 @@ TEST_F(BidirectionalStreamTest, CancelStreamAfterSendData) {
                      PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
 
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info(
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
       new BidirectionalStreamRequestInfo);
   request_info->method = "POST";
   request_info->url = GURL("https://www.example.org/");
@@ -811,7 +929,7 @@ TEST_F(BidirectionalStreamTest, CancelStreamAfterSendData) {
                                         base::SizeTToString(kBodyDataSize * 3));
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
-  scoped_ptr<TestDelegateBase> delegate(
+  std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
   delegate->set_do_not_start_read(true);
   delegate->Start(std::move(request_info), http_session_.get());
@@ -841,22 +959,22 @@ TEST_F(BidirectionalStreamTest, CancelStreamAfterSendData) {
 }
 
 TEST_F(BidirectionalStreamTest, CancelStreamDuringReadData) {
-  BufferedSpdyFramer framer(spdy_util_.spdy_version(), false);
+  BufferedSpdyFramer framer(spdy_util_.spdy_version());
 
-  scoped_ptr<SpdyFrame> req(spdy_util_.ConstructSpdyPost(
+  std::unique_ptr<SpdySerializedFrame> req(spdy_util_.ConstructSpdyPost(
       "https://www.example.org", 1, kBodyDataSize * 3, LOWEST, nullptr, 0));
-  scoped_ptr<SpdyFrame> data_frame(
+  std::unique_ptr<SpdySerializedFrame> data_frame(
       framer.CreateDataFrame(1, kBodyData, kBodyDataSize, DATA_FLAG_NONE));
-  scoped_ptr<SpdyFrame> rst(
+  std::unique_ptr<SpdySerializedFrame> rst(
       spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
 
   MockWrite writes[] = {
       CreateMockWrite(*req, 0), CreateMockWrite(*rst, 4),
   };
 
-  scoped_ptr<SpdyFrame> resp(
+  std::unique_ptr<SpdySerializedFrame> resp(
       spdy_util_.ConstructSpdyGetSynReply(nullptr, 0, 1));
-  scoped_ptr<SpdyFrame> response_body_frame(
+  std::unique_ptr<SpdySerializedFrame> response_body_frame(
       spdy_util_.ConstructSpdyBodyFrame(1, false));
 
   MockRead reads[] = {
@@ -870,7 +988,7 @@ TEST_F(BidirectionalStreamTest, CancelStreamDuringReadData) {
                      PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
 
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info(
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
       new BidirectionalStreamRequestInfo);
   request_info->method = "POST";
   request_info->url = GURL("https://www.example.org/");
@@ -879,7 +997,7 @@ TEST_F(BidirectionalStreamTest, CancelStreamDuringReadData) {
                                         base::SizeTToString(kBodyDataSize * 3));
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
-  scoped_ptr<TestDelegateBase> delegate(
+  std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
   delegate->set_do_not_start_read(true);
   delegate->Start(std::move(request_info), http_session_.get());
@@ -906,9 +1024,9 @@ TEST_F(BidirectionalStreamTest, CancelStreamDuringReadData) {
 // Receiving a header with uppercase ASCII will result in a protocol error,
 // which should be propagated via Delegate::OnFailed.
 TEST_F(BidirectionalStreamTest, PropagateProtocolError) {
-  scoped_ptr<SpdyFrame> req(spdy_util_.ConstructSpdyPost(
+  std::unique_ptr<SpdySerializedFrame> req(spdy_util_.ConstructSpdyPost(
       "https://www.example.org", 1, kBodyDataSize * 3, LOW, nullptr, 0));
-  scoped_ptr<SpdyFrame> rst(
+  std::unique_ptr<SpdySerializedFrame> rst(
       spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_PROTOCOL_ERROR));
 
   MockWrite writes[] = {
@@ -916,7 +1034,7 @@ TEST_F(BidirectionalStreamTest, PropagateProtocolError) {
   };
 
   const char* const kExtraHeaders[] = {"X-UpperCase", "yes"};
-  scoped_ptr<SpdyFrame> resp(
+  std::unique_ptr<SpdySerializedFrame> resp(
       spdy_util_.ConstructSpdyGetSynReply(kExtraHeaders, 1, 1));
 
   MockRead reads[] = {
@@ -928,7 +1046,7 @@ TEST_F(BidirectionalStreamTest, PropagateProtocolError) {
                      PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
 
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info(
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
       new BidirectionalStreamRequestInfo);
   request_info->method = "POST";
   request_info->url = GURL("https://www.example.org/");
@@ -936,7 +1054,7 @@ TEST_F(BidirectionalStreamTest, PropagateProtocolError) {
                                         base::SizeTToString(kBodyDataSize * 3));
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
-  scoped_ptr<TestDelegateBase> delegate(
+  std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
   delegate->SetRunUntilCompletion(true);
   delegate->Start(std::move(request_info), http_session_.get());
@@ -960,10 +1078,10 @@ INSTANTIATE_TEST_CASE_P(CancelOrDeleteTests,
                         ::testing::Values(true, false));
 
 TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnHeadersReceived) {
-  scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyGet("https://www.example.org", false, 1, LOWEST));
+  std::unique_ptr<SpdySerializedFrame> req(
+      spdy_util_.ConstructSpdyGet("https://www.example.org", 1, LOWEST));
 
-  scoped_ptr<SpdyFrame> rst(
+  std::unique_ptr<SpdySerializedFrame> rst(
       spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
   MockWrite writes[] = {
       CreateMockWrite(*req, 0), CreateMockWrite(*rst, 2),
@@ -971,7 +1089,7 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnHeadersReceived) {
 
   const char* const kExtraResponseHeaders[] = {"header-name", "header-value"};
 
-  scoped_ptr<SpdyFrame> resp(
+  std::unique_ptr<SpdySerializedFrame> resp(
       spdy_util_.ConstructSpdyGetSynReply(kExtraResponseHeaders, 1, 1));
 
   MockRead reads[] = {
@@ -983,7 +1101,7 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnHeadersReceived) {
                      PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
 
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info(
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
       new BidirectionalStreamRequestInfo);
   request_info->method = "GET";
   request_info->url = GURL("https://www.example.org/");
@@ -991,7 +1109,7 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnHeadersReceived) {
   request_info->end_stream_on_headers = true;
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
-  scoped_ptr<CancelOrDeleteStreamDelegate> delegate(
+  std::unique_ptr<CancelOrDeleteStreamDelegate> delegate(
       new CancelOrDeleteStreamDelegate(
           read_buffer.get(), kReadBufferSize,
           CancelOrDeleteStreamDelegate::Phase::ON_HEADERS_RECEIVED,
@@ -1016,10 +1134,10 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnHeadersReceived) {
 }
 
 TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnDataRead) {
-  scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyGet("https://www.example.org", false, 1, LOWEST));
+  std::unique_ptr<SpdySerializedFrame> req(
+      spdy_util_.ConstructSpdyGet("https://www.example.org", 1, LOWEST));
 
-  scoped_ptr<SpdyFrame> rst(
+  std::unique_ptr<SpdySerializedFrame> rst(
       spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
   MockWrite writes[] = {
       CreateMockWrite(*req, 0), CreateMockWrite(*rst, 3),
@@ -1027,10 +1145,10 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnDataRead) {
 
   const char* const kExtraResponseHeaders[] = {"header-name", "header-value"};
 
-  scoped_ptr<SpdyFrame> resp(
+  std::unique_ptr<SpdySerializedFrame> resp(
       spdy_util_.ConstructSpdyGetSynReply(kExtraResponseHeaders, 1, 1));
 
-  scoped_ptr<SpdyFrame> response_body_frame(
+  std::unique_ptr<SpdySerializedFrame> response_body_frame(
       spdy_util_.ConstructSpdyBodyFrame(1, false));
 
   MockRead reads[] = {
@@ -1043,7 +1161,7 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnDataRead) {
                      PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
 
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info(
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
       new BidirectionalStreamRequestInfo);
   request_info->method = "GET";
   request_info->url = GURL("https://www.example.org/");
@@ -1051,7 +1169,7 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnDataRead) {
   request_info->end_stream_on_headers = true;
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
-  scoped_ptr<CancelOrDeleteStreamDelegate> delegate(
+  std::unique_ptr<CancelOrDeleteStreamDelegate> delegate(
       new CancelOrDeleteStreamDelegate(
           read_buffer.get(), kReadBufferSize,
           CancelOrDeleteStreamDelegate::Phase::ON_DATA_READ, GetParam()));
@@ -1075,10 +1193,10 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnDataRead) {
 }
 
 TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnTrailersReceived) {
-  scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyGet("https://www.example.org", false, 1, LOWEST));
+  std::unique_ptr<SpdySerializedFrame> req(
+      spdy_util_.ConstructSpdyGet("https://www.example.org", 1, LOWEST));
 
-  scoped_ptr<SpdyFrame> rst(
+  std::unique_ptr<SpdySerializedFrame> rst(
       spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
   MockWrite writes[] = {
       CreateMockWrite(*req, 0), CreateMockWrite(*rst, 4),
@@ -1086,15 +1204,16 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnTrailersReceived) {
 
   const char* const kExtraResponseHeaders[] = {"header-name", "header-value"};
 
-  scoped_ptr<SpdyFrame> resp(
+  std::unique_ptr<SpdySerializedFrame> resp(
       spdy_util_.ConstructSpdyGetSynReply(kExtraResponseHeaders, 1, 1));
 
-  scoped_ptr<SpdyFrame> response_body_frame(
+  std::unique_ptr<SpdySerializedFrame> response_body_frame(
       spdy_util_.ConstructSpdyBodyFrame(1, false));
 
-  const char* const kTrailers[] = {"foo", "bar"};
-  scoped_ptr<SpdyFrame> trailers(
-      spdy_util_.ConstructSpdyHeaderFrame(1, kTrailers, 1, true));
+  SpdyHeaderBlock late_headers;
+  late_headers["foo"] = "bar";
+  std::unique_ptr<SpdySerializedFrame> trailers(
+      spdy_util_.ConstructSpdyResponseHeaders(1, late_headers, true));
 
   MockRead reads[] = {
       CreateMockRead(*resp, 1), CreateMockRead(*response_body_frame, 2),
@@ -1106,7 +1225,7 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnTrailersReceived) {
                      PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
 
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info(
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
       new BidirectionalStreamRequestInfo);
   request_info->method = "GET";
   request_info->url = GURL("https://www.example.org/");
@@ -1114,7 +1233,7 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnTrailersReceived) {
   request_info->end_stream_on_headers = true;
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
-  scoped_ptr<CancelOrDeleteStreamDelegate> delegate(
+  std::unique_ptr<CancelOrDeleteStreamDelegate> delegate(
       new CancelOrDeleteStreamDelegate(
           read_buffer.get(), kReadBufferSize,
           CancelOrDeleteStreamDelegate::Phase::ON_TRAILERS_RECEIVED,
@@ -1140,10 +1259,10 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnTrailersReceived) {
 }
 
 TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnFailed) {
-  scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyGet("https://www.example.org", false, 1, LOWEST));
+  std::unique_ptr<SpdySerializedFrame> req(
+      spdy_util_.ConstructSpdyGet("https://www.example.org", 1, LOWEST));
 
-  scoped_ptr<SpdyFrame> rst(
+  std::unique_ptr<SpdySerializedFrame> rst(
       spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_PROTOCOL_ERROR));
 
   MockWrite writes[] = {
@@ -1151,7 +1270,7 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnFailed) {
   };
 
   const char* const kExtraHeaders[] = {"X-UpperCase", "yes"};
-  scoped_ptr<SpdyFrame> resp(
+  std::unique_ptr<SpdySerializedFrame> resp(
       spdy_util_.ConstructSpdyGetSynReply(kExtraHeaders, 1, 1));
 
   MockRead reads[] = {
@@ -1163,7 +1282,7 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnFailed) {
                      PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
 
-  scoped_ptr<BidirectionalStreamRequestInfo> request_info(
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
       new BidirectionalStreamRequestInfo);
   request_info->method = "GET";
   request_info->url = GURL("https://www.example.org/");
@@ -1171,7 +1290,7 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnFailed) {
   request_info->end_stream_on_headers = true;
 
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
-  scoped_ptr<CancelOrDeleteStreamDelegate> delegate(
+  std::unique_ptr<CancelOrDeleteStreamDelegate> delegate(
       new CancelOrDeleteStreamDelegate(
           read_buffer.get(), kReadBufferSize,
           CancelOrDeleteStreamDelegate::Phase::ON_FAILED, GetParam()));
@@ -1191,6 +1310,74 @@ TEST_P(BidirectionalStreamTest, CancelOrDeleteStreamDuringOnFailed) {
   EXPECT_EQ(0, delegate->GetTotalSentBytes());
   EXPECT_EQ(0, delegate->GetTotalReceivedBytes());
   EXPECT_EQ(kProtoUnknown, delegate->GetProtocol());
+}
+
+TEST_F(BidirectionalStreamTest, TestHonorAlternativeServiceHeader) {
+  std::unique_ptr<SpdySerializedFrame> req(
+      spdy_util_.ConstructSpdyGet("https://www.example.org", 1, LOWEST));
+  // Empty DATA frame with an END_STREAM flag.
+  std::unique_ptr<SpdySerializedFrame> end_stream(
+      spdy_util_.ConstructSpdyBodyFrame(1, nullptr, 0, true));
+
+  MockWrite writes[] = {CreateMockWrite(*req.get(), 0)};
+
+  std::string alt_svc_header_value = AlternateProtocolToString(QUIC);
+  alt_svc_header_value.append("=\"www.example.org:443\"");
+  const char* const kExtraResponseHeaders[] = {"alt-svc",
+                                               alt_svc_header_value.c_str()};
+
+  std::unique_ptr<SpdySerializedFrame> resp(
+      spdy_util_.ConstructSpdyGetSynReply(kExtraResponseHeaders, 1, 1));
+  std::unique_ptr<SpdySerializedFrame> body_frame(
+      spdy_util_.ConstructSpdyBodyFrame(1, true));
+
+  MockRead reads[] = {
+      CreateMockRead(*resp, 1), CreateMockRead(*body_frame, 2),
+      MockRead(SYNCHRONOUS, 0, 3),
+  };
+
+  HostPortPair host_port_pair("www.example.org", 443);
+  SpdySessionKey key(host_port_pair, ProxyServer::Direct(),
+                     PRIVACY_MODE_DISABLED);
+  session_deps_.parse_alternative_services = true;
+  // Enable QUIC so that the alternative service header can be added to
+  // HttpServerProperties.
+  session_deps_.enable_quic = true;
+  InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
+
+  std::unique_ptr<BidirectionalStreamRequestInfo> request_info(
+      new BidirectionalStreamRequestInfo);
+  request_info->method = "GET";
+  request_info->url = GURL("https://www.example.org/");
+  request_info->priority = LOWEST;
+  request_info->end_stream_on_headers = true;
+
+  scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
+  MockTimer* timer = new MockTimer();
+  std::unique_ptr<TestDelegateBase> delegate(new TestDelegateBase(
+      read_buffer.get(), kReadBufferSize, base::WrapUnique(timer)));
+  delegate->SetRunUntilCompletion(true);
+  delegate->Start(std::move(request_info), http_session_.get());
+
+  const SpdyHeaderBlock response_headers = delegate->response_headers();
+  EXPECT_EQ("200", response_headers.find(":status")->second);
+  EXPECT_EQ(alt_svc_header_value, response_headers.find("alt-svc")->second);
+  EXPECT_EQ(0, delegate->on_data_sent_count());
+  EXPECT_EQ(kProtoHTTP2, delegate->GetProtocol());
+  EXPECT_EQ(kUploadData, delegate->data_received());
+  EXPECT_EQ(CountWriteBytes(writes, arraysize(writes)),
+            delegate->GetTotalSentBytes());
+  EXPECT_EQ(CountReadBytes(reads, arraysize(reads)),
+            delegate->GetTotalReceivedBytes());
+
+  AlternativeServiceVector alternative_service_vector =
+      http_session_->http_server_properties()->GetAlternativeServices(
+          host_port_pair);
+  ASSERT_EQ(1u, alternative_service_vector.size());
+  EXPECT_EQ(AlternateProtocolFromNextProto(kProtoQUIC1SPDY3),
+            alternative_service_vector[0].protocol);
+  EXPECT_EQ("www.example.org", alternative_service_vector[0].host);
+  EXPECT_EQ(443, alternative_service_vector[0].port);
 }
 
 }  // namespace net

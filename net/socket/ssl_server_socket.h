@@ -5,7 +5,8 @@
 #ifndef NET_SOCKET_SSL_SERVER_SOCKET_H_
 #define NET_SOCKET_SSL_SERVER_SOCKET_H_
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
 #include "net/socket/ssl_socket.h"
@@ -31,6 +32,20 @@ class SSLServerSocket : public SSLSocket {
   virtual int Handshake(const CompletionCallback& callback) = 0;
 };
 
+class SSLServerContext {
+ public:
+  virtual ~SSLServerContext(){};
+
+  // Creates an SSL server socket over an already-connected transport socket.
+  // The caller must ensure the returned socket does not outlive the server
+  // context.
+  //
+  // The caller starts the SSL server handshake by calling Handshake on the
+  // returned socket.
+  virtual std::unique_ptr<SSLServerSocket> CreateSSLServerSocket(
+      std::unique_ptr<StreamSocket> socket) = 0;
+};
+
 // Configures the underlying SSL library for the use of SSL server sockets.
 //
 // Due to the requirements of the underlying libraries, this should be called
@@ -41,18 +56,14 @@ class SSLServerSocket : public SSLSocket {
 // omitted.
 NET_EXPORT void EnableSSLServerSockets();
 
-// Creates an SSL server socket over an already-connected transport socket.
-// The caller must provide the server certificate and private key to use.
+// Creates an SSL server socket context where all sockets spawned using this
+// context will share the same session cache.
 //
-// The returned SSLServerSocket takes ownership of |socket|.  Stubbed versions
-// of CreateSSLServerSocket will delete |socket| and return NULL.
+// The caller must provide the server certificate and private key to use.
 // It takes a reference to |certificate|.
 // The |key| and |ssl_config| parameters are copied.
 //
-// The caller starts the SSL server handshake by calling Handshake on the
-// returned socket.
-NET_EXPORT scoped_ptr<SSLServerSocket> CreateSSLServerSocket(
-    scoped_ptr<StreamSocket> socket,
+NET_EXPORT std::unique_ptr<SSLServerContext> CreateSSLServerContext(
     X509Certificate* certificate,
     const crypto::RSAPrivateKey& key,
     const SSLServerConfig& ssl_config);

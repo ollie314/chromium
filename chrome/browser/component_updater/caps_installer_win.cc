@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -77,14 +79,17 @@ class CAPSInstallerTraits : public ComponentInstallerTraits {
 
   bool CanAutoUpdate() const override { return true; }
 
+  bool RequiresNetworkEncryption() const override { return false; }
+
   bool OnCustomInstall(const base::DictionaryValue& manifest,
                        const base::FilePath& install_dir) override {
     return true;
   }
 
-  void ComponentReady(const base::Version& version,
-                      const base::FilePath& install_dir,
-                      scoped_ptr<base::DictionaryValue> manifest) override {
+  void ComponentReady(
+      const base::Version& version,
+      const base::FilePath& install_dir,
+      std::unique_ptr<base::DictionaryValue> manifest) override {
     // Can't block here. This is usually the browser UI thread.
     base::WorkerPool::PostTask(
         FROM_HERE,
@@ -106,16 +111,17 @@ class CAPSInstallerTraits : public ComponentInstallerTraits {
 
   // This string is shown in chrome://components.
   std::string GetName() const override { return "Chrome Crash Service"; }
+
+  std::string GetAp() const override { return std::string(); }
 };
 
 }  // namespace
 
 void RegisterCAPSComponent(ComponentUpdateService* cus) {
   // The component updater takes ownership of |installer|.
-  scoped_ptr<ComponentInstallerTraits> traits(
-      new CAPSInstallerTraits());
+  std::unique_ptr<ComponentInstallerTraits> traits(new CAPSInstallerTraits());
   DefaultComponentInstaller* installer =
-      new DefaultComponentInstaller(traits.Pass());
+      new DefaultComponentInstaller(std::move(traits));
   installer->Register(cus, base::Closure());
 }
 

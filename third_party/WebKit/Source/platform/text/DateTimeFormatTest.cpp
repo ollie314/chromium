@@ -25,9 +25,6 @@
 
 #include "platform/text/DateTimeFormat.h"
 
-#include "wtf/build_config.h"
-
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 #include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/text/CString.h"
 #include "wtf/text/StringBuilder.h"
@@ -167,7 +164,7 @@ protected:
         TokenHandler handler;
         if (!DateTimeFormat::parse(formatString, handler))
             return Tokens(Token("*failed*"));
-        return handler.tokens();
+        return handler.getTokens();
     }
 
     FieldType single(const char ch)
@@ -178,7 +175,7 @@ protected:
         TokenHandler handler;
         if (!DateTimeFormat::parse(formatString, handler))
             return DateTimeFormat::FieldTypeInvalid;
-        return handler.fieldType(0);
+        return handler.getFieldType(0);
     }
 
 private:
@@ -186,12 +183,12 @@ private:
     public:
         ~TokenHandler() override { }
 
-        FieldType fieldType(int index) const
+        FieldType getFieldType(int index) const
         {
             return index >=0 && index < static_cast<int>(m_tokens.size()) ? m_tokens[index].fieldType : DateTimeFormat::FieldTypeInvalid;
         }
 
-        Tokens tokens() const { return Tokens(m_tokens); }
+        Tokens getTokens() const { return Tokens(m_tokens); }
 
     private:
         void visitField(FieldType fieldType, int count) override
@@ -336,5 +333,3 @@ TEST_F(DateTimeFormatTest, SingleUpperCaseInvalid)
 }
 
 } // namespace blink
-
-#endif

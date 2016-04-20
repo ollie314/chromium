@@ -13,7 +13,6 @@
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -23,7 +22,9 @@
 #include "chrome/browser/extensions/install_verifier_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -234,7 +235,7 @@ void InstallVerifier::Init() {
 
   const base::DictionaryValue* pref = prefs_->GetInstallSignature();
   if (pref) {
-    scoped_ptr<InstallSignature> signature_from_prefs =
+    std::unique_ptr<InstallSignature> signature_from_prefs =
         InstallSignature::FromValue(*pref);
     if (!signature_from_prefs.get()) {
       LogInitResultHistogram(INIT_UNPARSEABLE_PREF);
@@ -452,7 +453,7 @@ InstallVerifier::PendingOperation::~PendingOperation() {
 
 ExtensionIdSet InstallVerifier::GetExtensionsToVerify() const {
   ExtensionIdSet result;
-  scoped_ptr<ExtensionSet> extensions =
+  std::unique_ptr<ExtensionSet> extensions =
       ExtensionRegistry::Get(context_)->GenerateInstalledExtensionsSet();
   for (ExtensionSet::const_iterator iter = extensions->begin();
        iter != extensions->end();
@@ -574,7 +575,10 @@ void InstallVerifier::BeginFetch() {
     ids_to_sign.insert(operation.ids.begin(), operation.ids.end());
   }
 
-  signer_.reset(new InstallSigner(context_->GetRequestContext(), ids_to_sign));
+  signer_.reset(new InstallSigner(
+      content::BrowserContext::GetDefaultStoragePartition(context_)->
+          GetURLRequestContext(),
+      ids_to_sign));
   signer_->GetSignature(base::Bind(&InstallVerifier::SignatureCallback,
                                    weak_factory_.GetWeakPtr()));
 }
@@ -593,7 +597,7 @@ void InstallVerifier::SaveToPrefs() {
       DVLOG(1) << "SaveToPrefs - saving";
 
       DCHECK(InstallSigner::VerifySignature(*signature_.get()));
-      scoped_ptr<InstallSignature> rehydrated =
+      std::unique_ptr<InstallSignature> rehydrated =
           InstallSignature::FromValue(pref);
       DCHECK(InstallSigner::VerifySignature(*rehydrated.get()));
     }
@@ -622,8 +626,7 @@ void GetSignatureResultHistogram(CallbackResult result) {
 }  // namespace
 
 void InstallVerifier::SignatureCallback(
-    scoped_ptr<InstallSignature> signature) {
-
+    std::unique_ptr<InstallSignature> signature) {
   linked_ptr<PendingOperation> operation = operation_queue_.front();
   operation_queue_.pop();
 

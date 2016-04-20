@@ -14,6 +14,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/values.h"
@@ -25,24 +26,24 @@ namespace net {
 
 namespace {
 
-scoped_ptr<base::Value> NetLogSpdyStreamErrorCallback(
+std::unique_ptr<base::Value> NetLogSpdyStreamErrorCallback(
     SpdyStreamId stream_id,
     int status,
     const std::string* description,
     NetLogCaptureMode /* capture_mode */) {
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("stream_id", static_cast<int>(stream_id));
   dict->SetInteger("status", status);
   dict->SetString("description", *description);
   return std::move(dict);
 }
 
-scoped_ptr<base::Value> NetLogSpdyStreamWindowUpdateCallback(
+std::unique_ptr<base::Value> NetLogSpdyStreamWindowUpdateCallback(
     SpdyStreamId stream_id,
     int32_t delta,
     int32_t window_size,
     NetLogCaptureMode /* capture_mode */) {
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("stream_id", stream_id);
   dict->SetInteger("delta", delta);
   dict->SetInteger("window_size", window_size);
@@ -50,12 +51,7 @@ scoped_ptr<base::Value> NetLogSpdyStreamWindowUpdateCallback(
 }
 
 bool ContainsUppercaseAscii(const std::string& str) {
-  for (std::string::const_iterator i(str.begin()); i != str.end(); ++i) {
-    if (*i >= 'A' && *i <= 'Z') {
-      return true;
-    }
-  }
-  return false;
+  return std::any_of(str.begin(), str.end(), base::IsAsciiUpper<char>);
 }
 
 }  // namespace
@@ -72,13 +68,13 @@ class SpdyStream::SynStreamBufferProducer : public SpdyBufferProducer {
 
   ~SynStreamBufferProducer() override {}
 
-  scoped_ptr<SpdyBuffer> ProduceBuffer() override {
+  std::unique_ptr<SpdyBuffer> ProduceBuffer() override {
     if (!stream_.get()) {
       NOTREACHED();
-      return scoped_ptr<SpdyBuffer>();
+      return std::unique_ptr<SpdyBuffer>();
     }
     DCHECK_GT(stream_->stream_id(), 0u);
-    return scoped_ptr<SpdyBuffer>(
+    return std::unique_ptr<SpdyBuffer>(
         new SpdyBuffer(stream_->ProduceSynStreamFrame()));
   }
 
@@ -181,7 +177,7 @@ void SpdyStream::PushedStreamReplay() {
 
   while (!pending_recv_data_.empty()) {
     // Take ownership of the first element of |pending_recv_data_|.
-    scoped_ptr<SpdyBuffer> buffer = std::move(pending_recv_data_.at(0));
+    std::unique_ptr<SpdyBuffer> buffer = std::move(pending_recv_data_.at(0));
     pending_recv_data_.erase(pending_recv_data_.begin());
 
     bool eof = (buffer == NULL);
@@ -203,7 +199,7 @@ void SpdyStream::PushedStreamReplay() {
   }
 }
 
-scoped_ptr<SpdyFrame> SpdyStream::ProduceSynStreamFrame() {
+std::unique_ptr<SpdySerializedFrame> SpdyStream::ProduceSynStreamFrame() {
   CHECK_EQ(io_state_, STATE_IDLE);
   CHECK(request_headers_);
   CHECK_GT(stream_id_, 0u);
@@ -211,7 +207,7 @@ scoped_ptr<SpdyFrame> SpdyStream::ProduceSynStreamFrame() {
   SpdyControlFlags flags =
       (pending_send_status_ == NO_MORE_DATA_TO_SEND) ?
       CONTROL_FLAG_FIN : CONTROL_FLAG_NONE;
-  scoped_ptr<SpdyFrame> frame(session_->CreateSynStream(
+  std::unique_ptr<SpdySerializedFrame> frame(session_->CreateSynStream(
       stream_id_, priority_, flags, *request_headers_));
   send_time_ = base::TimeTicks::Now();
   return frame;
@@ -224,8 +220,6 @@ void SpdyStream::DetachDelegate() {
 }
 
 void SpdyStream::AdjustSendWindowSize(int32_t delta_window_size) {
-  DCHECK_GE(session_->flow_control_state(), SpdySession::FLOW_CONTROL_STREAM);
-
   if (IsClosed())
     return;
 
@@ -246,7 +240,6 @@ void SpdyStream::OnWriteBufferConsumed(
     size_t frame_payload_size,
     size_t consume_size,
     SpdyBuffer::ConsumeSource consume_source) {
-  DCHECK_GE(session_->flow_control_state(), SpdySession::FLOW_CONTROL_STREAM);
   if (consume_source == SpdyBuffer::DISCARD) {
     // If we're discarding a frame or part of it, increase the send
     // window by the number of discarded bytes. (Although if we're
@@ -261,7 +254,6 @@ void SpdyStream::OnWriteBufferConsumed(
 }
 
 void SpdyStream::IncreaseSendWindowSize(int32_t delta_window_size) {
-  DCHECK_GE(session_->flow_control_state(), SpdySession::FLOW_CONTROL_STREAM);
   DCHECK_GE(delta_window_size, 1);
 
   // Ignore late WINDOW_UPDATEs.
@@ -293,8 +285,6 @@ void SpdyStream::IncreaseSendWindowSize(int32_t delta_window_size) {
 }
 
 void SpdyStream::DecreaseSendWindowSize(int32_t delta_window_size) {
-  DCHECK_GE(session_->flow_control_state(), SpdySession::FLOW_CONTROL_STREAM);
-
   if (IsClosed())
     return;
 
@@ -318,7 +308,6 @@ void SpdyStream::DecreaseSendWindowSize(int32_t delta_window_size) {
 void SpdyStream::OnReadBufferConsumed(
     size_t consume_size,
     SpdyBuffer::ConsumeSource consume_source) {
-  DCHECK_GE(session_->flow_control_state(), SpdySession::FLOW_CONTROL_STREAM);
   DCHECK_GE(consume_size, 1u);
   DCHECK_LE(consume_size,
             static_cast<size_t>(std::numeric_limits<int32_t>::max()));
@@ -326,8 +315,6 @@ void SpdyStream::OnReadBufferConsumed(
 }
 
 void SpdyStream::IncreaseRecvWindowSize(int32_t delta_window_size) {
-  DCHECK_GE(session_->flow_control_state(), SpdySession::FLOW_CONTROL_STREAM);
-
   // By the time a read is processed by the delegate, this stream may
   // already be inactive.
   if (!session_->IsStreamActive(stream_id_))
@@ -356,7 +343,6 @@ void SpdyStream::IncreaseRecvWindowSize(int32_t delta_window_size) {
 
 void SpdyStream::DecreaseRecvWindowSize(int32_t delta_window_size) {
   DCHECK(session_->IsStreamActive(stream_id_));
-  DCHECK_GE(session_->flow_control_state(), SpdySession::FLOW_CONTROL_STREAM);
   DCHECK_GE(delta_window_size, 1);
 
   // The receiving window size as the peer knows it is
@@ -487,8 +473,12 @@ void SpdyStream::OnPushPromiseHeadersReceived(const SpdyHeaderBlock& headers) {
   request_headers_.reset(new SpdyHeaderBlock(headers));
 }
 
-void SpdyStream::OnDataReceived(scoped_ptr<SpdyBuffer> buffer) {
+void SpdyStream::OnDataReceived(std::unique_ptr<SpdyBuffer> buffer) {
   DCHECK(session_->IsStreamActive(stream_id_));
+
+  // Track our bandwidth.
+  recv_bytes_ += buffer ? buffer->GetRemainingSize() : 0;
+  recv_last_byte_time_ = base::TimeTicks::Now();
 
   // If we're still buffering data for a push stream, we will do the
   // check for data received with incomplete headers in
@@ -543,37 +533,29 @@ void SpdyStream::OnDataReceived(scoped_ptr<SpdyBuffer> buffer) {
 
   size_t length = buffer->GetRemainingSize();
   DCHECK_LE(length, session_->GetDataFrameMaximumPayload());
-  if (session_->flow_control_state() >= SpdySession::FLOW_CONTROL_STREAM) {
-    base::WeakPtr<SpdyStream> weak_this = GetWeakPtr();
-    // May close the stream.
-    DecreaseRecvWindowSize(static_cast<int32_t>(length));
-    if (!weak_this)
-      return;
-    buffer->AddConsumeCallback(
-        base::Bind(&SpdyStream::OnReadBufferConsumed, GetWeakPtr()));
-  }
-
-  // Track our bandwidth.
-  recv_bytes_ += length;
-  recv_last_byte_time_ = base::TimeTicks::Now();
+  base::WeakPtr<SpdyStream> weak_this = GetWeakPtr();
+  // May close the stream.
+  DecreaseRecvWindowSize(static_cast<int32_t>(length));
+  if (!weak_this)
+    return;
+  buffer->AddConsumeCallback(
+      base::Bind(&SpdyStream::OnReadBufferConsumed, GetWeakPtr()));
 
   // May close |this|.
   delegate_->OnDataReceived(std::move(buffer));
 }
 
 void SpdyStream::OnPaddingConsumed(size_t len) {
-  if (session_->flow_control_state() >= SpdySession::FLOW_CONTROL_STREAM) {
-    // Decrease window size because padding bytes are received.
-    // Increase window size because padding bytes are consumed (by discarding).
-    // Net result: |unacked_recv_window_bytes_| increases by |len|,
-    // |recv_window_size_| does not change.
-    base::WeakPtr<SpdyStream> weak_this = GetWeakPtr();
-    // May close the stream.
-    DecreaseRecvWindowSize(static_cast<int32_t>(len));
-    if (!weak_this)
-      return;
-    IncreaseRecvWindowSize(static_cast<int32_t>(len));
-  }
+  // Decrease window size because padding bytes are received.
+  // Increase window size because padding bytes are consumed (by discarding).
+  // Net result: |unacked_recv_window_bytes_| increases by |len|,
+  // |recv_window_size_| does not change.
+  base::WeakPtr<SpdyStream> weak_this = GetWeakPtr();
+  // May close the stream.
+  DecreaseRecvWindowSize(static_cast<int32_t>(len));
+  if (!weak_this)
+    return;
+  IncreaseRecvWindowSize(static_cast<int32_t>(len));
 }
 
 void SpdyStream::OnFrameWriteComplete(SpdyFrameType frame_type,
@@ -590,9 +572,9 @@ void SpdyStream::OnFrameWriteComplete(SpdyFrameType frame_type,
   }
 
   if (pending_send_status_ == NO_MORE_DATA_TO_SEND) {
-    if(io_state_ == STATE_OPEN) {
+    if (io_state_ == STATE_OPEN) {
       io_state_ = STATE_HALF_CLOSED_LOCAL;
-    } else if(io_state_ == STATE_HALF_CLOSED_REMOTE) {
+    } else if (io_state_ == STATE_HALF_CLOSED_REMOTE) {
       io_state_ = STATE_CLOSED;
     } else {
       NOTREACHED() << io_state_;
@@ -702,8 +684,9 @@ base::WeakPtr<SpdyStream> SpdyStream::GetWeakPtr() {
   return weak_ptr_factory_.GetWeakPtr();
 }
 
-int SpdyStream::SendRequestHeaders(scoped_ptr<SpdyHeaderBlock> request_headers,
-                                   SpdySendStatus send_status) {
+int SpdyStream::SendRequestHeaders(
+    std::unique_ptr<SpdyHeaderBlock> request_headers,
+    SpdySendStatus send_status) {
   CHECK_NE(type_, SPDY_PUSH_STREAM);
   CHECK_EQ(pending_send_status_, MORE_DATA_TO_SEND);
   CHECK(!request_headers_);
@@ -711,10 +694,9 @@ int SpdyStream::SendRequestHeaders(scoped_ptr<SpdyHeaderBlock> request_headers,
   CHECK_EQ(io_state_, STATE_IDLE);
   request_headers_ = std::move(request_headers);
   pending_send_status_ = send_status;
-  session_->EnqueueStreamWrite(
-      GetWeakPtr(), SYN_STREAM,
-      scoped_ptr<SpdyBufferProducer>(
-          new SynStreamBufferProducer(GetWeakPtr())));
+  session_->EnqueueStreamWrite(GetWeakPtr(), SYN_STREAM,
+                               std::unique_ptr<SpdyBufferProducer>(
+                                   new SynStreamBufferProducer(GetWeakPtr())));
   return ERR_IO_PENDING;
 }
 
@@ -788,16 +770,22 @@ void SpdyStream::AddRawSentBytes(size_t sent_bytes) {
 bool SpdyStream::GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const {
   if (stream_id_ == 0)
     return false;
-
-  return session_->GetLoadTimingInfo(stream_id_, load_timing_info);
+  bool result = session_->GetLoadTimingInfo(stream_id_, load_timing_info);
+  if (type_ == SPDY_PUSH_STREAM) {
+    load_timing_info->push_start = recv_first_byte_time_;
+    bool done_receiving = IsClosed() || (!pending_recv_data_.empty() &&
+                                         !pending_recv_data_.back());
+    if (done_receiving)
+      load_timing_info->push_end = recv_last_byte_time_;
+  }
+  return result;
 }
 
 GURL SpdyStream::GetUrlFromHeaders() const {
   if (!request_headers_)
     return GURL();
 
-  return GetUrlFromHeaderBlock(
-      *request_headers_, GetProtocolVersion(), type_ == SPDY_PUSH_STREAM);
+  return GetUrlFromHeaderBlock(*request_headers_, GetProtocolVersion());
 }
 
 bool SpdyStream::HasUrlFromHeaders() const {
@@ -851,38 +839,33 @@ void SpdyStream::QueueNextDataFrame() {
   SpdyDataFlags flags =
       (pending_send_status_ == NO_MORE_DATA_TO_SEND) ?
       DATA_FLAG_FIN : DATA_FLAG_NONE;
-  scoped_ptr<SpdyBuffer> data_buffer(
-      session_->CreateDataBuffer(stream_id_,
-                                 pending_send_data_.get(),
-                                 pending_send_data_->BytesRemaining(),
-                                 flags));
+  std::unique_ptr<SpdyBuffer> data_buffer(
+      session_->CreateDataBuffer(stream_id_, pending_send_data_.get(),
+                                 pending_send_data_->BytesRemaining(), flags));
   // We'll get called again by PossiblyResumeIfSendStalled().
   if (!data_buffer)
     return;
 
-  if (session_->flow_control_state() >= SpdySession::FLOW_CONTROL_STREAM) {
-    DCHECK_GE(data_buffer->GetRemainingSize(),
-              session_->GetDataFrameMinimumSize());
-    size_t payload_size =
-        data_buffer->GetRemainingSize() - session_->GetDataFrameMinimumSize();
-    DCHECK_LE(payload_size, session_->GetDataFrameMaximumPayload());
+  DCHECK_GE(data_buffer->GetRemainingSize(),
+            session_->GetDataFrameMinimumSize());
+  size_t payload_size =
+      data_buffer->GetRemainingSize() - session_->GetDataFrameMinimumSize();
+  DCHECK_LE(payload_size, session_->GetDataFrameMaximumPayload());
 
-    // Send window size is based on payload size, so nothing to do if this is
-    // just a FIN with no payload.
-    if (payload_size != 0) {
-      DecreaseSendWindowSize(static_cast<int32_t>(payload_size));
-      // This currently isn't strictly needed, since write frames are
-      // discarded only if the stream is about to be closed. But have it
-      // here anyway just in case this changes.
-      data_buffer->AddConsumeCallback(
-          base::Bind(&SpdyStream::OnWriteBufferConsumed,
-                     GetWeakPtr(), payload_size));
-    }
+  // Send window size is based on payload size, so nothing to do if this is
+  // just a FIN with no payload.
+  if (payload_size != 0) {
+    DecreaseSendWindowSize(static_cast<int32_t>(payload_size));
+    // This currently isn't strictly needed, since write frames are
+    // discarded only if the stream is about to be closed. But have it
+    // here anyway just in case this changes.
+    data_buffer->AddConsumeCallback(base::Bind(
+        &SpdyStream::OnWriteBufferConsumed, GetWeakPtr(), payload_size));
   }
 
   session_->EnqueueStreamWrite(
       GetWeakPtr(), DATA,
-      scoped_ptr<SpdyBufferProducer>(
+      std::unique_ptr<SpdyBufferProducer>(
           new SimpleBufferProducer(std::move(data_buffer))));
 }
 

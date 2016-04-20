@@ -4,11 +4,11 @@
 
 #include "chromeos/binder/command_stream.h"
 
-#include <linux/android/binder.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "base/bind.h"
+#include "chromeos/binder/binder_driver_api.h"
 #include "chromeos/binder/buffer_reader.h"
 #include "chromeos/binder/driver.h"
 #include "chromeos/binder/transaction_data.h"
@@ -44,6 +44,11 @@ bool CommandStream::Fetch() {
   incoming_data_reader_.reset(
       new BufferReader(incoming_data_.data(), incoming_data_.size()));
   return true;
+}
+
+bool CommandStream::FetchBlocking() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return driver_->Poll() && Fetch();
 }
 
 bool CommandStream::CanProcessIncomingCommand() {
@@ -126,9 +131,10 @@ bool CommandStream::OnIncomingCommand(uint32_t command, BufferReader* reader) {
       break;
     }
     case BR_REPLY: {
-      scoped_ptr<TransactionDataFromDriver> data(new TransactionDataFromDriver(
-          base::Bind(&CommandStream::FreeTransactionBuffer,
-                     weak_ptr_factory_.GetWeakPtr())));
+      std::unique_ptr<TransactionDataFromDriver> data(
+          new TransactionDataFromDriver(
+              base::Bind(&CommandStream::FreeTransactionBuffer,
+                         weak_ptr_factory_.GetWeakPtr())));
       binder_transaction_data* data_struct = data->mutable_data();
       if (!reader->Read(data_struct, sizeof(*data_struct))) {
         LOG(ERROR) << "Failed to read transaction data.";
@@ -208,7 +214,8 @@ bool CommandStream::OnIncomingCommand(uint32_t command, BufferReader* reader) {
 
 void CommandStream::FreeTransactionBuffer(const void* ptr) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  AppendOutgoingCommand(BC_FREE_BUFFER, &ptr, sizeof(ptr));
+  binder_uintptr_t p = reinterpret_cast<binder_uintptr_t>(ptr);
+  AppendOutgoingCommand(BC_FREE_BUFFER, &p, sizeof(p));
 }
 
 }  // namespace binder

@@ -55,7 +55,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNegotiate : public HttpAuthHandler {
 #if !defined(OS_ANDROID)
     // Sets the system library to use, thereby assuming ownership of
     // |auth_library|.
-    void set_library(scoped_ptr<AuthLibrary> auth_provider) {
+    void set_library(std::unique_ptr<AuthLibrary> auth_provider) {
       auth_library_ = std::move(auth_provider);
     }
 #endif
@@ -63,11 +63,12 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNegotiate : public HttpAuthHandler {
     // HttpAuthHandlerFactory overrides
     int CreateAuthHandler(HttpAuthChallengeTokenizer* challenge,
                           HttpAuth::Target target,
+                          const SSLInfo& ssl_info,
                           const GURL& origin,
                           CreateReason reason,
                           int digest_nonce_count,
                           const BoundNetLog& net_log,
-                          scoped_ptr<HttpAuthHandler>* handler) override;
+                          std::unique_ptr<HttpAuthHandler>* handler) override;
 
    private:
     HostResolver* resolver_;
@@ -76,7 +77,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNegotiate : public HttpAuthHandler {
 #endif
     bool is_unsupported_;
 #if !defined(OS_ANDROID)
-    scoped_ptr<AuthLibrary> auth_library_;
+    std::unique_ptr<AuthLibrary> auth_library_;
 #endif
   };
 
@@ -104,7 +105,8 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNegotiate : public HttpAuthHandler {
   bool AllowsExplicitCredentials() override;
 
  protected:
-  bool Init(HttpAuthChallengeTokenizer* challenge) override;
+  bool Init(HttpAuthChallengeTokenizer* challenge,
+            const SSLInfo& ssl_info) override;
 
   int GenerateAuthTokenImpl(const AuthCredentials* credentials,
                             const HttpRequestInfo* request,
@@ -135,13 +137,14 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNegotiate : public HttpAuthHandler {
 
   // Members which are needed for DNS lookup + SPN.
   AddressList address_list_;
-  scoped_ptr<SingleRequestHostResolver> single_resolve_;
+  std::unique_ptr<SingleRequestHostResolver> single_resolve_;
 
   // Things which should be consistent after first call to GenerateAuthToken.
   bool already_called_;
   bool has_credentials_;
   AuthCredentials credentials_;
   std::string spn_;
+  std::string channel_bindings_;
 
   // Things which vary each round.
   CompletionCallback callback_;

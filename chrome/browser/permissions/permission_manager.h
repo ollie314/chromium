@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_PERMISSIONS_PERMISSION_MANAGER_H_
 #define CHROME_BROWSER_PERMISSIONS_PERMISSION_MANAGER_H_
 
+#include <unordered_map>
+
 #include "base/callback_forward.h"
 #include "base/id_map.h"
 #include "base/macros.h"
@@ -14,6 +16,7 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/permission_manager.h"
 
+class PermissionContextBase;
 class Profile;
 
 namespace content {
@@ -25,6 +28,8 @@ class PermissionManager : public KeyedService,
                           public content::PermissionManager,
                           public content_settings::Observer {
  public:
+  static PermissionManager* Get(Profile* profile);
+
   explicit PermissionManager(Profile* profile);
   ~PermissionManager() override;
 
@@ -33,20 +38,20 @@ class PermissionManager : public KeyedService,
       content::PermissionType permission,
       content::RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
-      bool user_gesture,
-      const base::Callback<void(content::PermissionStatus)>& callback) override;
+      const base::Callback<void(blink::mojom::PermissionStatus)>& callback)
+      override;
   int RequestPermissions(
       const std::vector<content::PermissionType>& permissions,
       content::RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
-      bool user_gesture,
-      const base::Callback<void(
-          const std::vector<content::PermissionStatus>&)>& callback) override;
+      const base::Callback<
+          void(const std::vector<blink::mojom::PermissionStatus>&)>& callback)
+      override;
   void CancelPermissionRequest(int request_id) override;
   void ResetPermission(content::PermissionType permission,
                        const GURL& requesting_origin,
                        const GURL& embedding_origin) override;
-  content::PermissionStatus GetPermissionStatus(
+  blink::mojom::PermissionStatus GetPermissionStatus(
       content::PermissionType permission,
       const GURL& requesting_origin,
       const GURL& embedding_origin) override;
@@ -57,15 +62,27 @@ class PermissionManager : public KeyedService,
       content::PermissionType permission,
       const GURL& requesting_origin,
       const GURL& embedding_origin,
-      const base::Callback<void(content::PermissionStatus)>& callback) override;
+      const base::Callback<void(blink::mojom::PermissionStatus)>& callback)
+      override;
   void UnsubscribePermissionStatusChange(int subscription_id) override;
 
  private:
+  friend class GeolocationPermissionContextTests;
+  // TODO(raymes): Refactor MediaPermission to not call GetPermissionContext.
+  // See crbug.com/596786.
+  friend class MediaPermission;
+
   class PendingRequest;
   using PendingRequestsMap = IDMap<PendingRequest, IDMapOwnPointer>;
 
   struct Subscription;
   using SubscriptionsMap = IDMap<Subscription, IDMapOwnPointer>;
+
+  struct PermissionTypeHash {
+    std::size_t operator()(const content::PermissionType& type) const;
+  };
+
+  PermissionContextBase* GetPermissionContext(content::PermissionType type);
 
   // Called when a permission was decided for a given PendingRequest. The
   // PendingRequest is identified by its |request_id| and the permission is
@@ -76,7 +93,7 @@ class PermissionManager : public KeyedService,
   void OnPermissionsRequestResponseStatus(
       int request_id,
       int permission_id,
-      content::PermissionStatus status);
+      blink::mojom::PermissionStatus status);
 
   // Not all WebContents are able to display permission requests. If the PBM
   // is required but missing for |web_contents|, don't pass along the request.
@@ -91,6 +108,11 @@ class PermissionManager : public KeyedService,
   Profile* profile_;
   PendingRequestsMap pending_requests_;
   SubscriptionsMap subscriptions_;
+
+  std::unordered_map<content::PermissionType,
+                     std::unique_ptr<PermissionContextBase>,
+                     PermissionTypeHash>
+      permission_contexts_;
 
   base::WeakPtrFactory<PermissionManager> weak_ptr_factory_;
 

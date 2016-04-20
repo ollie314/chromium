@@ -36,14 +36,17 @@ WebContents* RenderFrameHostDelegate::GetAsWebContents() {
   return NULL;
 }
 
+InterstitialPage* RenderFrameHostDelegate::GetAsInterstitialPage() {
+  return nullptr;
+}
+
 void RenderFrameHostDelegate::RequestMediaAccessPermission(
     const MediaStreamRequest& request,
     const MediaResponseCallback& callback) {
   LOG(ERROR) << "RenderFrameHostDelegate::RequestMediaAccessPermission: "
              << "Not supported.";
-  callback.Run(MediaStreamDevices(),
-               MEDIA_DEVICE_NOT_SUPPORTED,
-               scoped_ptr<MediaStreamUI>());
+  callback.Run(MediaStreamDevices(), MEDIA_DEVICE_NOT_SUPPORTED,
+               std::unique_ptr<MediaStreamUI>());
 }
 
 bool RenderFrameHostDelegate::CheckMediaAccessPermission(
@@ -79,16 +82,9 @@ bool RenderFrameHostDelegate::ShouldRouteMessageEvent(
   return false;
 }
 
-scoped_ptr<WebUIImpl> RenderFrameHostDelegate::CreateWebUIForRenderFrameHost(
-    const GURL& url) {
+std::unique_ptr<WebUIImpl>
+RenderFrameHostDelegate::CreateWebUIForRenderFrameHost(const GURL& url) {
   return nullptr;
 }
-
-#if defined(OS_WIN)
-gfx::NativeViewAccessible
-    RenderFrameHostDelegate::GetParentNativeViewAccessible() {
-  return NULL;
-}
-#endif  // defined(OS_WIN)
 
 }  // namespace content

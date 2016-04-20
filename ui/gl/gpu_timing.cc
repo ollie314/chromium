@@ -5,6 +5,7 @@
 #include "ui/gl/gpu_timing.h"
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/time/time.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
@@ -18,6 +19,12 @@ class TimerQuery;
 int64_t NanoToMicro(uint64_t nano_seconds) {
   const uint64_t up = nano_seconds + base::Time::kNanosecondsPerMicrosecond / 2;
   return static_cast<int64_t>(up / base::Time::kNanosecondsPerMicrosecond);
+}
+
+int32_t QueryTimestampBits() {
+  GLint timestamp_bits;
+  glGetQueryiv(GL_TIMESTAMP, GL_QUERY_COUNTER_BITS, &timestamp_bits);
+  return static_cast<int32_t>(timestamp_bits);
 }
 
 class GPUTimingImpl : public GPUTiming {
@@ -73,6 +80,7 @@ class GPUTimingImpl : public GPUTiming {
   int64_t offset_ = 0;  // offset cache when timer_type_ == kTimerTypeARB
   bool offset_valid_ = false;
   bool force_time_elapsed_query_ = false;
+  int32_t timestamp_bit_count_gl_ = -1;  // gl implementation timestamp bits
 
   uint32_t next_timer_query_id_ = 0;
   uint32_t next_good_timer_query_id_ = 0; // identify bad ids for disjoints.
@@ -310,14 +318,21 @@ GPUTimingImpl::GPUTimingImpl(GLContextReal* context) {
   DCHECK(context);
   const GLVersionInfo* version_info = context->GetVersionInfo();
   DCHECK(version_info);
-  if (version_info->is_es3 &&  // glGetInteger64v is supported under ES3.
-    context->HasExtension("GL_EXT_disjoint_timer_query")) {
+  if (context->HasExtension("GL_EXT_disjoint_timer_query")) {
     timer_type_ = GPUTiming::kTimerTypeDisjoint;
   } else if (context->HasExtension("GL_ARB_timer_query")) {
     timer_type_ = GPUTiming::kTimerTypeARB;
   } else if (context->HasExtension("GL_EXT_timer_query")) {
     timer_type_ = GPUTiming::kTimerTypeEXT;
     force_time_elapsed_query_ = true;
+    timestamp_bit_count_gl_ = 0;
+  }
+  // The command glGetInteger64v is only supported under ES3 and GL3.2. Since it
+  // is only used for timestamps, we workaround this by emulating timestamps
+  // so WebGL 1.0 will still have access to the extension.
+  if (!version_info->IsAtLeastGLES(3, 0) && !version_info->IsAtLeastGL(3, 2)) {
+    force_time_elapsed_query_ = true;
+    timestamp_bit_count_gl_ = 0;
   }
 }
 
@@ -342,9 +357,19 @@ int64_t GPUTimingImpl::CalculateTimerOffset() {
         timer_type_ == GPUTiming::kTimerTypeARB) {
       GLint64 gl_now = 0;
       glGetInteger64v(GL_TIMESTAMP, &gl_now);
-      int64_t micro_now = NanoToMicro(gl_now);
-      offset_ = GetCurrentCPUTime() - micro_now;
-      offset_valid_ = (timer_type_ == GPUTiming::kTimerTypeARB);
+      const int64_t cpu_time = GetCurrentCPUTime();
+      const int64_t micro_offset = cpu_time - NanoToMicro(gl_now);
+
+      // We cannot expect these instructions to run with the accuracy
+      // within 1 microsecond, instead discard differences which are less
+      // than a single millisecond.
+      base::TimeDelta delta =
+          base::TimeDelta::FromMicroseconds(micro_offset - offset_);
+
+      if (delta.magnitude().InMilliseconds() >= 1) {
+        offset_ = micro_offset;
+        offset_valid_ = (timer_type_ == GPUTiming::kTimerTypeARB);
+      }
     } else {
       offset_ = 0;
       offset_valid_ = true;
@@ -381,6 +406,15 @@ void GPUTimingImpl::EndElapsedTimeQuery(scoped_refptr<QueryResult> result) {
 
 scoped_refptr<QueryResult> GPUTimingImpl::DoTimeStampQuery() {
   DCHECK(timer_type_ != GPUTiming::kTimerTypeInvalid);
+
+  // Certain GL drivers have timestamp bit count set to 0 which means timestamps
+  // aren't supported. Emulate them with time elapsed queries if that is the
+  // case.
+  if (timestamp_bit_count_gl_ == -1) {
+    DCHECK(timer_type_ != GPUTiming::kTimerTypeEXT);
+    timestamp_bit_count_gl_ = QueryTimestampBits();
+    force_time_elapsed_query_ = (timestamp_bit_count_gl_ == 0);
+  }
 
   if (force_time_elapsed_query_) {
     // Replace with elapsed timer queries instead.
@@ -571,12 +605,13 @@ GPUTimingClient::GPUTimingClient(GPUTimingImpl* gpu_timing)
   }
 }
 
-scoped_ptr<GPUTimer> GPUTimingClient::CreateGPUTimer(bool prefer_elapsed_time) {
+std::unique_ptr<GPUTimer> GPUTimingClient::CreateGPUTimer(
+    bool prefer_elapsed_time) {
   prefer_elapsed_time |= (timer_type_ == GPUTiming::kTimerTypeEXT);
   if (gpu_timing_)
     prefer_elapsed_time |= gpu_timing_->IsForceTimeElapsedQuery();
 
-  return make_scoped_ptr(new GPUTimer(this, prefer_elapsed_time));
+  return base::WrapUnique(new GPUTimer(this, prefer_elapsed_time));
 }
 
 bool GPUTimingClient::IsAvailable() {

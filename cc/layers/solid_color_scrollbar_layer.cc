@@ -4,13 +4,14 @@
 
 #include "cc/layers/solid_color_scrollbar_layer.h"
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/solid_color_scrollbar_layer_impl.h"
 
 namespace cc {
 
-scoped_ptr<LayerImpl> SolidColorScrollbarLayer::CreateLayerImpl(
+std::unique_ptr<LayerImpl> SolidColorScrollbarLayer::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
   const bool kIsOverlayScrollbar = true;
   return SolidColorScrollbarLayerImpl::Create(tree_impl,
@@ -23,31 +24,27 @@ scoped_ptr<LayerImpl> SolidColorScrollbarLayer::CreateLayerImpl(
 }
 
 scoped_refptr<SolidColorScrollbarLayer> SolidColorScrollbarLayer::Create(
-    const LayerSettings& settings,
     ScrollbarOrientation orientation,
     int thumb_thickness,
     int track_start,
     bool is_left_side_vertical_scrollbar,
     int scroll_layer_id) {
   return make_scoped_refptr(new SolidColorScrollbarLayer(
-      settings, orientation, thumb_thickness, track_start,
+      orientation, thumb_thickness, track_start,
       is_left_side_vertical_scrollbar, scroll_layer_id));
 }
 
 SolidColorScrollbarLayer::SolidColorScrollbarLayer(
-    const LayerSettings& settings,
     ScrollbarOrientation orientation,
     int thumb_thickness,
     int track_start,
     bool is_left_side_vertical_scrollbar,
     int scroll_layer_id)
-    : Layer(settings),
-      scroll_layer_id_(Layer::INVALID_ID),
+    : scroll_layer_id_(Layer::INVALID_ID),
       orientation_(orientation),
       thumb_thickness_(thumb_thickness),
       track_start_(track_start),
-      is_left_side_vertical_scrollbar_(is_left_side_vertical_scrollbar) {
-}
+      is_left_side_vertical_scrollbar_(is_left_side_vertical_scrollbar) {}
 
 SolidColorScrollbarLayer::~SolidColorScrollbarLayer() {}
 

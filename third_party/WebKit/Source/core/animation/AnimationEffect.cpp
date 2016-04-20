@@ -135,7 +135,7 @@ ComputedTimingProperties AnimationEffect::computedTiming()
 
 void AnimationEffect::updateInheritedTime(double inheritedTime, TimingUpdateReason reason) const
 {
-    bool needsUpdate = m_needsUpdate || (m_lastUpdateTime != inheritedTime && !(isNull(m_lastUpdateTime) && isNull(inheritedTime)));
+    bool needsUpdate = m_needsUpdate || (m_lastUpdateTime != inheritedTime && !(isNull(m_lastUpdateTime) && isNull(inheritedTime))) || (animation() && animation()->effectSuppressed());
     m_needsUpdate = false;
     m_lastUpdateTime = inheritedTime;
 
@@ -158,7 +158,16 @@ void AnimationEffect::updateInheritedTime(double inheritedTime, TimingUpdateReas
             const double iterationTime = calculateIterationTime(iterationDuration, repeatedDuration(), scaledActiveTime, startOffset, m_timing);
 
             currentIteration = calculateCurrentIteration(iterationDuration, iterationTime, scaledActiveTime, m_timing);
-            timeFraction = calculateTransformedTime(currentIteration, iterationDuration, iterationTime, m_timing) / iterationDuration;
+            const double transformedTime = calculateTransformedTime(currentIteration, iterationDuration, iterationTime, m_timing);
+
+            // The infinite iterationDuration case here is a workaround because
+            // the specified behaviour does not handle infinite durations well.
+            // There is an open issue against the spec to fix this:
+            // https://github.com/w3c/web-animations/issues/142
+            if (!std::isfinite(iterationDuration))
+                timeFraction = fmod(m_timing.iterationStart, 1.0);
+            else
+                timeFraction = transformedTime / iterationDuration;
 
             if (!isNull(iterationTime)) {
                 timeToNextIteration = (iterationDuration - iterationTime) / std::abs(m_timing.playbackRate);
@@ -188,8 +197,8 @@ void AnimationEffect::updateInheritedTime(double inheritedTime, TimingUpdateReas
 
         m_calculated.phase = currentPhase;
         m_calculated.isInEffect = !isNull(activeTime);
-        m_calculated.isInPlay = phase() == PhaseActive;
-        m_calculated.isCurrent = phase() == PhaseBefore || isInPlay();
+        m_calculated.isInPlay = getPhase() == PhaseActive;
+        m_calculated.isCurrent = getPhase() == PhaseBefore || isInPlay();
         m_calculated.localTime = m_lastUpdateTime;
     }
 

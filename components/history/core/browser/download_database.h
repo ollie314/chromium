@@ -79,6 +79,14 @@ class DownloadDatabase {
   // to the downloads table.
   bool MigrateDownloadValidators();
 
+  // Returns true if able to add GUID, hash and HTTP method columns to the
+  // download table.
+  bool MigrateHashHttpMethodAndGenerateGuids();
+
+  // Returns true if able to add tab_url and tab_referrer_url columns to the
+  // download table.
+  bool MigrateDownloadTabUrl();
+
   // Creates the downloads table if needed.
   bool InitDownloadTable();
 

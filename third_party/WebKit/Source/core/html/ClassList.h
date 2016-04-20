@@ -30,7 +30,6 @@
 #include "core/dom/Element.h"
 #include "core/dom/SpaceSplitString.h"
 #include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
@@ -40,15 +39,10 @@ typedef int ExceptionCode;
 
 class ClassList final : public DOMTokenList {
 public:
-    static PassOwnPtrWillBeRawPtr<ClassList> create(Element* element)
+    static ClassList* create(Element* element)
     {
-        return adoptPtrWillBeNoop(new ClassList(element));
+        return new ClassList(element);
     }
-
-#if !ENABLE(OILPAN)
-    void ref() override;
-    void deref() override;
-#endif
 
     unsigned length() const override;
     const AtomicString item(unsigned index) const override;
@@ -69,7 +63,7 @@ private:
     const AtomicString& value() const override { return m_element->getAttribute(HTMLNames::classAttr); }
     void setValue(const AtomicString& value) override { m_element->setAttribute(HTMLNames::classAttr, value); }
 
-    RawPtrWillBeMember<Element> m_element;
+    Member<Element> m_element;
     mutable OwnPtr<SpaceSplitString> m_classNamesForQuirksMode;
 };
 

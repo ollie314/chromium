@@ -5,7 +5,9 @@
 #import "ios/chrome/browser/find_in_page/find_in_page_controller.h"
 
 #import <UIKit/UIKit.h>
+
 #import <cmath>
+#include <memory>
 
 #include "base/ios/ios_util.h"
 #include "base/logging.h"
@@ -80,7 +82,7 @@ const NSTimeInterval kRecurringPumpDelay = .01;
   BOOL _findStringStarted;
 
   // Bridge to observe the web state from Objective-C.
-  scoped_ptr<web::WebStateObserverBridge> _webStateObserverBridge;
+  std::unique_ptr<web::WebStateObserverBridge> _webStateObserverBridge;
 }
 
 @synthesize delegate = _delegate;
@@ -290,6 +292,12 @@ const NSTimeInterval kRecurringPumpDelay = .01;
 }
 
 - (void)restoreSearchTerm {
+  // Pasteboards always return nil in background:
+  if ([[UIApplication sharedApplication] applicationState] !=
+      UIApplicationStateActive) {
+    return;
+  }
+
   NSString* term = [self findPasteboard].string;
   [[self findInPageModel] updateQuery:(term ? term : @"") matches:0];
 }

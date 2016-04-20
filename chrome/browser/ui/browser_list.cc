@@ -15,10 +15,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_iterator.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
 
@@ -30,8 +29,7 @@ base::LazyInstance<base::ObserverList<chrome::BrowserListObserver>>::Leaky
     BrowserList::observers_ = LAZY_INSTANCE_INITIALIZER;
 
 // static
-BrowserList* BrowserList::native_instance_ = NULL;
-BrowserList* BrowserList::ash_instance_ = NULL;
+BrowserList* BrowserList::instance_ = NULL;
 
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserList, public:
@@ -43,14 +41,9 @@ Browser* BrowserList::GetLastActive() const {
 }
 
 // static
-BrowserList* BrowserList::GetInstance(chrome::HostDesktopType type) {
+BrowserList* BrowserList::GetInstance() {
   BrowserList** list = NULL;
-  if (type == chrome::HOST_DESKTOP_TYPE_NATIVE)
-    list = &native_instance_;
-  else if (type == chrome::HOST_DESKTOP_TYPE_ASH)
-    list = &ash_instance_;
-  else
-    NOTREACHED();
+  list = &instance_;
   if (!*list)
     *list = new BrowserList;
   return *list;
@@ -59,11 +52,9 @@ BrowserList* BrowserList::GetInstance(chrome::HostDesktopType type) {
 // static
 void BrowserList::AddBrowser(Browser* browser) {
   DCHECK(browser);
-  // Push |browser| on the appropriate list instance.
-  BrowserList* browser_list = GetInstance(browser->host_desktop_type());
-  browser_list->browsers_.push_back(browser);
+  GetInstance()->browsers_.push_back(browser);
 
-  g_browser_process->AddRefModule();
+  browser->RegisterKeepAlive();
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_BROWSER_OPENED,
@@ -77,7 +68,7 @@ void BrowserList::AddBrowser(Browser* browser) {
 // static
 void BrowserList::RemoveBrowser(Browser* browser) {
   // Remove |browser| from the appropriate list instance.
-  BrowserList* browser_list = GetInstance(browser->host_desktop_type());
+  BrowserList* browser_list = GetInstance();
   RemoveBrowserFrom(browser, &browser_list->last_active_browsers_);
 
   content::NotificationService::current()->Notify(
@@ -90,7 +81,7 @@ void BrowserList::RemoveBrowser(Browser* browser) {
   FOR_EACH_OBSERVER(chrome::BrowserListObserver, observers_.Get(),
                     OnBrowserRemoved(browser));
 
-  g_browser_process->ReleaseModule();
+  browser->UnregisterKeepAlive();
 
   // If we're exiting, send out the APP_TERMINATING notification to allow other
   // modules to shut themselves down.
@@ -120,9 +111,10 @@ void BrowserList::RemoveObserver(chrome::BrowserListObserver* observer) {
 // static
 void BrowserList::CloseAllBrowsersWithProfile(Profile* profile) {
   BrowserVector browsers_to_close;
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    if (it->profile()->GetOriginalProfile() == profile->GetOriginalProfile())
-      browsers_to_close.push_back(*it);
+  for (auto* browser : *BrowserList::GetInstance()) {
+    if (browser->profile()->GetOriginalProfile() ==
+        profile->GetOriginalProfile())
+      browsers_to_close.push_back(browser);
   }
 
   for (BrowserVector::const_iterator it = browsers_to_close.begin();
@@ -135,9 +127,10 @@ void BrowserList::CloseAllBrowsersWithProfile(Profile* profile) {
 void BrowserList::CloseAllBrowsersWithProfile(Profile* profile,
     const base::Callback<void(const base::FilePath&)>& on_close_success) {
   BrowserVector browsers_to_close;
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    if (it->profile()->GetOriginalProfile() == profile->GetOriginalProfile())
-      browsers_to_close.push_back(*it);
+  for (auto* browser : *BrowserList::GetInstance()) {
+    if (browser->profile()->GetOriginalProfile() ==
+        profile->GetOriginalProfile())
+      browsers_to_close.push_back(browser);
   }
 
   TryToCloseBrowserList(browsers_to_close,
@@ -195,10 +188,9 @@ void BrowserList::PostBeforeUnloadHandlers(
 // static
 void BrowserList::SetLastActive(Browser* browser) {
   content::RecordAction(UserMetricsAction("ActiveBrowserChanged"));
-  BrowserList* browser_list = GetInstance(browser->host_desktop_type());
 
-  RemoveBrowserFrom(browser, &browser_list->last_active_browsers_);
-  browser_list->last_active_browsers_.push_back(browser);
+  RemoveBrowserFrom(browser, &GetInstance()->last_active_browsers_);
+  GetInstance()->last_active_browsers_.push_back(browser);
 
   FOR_EACH_OBSERVER(chrome::BrowserListObserver, observers_.Get(),
                     OnBrowserSetLastActive(browser));
@@ -206,8 +198,8 @@ void BrowserList::SetLastActive(Browser* browser) {
 
 // static
 bool BrowserList::IsOffTheRecordSessionActive() {
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    if (it->profile()->IsOffTheRecord())
+  for (auto* browser : *BrowserList::GetInstance()) {
+    if (browser->profile()->IsOffTheRecord())
       return true;
   }
   return false;
@@ -215,9 +207,9 @@ bool BrowserList::IsOffTheRecordSessionActive() {
 
 // static
 bool BrowserList::IsOffTheRecordSessionActiveForProfile(Profile* profile) {
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    if (it->profile()->IsSameProfile(profile) &&
-        it->profile()->IsOffTheRecord()) {
+  for (auto* browser : *BrowserList::GetInstance()) {
+    if (browser->profile()->IsSameProfile(profile) &&
+        browser->profile()->IsOffTheRecord()) {
       return true;
     }
   }

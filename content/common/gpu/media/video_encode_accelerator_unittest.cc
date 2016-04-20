@@ -5,7 +5,9 @@
 #include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
+
 #include <algorithm>
+#include <memory>
 #include <queue>
 #include <string>
 #include <utility>
@@ -55,6 +57,8 @@
 // Status has been defined as int in Xlib.h.
 #undef Status
 #endif  // defined(ARCH_CPU_X86_FAMILY)
+#elif defined(OS_MACOSX)
+#include "content/common/gpu/media/vt_video_encode_accelerator_mac.h"
 #else
 #error The VideoEncodeAcceleratorUnittest is not supported on this platform.
 #endif
@@ -126,7 +130,11 @@ const unsigned int kLoggedLatencyPercentiles[] = {50, 75, 95};
 //                                    of the stream.
 //   Bitrate is only forced for tests that test bitrate.
 const char* g_default_in_filename = "bear_320x192_40frames.yuv";
+#if !defined(OS_MACOSX)
 const char* g_default_in_parameters = ":320:192:1:out.h264:200000";
+#else
+const char* g_default_in_parameters = ":320:192:0:out.h264:200000";
+#endif
 
 // Enabled by including a --fake_encoder flag to the command line invoking the
 // test.
@@ -394,7 +402,7 @@ static void ParseAndReadTestStreamData(const base::FilePath::StringType& data,
 class VideoEncodeAcceleratorTestEnvironment : public ::testing::Environment {
  public:
   VideoEncodeAcceleratorTestEnvironment(
-      scoped_ptr<base::FilePath::StringType> data,
+      std::unique_ptr<base::FilePath::StringType> data,
       const base::FilePath& log_path,
       bool run_at_fps,
       bool needs_encode_latency,
@@ -449,9 +457,9 @@ class VideoEncodeAcceleratorTestEnvironment : public ::testing::Environment {
   ScopedVector<TestStream> test_streams_;
 
  private:
-  scoped_ptr<base::FilePath::StringType> test_stream_data_;
+  std::unique_ptr<base::FilePath::StringType> test_stream_data_;
   base::FilePath log_path_;
-  scoped_ptr<base::File> log_file_;
+  std::unique_ptr<base::File> log_file_;
   bool run_at_fps_;
   bool needs_encode_latency_;
   bool verify_all_output_;
@@ -484,8 +492,9 @@ class StreamValidator {
   virtual ~StreamValidator() {}
 
   // Provide a StreamValidator instance for the given |profile|.
-  static scoped_ptr<StreamValidator> Create(media::VideoCodecProfile profile,
-                                            const FrameFoundCallback& frame_cb);
+  static std::unique_ptr<StreamValidator> Create(
+      media::VideoCodecProfile profile,
+      const FrameFoundCallback& frame_cb);
 
   // Process and verify contents of a bitstream buffer.
   virtual void ProcessStreamBuffer(const uint8_t* stream, size_t size) = 0;
@@ -593,10 +602,10 @@ void VP8Validator::ProcessStreamBuffer(const uint8_t* stream, size_t size) {
 }
 
 // static
-scoped_ptr<StreamValidator> StreamValidator::Create(
+std::unique_ptr<StreamValidator> StreamValidator::Create(
     media::VideoCodecProfile profile,
     const FrameFoundCallback& frame_cb) {
-  scoped_ptr<StreamValidator> validator;
+  std::unique_ptr<StreamValidator> validator;
 
   if (IsH264(profile)) {
     validator.reset(new H264Validator(frame_cb));
@@ -623,15 +632,15 @@ class VideoFrameQualityValidator {
 
  private:
   void InitializeCB(bool success);
-  void DecodeDone(media::VideoDecoder::Status status);
-  void FlushDone(media::VideoDecoder::Status status);
+  void DecodeDone(media::DecodeStatus status);
+  void FlushDone(media::DecodeStatus status);
   void VerifyOutputFrame(const scoped_refptr<media::VideoFrame>& output_frame);
   void Decode();
 
   enum State { UNINITIALIZED, INITIALIZED, DECODING, ERROR };
 
   const media::VideoCodecProfile profile_;
-  scoped_ptr<media::FFmpegVideoDecoder> decoder_;
+  std::unique_ptr<media::FFmpegVideoDecoder> decoder_;
   media::VideoDecoder::DecodeCB decode_cb_;
   // Decode callback of an EOS buffer.
   media::VideoDecoder::DecodeCB eos_decode_cb_;
@@ -670,16 +679,18 @@ void VideoFrameQualityValidator::Initialize(const gfx::Size& coded_size,
   if (IsVP8(profile_))
     config.Initialize(media::kCodecVP8, media::VP8PROFILE_ANY, kInputFormat,
                       media::COLOR_SPACE_UNSPECIFIED, coded_size, visible_size,
-                      natural_size, media::EmptyExtraData(), false);
+                      natural_size, media::EmptyExtraData(),
+                      media::Unencrypted());
   else if (IsH264(profile_))
     config.Initialize(media::kCodecH264, media::H264PROFILE_MAIN, kInputFormat,
                       media::COLOR_SPACE_UNSPECIFIED, coded_size, visible_size,
-                      natural_size, media::EmptyExtraData(), false);
+                      natural_size, media::EmptyExtraData(),
+                      media::Unencrypted());
   else
     LOG_ASSERT(0) << "Invalid profile " << profile_;
 
   decoder_->Initialize(
-      config, false, media::SetCdmReadyCB(),
+      config, false, nullptr,
       base::Bind(&VideoFrameQualityValidator::InitializeCB,
                  base::Unretained(this)),
       base::Bind(&VideoFrameQualityValidator::VerifyOutputFrame,
@@ -704,9 +715,8 @@ void VideoFrameQualityValidator::AddOriginalFrame(
   original_frames_.push(frame);
 }
 
-void VideoFrameQualityValidator::DecodeDone(
-    media::VideoDecoder::Status status) {
-  if (status == media::VideoDecoder::kOk) {
+void VideoFrameQualityValidator::DecodeDone(media::DecodeStatus status) {
+  if (status == media::DecodeStatus::OK) {
     decoder_state_ = INITIALIZED;
     Decode();
   } else {
@@ -716,7 +726,7 @@ void VideoFrameQualityValidator::DecodeDone(
   }
 }
 
-void VideoFrameQualityValidator::FlushDone(media::VideoDecoder::Status status) {
+void VideoFrameQualityValidator::FlushDone(media::DecodeStatus status) {
   flush_complete_cb_.Run();
 }
 
@@ -807,9 +817,10 @@ class VEAClient : public VideoEncodeAccelerator::Client {
   // Return the number of encoded frames per second.
   double frames_per_second();
 
-  scoped_ptr<media::VideoEncodeAccelerator> CreateFakeVEA();
-  scoped_ptr<media::VideoEncodeAccelerator> CreateV4L2VEA();
-  scoped_ptr<media::VideoEncodeAccelerator> CreateVaapiVEA();
+  std::unique_ptr<media::VideoEncodeAccelerator> CreateFakeVEA();
+  std::unique_ptr<media::VideoEncodeAccelerator> CreateV4L2VEA();
+  std::unique_ptr<media::VideoEncodeAccelerator> CreateVaapiVEA();
+  std::unique_ptr<media::VideoEncodeAccelerator> CreateVTVEA();
 
   void SetState(ClientState new_state);
 
@@ -873,7 +884,7 @@ class VEAClient : public VideoEncodeAccelerator::Client {
   void DecodeFailed();
 
   ClientState state_;
-  scoped_ptr<VideoEncodeAccelerator> encoder_;
+  std::unique_ptr<VideoEncodeAccelerator> encoder_;
 
   TestStream* test_stream_;
 
@@ -950,10 +961,10 @@ class VEAClient : public VideoEncodeAccelerator::Client {
   bool verify_output_;
 
   // Used to perform codec-specific sanity checks on the stream.
-  scoped_ptr<StreamValidator> stream_validator_;
+  std::unique_ptr<StreamValidator> stream_validator_;
 
   // Used to validate the encoded frame quality.
-  scoped_ptr<VideoFrameQualityValidator> quality_validator_;
+  std::unique_ptr<VideoFrameQualityValidator> quality_validator_;
 
   // The time when the first frame is submitted for encode.
   base::TimeTicks first_frame_start_time_;
@@ -977,7 +988,7 @@ class VEAClient : public VideoEncodeAccelerator::Client {
   unsigned int requested_subsequent_framerate_;
 
   // The timer used to feed the encoder with the input frames.
-  scoped_ptr<base::RepeatingTimer> input_timer_;
+  std::unique_ptr<base::RepeatingTimer> input_timer_;
 };
 
 VEAClient::VEAClient(TestStream* test_stream,
@@ -1042,8 +1053,8 @@ VEAClient::VEAClient(TestStream* test_stream,
 
 VEAClient::~VEAClient() { LOG_ASSERT(!has_encoder()); }
 
-scoped_ptr<media::VideoEncodeAccelerator> VEAClient::CreateFakeVEA() {
-  scoped_ptr<media::VideoEncodeAccelerator> encoder;
+std::unique_ptr<media::VideoEncodeAccelerator> VEAClient::CreateFakeVEA() {
+  std::unique_ptr<media::VideoEncodeAccelerator> encoder;
   if (g_fake_encoder) {
     encoder.reset(new media::FakeVideoEncodeAccelerator(
         scoped_refptr<base::SingleThreadTaskRunner>(
@@ -1052,8 +1063,8 @@ scoped_ptr<media::VideoEncodeAccelerator> VEAClient::CreateFakeVEA() {
   return encoder;
 }
 
-scoped_ptr<media::VideoEncodeAccelerator> VEAClient::CreateV4L2VEA() {
-  scoped_ptr<media::VideoEncodeAccelerator> encoder;
+std::unique_ptr<media::VideoEncodeAccelerator> VEAClient::CreateV4L2VEA() {
+  std::unique_ptr<media::VideoEncodeAccelerator> encoder;
 #if defined(OS_CHROMEOS) && (defined(ARCH_CPU_ARMEL) || \
     (defined(USE_OZONE) && defined(USE_V4L2_CODEC)))
   scoped_refptr<V4L2Device> device = V4L2Device::Create(V4L2Device::kEncoder);
@@ -1063,10 +1074,18 @@ scoped_ptr<media::VideoEncodeAccelerator> VEAClient::CreateV4L2VEA() {
   return encoder;
 }
 
-scoped_ptr<media::VideoEncodeAccelerator> VEAClient::CreateVaapiVEA() {
-  scoped_ptr<media::VideoEncodeAccelerator> encoder;
+std::unique_ptr<media::VideoEncodeAccelerator> VEAClient::CreateVaapiVEA() {
+  std::unique_ptr<media::VideoEncodeAccelerator> encoder;
 #if defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
   encoder.reset(new VaapiVideoEncodeAccelerator());
+#endif
+  return encoder;
+}
+
+std::unique_ptr<media::VideoEncodeAccelerator> VEAClient::CreateVTVEA() {
+  std::unique_ptr<media::VideoEncodeAccelerator> encoder;
+#if defined(OS_MACOSX)
+  encoder.reset(new VTVideoEncodeAccelerator());
 #endif
   return encoder;
 }
@@ -1075,11 +1094,8 @@ void VEAClient::CreateEncoder() {
   DCHECK(thread_checker_.CalledOnValidThread());
   LOG_ASSERT(!has_encoder());
 
-  scoped_ptr<media::VideoEncodeAccelerator> encoders[] = {
-    CreateFakeVEA(),
-    CreateV4L2VEA(),
-    CreateVaapiVEA()
-  };
+  std::unique_ptr<media::VideoEncodeAccelerator> encoders[] = {
+      CreateFakeVEA(), CreateV4L2VEA(), CreateVaapiVEA(), CreateVTVEA()};
 
   DVLOG(1) << "Profile: " << test_stream_->requested_profile
            << ", initial bitrate: " << requested_bitrate_;
@@ -1649,6 +1665,7 @@ TEST_P(VideoEncodeAcceleratorTest, TestSimpleEncode) {
   encoder_thread.Stop();
 }
 
+#if !defined(OS_MACOSX)
 INSTANTIATE_TEST_CASE_P(
     SimpleEncode,
     VideoEncodeAcceleratorTest,
@@ -1693,6 +1710,26 @@ INSTANTIATE_TEST_CASE_P(
         base::MakeTuple(3, false, 0, false, false, false, false, false),
         base::MakeTuple(3, false, 0, true, false, false, true, false),
         base::MakeTuple(3, false, 0, true, false, true, false, false)));
+#else
+INSTANTIATE_TEST_CASE_P(
+    SimpleEncode,
+    VideoEncodeAcceleratorTest,
+    ::testing::Values(
+        base::MakeTuple(1, true, 0, false, false, false, false, false),
+        base::MakeTuple(1, true, 0, false, false, false, false, true)));
+
+INSTANTIATE_TEST_CASE_P(
+    EncoderPerf,
+    VideoEncodeAcceleratorTest,
+    ::testing::Values(
+        base::MakeTuple(1, false, 0, false, true, false, false, false)));
+
+INSTANTIATE_TEST_CASE_P(
+    MultipleEncoders,
+    VideoEncodeAcceleratorTest,
+    ::testing::Values(
+        base::MakeTuple(3, false, 0, false, false, false, false, false)));
+#endif
 
 // TODO(posciak): more tests:
 // - async FeedEncoderWithOutput
@@ -1710,7 +1747,7 @@ int main(int argc, char** argv) {
   base::ShadowingAtExitManager at_exit_manager;
   base::MessageLoop main_loop;
 
-  scoped_ptr<base::FilePath::StringType> test_stream_data(
+  std::unique_ptr<base::FilePath::StringType> test_stream_data(
       new base::FilePath::StringType(
           media::GetTestDataFilePath(content::g_default_in_filename).value() +
           content::g_default_in_parameters));

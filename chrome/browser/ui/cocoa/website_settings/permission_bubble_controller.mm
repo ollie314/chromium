@@ -29,15 +29,18 @@
 #include "chrome/browser/ui/website_settings/permission_bubble_view.h"
 #include "chrome/browser/ui/website_settings/permission_menu_model.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/url_formatter/elide_url.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/components_strings.h"
 #include "skia/ext/skia_utils_mac.h"
+#include "ui/base/cocoa/cocoa_base_utils.h"
 #import "ui/base/cocoa/controls/hyperlink_text_view.h"
 #import "ui/base/cocoa/menu_controller.h"
 #include "ui/base/cocoa/window_size_constants.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/models/simple_menu_model.h"
+#include "url/gurl.h"
 
 using base::UserMetricsAction;
 
@@ -79,7 +82,7 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 // multiple permissions in the bubble.
 @interface AllowBlockMenuButton : NSPopUpButton {
  @private
-  scoped_ptr<PermissionMenuModel> menuModel_;
+  std::unique_ptr<PermissionMenuModel> menuModel_;
   base::scoped_nsobject<MenuController> menuController_;
 }
 
@@ -185,7 +188,7 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 
 // Returns an autoreleased NSView displaying the title for the bubble
 // requesting settings for |host|.
-- (NSView*)titleWithHostname:(const std::string&)host;
+- (NSView*)titleWithOrigin:(const GURL&)origin;
 
 // Returns an autoreleased NSView displaying a menu for |request|.  The
 // menu will be initialized as 'allow' if |allow| is YES.
@@ -340,8 +343,7 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
   }
 
   base::scoped_nsobject<NSView> titleView(
-      [[self titleWithHostname:requests[0]->GetRequestingHostname().host()]
-          retain]);
+      [[self titleWithOrigin:requests[0]->GetOrigin()] retain]);
   [contentView addSubview:titleView];
   [titleView setFrameOrigin:NSMakePoint(kHorizontalPadding,
                                         kVerticalPadding + yOffset)];
@@ -455,7 +457,8 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
     anchor = NSMakePoint(NSMidX(contentFrame), NSMaxY(contentFrame));
   }
 
-  return [[self getExpectedParentWindow] convertBaseToScreen:anchor];
+  return ui::ConvertPointFromWindowToScreen([self getExpectedParentWindow],
+                                            anchor);
 }
 
 - (bool)hasLocationBar {
@@ -517,16 +520,18 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
   return permissionView.autorelease();
 }
 
-- (NSView*)titleWithHostname:(const std::string&)host {
+- (NSView*)titleWithOrigin:(const GURL&)origin {
   base::scoped_nsobject<NSTextField> titleView(
       [[NSTextField alloc] initWithFrame:NSZeroRect]);
   [titleView setDrawsBackground:NO];
   [titleView setBezeled:NO];
   [titleView setEditable:NO];
   [titleView setSelectable:NO];
-  [titleView setStringValue:
-      l10n_util::GetNSStringF(IDS_PERMISSIONS_BUBBLE_PROMPT,
-                              base::UTF8ToUTF16(host))];
+  [titleView setStringValue:l10n_util::GetNSStringF(
+                                IDS_PERMISSIONS_BUBBLE_PROMPT,
+                                url_formatter::FormatUrlForSecurityDisplay(
+                                    origin, url_formatter::SchemeDisplay::
+                                                OMIT_CRYPTOGRAPHIC))];
   [titleView setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
   [titleView sizeToFit];
   NSRect titleFrame = [titleView frame];
@@ -541,7 +546,7 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
   DCHECK(request);
   DCHECK(delegate_);
   base::scoped_nsobject<AllowBlockMenuButton> button(
-      [[AllowBlockMenuButton alloc] initForURL:request->GetRequestingHostname()
+      [[AllowBlockMenuButton alloc] initForURL:request->GetOrigin()
                                        allowed:allow
                                          index:index
                                       delegate:delegate_]);

@@ -30,8 +30,10 @@
 #define WEBPImageDecoder_h
 
 #include "platform/image-decoders/ImageDecoder.h"
+#include "third_party/skia/include/core/SkData.h"
 #include "webp/decode.h"
 #include "webp/demux.h"
+#include "wtf/RefPtr.h"
 
 namespace blink {
 
@@ -43,8 +45,7 @@ public:
 
     // ImageDecoder:
     String filenameExtension() const override { return "webp"; }
-    bool hasColorProfile() const override { return m_hasColorProfile; }
-    void onSetData(SharedBuffer* data) override;
+    void onSetData(SegmentReader* data) override;
     int repetitionCount() const override;
     bool frameIsCompleteAtIndex(size_t) const override;
     float frameDurationAtIndex(size_t) const override;
@@ -63,15 +64,9 @@ private:
     WebPDecBuffer m_decoderBuffer;
     int m_formatFlags;
     bool m_frameBackgroundHasAlpha;
-    bool m_hasColorProfile;
 
 #if USE(QCMSLIB)
-    qcms_transform* colorTransform() const { return m_transform; }
-    bool createColorTransform(const char* data, size_t);
-    void clearColorTransform();
     void readColorProfile();
-
-    qcms_transform* m_transform;
 #endif
 
     bool updateDemuxer();
@@ -90,6 +85,9 @@ private:
 
     void clear();
     void clearDecoder();
+
+    // FIXME: Update libwebp's API so it does not require copying the data on each update.
+    RefPtr<SkData> m_consolidatedData;
 };
 
 } // namespace blink

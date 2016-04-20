@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 
 #include "base/json/json_reader.h"
@@ -24,7 +25,11 @@ std::string GetLastSegment(const std::string& path) {
   // return re.search('[^/]*\/?$', path).group(0)
   if (path.size() == 0)
     return "";
-  size_t start = path.rfind("/", path.size() - 1);
+  if (path.size() == 1) {
+    DCHECK(path[0] == '/');
+    return path;
+  }
+  size_t start = path.rfind("/", path.size() - 2);
   return start == std::string::npos ? "" : path.substr(start + 1);
 }
 
@@ -147,7 +152,7 @@ std::vector<double> CalculateDerivedFeaturesFromJSON(
     return std::vector<double>();
   }
 
-  scoped_ptr<base::Value> json = base::JSONReader::Read(stringified);
+  std::unique_ptr<base::Value> json = base::JSONReader::Read(stringified);
   if (!json) {
     return std::vector<double>();
   }

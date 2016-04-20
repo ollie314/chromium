@@ -140,6 +140,8 @@ AppCacheUpdateJob::UrlToFetch::UrlToFetch(const GURL& url,
       existing_response_info(info) {
 }
 
+AppCacheUpdateJob::UrlToFetch::UrlToFetch(const UrlToFetch& other) = default;
+
 AppCacheUpdateJob::UrlToFetch::~UrlToFetch() {
 }
 
@@ -279,7 +281,7 @@ void AppCacheUpdateJob::URLFetcher::AddConditionalHeaders(
   // Add If-Modified-Since header if response info has Last-Modified header.
   const std::string last_modified = "Last-Modified";
   std::string last_modified_value;
-  headers->EnumerateHeader(NULL, last_modified, &last_modified_value);
+  headers->EnumerateHeader(nullptr, last_modified, &last_modified_value);
   if (!last_modified_value.empty()) {
     extra_headers.SetHeader(net::HttpRequestHeaders::kIfModifiedSince,
                             last_modified_value);
@@ -288,7 +290,7 @@ void AppCacheUpdateJob::URLFetcher::AddConditionalHeaders(
   // Add If-None-Match header if response info has ETag header.
   const std::string etag = "ETag";
   std::string etag_value;
-  headers->EnumerateHeader(NULL, etag, &etag_value);
+  headers->EnumerateHeader(nullptr, etag, &etag_value);
   if (!etag_value.empty()) {
     extra_headers.SetHeader(net::HttpRequestHeaders::kIfNoneMatch,
                             etag_value);
@@ -496,8 +498,7 @@ void AppCacheUpdateJob::StartUpdate(AppCacheHost* host,
 
 AppCacheResponseWriter* AppCacheUpdateJob::CreateResponseWriter() {
   AppCacheResponseWriter* writer =
-      storage_->CreateResponseWriter(manifest_url_,
-                                                group_->group_id());
+      storage_->CreateResponseWriter(manifest_url_);
   stored_response_ids_.push_back(writer->response_id());
   return writer;
 }
@@ -562,8 +563,7 @@ void AppCacheUpdateJob::FetchManifest(bool is_first_fetch) {
         group_->newest_complete_cache()->GetEntry(manifest_url_) : NULL;
     if (entry && !doing_full_update_check_) {
       // Asynchronously load response info for manifest from newest cache.
-      storage_->LoadResponseInfo(manifest_url_, group_->group_id(),
-                                 entry->response_id(), this);
+      storage_->LoadResponseInfo(manifest_url_, entry->response_id(), this);
       return;
     }
     manifest_fetcher_->Start();
@@ -610,7 +610,7 @@ void AppCacheUpdateJob::HandleManifestFetchCompleted(
              update_type_ == UPGRADE_ATTEMPT) {
     storage_->MakeGroupObsolete(group_, this, response_code);  // async
   } else {
-    const char* kFormatString = "Manifest fetch failed (%d) %s";
+    const char kFormatString[] = "Manifest fetch failed (%d) %s";
     std::string message = FormatUrlErrorMessage(
         kFormatString, manifest_url_, fetcher->result(), response_code);
     HandleCacheFailure(AppCacheErrorDetails(message,
@@ -670,7 +670,7 @@ void AppCacheUpdateJob::ContinueHandleManifestFetchCompleted(bool changed) {
                         PARSE_MANIFEST_ALLOWING_INTERCEPTS :
                         PARSE_MANIFEST_PER_STANDARD,
                      manifest)) {
-    const char* kFormatString = "Failed to parse manifest %s";
+    const char kFormatString[] = "Failed to parse manifest %s";
     const std::string message = base::StringPrintf(kFormatString,
         manifest_url_.spec().c_str());
     HandleCacheFailure(
@@ -759,7 +759,7 @@ void AppCacheUpdateJob::HandleUrlFetchCompleted(URLFetcher* fetcher) {
         entry.set_response_size(fetcher->existing_entry().response_size());
         inprogress_cache_->AddOrModifyEntry(url, entry);
       } else {
-        const char* kFormatString = "Resource fetch failed (%d) %s";
+        const char kFormatString[] = "Resource fetch failed (%d) %s";
         std::string message = FormatUrlErrorMessage(
             kFormatString, url, fetcher->result(), response_code);
         ResultType result = fetcher->result();
@@ -873,7 +873,7 @@ void AppCacheUpdateJob::HandleMasterEntryFetchCompleted(
 
     failed_master_entries_.insert(url);
 
-    const char* kFormatString = "Manifest fetch failed (%d) %s";
+    const char kFormatString[] = "Manifest fetch failed (%d) %s";
     std::string message = FormatUrlErrorMessage(
         kFormatString, request->url(), fetcher->result(), response_code);
     host_notifier.SendErrorNotifications(
@@ -948,7 +948,7 @@ void AppCacheUpdateJob::HandleManifestRefetchCompleted(
                          MANIFEST_ERROR,
                          GURL());
     } else {
-      const char* kFormatString = "Manifest re-fetch failed (%d) %s";
+      const char kFormatString[] = "Manifest re-fetch failed (%d) %s";
       std::string message = FormatUrlErrorMessage(
           kFormatString, manifest_url_, fetcher->result(), response_code);
       HandleCacheFailure(AppCacheErrorDetails(message,
@@ -1158,7 +1158,6 @@ void AppCacheUpdateJob::CheckIfManifestChanged() {
   // Load manifest data from storage to compare against fetched manifest.
   manifest_response_reader_.reset(
       storage_->CreateResponseReader(manifest_url_,
-                                     group_->group_id(),
                                      entry->response_id()));
   read_manifest_buffer_ = new net::IOBuffer(kBufferSize);
   manifest_response_reader_->ReadData(
@@ -1441,9 +1440,7 @@ bool AppCacheUpdateJob::MaybeLoadFromNewestCache(const GURL& url,
   // Load HTTP headers for entry from newest cache.
   loading_responses_.insert(
       LoadingResponses::value_type(copy_me->response_id(), url));
-  storage_->LoadResponseInfo(manifest_url_, group_->group_id(),
-                             copy_me->response_id(),
-                             this);
+  storage_->LoadResponseInfo(manifest_url_, copy_me->response_id(), this);
   // Async: wait for OnResponseInfoLoaded to complete.
   return true;
 }
@@ -1474,7 +1471,7 @@ void AppCacheUpdateJob::OnResponseInfoLoaded(
     // Responses with a "vary" header get treated as expired.
     const std::string name = "vary";
     std::string value;
-    void* iter = NULL;
+    size_t iter = 0;
     if (!http_info->headers.get() ||
         http_info->headers->RequiresValidation(http_info->request_time,
                                                http_info->response_time,

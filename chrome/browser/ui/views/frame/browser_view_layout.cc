@@ -25,7 +25,7 @@
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "ui/base/hit_test.h"
-#include "ui/base/resource/material_design/material_design_controller.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/scrollbar_size.h"
@@ -467,13 +467,10 @@ int BrowserViewLayout::LayoutInfoBar(int top) {
   }
   // Raise the |infobar_container_| by its vertical overlap.
   infobar_container_->SetVisible(InfobarVisible());
-  int height;
-  int overlapped_top = top - infobar_container_->GetVerticalOverlap(&height);
-  infobar_container_->SetBounds(vertical_layout_rect_.x(),
-                                overlapped_top,
-                                vertical_layout_rect_.width(),
-                                height);
-  return overlapped_top + height;
+  infobar_container_->SetBounds(
+      vertical_layout_rect_.x(), top, vertical_layout_rect_.width(),
+      infobar_container_->GetPreferredSize().height());
+  return top + infobar_container_->height();
 }
 
 void BrowserViewLayout::LayoutContentsContainerView(int top, int bottom) {

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -212,7 +213,7 @@ TEST(SandboxOriginDatabaseTest, DatabaseRecoveryTest) {
     "fuga.example.com",
   };
 
-  scoped_ptr<SandboxOriginDatabase> database(
+  std::unique_ptr<SandboxOriginDatabase> database(
       new SandboxOriginDatabase(kFSDir, NULL));
   for (size_t i = 0; i < arraysize(kOrigins); ++i) {
     base::FilePath path;
@@ -282,7 +283,7 @@ TEST(SandboxOriginDatabaseTest, DatabaseRecoveryForMissingDBFileTest) {
     const std::string kOrigin = "foo.example.com";
     base::FilePath path;
 
-    scoped_ptr<SandboxOriginDatabase> database(
+    std::unique_ptr<SandboxOriginDatabase> database(
         new SandboxOriginDatabase(kFSDir, NULL));
     EXPECT_FALSE(database->HasOriginPath(kOrigin));
     EXPECT_TRUE(database->GetPathForOrigin(kOrigin, &path));

@@ -1061,7 +1061,7 @@ WebInspector.HeapSnapshotProfileType.prototype = {
 
     get buttonTooltip()
     {
-        return WebInspector.UIString("Take heap snapshot.");
+        return WebInspector.UIString("Take heap snapshot");
     },
 
     /**
@@ -1279,7 +1279,7 @@ WebInspector.TrackingHeapSnapshotProfileType.prototype = {
 
     get buttonTooltip()
     {
-        return this._recording ? WebInspector.UIString("Stop recording heap profile.") : WebInspector.UIString("Start recording heap profile.");
+        return this._recording ? WebInspector.UIString("Stop recording heap profile") : WebInspector.UIString("Start recording heap profile");
     },
 
     /**
@@ -1610,7 +1610,7 @@ WebInspector.HeapProfileHeader.prototype = {
                 fileOutputStream.close();
             } else if (this._tempFile) {
                 var delegate = new WebInspector.SaveSnapshotOutputStreamDelegate(this);
-                this._tempFile.writeToOutputSteam(fileOutputStream, delegate);
+                this._tempFile.copyToOutputStream(fileOutputStream, delegate);
             } else {
                 this._onTempFileReady = onOpen.bind(this, accepted);
                 this._updateSaveProgress(0, 1);

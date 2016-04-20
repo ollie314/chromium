@@ -36,7 +36,7 @@ InspectorTest.waitForStyleSheetChangedEvent = function(reply)
 {
     var originalSetTimeout = WebInspector.Throttler.prototype._setTimeout;
     WebInspector.Throttler.prototype._setTimeout = innerSetTimeout;
-    InspectorTest.addSniffer(WebInspector.CSSStyleModel.prototype, "_fireStyleSheetChanged", onStyleSheetChanged);
+    InspectorTest.addSniffer(WebInspector.CSSModel.prototype, "_fireStyleSheetChanged", onStyleSheetChanged);
 
     function onStyleSheetChanged()
     {
@@ -135,7 +135,7 @@ function extension_testOnContentCommitted(nextTest)
         resource.setContent("div.test { width: 140px; height: 42px; }", false);
     });
     // The next step is going to produce a console message that will be logged, so synchronize the output now.
-    evaluateOnFrontend("InspectorTest.runAfterPendingDispatches(reply)", function() {
+    evaluateOnFrontend("InspectorTest.deprecatedRunAfterPendingDispatches(reply)", function() {
         extension_runWithResource(/abe\.png$/, function(resource) {
             resource.setContent("", true);
         });

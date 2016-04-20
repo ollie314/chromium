@@ -4,7 +4,8 @@
 
 #include "content/test/render_thread_impl_browser_test_ipc_helper.h"
 
-#include "content/common/mojo/channel_init.h"
+#include "content/public/common/mojo_channel_switches.h"
+#include "mojo/edk/embedder/embedder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace content {
@@ -23,7 +24,7 @@ RenderThreadImplBrowserIPCTestHelper::RenderThreadImplBrowserIPCTestHelper() {
 
   SetupIpcThread();
 
-  if (IPC::ChannelMojo::ShouldBeUsed()) {
+  if (ShouldUseMojoChannel()) {
     SetupMojo();
   } else {
     channel_ = IPC::ChannelProxy::Create(channel_id_, IPC::Channel::MODE_SERVER,
@@ -47,17 +48,15 @@ void RenderThreadImplBrowserIPCTestHelper::SetupMojo() {
 
   ipc_support_.reset(new IPC::ScopedIPCSupport(ipc_thread_->task_runner()));
   mojo_application_host_.reset(new MojoApplicationHost());
-  mojo_application_host_->OverrideIOTaskRunnerForTest(
-      ipc_thread_->task_runner());
+  mojo_application_token_ = mojo_application_host_->GetToken();
 
+  mojo_ipc_token_ = mojo::edk::GenerateRandomToken();
+
+  mojo::MessagePipe pipe;
   channel_ = IPC::ChannelProxy::Create(
-      IPC::ChannelMojo::CreateServerFactory(ipc_thread_->task_runner(),
-                                            channel_id_),
+      IPC::ChannelMojo::CreateServerFactory(
+          mojo::edk::CreateParentMessagePipe(mojo_ipc_token_)),
       dummy_listener_.get(), ipc_thread_->task_runner());
-
-  mojo_application_host_->Init();
-  mojo_application_host_->Activate(channel_.get(),
-                                   base::GetCurrentProcessHandle());
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>

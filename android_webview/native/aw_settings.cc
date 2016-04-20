@@ -49,6 +49,7 @@ void PopulateFixedRendererPreferences(RendererPreferences* prefs) {
 void PopulateFixedWebPreferences(WebPreferences* web_prefs) {
   web_prefs->shrinks_standalone_images_to_fit = false;
   web_prefs->should_clear_document_background = false;
+  web_prefs->viewport_meta_enabled = true;
 }
 
 const void* const kAwSettingsUserDataKey = &kAwSettingsUserDataKey;
@@ -400,6 +401,9 @@ void AwSettings::PopulateWebPreferencesLocked(JNIEnv* env,
   web_prefs->ignore_main_frame_overflow_hidden_quirk = support_quirks;
   web_prefs->report_screen_size_in_physical_pixels_quirk = support_quirks;
 
+  web_prefs->resue_global_for_unowned_main_frame =
+      Java_AwSettings_getAllowEmptyDocumentPersistenceLocked(env, obj);
+
   web_prefs->password_echo_enabled =
       Java_AwSettings_getPasswordEchoEnabledLocked(env, obj);
   web_prefs->spatial_navigation_enabled =
@@ -433,6 +437,11 @@ void AwSettings::PopulateWebPreferencesLocked(JNIEnv* env,
       Java_AwSettings_getFullscreenSupportedLocked(env, obj);
   web_prefs->record_whole_document =
       Java_AwSettings_getRecordFullDocument(env, obj);
+
+  // TODO(jww): This should be removed once sufficient warning has been given of
+  // possible API breakage because of disabling insecure use of geolocation.
+  web_prefs->allow_geolocation_on_insecure_origins =
+      Java_AwSettings_getAllowGeolocationOnInsecureOrigins(env, obj);
 }
 
 static jlong Init(JNIEnv* env,

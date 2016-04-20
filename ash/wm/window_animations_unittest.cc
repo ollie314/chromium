@@ -6,7 +6,9 @@
 
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/wm/common/window_animation_types.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "ash/wm/workspace_controller.h"
 #include "base/time/time.h"
 #include "ui/aura/test/test_windows.h"
@@ -64,14 +66,13 @@ TEST_F(WindowAnimationsTest, HideShowBrightnessGrayscaleAnimation) {
   ui::ScopedAnimationDurationScaleMode test_duration_mode(
       ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
 
-  scoped_ptr<aura::Window> window(CreateTestWindowInShellWithId(0));
+  std::unique_ptr<aura::Window> window(CreateTestWindowInShellWithId(0));
   window->Show();
   EXPECT_TRUE(window->layer()->visible());
 
   // Hiding.
   ::wm::SetWindowVisibilityAnimationType(
-      window.get(),
-      WINDOW_VISIBILITY_ANIMATION_TYPE_BRIGHTNESS_GRAYSCALE);
+      window.get(), wm::WINDOW_VISIBILITY_ANIMATION_TYPE_BRIGHTNESS_GRAYSCALE);
   AnimateOnChildWindowVisibilityChanged(window.get(), false);
   EXPECT_EQ(0.0f, window->layer()->GetTargetOpacity());
   EXPECT_FALSE(window->layer()->GetTargetVisibility());
@@ -79,8 +80,7 @@ TEST_F(WindowAnimationsTest, HideShowBrightnessGrayscaleAnimation) {
 
   // Showing.
   ::wm::SetWindowVisibilityAnimationType(
-      window.get(),
-      WINDOW_VISIBILITY_ANIMATION_TYPE_BRIGHTNESS_GRAYSCALE);
+      window.get(), wm::WINDOW_VISIBILITY_ANIMATION_TYPE_BRIGHTNESS_GRAYSCALE);
   AnimateOnChildWindowVisibilityChanged(window.get(), true);
   EXPECT_EQ(0.0f, window->layer()->GetTargetBrightness());
   EXPECT_EQ(0.0f, window->layer()->GetTargetGrayscale());
@@ -95,7 +95,7 @@ TEST_F(WindowAnimationsTest, HideShowBrightnessGrayscaleAnimation) {
 }
 
 TEST_F(WindowAnimationsTest, LayerTargetVisibility) {
-  scoped_ptr<aura::Window> window(CreateTestWindowInShellWithId(0));
+  std::unique_ptr<aura::Window> window(CreateTestWindowInShellWithId(0));
 
   // Layer target visibility changes according to Show/Hide.
   window->Show();
@@ -112,7 +112,7 @@ TEST_F(WindowAnimationsTest, CrossFadeToBounds) {
   ui::ScopedAnimationDurationScaleMode test_duration_mode(
       ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
 
-  scoped_ptr<Window> window(CreateTestWindowInShellWithId(0));
+  std::unique_ptr<Window> window(CreateTestWindowInShellWithId(0));
   window->SetBounds(gfx::Rect(5, 10, 320, 240));
   window->Show();
 
@@ -171,7 +171,7 @@ TEST_F(WindowAnimationsTest, CrossFadeToBoundsFromTransform) {
   ui::ScopedAnimationDurationScaleMode test_duration_mode(
       ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
 
-  scoped_ptr<Window> window(CreateTestWindowInShellWithId(0));
+  std::unique_ptr<Window> window(CreateTestWindowInShellWithId(0));
   window->SetBounds(gfx::Rect(10, 10, 320, 240));
   gfx::Transform half_size;
   half_size.Translate(10, 10);
@@ -210,7 +210,7 @@ TEST_F(WindowAnimationsTest, LockAnimationDuration) {
   ui::ScopedAnimationDurationScaleMode test_duration_mode(
       ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
 
-  scoped_ptr<Window> window(CreateTestWindowInShellWithId(0));
+  std::unique_ptr<Window> window(CreateTestWindowInShellWithId(0));
   Layer* layer = window->layer();
   window->SetBounds(gfx::Rect(5, 10, 320, 240));
   window->Show();

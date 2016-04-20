@@ -9,8 +9,10 @@
 #include "sync/internal_api/sync_manager_impl.h"
 
 #include <stdint.h>
+
 #include <cstddef>
 #include <map>
+#include <memory>
 #include <utility>
 
 #include "base/callback.h"
@@ -18,7 +20,6 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
 #include "base/location.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -910,8 +911,8 @@ class SyncManagerTest : public testing::Test,
     SyncManager::InitArgs args;
     args.database_location = temp_dir_.path();
     args.service_url = GURL("https://example.com/");
-    args.post_factory =
-        scoped_ptr<HttpPostProviderFactory>(new TestHttpPostProviderFactory());
+    args.post_factory = std::unique_ptr<HttpPostProviderFactory>(
+        new TestHttpPostProviderFactory());
     args.workers = workers;
     args.extensions_activity = extensions_activity_.get(),
     args.change_delegate = this;
@@ -1144,7 +1145,7 @@ TEST_F(SyncManagerTest, GetAllNodesForTypeTest) {
   GetModelSafeRoutingInfo(&routing_info);
   sync_manager_.StartSyncingNormally(routing_info, base::Time());
 
-  scoped_ptr<base::ListValue> node_list(
+  std::unique_ptr<base::ListValue> node_list(
       sync_manager_.GetAllNodesForType(syncer::PREFERENCES));
 
   // Should have one node: the type root node.
@@ -2545,7 +2546,7 @@ class ComponentsFactory : public TestInternalComponentsFactory {
         session_context_(session_context) {}
   ~ComponentsFactory() override {}
 
-  scoped_ptr<SyncScheduler> BuildScheduler(
+  std::unique_ptr<SyncScheduler> BuildScheduler(
       const std::string& name,
       sessions::SyncSessionContext* context,
       CancelationSignal* stop_handle) override {
@@ -2554,7 +2555,7 @@ class ComponentsFactory : public TestInternalComponentsFactory {
   }
 
  private:
-  scoped_ptr<SyncScheduler> scheduler_to_use_;
+  std::unique_ptr<SyncScheduler> scheduler_to_use_;
   sessions::SyncSessionContext** session_context_;
 };
 
@@ -2620,8 +2621,9 @@ TEST_F(SyncManagerTestWithMockScheduler, BasicConfiguration) {
   EXPECT_EQ(new_routing_info, params.routing_info);
 
   // Verify all the disabled types were purged.
-  EXPECT_TRUE(sync_manager_.InitialSyncEndedTypes().Equals(
-      enabled_types));
+  EXPECT_TRUE(
+      sync_manager_.GetUserShare()->directory->InitialSyncEndedTypes().Equals(
+          enabled_types));
   EXPECT_TRUE(sync_manager_.GetTypesWithEmptyProgressMarkerToken(
       ModelTypeSet::All()).Equals(disabled_types));
 }
@@ -2717,7 +2719,9 @@ TEST_F(SyncManagerTest, PurgePartiallySyncedTypes) {
   }
 
   // One more redundant check.
-  ASSERT_FALSE(sync_manager_.InitialSyncEndedTypes().Has(AUTOFILL));
+  ASSERT_FALSE(
+      sync_manager_.GetUserShare()->directory->InitialSyncEndedTypes().Has(
+          AUTOFILL));
 
   // Give autofill a progress marker.
   sync_pb::DataTypeProgressMarker autofill_marker;
@@ -2732,7 +2736,9 @@ TEST_F(SyncManagerTest, PurgePartiallySyncedTypes) {
 
   // Preferences is an enabled type.  Check that the harness initialized it.
   ASSERT_TRUE(enabled_types.Has(PREFERENCES));
-  ASSERT_TRUE(sync_manager_.InitialSyncEndedTypes().Has(PREFERENCES));
+  ASSERT_TRUE(
+      sync_manager_.GetUserShare()->directory->InitialSyncEndedTypes().Has(
+          PREFERENCES));
 
   // Give preferencse a progress marker.
   sync_pb::DataTypeProgressMarker prefs_marker;
@@ -2758,7 +2764,7 @@ TEST_F(SyncManagerTest, PurgePartiallySyncedTypes) {
   EXPECT_TRUE(empty_tokens.Has(AUTOFILL));
   EXPECT_FALSE(empty_tokens.Has(PREFERENCES));
 
-  // Ensure that autofill lots its node, but preferences did not.
+  // Ensure that autofill lost its node, but preferences did not.
   {
     syncable::ReadTransaction trans(FROM_HERE, share->directory.get());
     syncable::Entry autofill_node(&trans, GET_BY_HANDLE, autofill_meta);
@@ -2777,7 +2783,8 @@ TEST_F(SyncManagerTest, PurgeDisabledTypes) {
   ModelTypeSet disabled_types = Difference(ModelTypeSet::All(), enabled_types);
 
   // The harness should have initialized the enabled_types for us.
-  EXPECT_TRUE(enabled_types.Equals(sync_manager_.InitialSyncEndedTypes()));
+  EXPECT_TRUE(enabled_types.Equals(
+      sync_manager_.GetUserShare()->directory->InitialSyncEndedTypes()));
 
   // Set progress markers for all types.
   ModelTypeSet protocol_types = ProtocolTypes();
@@ -2791,7 +2798,8 @@ TEST_F(SyncManagerTest, PurgeDisabledTypes) {
   sync_manager_.PurgeDisabledTypes(disabled_types,
                                    ModelTypeSet(),
                                    ModelTypeSet());
-  EXPECT_TRUE(enabled_types.Equals(sync_manager_.InitialSyncEndedTypes()));
+  EXPECT_TRUE(enabled_types.Equals(
+      sync_manager_.GetUserShare()->directory->InitialSyncEndedTypes()));
   EXPECT_TRUE(disabled_types.Equals(
       sync_manager_.GetTypesWithEmptyProgressMarkerToken(ModelTypeSet::All())));
 
@@ -2805,7 +2813,8 @@ TEST_F(SyncManagerTest, PurgeDisabledTypes) {
   sync_manager_.PurgeDisabledTypes(disabled_types,
                                    ModelTypeSet(),
                                    ModelTypeSet());
-  EXPECT_TRUE(new_enabled_types.Equals(sync_manager_.InitialSyncEndedTypes()));
+  EXPECT_TRUE(new_enabled_types.Equals(
+      sync_manager_.GetUserShare()->directory->InitialSyncEndedTypes()));
   EXPECT_TRUE(disabled_types.Equals(
       sync_manager_.GetTypesWithEmptyProgressMarkerToken(ModelTypeSet::All())));
 }
@@ -2820,7 +2829,8 @@ TEST_F(SyncManagerTest, PurgeUnappliedTypes) {
   ModelTypeSet disabled_types = Difference(ModelTypeSet::All(), enabled_types);
 
   // The harness should have initialized the enabled_types for us.
-  EXPECT_TRUE(enabled_types.Equals(sync_manager_.InitialSyncEndedTypes()));
+  EXPECT_TRUE(enabled_types.Equals(
+      sync_manager_.GetUserShare()->directory->InitialSyncEndedTypes()));
 
   // Set progress markers for all types.
   ModelTypeSet protocol_types = ProtocolTypes();
@@ -2886,7 +2896,9 @@ TEST_F(SyncManagerTest, PurgeUnappliedTypes) {
 
   // Verify the unapplied types still have progress markers and initial sync
   // ended after cleanup.
-  EXPECT_TRUE(sync_manager_.InitialSyncEndedTypes().HasAll(unapplied_types));
+  EXPECT_TRUE(
+      sync_manager_.GetUserShare()->directory->InitialSyncEndedTypes().HasAll(
+          unapplied_types));
   EXPECT_TRUE(
       sync_manager_.GetTypesWithEmptyProgressMarkerToken(unapplied_types).
           Empty());

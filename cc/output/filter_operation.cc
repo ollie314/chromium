@@ -11,6 +11,9 @@
 #include "cc/base/math_util.h"
 #include "cc/output/filter_operation.h"
 #include "ui/gfx/animation/tween.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/skia_util.h"
 
 namespace cc {
 
@@ -290,20 +293,17 @@ void FilterOperation::AsValueInto(base::trace_event::TracedValue* value) const {
       break;
     case FilterOperation::REFERENCE: {
       int count_inputs = 0;
-      bool can_filter_image_gpu = false;
       if (image_filter_) {
         count_inputs = image_filter_->countInputs();
-        can_filter_image_gpu = image_filter_->canFilterImageGPU();
       }
       value->SetBoolean("is_null", !image_filter_);
       value->SetInteger("count_inputs", count_inputs);
-      value->SetBoolean("can_filter_image_gpu", can_filter_image_gpu);
       break;
     }
     case FilterOperation::ALPHA_THRESHOLD: {
         value->SetDouble("inner_threshold", amount_);
         value->SetDouble("outer_threshold", outer_threshold_);
-        scoped_ptr<base::ListValue> region_value(new base::ListValue());
+        std::unique_ptr<base::ListValue> region_value(new base::ListValue());
         value->BeginArray("region");
         for (SkRegion::Iterator it(region_); !it.done(); it.next()) {
           value->AppendInteger(it.rect().x());
@@ -314,6 +314,43 @@ void FilterOperation::AsValueInto(base::trace_event::TracedValue* value) const {
         value->EndArray();
       }
       break;
+  }
+}
+
+static int SpreadForStdDeviation(float std_deviation) {
+  // https://dvcs.w3.org/hg/FXTF/raw-file/tip/filters/index.html#feGaussianBlurElement
+  // provides this approximation for evaluating a gaussian blur by a triple box
+  // filter.
+  float d = floorf(std_deviation * 3.f * sqrt(8.f * atan(1.f)) / 4.f + 0.5f);
+  return static_cast<int>(ceilf(d * 3.f / 2.f));
+}
+
+gfx::Rect FilterOperation::MapRect(const gfx::Rect& rect) const {
+  switch (type_) {
+    case FilterOperation::BLUR: {
+      int spread = SpreadForStdDeviation(amount());
+      gfx::Rect result = rect;
+      result.Inset(-spread, -spread, -spread, -spread);
+      return result;
+    }
+    case FilterOperation::DROP_SHADOW: {
+      int spread = SpreadForStdDeviation(amount());
+      gfx::Rect result = rect;
+      result.Inset(-spread, -spread, -spread, -spread);
+      result += drop_shadow_offset().OffsetFromOrigin();
+      result.Union(rect);
+      return result;
+    }
+    case FilterOperation::REFERENCE: {
+      if (!image_filter())
+        return rect;
+      SkIRect in_rect = gfx::RectToSkIRect(rect);
+      SkIRect out_rect = image_filter()->filterBounds(
+          in_rect, SkMatrix::I(), SkImageFilter::kForward_MapDirection);
+      return gfx::SkIRectToRect(out_rect);
+    }
+    default:
+      return rect;
   }
 }
 

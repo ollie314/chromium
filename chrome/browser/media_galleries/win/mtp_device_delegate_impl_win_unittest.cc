@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 
+#include <utility>
 #include <vector>
 
 #include "base/command_line.h"
@@ -85,12 +86,12 @@ void MTPDeviceDelegateImplWinTest::SetUp() {
       new TestPortableDeviceWatcherWin;
   TestVolumeMountWatcherWin* mount_watcher = new TestVolumeMountWatcherWin;
   portable_device_watcher->set_use_dummy_mtp_storage_info(true);
-  scoped_ptr<TestStorageMonitorWin> monitor(
+  std::unique_ptr<TestStorageMonitorWin> monitor(
       new TestStorageMonitorWin(mount_watcher, portable_device_watcher));
   TestingBrowserProcess* browser_process = TestingBrowserProcess::GetGlobal();
   DCHECK(browser_process);
   monitor_ = monitor.get();
-  StorageMonitor::SetStorageMonitorForTesting(monitor.Pass());
+  StorageMonitor::SetStorageMonitorForTesting(std::move(monitor));
 
   base::RunLoop runloop;
   browser_process->media_file_system_registry()->GetPreferences(profile())->

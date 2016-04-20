@@ -13,9 +13,6 @@
  *      </settings-bluetooth-page>
  *      ... other pages ...
  *    </core-animated-pages>
- *
- * @group Chrome Settings Elements
- * @element settings-bluetooth-page
  */
 
 var bluetoothPage = bluetoothPage || {
@@ -197,6 +194,16 @@ Polymer({
     // When bluetooth is enabled, auto-expand the device list.
     if (this.bluetoothEnabled)
       this.deviceListExpanded = true;
+  },
+
+  /**
+   * @param {boolean} bluetoothEnabled
+   * @param {boolean} deviceListExpanded
+   * @return {boolean} Whether the <iron-collapse> can be shown.
+   * @private
+   */
+  canShowDeviceList_: function(bluetoothEnabled, deviceListExpanded) {
+    return bluetoothEnabled && deviceListExpanded;
   },
 
   /**
@@ -416,7 +423,7 @@ Polymer({
    * @private
    */
   haveDevices_: function(deviceListChanges) {
-    return this.deviceList.findIndex(function(d) { return d.paired; }) != -1;
+    return this.deviceList.findIndex(function(d) { return !!d.paired; }) != -1;
   },
 
   /**

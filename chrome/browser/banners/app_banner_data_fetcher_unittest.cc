@@ -6,6 +6,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/platform/WebDisplayMode.h"
 
 namespace banners {
 
@@ -23,6 +24,7 @@ class AppBannerDataFetcherUnitTest : public testing::Test {
     manifest.name = ToNullableUTF16("foo");
     manifest.short_name = ToNullableUTF16("bar");
     manifest.start_url = GURL("http://example.com");
+    manifest.display = blink::WebDisplayModeStandalone;
 
     content::Manifest::Icon icon;
     icon.type = ToNullableUTF16("image/png");
@@ -36,7 +38,10 @@ class AppBannerDataFetcherUnitTest : public testing::Test {
     // The second argument is the web_contents pointer, which is used for
     // developer debug logging to the console. The logging is skipped inside the
     // method if a null web_contents pointer is provided, so this is safe.
-    return AppBannerDataFetcher::IsManifestValidForWebApp(manifest, nullptr);
+    // The third argument is the is_debug_mode boolean value, which is true only
+    // when it is triggered by the developer's action in DevTools.
+    return AppBannerDataFetcher::IsManifestValidForWebApp(manifest, nullptr,
+                                                          false);
   }
 };
 
@@ -61,6 +66,20 @@ TEST_F(AppBannerDataFetcherUnitTest, ManifestRequiresNameORShortName) {
   EXPECT_TRUE(IsManifestValid(manifest));
 
   manifest.name = base::NullableString16();
+  EXPECT_FALSE(IsManifestValid(manifest));
+}
+
+TEST_F(AppBannerDataFetcherUnitTest, ManifestRequiresNonEmptyNameORShortName) {
+  content::Manifest manifest = GetValidManifest();
+
+  manifest.name = ToNullableUTF16("");
+  EXPECT_TRUE(IsManifestValid(manifest));
+
+  manifest.name = ToNullableUTF16("foo");
+  manifest.short_name = ToNullableUTF16("");
+  EXPECT_TRUE(IsManifestValid(manifest));
+
+  manifest.name = ToNullableUTF16("");
   EXPECT_FALSE(IsManifestValid(manifest));
 }
 
@@ -104,6 +123,25 @@ TEST_F(AppBannerDataFetcherUnitTest, ManifestRequiresMinimalSize) {
 
   // The representation of the keyword 'any' should be recognized.
   manifest.icons[0].sizes[1] = gfx::Size(0, 0);
+  EXPECT_TRUE(IsManifestValid(manifest));
+}
+
+TEST_F(AppBannerDataFetcherUnitTest, ManifestDisplayStandaloneFullscreen) {
+  content::Manifest manifest = GetValidManifest();
+
+  manifest.display = blink::WebDisplayModeUndefined;
+  EXPECT_FALSE(IsManifestValid(manifest));
+
+  manifest.display = blink::WebDisplayModeBrowser;
+  EXPECT_FALSE(IsManifestValid(manifest));
+
+  manifest.display = blink::WebDisplayModeMinimalUi;
+  EXPECT_FALSE(IsManifestValid(manifest));
+
+  manifest.display = blink::WebDisplayModeStandalone;
+  EXPECT_TRUE(IsManifestValid(manifest));
+
+  manifest.display = blink::WebDisplayModeFullscreen;
   EXPECT_TRUE(IsManifestValid(manifest));
 }
 

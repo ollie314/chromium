@@ -11,6 +11,7 @@
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/wm/common/window_parenting_utils.h"
 #include "ash/wm/panels/panel_layout_manager.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
@@ -58,7 +59,7 @@ void PanelWindowResizer::Drag(const gfx::Point& location, int event_flags) {
   }
 
   // Check if the destination has changed displays.
-  gfx::Screen* screen = Shell::GetScreen();
+  gfx::Screen* screen = gfx::Screen::GetScreen();
   const gfx::Display dst_display =
       screen->GetDisplayNearestPoint(last_location_);
   if (dst_display.id() !=
@@ -140,6 +141,7 @@ bool PanelWindowResizer::AttachToLauncher(const gfx::Rect& bounds,
         shelf_widget()->GetWindowBoundsInScreen());
     switch (panel_layout_manager->shelf()->alignment()) {
       case SHELF_ALIGNMENT_BOTTOM:
+      case SHELF_ALIGNMENT_BOTTOM_LOCKED:
         if (bounds.bottom() >= (launcher_bounds.y() -
                                 kPanelSnapToLauncherDistance)) {
           should_attach = true;
@@ -158,13 +160,6 @@ bool PanelWindowResizer::AttachToLauncher(const gfx::Rect& bounds,
                                kPanelSnapToLauncherDistance)) {
           should_attach = true;
           offset->set_x(launcher_bounds.x() - bounds.width() - bounds.x());
-        }
-        break;
-      case SHELF_ALIGNMENT_TOP:
-        if (bounds.y() <= (launcher_bounds.bottom() +
-                           kPanelSnapToLauncherDistance)) {
-          should_attach = true;
-          offset->set_y(launcher_bounds.bottom() - bounds.y());
         }
         break;
     }
@@ -187,7 +182,10 @@ void PanelWindowResizer::StartedDragging() {
     aura::Window* old_parent = target->parent();
     aura::client::ParentWindowWithContext(
         target, target_root, target_root->GetBoundsInScreen());
-    wm::ReparentTransientChildrenOfChild(target, old_parent, target->parent());
+    ash::wm::ReparentTransientChildrenOfChild(
+        ash::wm::WmWindowAura::Get(target),
+        ash::wm::WmWindowAura::Get(old_parent),
+        ash::wm::WmWindowAura::Get(target->parent()));
   }
 }
 
@@ -203,7 +201,10 @@ void PanelWindowResizer::FinishDragging() {
     aura::Window* old_parent = target->parent();
     aura::client::ParentWindowWithContext(
         target, target_root, gfx::Rect(last_location_, gfx::Size()));
-    wm::ReparentTransientChildrenOfChild(target, old_parent, target->parent());
+    ash::wm::ReparentTransientChildrenOfChild(
+        ash::wm::WmWindowAura::Get(target),
+        ash::wm::WmWindowAura::Get(old_parent),
+        ash::wm::WmWindowAura::Get(target->parent()));
   }
 
   // If we started the drag in one root window and moved into another root

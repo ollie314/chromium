@@ -15,13 +15,10 @@
 #include "android_webview/browser/aw_resource_context.h"
 #include "android_webview/browser/jni_dependency_factory.h"
 #include "android_webview/browser/net/aw_url_request_context_getter.h"
-#include "android_webview/browser/net/init_native_callback.h"
 #include "android_webview/common/aw_content_client.h"
 #include "base/base_paths_android.h"
 #include "base/bind.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
-#include "base/prefs/pref_service_factory.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
@@ -35,6 +32,8 @@
 #include "components/policy/core/browser/configuration_policy_pref_store.h"
 #include "components/policy/core/browser/url_blacklist_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/pref_service_factory.h"
 #include "components/url_formatter/url_fixer.h"
 #include "components/user_prefs/user_prefs.h"
 #include "components/visitedlink/browser/visitedlink_master.h"
@@ -42,7 +41,6 @@
 #include "content/public/browser/ssl_host_state_delegate.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
-#include "net/cookies/cookie_store.h"
 #include "net/proxy/proxy_config_service_android.h"
 #include "net/proxy/proxy_service.h"
 
@@ -81,8 +79,8 @@ void DeleteDirRecursively(const base::FilePath& path) {
 
 AwBrowserContext* g_browser_context = NULL;
 
-scoped_ptr<net::ProxyConfigService> CreateProxyConfigService() {
-  scoped_ptr<net::ProxyConfigService> config_service =
+std::unique_ptr<net::ProxyConfigService> CreateProxyConfigService() {
+  std::unique_ptr<net::ProxyConfigService> config_service =
       net::ProxyService::CreateSystemProxyConfigService(
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
           nullptr /* Ignored on Android */);
@@ -131,6 +129,7 @@ AwBrowserContext::AwBrowserContext(
       native_factory_(native_factory) {
   DCHECK(!g_browser_context);
   g_browser_context = this;
+  BrowserContext::Initialize(this, path);
 
   // This constructor is entered during the creation of ContentBrowserClient,
   // before browser threads are created. Therefore any checks to enforce
@@ -182,7 +181,6 @@ void AwBrowserContext::SetLegacyCacheRemovalDelayForTest(int delay_ms) {
 }
 
 void AwBrowserContext::PreMainMessageLoopRun() {
-  cookie_store_ = CreateCookieStore(this);
   FilePath cache_path;
   const FilePath fallback_cache_dir =
       GetPath().Append(FILE_PATH_LITERAL("Cache"));
@@ -205,8 +203,7 @@ void AwBrowserContext::PreMainMessageLoopRun() {
   InitUserPrefService();
 
   url_request_context_getter_ = new AwURLRequestContextGetter(
-      cache_path, cookie_store_.get(), CreateProxyConfigService(),
-      user_pref_service_.get());
+      cache_path, CreateProxyConfigService(), user_pref_service_.get());
 
   data_reduction_proxy_io_data_.reset(
       new data_reduction_proxy::DataReductionProxyIOData(
@@ -220,7 +217,7 @@ void AwBrowserContext::PreMainMessageLoopRun() {
           GetUserAgent()));
   data_reduction_proxy_settings_.reset(
       new data_reduction_proxy::DataReductionProxySettings());
-  scoped_ptr<data_reduction_proxy::DataStore> store(
+  std::unique_ptr<data_reduction_proxy::DataStore> store(
       new data_reduction_proxy::DataStore());
   base::SequencedWorkerPool* pool = BrowserThread::GetBlockingPool();
   scoped_refptr<base::SequencedTaskRunner> db_task_runner =
@@ -262,42 +259,16 @@ void AwBrowserContext::PreMainMessageLoopRun() {
   const FilePath guid_file_path =
       GetPath().Append(FILE_PATH_LITERAL("metrics_guid"));
 
-  AwMetricsServiceClient::GetInstance()->Initialize(user_pref_service_.get(),
-                                                    GetRequestContext(),
-                                                    guid_file_path);
-}
-
-void AwBrowserContext::PostMainMessageLoopRun() {
-  AwMetricsServiceClient::GetInstance()->Finalize();
+  AwMetricsServiceClient::GetInstance()->Initialize(
+      user_pref_service_.get(),
+      content::BrowserContext::GetDefaultStoragePartition(this)->
+          GetURLRequestContext(),
+      guid_file_path);
 }
 
 void AwBrowserContext::AddVisitedURLs(const std::vector<GURL>& urls) {
   DCHECK(visitedlink_master_);
   visitedlink_master_->AddURLs(urls);
-}
-
-net::URLRequestContextGetter* AwBrowserContext::CreateRequestContext(
-    content::ProtocolHandlerMap* protocol_handlers,
-    content::URLRequestInterceptorScopedVector request_interceptors) {
-  // This function cannot actually create the request context because
-  // there is a reentrant dependency on GetResourceContext() via
-  // content::StoragePartitionImplMap::Create(). This is not fixable
-  // until http://crbug.com/159193. Until then, assert that the context
-  // has already been allocated and just handle setting the protocol_handlers.
-  DCHECK(url_request_context_getter_.get());
-  url_request_context_getter_->SetHandlersAndInterceptors(
-      protocol_handlers, std::move(request_interceptors));
-  return url_request_context_getter_.get();
-}
-
-net::URLRequestContextGetter*
-AwBrowserContext::CreateRequestContextForStoragePartition(
-    const base::FilePath& partition_path,
-    bool in_memory,
-    content::ProtocolHandlerMap* protocol_handlers,
-    content::URLRequestInterceptorScopedVector request_interceptors) {
-  NOTREACHED();
-  return NULL;
 }
 
 AwQuotaManagerBridge* AwBrowserContext::GetQuotaManagerBridge() {
@@ -351,7 +322,7 @@ void AwBrowserContext::InitUserPrefService() {
 
   metrics::MetricsService::RegisterPrefs(pref_registry);
 
-  base::PrefServiceFactory pref_service_factory;
+  PrefServiceFactory pref_service_factory;
   pref_service_factory.set_user_prefs(make_scoped_refptr(new AwPrefStore()));
   pref_service_factory.set_managed_prefs(
       make_scoped_refptr(new policy::ConfigurationPolicyPrefStore(
@@ -364,7 +335,7 @@ void AwBrowserContext::InitUserPrefService() {
   user_prefs::UserPrefs::Set(this, user_pref_service_.get());
 }
 
-scoped_ptr<content::ZoomLevelDelegate>
+std::unique_ptr<content::ZoomLevelDelegate>
 AwBrowserContext::CreateZoomLevelDelegate(
     const base::FilePath& partition_path) {
   return nullptr;
@@ -377,34 +348,6 @@ base::FilePath AwBrowserContext::GetPath() const {
 bool AwBrowserContext::IsOffTheRecord() const {
   // Android WebView does not support off the record profile yet.
   return false;
-}
-
-net::URLRequestContextGetter* AwBrowserContext::GetRequestContext() {
-  return GetDefaultStoragePartition(this)->GetURLRequestContext();
-}
-
-net::URLRequestContextGetter*
-AwBrowserContext::GetRequestContextForRenderProcess(
-    int renderer_child_id) {
-  return GetRequestContext();
-}
-
-net::URLRequestContextGetter* AwBrowserContext::GetMediaRequestContext() {
-  return GetRequestContext();
-}
-
-net::URLRequestContextGetter*
-AwBrowserContext::GetMediaRequestContextForRenderProcess(
-    int renderer_child_id) {
-  return GetRequestContext();
-}
-
-net::URLRequestContextGetter*
-AwBrowserContext::GetMediaRequestContextForStoragePartition(
-    const base::FilePath& partition_path,
-    bool in_memory) {
-  NOTREACHED();
-  return NULL;
 }
 
 content::ResourceContext* AwBrowserContext::GetResourceContext() {
@@ -450,6 +393,42 @@ content::PermissionManager* AwBrowserContext::GetPermissionManager() {
 content::BackgroundSyncController*
 AwBrowserContext::GetBackgroundSyncController() {
   return nullptr;
+}
+
+net::URLRequestContextGetter* AwBrowserContext::CreateRequestContext(
+    content::ProtocolHandlerMap* protocol_handlers,
+    content::URLRequestInterceptorScopedVector request_interceptors) {
+  // This function cannot actually create the request context because
+  // there is a reentrant dependency on GetResourceContext() via
+  // content::StoragePartitionImplMap::Create(). This is not fixable
+  // until http://crbug.com/159193. Until then, assert that the context
+  // has already been allocated and just handle setting the protocol_handlers.
+  DCHECK(url_request_context_getter_.get());
+  url_request_context_getter_->SetHandlersAndInterceptors(
+      protocol_handlers, std::move(request_interceptors));
+  return url_request_context_getter_.get();
+}
+
+net::URLRequestContextGetter*
+AwBrowserContext::CreateRequestContextForStoragePartition(
+    const base::FilePath& partition_path,
+    bool in_memory,
+    content::ProtocolHandlerMap* protocol_handlers,
+    content::URLRequestInterceptorScopedVector request_interceptors) {
+  NOTREACHED();
+  return NULL;
+}
+
+net::URLRequestContextGetter* AwBrowserContext::CreateMediaRequestContext() {
+  return url_request_context_getter_.get();
+}
+
+net::URLRequestContextGetter*
+AwBrowserContext::CreateMediaRequestContextForStoragePartition(
+    const base::FilePath& partition_path,
+    bool in_memory) {
+  NOTREACHED();
+  return NULL;
 }
 
 policy::URLBlacklistManager* AwBrowserContext::GetURLBlacklistManager() {

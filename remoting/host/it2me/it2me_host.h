@@ -5,9 +5,10 @@
 #ifndef REMOTING_HOST_IT2ME_IT2ME_HOST_H_
 #define REMOTING_HOST_IT2ME_IT2ME_HOST_H_
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "remoting/host/host_status_observer.h"
@@ -61,13 +62,13 @@ class It2MeHost : public base::RefCountedThreadSafe<It2MeHost>,
                                 const std::string& error_message) = 0;
   };
 
-  It2MeHost(
-      scoped_ptr<ChromotingHostContext> context,
-      scoped_ptr<PolicyWatcher> policy_watcher,
-      scoped_ptr<It2MeConfirmationDialogFactory> confirmation_dialog_factory,
-      base::WeakPtr<It2MeHost::Observer> observer,
-      const XmppSignalStrategy::XmppServerConfig& xmpp_server_config,
-      const std::string& directory_bot_jid);
+  It2MeHost(std::unique_ptr<ChromotingHostContext> context,
+            std::unique_ptr<PolicyWatcher> policy_watcher,
+            std::unique_ptr<It2MeConfirmationDialogFactory>
+                confirmation_dialog_factory,
+            base::WeakPtr<It2MeHost::Observer> observer,
+            const XmppSignalStrategy::XmppServerConfig& xmpp_server_config,
+            const std::string& directory_bot_jid);
 
   // Methods called by the script object, from the plugin thread.
 
@@ -128,19 +129,20 @@ class It2MeHost : public base::RefCountedThreadSafe<It2MeHost>,
                            const std::string& error_message);
 
   // Called when initial policies are read, and when they change.
-  void OnPolicyUpdate(scoped_ptr<base::DictionaryValue> policies);
+  void OnPolicyUpdate(std::unique_ptr<base::DictionaryValue> policies);
 
   // Called when malformed policies are detected.
   void OnPolicyError();
 
-  // Handlers for NAT traversal and host domain policies.
+  // Handlers for NAT traversal and domain policies.
   void UpdateNatPolicy(bool nat_traversal_enabled);
   void UpdateHostDomainPolicy(const std::string& host_domain);
+  void UpdateClientDomainPolicy(const std::string& client_domain);
 
   void Shutdown();
 
   // Caller supplied fields.
-  scoped_ptr<ChromotingHostContext> host_context_;
+  std::unique_ptr<ChromotingHostContext> host_context_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   base::WeakPtr<It2MeHost::Observer> observer_;
   XmppSignalStrategy::XmppServerConfig xmpp_server_config_;
@@ -149,23 +151,24 @@ class It2MeHost : public base::RefCountedThreadSafe<It2MeHost>,
   It2MeHostState state_;
 
   scoped_refptr<RsaKeyPair> host_key_pair_;
-  scoped_ptr<SignalStrategy> signal_strategy_;
-  scoped_ptr<RegisterSupportHostRequest> register_request_;
-  scoped_ptr<HostStatusLogger> host_status_logger_;
-  scoped_ptr<DesktopEnvironmentFactory> desktop_environment_factory_;
-  scoped_ptr<HostEventLogger> host_event_logger_;
+  std::unique_ptr<SignalStrategy> signal_strategy_;
+  std::unique_ptr<RegisterSupportHostRequest> register_request_;
+  std::unique_ptr<HostStatusLogger> host_status_logger_;
+  std::unique_ptr<DesktopEnvironmentFactory> desktop_environment_factory_;
+  std::unique_ptr<HostEventLogger> host_event_logger_;
 
-  scoped_ptr<ChromotingHost> host_;
+  std::unique_ptr<ChromotingHost> host_;
   int failed_login_attempts_;
 
-  scoped_ptr<PolicyWatcher> policy_watcher_;
-  scoped_ptr<It2MeConfirmationDialogFactory> confirmation_dialog_factory_;
-  scoped_ptr<It2MeConfirmationDialogProxy> confirmation_dialog_proxy_;
+  std::unique_ptr<PolicyWatcher> policy_watcher_;
+  std::unique_ptr<It2MeConfirmationDialogFactory> confirmation_dialog_factory_;
+  std::unique_ptr<It2MeConfirmationDialogProxy> confirmation_dialog_proxy_;
 
   // Host the current nat traversal policy setting.
   bool nat_traversal_enabled_;
 
-  // The host domain policy setting.
+  // The client and host domain policy setting.
+  std::string required_client_domain_;
   std::string required_host_domain_;
 
   // Indicates whether or not a policy has ever been read. This is to ensure
@@ -197,7 +200,7 @@ class It2MeHostFactory {
   virtual void set_policy_service(policy::PolicyService* policy_service);
 
   virtual scoped_refptr<It2MeHost> CreateIt2MeHost(
-      scoped_ptr<ChromotingHostContext> context,
+      std::unique_ptr<ChromotingHostContext> context,
       base::WeakPtr<It2MeHost::Observer> observer,
       const XmppSignalStrategy::XmppServerConfig& xmpp_server_config,
       const std::string& directory_bot_jid);

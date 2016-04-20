@@ -51,7 +51,7 @@ class ExampleMenuModel : public ui::SimpleMenuModel,
     COMMAND_GO_HOME,
   };
 
-  scoped_ptr<ui::SimpleMenuModel> submenu_;
+  std::unique_ptr<ui::SimpleMenuModel> submenu_;
   std::set<int> checked_fruits_;
   int current_encoding_command_id_;
 
@@ -65,12 +65,14 @@ class ExampleMenuButton : public MenuButton, public MenuButtonListener {
 
  private:
   // MenuButtonListener:
-  void OnMenuButtonClicked(View* source, const gfx::Point& point) override;
+  void OnMenuButtonClicked(MenuButton* source,
+                           const gfx::Point& point,
+                           const ui::Event* event) override;
 
   ui::SimpleMenuModel* GetMenuModel();
 
-  scoped_ptr<ExampleMenuModel> menu_model_;
-  scoped_ptr<MenuRunner> menu_runner_;
+  std::unique_ptr<ExampleMenuModel> menu_model_;
+  std::unique_ptr<MenuRunner> menu_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(ExampleMenuButton);
 };
@@ -178,14 +180,14 @@ void ExampleMenuModel::ExecuteCommand(int command_id, int event_flags) {
 // ExampleMenuButton -----------------------------------------------------------
 
 ExampleMenuButton::ExampleMenuButton(const base::string16& test)
-    : MenuButton(NULL, test, this, true) {
-}
+    : MenuButton(test, this, true) {}
 
 ExampleMenuButton::~ExampleMenuButton() {
 }
 
-void ExampleMenuButton::OnMenuButtonClicked(View* source,
-                                            const gfx::Point& point) {
+void ExampleMenuButton::OnMenuButtonClicked(MenuButton* source,
+                                            const gfx::Point& point,
+                                            const ui::Event* event) {
   menu_runner_.reset(new MenuRunner(GetMenuModel(), MenuRunner::HAS_MNEMONICS));
 
   if (menu_runner_->RunMenuAt(source->GetWidget()->GetTopLevelWidget(),

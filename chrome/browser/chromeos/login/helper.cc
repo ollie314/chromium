@@ -10,7 +10,7 @@
 #include "base/json/json_writer.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/grit/generated_resources.h"
@@ -37,7 +37,7 @@ namespace {
 // Gets the WebContents instance of current login display. If there is none,
 // returns nullptr.
 content::WebContents* GetLoginWebContents() {
-  LoginDisplayHost* host = LoginDisplayHostImpl::default_host();
+  LoginDisplayHost* host = LoginDisplayHost::default_host();
   if (!host || !host->GetWebUILoginView())
     return nullptr;
 
@@ -87,8 +87,7 @@ content::StoragePartition* GetPartition(content::WebContents* embedder,
 }  // namespace
 
 gfx::Rect CalculateScreenBounds(const gfx::Size& size) {
-  gfx::Rect bounds =
-      gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().bounds();
+  gfx::Rect bounds = gfx::Screen::GetScreen()->GetPrimaryDisplay().bounds();
   if (!size.IsEmpty()) {
     int horizontal_diff = bounds.width() - size.width();
     int vertical_diff = bounds.height() - size.height();
@@ -139,7 +138,7 @@ void NetworkStateHelper::GetConnectedWifiNetwork(std::string* out_onc_spec) {
   if (!network_state)
     return;
 
-  scoped_ptr<base::DictionaryValue> current_onc =
+  std::unique_ptr<base::DictionaryValue> current_onc =
       network_util::TranslateNetworkStateToONC(network_state);
   std::string security;
   current_onc->GetString(
@@ -149,7 +148,8 @@ void NetworkStateHelper::GetConnectedWifiNetwork(std::string* out_onc_spec) {
 
   const std::string hex_ssid = network_state->GetHexSsid();
 
-  scoped_ptr<base::DictionaryValue> copied_onc(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> copied_onc(
+      new base::DictionaryValue());
   copied_onc->Set(onc::toplevel_config::kType,
                   new base::StringValue(onc::network_type::kWiFi));
   copied_onc->Set(onc::network_config::WifiProperty(onc::wifi::kHexSSID),
@@ -164,7 +164,7 @@ void NetworkStateHelper::CreateAndConnectNetworkFromOnc(
     const base::Closure& success_callback,
     const base::Closure& error_callback) const {
   std::string error;
-  scoped_ptr<base::Value> root = base::JSONReader::ReadAndReturnError(
+  std::unique_ptr<base::Value> root = base::JSONReader::ReadAndReturnError(
       onc_spec, base::JSON_ALLOW_TRAILING_COMMAS, nullptr, &error);
 
   base::DictionaryValue* toplevel_onc = nullptr;
@@ -201,7 +201,8 @@ bool NetworkStateHelper::IsConnecting() const {
 void NetworkStateHelper::OnCreateConfiguration(
     const base::Closure& success_callback,
     const base::Closure& error_callback,
-    const std::string& service_path) const {
+    const std::string& service_path,
+    const std::string& guid) const {
   // Connect to the network.
   NetworkHandler::Get()->network_connection_handler()->ConnectToNetwork(
       service_path, success_callback,
@@ -213,7 +214,7 @@ void NetworkStateHelper::OnCreateConfiguration(
 void NetworkStateHelper::OnCreateOrConnectNetworkFailed(
     const base::Closure& error_callback,
     const std::string& error_name,
-    scoped_ptr<base::DictionaryValue> error_data) const {
+    std::unique_ptr<base::DictionaryValue> error_data) const {
   LOG(ERROR) << "Failed to create or connect to network: " << error_name;
   error_callback.Run();
 }
@@ -235,7 +236,7 @@ net::URLRequestContextGetter* GetSigninContext() {
     // Special case for unit tests. There's no LoginDisplayHost thus no
     // webview instance. TODO(nkostylev): Investigate if there's a better
     // place to address this like dependency injection. http://crbug.com/477402
-    if (!signin_partition && !LoginDisplayHostImpl::default_host())
+    if (!signin_partition && !LoginDisplayHost::default_host())
       return ProfileHelper::GetSigninProfile()->GetRequestContext();
 
     if (!signin_partition)

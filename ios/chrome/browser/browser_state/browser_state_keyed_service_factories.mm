@@ -8,11 +8,9 @@
 #include "ios/chrome/browser/autocomplete/in_memory_url_index_factory.h"
 #include "ios/chrome/browser/autocomplete/shortcuts_backend_factory.h"
 #include "ios/chrome/browser/autofill/personal_data_manager_factory.h"
-#include "ios/chrome/browser/bookmarks/bookmark_client_factory.h"
 #include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "ios/chrome/browser/bookmarks/startup_task_runner_service_factory.h"
 #include "ios/chrome/browser/content_settings/cookie_settings_factory.h"
-#include "ios/chrome/browser/data_reduction_proxy/ios_chrome_data_reduction_proxy_settings_factory.h"
 #include "ios/chrome/browser/dom_distiller/dom_distiller_service_factory.h"
 #include "ios/chrome/browser/favicon/favicon_service_factory.h"
 #include "ios/chrome/browser/favicon/ios_chrome_favicon_loader_factory.h"
@@ -54,7 +52,6 @@
 // TODO(erg): This needs to be something else. I don't think putting every
 // FooServiceFactory here will scale or is desirable long term.
 void EnsureBrowserStateKeyedServiceFactoriesBuilt() {
-  BookmarkClientFactory::GetInstance();
   dom_distiller::DomDistillerServiceFactory::GetInstance();
   ios::AboutSigninInternalsFactory::GetInstance();
   ios::AccountConsistencyServiceFactory::GetInstance();
@@ -78,7 +75,6 @@ void EnsureBrowserStateKeyedServiceFactoriesBuilt() {
   ios::TopSitesFactory::GetInstance();
   ios::WebDataServiceFactory::GetInstance();
   ios::WebHistoryServiceFactory::GetInstance();
-  IOSChromeDataReductionProxySettingsFactory::GetInstance();
   IOSChromeGCMProfileServiceFactory::GetInstance();
   IOSChromeLargeIconCacheFactory::GetInstance();
   IOSChromeLargeIconServiceFactory::GetInstance();

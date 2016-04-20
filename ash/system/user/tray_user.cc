@@ -8,6 +8,7 @@
 #include "ash/root_window_controller.h"
 #include "ash/session/session_state_delegate.h"
 #include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_util.h"
 #include "ash/shell_delegate.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
@@ -191,8 +192,7 @@ void TrayUser::UpdateAfterShelfAlignmentChange(ShelfAlignment alignment) {
   // Inactive users won't have a layout.
   if (!layout_view_)
     return;
-  if (alignment == SHELF_ALIGNMENT_BOTTOM ||
-      alignment == SHELF_ALIGNMENT_TOP) {
+  if (IsHorizontalAlignment(alignment)) {
     if (avatar_) {
       avatar_->SetBorder(views::Border::NullBorder());
       avatar_->SetCornerRadii(
@@ -272,12 +272,7 @@ void TrayUser::UpdateAvatarImage(user::LoginStatus status) {
 }
 
 void TrayUser::UpdateLayoutOfItem() {
-  RootWindowController* controller = GetRootWindowController(
-      system_tray()->GetWidget()->GetNativeWindow()->GetRootWindow());
-  if (controller && controller->shelf()) {
-    UpdateAfterShelfAlignmentChange(
-        controller->GetShelfLayoutManager()->GetAlignment());
-  }
+  UpdateAfterShelfAlignmentChange(system_tray()->shelf_alignment());
 }
 
 }  // namespace ash

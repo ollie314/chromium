@@ -13,9 +13,10 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
+#include "grit/components_scaled_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/material_design/material_design_controller.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/painter.h"
@@ -118,17 +119,19 @@ void LocationIconView::OnGestureEvent(ui::GestureEvent* event) {
   event->SetHandled();
 }
 
+bool LocationIconView::GetTooltipText(const gfx::Point& p,
+                                      base::string16* tooltip) const {
+  if (show_tooltip_)
+    *tooltip = l10n_util::GetStringUTF16(IDS_TOOLTIP_LOCATION_ICON);
+  return show_tooltip_;
+}
+
 void LocationIconView::OnClickOrTap(const ui::LocatedEvent& event) {
   // Do not show page info if the user has been editing the location bar or the
   // location bar is at the NTP.
   if (location_bar_->GetOmniboxView()->IsEditingOrEmpty())
     return;
   ProcessEvent(event);
-}
-
-void LocationIconView::ShowTooltip(bool show) {
-  SetTooltipText(show ?
-      l10n_util::GetStringUTF16(IDS_TOOLTIP_LOCATION_ICON) : base::string16());
 }
 
 void LocationIconView::ProcessEvent(const ui::LocatedEvent& event) {

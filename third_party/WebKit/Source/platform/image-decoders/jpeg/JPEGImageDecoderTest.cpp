@@ -38,6 +38,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
+#include "wtf/typed_arrays/ArrayBuffer.h"
 
 namespace blink {
 
@@ -67,8 +68,8 @@ void downsample(size_t maxDecodedBytes, unsigned* outputWidth, unsigned* outputH
 
     ImageFrame* frame = decoder->frameBufferAtIndex(0);
     ASSERT_TRUE(frame);
-    *outputWidth = frame->getSkBitmap().width();
-    *outputHeight = frame->getSkBitmap().height();
+    *outputWidth = frame->bitmap().width();
+    *outputHeight = frame->bitmap().height();
     EXPECT_EQ(IntSize(*outputWidth, *outputHeight), decoder->decodedSize());
 }
 
@@ -80,15 +81,17 @@ void readYUV(size_t maxDecodedBytes, unsigned* outputYWidth, unsigned* outputYHe
     OwnPtr<ImageDecoder> decoder = createDecoder(maxDecodedBytes);
     decoder->setData(data.get(), true);
 
-    OwnPtr<ImagePlanes> imagePlanes = adoptPtr(new ImagePlanes());
-    decoder->setImagePlanes(imagePlanes.release());
+    // Setting a dummy ImagePlanes object signals to the decoder that we want to do YUV decoding.
+    OwnPtr<ImagePlanes> dummyImagePlanes = adoptPtr(new ImagePlanes());
+    decoder->setImagePlanes(dummyImagePlanes.release());
+
     bool sizeIsAvailable = decoder->isSizeAvailable();
     ASSERT_TRUE(sizeIsAvailable);
 
     IntSize size = decoder->decodedSize();
-    IntSize ySize = decoder->decodedYUVSize(0, ImageDecoder::ActualSize);
-    IntSize uSize = decoder->decodedYUVSize(1, ImageDecoder::ActualSize);
-    IntSize vSize = decoder->decodedYUVSize(2, ImageDecoder::ActualSize);
+    IntSize ySize = decoder->decodedYUVSize(0);
+    IntSize uSize = decoder->decodedYUVSize(1);
+    IntSize vSize = decoder->decodedYUVSize(2);
 
     ASSERT_TRUE(size.width() == ySize.width());
     ASSERT_TRUE(size.height() == ySize.height());
@@ -99,6 +102,22 @@ void readYUV(size_t maxDecodedBytes, unsigned* outputYWidth, unsigned* outputYHe
     *outputYHeight = ySize.height();
     *outputUVWidth = uSize.width();
     *outputUVHeight = uSize.height();
+
+    size_t rowBytes[3];
+    rowBytes[0] = decoder->decodedYUVWidthBytes(0);
+    rowBytes[1] = decoder->decodedYUVWidthBytes(1);
+    rowBytes[2] = decoder->decodedYUVWidthBytes(2);
+
+    RefPtr<ArrayBuffer> buffer(ArrayBuffer::create(rowBytes[0] * ySize.height() + rowBytes[1] * uSize.height() + rowBytes[2] * vSize.height(), 1));
+    void* planes[3];
+    planes[0] = buffer->data();
+    planes[1] = ((char*) planes[0]) + rowBytes[0] * ySize.height();
+    planes[2] = ((char*) planes[1]) + rowBytes[1] * uSize.height();
+
+    OwnPtr<ImagePlanes> imagePlanes = adoptPtr(new ImagePlanes(planes, rowBytes));
+    decoder->setImagePlanes(imagePlanes.release());
+
+    ASSERT_TRUE(decoder->decodeToYUV());
 }
 
 // Tests failure on a too big image.
@@ -215,6 +234,13 @@ TEST(JPEGImageDecoderTest, yuv)
     EXPECT_EQ(256u, outputYHeight);
     EXPECT_EQ(128u, outputUVWidth);
     EXPECT_EQ(128u, outputUVHeight);
+
+    const char* jpegFileImageSizeNotMultipleOf8 = "/LayoutTests/fast/images/resources/cropped_mandrill.jpg"; // 439x154
+    readYUV(LargeEnoughSize, &outputYWidth, &outputYHeight, &outputUVWidth, &outputUVHeight, jpegFileImageSizeNotMultipleOf8);
+    EXPECT_EQ(439u, outputYWidth);
+    EXPECT_EQ(154u, outputYHeight);
+    EXPECT_EQ(220u, outputUVWidth);
+    EXPECT_EQ(77u, outputUVHeight);
 
     // Make sure we revert to RGBA decoding when we're about to downscale,
     // which can occur on memory-constrained android devices.

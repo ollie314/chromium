@@ -5,19 +5,18 @@
 #ifndef CHROME_RENDERER_NET_NET_ERROR_HELPER_H_
 #define CHROME_RENDERER_NET_NET_ERROR_HELPER_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "chrome/renderer/net/net_error_page_controller.h"
 #include "components/error_page/common/net_error_info.h"
-#include "components/error_page/common/offline_page_types.h"
 #include "components/error_page/renderer/net_error_helper_core.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_frame_observer_tracker.h"
-#include "content/public/renderer/render_process_observer.h"
+#include "content/public/renderer/render_thread_observer.h"
 
 class GURL;
 
@@ -38,10 +37,12 @@ struct ErrorPageParams;
 // Listens for NetErrorInfo messages from the NetErrorTabHelper on the
 // browser side and updates the error page with more details (currently, just
 // DNS probe results) if/when available.
+// TODO(crbug.com/578770): Should this class be moved into the error_page
+// component?
 class NetErrorHelper
     : public content::RenderFrameObserver,
       public content::RenderFrameObserverTracker<NetErrorHelper>,
-      public content::RenderProcessObserver,
+      public content::RenderThreadObserver,
       public error_page::NetErrorHelperCore::Delegate,
       public NetErrorPageController::Delegate {
  public:
@@ -64,7 +65,7 @@ class NetErrorHelper
   // IPC::Listener implementation.
   bool OnMessageReceived(const IPC::Message& message) override;
 
-  // RenderProcessObserver implementation.
+  // RenderThreadObserver implementation.
   void NetworkStateChanged(bool online) override;
 
   // Initializes |error_html| with the HTML of an error page in response to
@@ -85,32 +86,29 @@ class NetErrorHelper
       const blink::WebURLError& error,
       bool is_failed_post,
       bool can_use_local_diagnostics_service,
-      error_page::OfflinePageStatus offline_page_status,
-      scoped_ptr<error_page::ErrorPageParams> params,
+      bool has_offline_pages,
+      std::unique_ptr<error_page::ErrorPageParams> params,
       bool* reload_button_shown,
       bool* show_saved_copy_button_shown,
       bool* show_cached_copy_button_shown,
       bool* show_offline_pages_button_shown,
-      bool* show_offline_copy_button_shown,
       std::string* html) const override;
   void LoadErrorPage(const std::string& html, const GURL& failed_url) override;
   void EnablePageHelperFunctions() override;
-  void UpdateErrorPage(
-      const blink::WebURLError& error,
-      bool is_failed_post,
-      bool can_use_local_diagnostics_service,
-      error_page::OfflinePageStatus offline_page_status) override;
+  void UpdateErrorPage(const blink::WebURLError& error,
+                       bool is_failed_post,
+                       bool can_use_local_diagnostics_service,
+                       bool has_offline_pages) override;
   void FetchNavigationCorrections(
       const GURL& navigation_correction_url,
       const std::string& navigation_correction_request_body) override;
   void CancelFetchNavigationCorrections() override;
   void SendTrackingRequest(const GURL& tracking_url,
                            const std::string& tracking_request_body) override;
-  void ReloadPage(bool ignore_cache) override;
+  void ReloadPage(bool bypass_cache) override;
   void LoadPageFromCache(const GURL& page_url) override;
   void DiagnoseError(const GURL& page_url) override;
   void ShowOfflinePages() override;
-  void LoadOfflineCopy(const GURL& page_url) override;
 
   void OnNetErrorInfo(int status);
   void OnSetCanShowNetworkDiagnosticsDialog(
@@ -128,15 +126,15 @@ class NetErrorHelper
                                  const std::string& data);
 
 #if defined(OS_ANDROID)
-  // Called to set the status of the offline pages that will be used to decide
+  // Called to set whether offline pages exists, which will be used to decide
   // if offline related button will be provided in the error page.
-  void OnSetOfflinePageInfo(error_page::OfflinePageStatus offline_page_status);
+  void OnSetHasOfflinePages(bool has_offline_pages);
 #endif
 
-  scoped_ptr<content::ResourceFetcher> correction_fetcher_;
-  scoped_ptr<content::ResourceFetcher> tracking_fetcher_;
+  std::unique_ptr<content::ResourceFetcher> correction_fetcher_;
+  std::unique_ptr<content::ResourceFetcher> tracking_fetcher_;
 
-  scoped_ptr<error_page::NetErrorHelperCore> core_;
+  std::unique_ptr<error_page::NetErrorHelperCore> core_;
 
   // Weak factory for vending a weak pointer to a NetErrorPageController. Weak
   // pointers are invalidated on each commit, to prevent getting messages from

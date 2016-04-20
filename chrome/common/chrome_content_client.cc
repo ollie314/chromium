@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/command_line.h"
 #include "base/debug/crash_logging.h"
 #include "base/files/file_util.h"
@@ -41,7 +43,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
-
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
 #if defined(OS_LINUX)
@@ -172,12 +173,11 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
           kWidevineCdmPluginMimeTypeDescription);
 
       // Add the supported codecs as if they came from the component manifest.
+      // This list must match the CDM that is being bundled with Chrome.
       std::vector<std::string> codecs;
-      codecs.push_back(kCdmSupportedCodecVorbis);
       codecs.push_back(kCdmSupportedCodecVp8);
       codecs.push_back(kCdmSupportedCodecVp9);
 #if defined(USE_PROPRIETARY_CODECS)
-      codecs.push_back(kCdmSupportedCodecAac);
       codecs.push_back(kCdmSupportedCodecAvc1);
 #endif  // defined(USE_PROPRIETARY_CODECS)
       std::string codec_string = base::JoinString(
@@ -371,7 +371,7 @@ bool GetSystemPepperFlash(content::PepperPluginInfo* plugin) {
   std::string manifest_data;
   if (!base::ReadFileToString(manifest_path, &manifest_data))
     return false;
-  scoped_ptr<base::Value> manifest_value(
+  std::unique_ptr<base::Value> manifest_value(
       base::JSONReader::Read(manifest_data, base::JSON_ALLOW_TRAILING_COMMAS));
   if (!manifest_value.get())
     return false;
@@ -470,9 +470,9 @@ content::PepperPluginInfo* ChromeContentClient::FindMostRecentPlugin(
         Version version_x(x->version);
         Version version_y(y->version);
         DCHECK(version_x.IsValid() && version_y.IsValid());
-        if (version_x.Equals(version_y))
+        if (version_x == version_y)
           return !x->is_debug && y->is_debug;
-        return version_x.IsOlderThan(y->version);
+        return version_x < version_y;
       });
   return it != plugins.end() ? *it : nullptr;
 }
@@ -497,18 +497,18 @@ void ChromeContentClient::AddPepperPlugins(
   ScopedVector<content::PepperPluginInfo> flash_versions;
 
 #if defined(OS_LINUX)
-  scoped_ptr<content::PepperPluginInfo> component_flash(
+  std::unique_ptr<content::PepperPluginInfo> component_flash(
       new content::PepperPluginInfo);
   if (GetComponentUpdatedPepperFlash(component_flash.get()))
     flash_versions.push_back(component_flash.release());
 #endif  // defined(OS_LINUX)
 
-  scoped_ptr<content::PepperPluginInfo> bundled_flash(
+  std::unique_ptr<content::PepperPluginInfo> bundled_flash(
       new content::PepperPluginInfo);
   if (GetBundledPepperFlash(bundled_flash.get()))
     flash_versions.push_back(bundled_flash.release());
 
-  scoped_ptr<content::PepperPluginInfo> system_flash(
+  std::unique_ptr<content::PepperPluginInfo> system_flash(
       new content::PepperPluginInfo);
   if (GetSystemPepperFlash(system_flash.get()))
     flash_versions.push_back(system_flash.release());
@@ -540,9 +540,15 @@ static const url::SchemeWithType kChromeStandardURLSchemes[
 
 void ChromeContentClient::AddAdditionalSchemes(
     std::vector<url::SchemeWithType>* standard_schemes,
+    std::vector<url::SchemeWithType>* referrer_schemes,
     std::vector<std::string>* savable_schemes) {
   for (int i = 0; i < kNumChromeStandardURLSchemes; i++)
     standard_schemes->push_back(kChromeStandardURLSchemes[i]);
+
+#if defined(OS_ANDROID)
+  referrer_schemes->push_back(
+      {chrome::kAndroidAppScheme, url::SCHEME_WITHOUT_PORT});
+#endif
 
   savable_schemes->push_back(extensions::kExtensionScheme);
   savable_schemes->push_back(extensions::kExtensionResourceScheme);
@@ -597,7 +603,7 @@ std::string ChromeContentClient::GetProcessTypeNameInEnglish(int type) {
   return "Unknown";
 }
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MACOSX)
 bool ChromeContentClient::GetSandboxProfileForSandboxType(
     int sandbox_type,
     int* sandbox_profile_resource_id) const {
@@ -636,4 +642,8 @@ bool ChromeContentClient::IsSupplementarySiteIsolationModeEnabled() {
 #else
   return false;
 #endif
+}
+
+base::StringPiece ChromeContentClient::GetOriginTrialPublicKey() {
+  return origin_trial_key_manager_.GetPublicKey();
 }

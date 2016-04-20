@@ -5,6 +5,8 @@
 #ifndef UI_VIEWS_WIDGET_NATIVE_WIDGET_AURA_H_
 #define UI_VIEWS_WIDGET_NATIVE_WIDGET_AURA_H_
 
+#include <string>
+
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/aura/client/focus_change_observer.h"
@@ -42,8 +44,8 @@ class VIEWS_EXPORT NativeWidgetAura
  public:
   explicit NativeWidgetAura(internal::NativeWidgetDelegate* delegate);
 
-  // Called internally by NativeWidget implementations to associate
-  // |native_widget| with |window|.
+  // Called internally by NativeWidgetAura and DesktopNativeWidgetAura to
+  // associate |native_widget| with |window|.
   static void RegisterNativeWidgetForWindow(
       internal::NativeWidgetPrivate* native_widget,
       aura::Window* window);
@@ -108,7 +110,6 @@ class VIEWS_EXPORT NativeWidgetAura
   void SetFullscreen(bool fullscreen) override;
   bool IsFullscreen() const override;
   void SetOpacity(unsigned char opacity) override;
-  void SetUseDragFrame(bool use_drag_frame) override;
   void FlashFrame(bool flash_frame) override;
   void RunShellDrag(View* view,
                     const ui::OSExchangeData& data,
@@ -134,6 +135,7 @@ class VIEWS_EXPORT NativeWidgetAura
   bool IsTranslucentWindowOpacitySupported() const override;
   void OnSizeConstraintsChanged() override;
   void RepostNativeEvent(gfx::NativeEvent native_event) override;
+  std::string GetName() const override;
 
   // Overridden from aura::WindowDelegate:
   gfx::Size GetMinimumSize() const override;
@@ -206,6 +208,9 @@ class VIEWS_EXPORT NativeWidgetAura
   // See class documentation for Widget in widget.h for a note about ownership.
   Widget::InitParams::Ownership ownership_;
 
+  // Internal name.
+  std::string name_;
+
   // Are we in the destructor?
   bool destroying_;
 
@@ -214,13 +219,13 @@ class VIEWS_EXPORT NativeWidgetAura
   // The saved window state for exiting full screen state.
   ui::WindowShowState saved_window_state_;
 
-  scoped_ptr<TooltipManagerAura> tooltip_manager_;
+  std::unique_ptr<TooltipManagerAura> tooltip_manager_;
 
   // Reorders child windows of |window_| associated with a view based on the
   // order of the associated views in the widget's view hierarchy.
-  scoped_ptr<WindowReorderer> window_reorderer_;
+  std::unique_ptr<WindowReorderer> window_reorderer_;
 
-  scoped_ptr<DropHelper> drop_helper_;
+  std::unique_ptr<DropHelper> drop_helper_;
   int last_drop_operation_;
 
   // The following factory is used for calls to close the NativeWidgetAura

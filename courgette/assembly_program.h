@@ -9,20 +9,20 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
-#include "courgette/disassembler.h"
+#include "base/memory/free_deleter.h"
+#include "courgette/courgette.h"
 #include "courgette/image_utils.h"
+#include "courgette/label_manager.h"
 #include "courgette/memory_allocator.h"
 
 namespace courgette {
 
 class EncodedProgram;
-
-typedef std::map<RVA, Label*> RVAToLabel;
 
 // Opcodes of simple assembly language
 enum OP {
@@ -133,7 +133,7 @@ class AssemblyProgram {
   void UnassignIndexes();
   void AssignRemainingIndexes();
 
-  EncodedProgram* Encode() const;
+  std::unique_ptr<EncodedProgram> Encode() const;
 
   // Accessor for instruction list.
   const InstructionVector& instructions() const {
@@ -152,12 +152,13 @@ class AssemblyProgram {
   // otherwise returns NULL.
   Label* InstructionRel32Label(const Instruction* instruction) const;
 
-  // Trim underused labels
+  // Removes underused Labels. Thresholds used (may be 0, i.e., no trimming) is
+  // dependent on architecture. Returns true on success, and false otherwise.
   CheckBool TrimLabels();
 
  private:
   using ScopedInstruction =
-      scoped_ptr<Instruction, UncheckedDeleter<Instruction>>;
+      std::unique_ptr<Instruction, UncheckedDeleter<Instruction>>;
 
   ExecutableType kind_;
 
@@ -176,7 +177,7 @@ class AssemblyProgram {
 
   // Sharing instructions that emit a single byte saves a lot of space.
   Instruction* GetByteInstruction(uint8_t byte);
-  scoped_ptr<Instruction* [], base::FreeDeleter> byte_instruction_cache_;
+  std::unique_ptr<Instruction* [], base::FreeDeleter> byte_instruction_cache_;
 
   uint64_t image_base_;  // Desired or mandated base address of image.
 
@@ -191,5 +192,12 @@ class AssemblyProgram {
   DISALLOW_COPY_AND_ASSIGN(AssemblyProgram);
 };
 
+// Converts |program| into encoded form, returning it as |*output|.
+// Returns C_OK if succeeded, otherwise returns an error status and sets
+// |*output| to null.
+Status Encode(const AssemblyProgram& program,
+              std::unique_ptr<EncodedProgram>* output);
+
 }  // namespace courgette
+
 #endif  // COURGETTE_ASSEMBLY_PROGRAM_H_

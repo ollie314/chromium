@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -19,6 +18,7 @@
 #include "chrome/common/pref_names.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/browser/website_settings_registry.h"
+#include "components/prefs/pref_service.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
@@ -61,7 +61,6 @@ void PermissionContextBase::RequestPermission(
     content::WebContents* web_contents,
     const PermissionRequestID& id,
     const GURL& requesting_frame,
-    bool user_gesture,
     const BrowserPermissionCallback& callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -113,7 +112,7 @@ void PermissionContextBase::RequestPermission(
                                          embedding_origin, profile_);
 
   DecidePermission(web_contents, id, requesting_origin, embedding_origin,
-                   user_gesture, callback);
+                   callback);
 }
 
 ContentSetting PermissionContextBase::GetPermissionStatus(
@@ -137,10 +136,10 @@ ContentSetting PermissionContextBase::GetPermissionStatus(
 void PermissionContextBase::ResetPermission(
     const GURL& requesting_origin,
     const GURL& embedding_origin) {
-  HostContentSettingsMapFactory::GetForProfile(profile_)->SetContentSetting(
-      ContentSettingsPattern::FromURLNoWildcard(requesting_origin),
-      ContentSettingsPattern::FromURLNoWildcard(embedding_origin),
-      content_settings_type_, std::string(), CONTENT_SETTING_DEFAULT);
+  HostContentSettingsMapFactory::GetForProfile(profile_)
+      ->SetContentSettingDefaultScope(requesting_origin, embedding_origin,
+                                      content_settings_type_, std::string(),
+                                      CONTENT_SETTING_DEFAULT);
 }
 
 void PermissionContextBase::CancelPermissionRequest(
@@ -165,7 +164,6 @@ void PermissionContextBase::DecidePermission(
     const PermissionRequestID& id,
     const GURL& requesting_origin,
     const GURL& embedding_origin,
-    bool user_gesture,
     const BrowserPermissionCallback& callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -176,10 +174,9 @@ void PermissionContextBase::DecidePermission(
   // prevent crashes. See crbug.com/457091.
   if (!bubble_manager)
     return;
-  scoped_ptr<PermissionBubbleRequest> request_ptr(
+  std::unique_ptr<PermissionBubbleRequest> request_ptr(
       new PermissionBubbleRequestImpl(
-          requesting_origin, user_gesture, permission_type_,
-          profile_->GetPrefs()->GetString(prefs::kAcceptLanguages),
+          requesting_origin, permission_type_,
           base::Bind(&PermissionContextBase::PermissionDecided,
                      weak_factory_.GetWeakPtr(), id, requesting_origin,
                      embedding_origin, callback),
@@ -279,10 +276,10 @@ void PermissionContextBase::UpdateContentSetting(
   DCHECK(content_setting == CONTENT_SETTING_ALLOW ||
          content_setting == CONTENT_SETTING_BLOCK);
 
-  HostContentSettingsMapFactory::GetForProfile(profile_)->SetContentSetting(
-      ContentSettingsPattern::FromURLNoWildcard(requesting_origin),
-      ContentSettingsPattern::FromURLNoWildcard(embedding_origin),
-      content_settings_type_, std::string(), content_setting);
+  HostContentSettingsMapFactory::GetForProfile(profile_)
+      ->SetContentSettingDefaultScope(requesting_origin, embedding_origin,
+                                      content_settings_type_, std::string(),
+                                      content_setting);
 }
 
 bool PermissionContextBase::IsPermissionKillSwitchOn() const {

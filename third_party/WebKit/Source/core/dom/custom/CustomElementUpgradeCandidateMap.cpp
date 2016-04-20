@@ -34,20 +34,13 @@
 
 namespace blink {
 
-PassOwnPtrWillBeRawPtr<CustomElementUpgradeCandidateMap> CustomElementUpgradeCandidateMap::create()
+CustomElementUpgradeCandidateMap* CustomElementUpgradeCandidateMap::create()
 {
-    return adoptPtrWillBeNoop(new CustomElementUpgradeCandidateMap());
+    return new CustomElementUpgradeCandidateMap();
 }
 
 CustomElementUpgradeCandidateMap::~CustomElementUpgradeCandidateMap()
 {
-#if !ENABLE(OILPAN)
-    // With Oilpan enabled, the observer table keeps a weak reference to the
-    // element; no need for explicit removal.
-    UpgradeCandidateMap::const_iterator::Keys end = m_upgradeCandidates.end().keys();
-    for (UpgradeCandidateMap::const_iterator::Keys it = m_upgradeCandidates.begin().keys(); it != end; ++it)
-        unobserve(*it);
-#endif
 }
 
 void CustomElementUpgradeCandidateMap::add(const CustomElementDescriptor& descriptor, Element* element)
@@ -60,7 +53,7 @@ void CustomElementUpgradeCandidateMap::add(const CustomElementDescriptor& descri
     UnresolvedDefinitionMap::iterator it = m_unresolvedDefinitions.find(descriptor);
     ElementSet* elements;
     if (it == m_unresolvedDefinitions.end())
-        elements = m_unresolvedDefinitions.add(descriptor, adoptPtrWillBeNoop(new ElementSet())).storedValue->value.get();
+        elements = m_unresolvedDefinitions.add(descriptor, new ElementSet()).storedValue->value.get();
     else
         elements = it->value.get();
     elements->add(element);
@@ -78,9 +71,9 @@ void CustomElementUpgradeCandidateMap::elementWasDestroyed(Element* element)
     m_upgradeCandidates.remove(candidate);
 }
 
-PassOwnPtrWillBeRawPtr<CustomElementUpgradeCandidateMap::ElementSet> CustomElementUpgradeCandidateMap::takeUpgradeCandidatesFor(const CustomElementDescriptor& descriptor)
+CustomElementUpgradeCandidateMap::ElementSet* CustomElementUpgradeCandidateMap::takeUpgradeCandidatesFor(const CustomElementDescriptor& descriptor)
 {
-    OwnPtrWillBeRawPtr<ElementSet> candidates = m_unresolvedDefinitions.take(descriptor);
+    ElementSet* candidates = m_unresolvedDefinitions.take(descriptor);
 
     if (!candidates)
         return nullptr;
@@ -89,15 +82,13 @@ PassOwnPtrWillBeRawPtr<CustomElementUpgradeCandidateMap::ElementSet> CustomEleme
         unobserve(candidate);
         m_upgradeCandidates.remove(candidate);
     }
-    return candidates.release();
+    return candidates;
 }
 
 DEFINE_TRACE(CustomElementUpgradeCandidateMap)
 {
-#if ENABLE(OILPAN)
     visitor->trace(m_upgradeCandidates);
     visitor->trace(m_unresolvedDefinitions);
-#endif
     CustomElementObserver::trace(visitor);
 }
 

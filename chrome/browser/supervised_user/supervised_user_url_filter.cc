@@ -14,6 +14,7 @@
 #include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -87,10 +88,10 @@ class FilterBuilder {
 
   // Finalizes construction of the SupervisedUserURLFilter::Contents and returns
   // them. This method should be called before this object is destroyed.
-  scoped_ptr<SupervisedUserURLFilter::Contents> Build();
+  std::unique_ptr<SupervisedUserURLFilter::Contents> Build();
 
  private:
-  scoped_ptr<SupervisedUserURLFilter::Contents> contents_;
+  std::unique_ptr<SupervisedUserURLFilter::Contents> contents_;
   URLMatcherConditionSet::Vector all_conditions_;
   URLMatcherConditionSet::ID matcher_id_;
   std::map<URLMatcherConditionSet::ID, scoped_refptr<SupervisedUserSiteList>>
@@ -143,14 +144,14 @@ void FilterBuilder::AddSiteList(
     contents_->hostname_hashes.insert(std::make_pair(hash, site_list));
 }
 
-scoped_ptr<SupervisedUserURLFilter::Contents> FilterBuilder::Build() {
+std::unique_ptr<SupervisedUserURLFilter::Contents> FilterBuilder::Build() {
   contents_->url_matcher.AddConditionSets(all_conditions_);
   contents_->site_lists_by_matcher_id.insert(site_lists_by_matcher_id_.begin(),
                                              site_lists_by_matcher_id_.end());
   return std::move(contents_);
 }
 
-scoped_ptr<SupervisedUserURLFilter::Contents>
+std::unique_ptr<SupervisedUserURLFilter::Contents>
 CreateWhitelistFromPatternsForTesting(
     const std::vector<std::string>& patterns) {
   FilterBuilder builder;
@@ -160,7 +161,7 @@ CreateWhitelistFromPatternsForTesting(
   return builder.Build();
 }
 
-scoped_ptr<SupervisedUserURLFilter::Contents>
+std::unique_ptr<SupervisedUserURLFilter::Contents>
 CreateWhitelistsFromSiteListsForTesting(
     const std::vector<scoped_refptr<SupervisedUserSiteList>>& site_lists) {
   FilterBuilder builder;
@@ -169,7 +170,7 @@ CreateWhitelistsFromSiteListsForTesting(
   return builder.Build();
 }
 
-scoped_ptr<SupervisedUserURLFilter::Contents>
+std::unique_ptr<SupervisedUserURLFilter::Contents>
 LoadWhitelistsOnBlockingPoolThread(
     const std::vector<scoped_refptr<SupervisedUserSiteList>>& site_lists) {
   FilterBuilder builder;
@@ -204,57 +205,6 @@ SupervisedUserURLFilter::BehaviorFromInt(int behavior_value) {
   DCHECK_GE(behavior_value, ALLOW);
   DCHECK_LE(behavior_value, BLOCK);
   return static_cast<FilteringBehavior>(behavior_value);
-}
-
-// static
-int SupervisedUserURLFilter::GetBlockMessageID(
-    FilteringBehaviorReason reason, bool is_child_account, bool single_parent) {
-  switch (reason) {
-    case DEFAULT:
-      return is_child_account ?
-          (single_parent ?
-              IDS_CHILD_BLOCK_MESSAGE_DEFAULT_SINGLE_PARENT :
-              IDS_CHILD_BLOCK_MESSAGE_DEFAULT_MULTI_PARENT) :
-          IDS_SUPERVISED_USER_BLOCK_MESSAGE_DEFAULT;
-    case BLACKLIST:
-    case ASYNC_CHECKER:
-      return IDS_SUPERVISED_USER_BLOCK_MESSAGE_SAFE_SITES;
-    case WHITELIST:
-      NOTREACHED();
-      break;
-    case MANUAL:
-      return is_child_account ?
-          (single_parent ?
-              IDS_CHILD_BLOCK_MESSAGE_MANUAL_SINGLE_PARENT :
-              IDS_CHILD_BLOCK_MESSAGE_MANUAL_MULTI_PARENT) :
-          IDS_SUPERVISED_USER_BLOCK_MESSAGE_MANUAL;
-  }
-  NOTREACHED();
-  return 0;
-}
-
-// static
-int SupervisedUserURLFilter::GetBlockHeaderID(FilteringBehaviorReason reason) {
-  switch (reason) {
-    case DEFAULT:
-      return IDS_SUPERVISED_USER_BLOCK_HEADER_DEFAULT;
-    case BLACKLIST:
-    case ASYNC_CHECKER:
-      return IDS_SUPERVISED_USER_BLOCK_HEADER_SAFE_SITES;
-    case WHITELIST:
-      NOTREACHED();
-      break;
-    case MANUAL:
-      return IDS_SUPERVISED_USER_BLOCK_HEADER_MANUAL;
-  }
-  NOTREACHED();
-  return 0;
-}
-
-// static
-bool SupervisedUserURLFilter::ReasonIsAutomatic(
-    FilteringBehaviorReason reason) {
-  return reason == ASYNC_CHECKER || reason == BLACKLIST;
 }
 
 // static
@@ -319,25 +269,25 @@ bool SupervisedUserURLFilter::HostMatchesPattern(const std::string& host,
 
 SupervisedUserURLFilter::FilteringBehavior
 SupervisedUserURLFilter::GetFilteringBehaviorForURL(const GURL& url) const {
-  FilteringBehaviorReason reason;
+  supervised_user_error_page::FilteringBehaviorReason reason;
   return GetFilteringBehaviorForURL(url, false, &reason);
 }
 
 bool SupervisedUserURLFilter::GetManualFilteringBehaviorForURL(
     const GURL& url, FilteringBehavior* behavior) const {
-  FilteringBehaviorReason reason;
+  supervised_user_error_page::FilteringBehaviorReason reason;
   *behavior = GetFilteringBehaviorForURL(url, true, &reason);
-  return reason == MANUAL;
+  return reason == supervised_user_error_page::MANUAL;
 }
 
 SupervisedUserURLFilter::FilteringBehavior
 SupervisedUserURLFilter::GetFilteringBehaviorForURL(
     const GURL& url,
     bool manual_only,
-    FilteringBehaviorReason* reason) const {
+    supervised_user_error_page::FilteringBehaviorReason* reason) const {
   DCHECK(CalledOnValidThread());
 
-  *reason = MANUAL;
+  *reason = supervised_user_error_page::MANUAL;
 
   // URLs with a non-standard scheme (e.g. chrome://) are always allowed.
   if (!HasFilteredScheme(url))
@@ -368,36 +318,38 @@ SupervisedUserURLFilter::GetFilteringBehaviorForURL(
       contents_->url_matcher.MatchURL(url);
 
   if (!matching_ids.empty()) {
-    *reason = WHITELIST;
+    *reason = supervised_user_error_page::WHITELIST;
     return ALLOW;
   }
 
   // Check the list of hostname hashes.
   if (contents_->hostname_hashes.count(HostnameHash(url.host()))) {
-    *reason = WHITELIST;
+    *reason = supervised_user_error_page::WHITELIST;
     return ALLOW;
   }
 
   // Check the static blacklist, unless the default is to block anyway.
   if (!manual_only && default_behavior_ != BLOCK &&
       blacklist_ && blacklist_->HasURL(url)) {
-    *reason = BLACKLIST;
+    *reason = supervised_user_error_page::BLACKLIST;
     return BLOCK;
   }
 
   // Fall back to the default behavior.
-  *reason = DEFAULT;
+  *reason = supervised_user_error_page::DEFAULT;
   return default_behavior_;
 }
 
 bool SupervisedUserURLFilter::GetFilteringBehaviorForURLWithAsyncChecks(
     const GURL& url,
     const FilteringBehaviorCallback& callback) const {
-  FilteringBehaviorReason reason = DEFAULT;
+  supervised_user_error_page::FilteringBehaviorReason reason =
+      supervised_user_error_page::DEFAULT;
   FilteringBehavior behavior = GetFilteringBehaviorForURL(url, false, &reason);
   // Any non-default reason trumps the async checker.
   // Also, if we're blocking anyway, then there's no need to check it.
-  if (reason != DEFAULT || behavior == BLOCK || !async_url_checker_) {
+  if (reason != supervised_user_error_page::DEFAULT || behavior == BLOCK ||
+      !async_url_checker_) {
     callback.Run(behavior, reason, false);
     FOR_EACH_OBSERVER(Observer, observers_,
                       OnURLChecked(url, behavior, reason, false));
@@ -513,7 +465,7 @@ bool SupervisedUserURLFilter::HasAsyncURLChecker() const {
 
 void SupervisedUserURLFilter::Clear() {
   default_behavior_ = ALLOW;
-  SetContents(make_scoped_ptr(new Contents()));
+  SetContents(base::WrapUnique(new Contents()));
   url_map_.clear();
   host_map_.clear();
   blacklist_ = nullptr;
@@ -533,7 +485,7 @@ void SupervisedUserURLFilter::SetBlockingTaskRunnerForTesting(
   blocking_task_runner_ = task_runner;
 }
 
-void SupervisedUserURLFilter::SetContents(scoped_ptr<Contents> contents) {
+void SupervisedUserURLFilter::SetContents(std::unique_ptr<Contents> contents) {
   DCHECK(CalledOnValidThread());
   contents_ = std::move(contents);
   FOR_EACH_OBSERVER(Observer, observers_, OnSiteListUpdated());
@@ -546,7 +498,9 @@ void SupervisedUserURLFilter::CheckCallback(
     bool uncertain) const {
   DCHECK(default_behavior_ != BLOCK);
 
-  callback.Run(behavior, ASYNC_CHECKER, uncertain);
-  FOR_EACH_OBSERVER(Observer, observers_,
-                    OnURLChecked(url, behavior, ASYNC_CHECKER, uncertain));
+  callback.Run(behavior, supervised_user_error_page::ASYNC_CHECKER, uncertain);
+  FOR_EACH_OBSERVER(
+      Observer, observers_,
+      OnURLChecked(url, behavior, supervised_user_error_page::ASYNC_CHECKER,
+                   uncertain));
 }

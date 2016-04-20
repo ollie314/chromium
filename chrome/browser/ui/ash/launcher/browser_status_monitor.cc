@@ -128,7 +128,7 @@ BrowserStatusMonitor::BrowserStatusMonitor(
           aura::client::GetActivationClient(*iter));
       observed_root_windows_.Add(static_cast<aura::Window*>(*iter));
     }
-    ash::Shell::GetInstance()->GetScreen()->AddObserver(this);
+    gfx::Screen::GetScreen()->AddObserver(this);
   }
 
   browser_tab_strip_tracker_.Init(
@@ -139,7 +139,7 @@ BrowserStatusMonitor::~BrowserStatusMonitor() {
   // This check needs for win7_aura. Without this, all tests in
   // ChromeLauncherController will fail in win7_aura.
   if (ash::Shell::HasInstance())
-    ash::Shell::GetInstance()->GetScreen()->RemoveObserver(this);
+    gfx::Screen::GetScreen()->RemoveObserver(this);
 
   chrome::SettingsWindowManager::GetInstance()->RemoveObserver(
       settings_window_observer_.get());
@@ -211,7 +211,7 @@ void BrowserStatusMonitor::OnWindowDestroyed(aura::Window* window) {
 }
 
 bool BrowserStatusMonitor::ShouldTrackBrowser(Browser* browser) {
-  return browser->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH;
+  return true;
 }
 
 void BrowserStatusMonitor::OnBrowserAdded(Browser* browser) {
@@ -265,9 +265,6 @@ void BrowserStatusMonitor::ActiveTabChanged(content::WebContents* old_contents,
   DCHECK(new_contents);
   browser = chrome::FindBrowserWithWebContents(new_contents);
 
-  if (browser && browser->host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH)
-    return;
-
   ChromeLauncherController::AppState state =
       ChromeLauncherController::APP_STATE_INACTIVE;
 
@@ -293,9 +290,6 @@ void BrowserStatusMonitor::TabReplacedAt(TabStripModel* tab_strip_model,
                                          int index) {
   DCHECK(old_contents && new_contents);
   Browser* browser = chrome::FindBrowserWithWebContents(new_contents);
-
-  if (browser && browser->host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH)
-    return;
 
   UpdateAppItemState(old_contents,
                      ChromeLauncherController::APP_STATE_REMOVED);

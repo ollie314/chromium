@@ -26,7 +26,6 @@
 
 [
     DoNotCheckConstants,
-    GarbageCollected,
     ConstructorCallWith=ScriptState,
 ] interface Internals {
     DOMString address(Node node);
@@ -83,11 +82,11 @@
     // animation update for CSS and advance the SMIL timeline by one frame.
     [RaisesException] void advanceImageAnimation(Element image);
 
-    [RaisesException] Node nextSiblingInComposedTree(Node node);
-    [RaisesException] Node firstChildInComposedTree(Node node);
-    [RaisesException] Node lastChildInComposedTree(Node node);
-    [RaisesException] Node nextInComposedTree(Node node);
-    [RaisesException] Node previousInComposedTree(Node node);
+    [RaisesException] Node nextSiblingInFlatTree(Node node);
+    [RaisesException] Node firstChildInFlatTree(Node node);
+    [RaisesException] Node lastChildInFlatTree(Node node);
+    [RaisesException] Node nextInFlatTree(Node node);
+    [RaisesException] Node previousInFlatTree(Node node);
 
     DOMString visiblePlaceholder(Element element);
 
@@ -145,7 +144,8 @@
     unsigned long activeDOMObjectCount(Document document);
     unsigned long wheelEventHandlerCount(Document document);
     unsigned long scrollEventHandlerCount(Document document);
-    unsigned long touchEventHandlerCount(Document document);
+    unsigned long touchStartOrMoveEventHandlerCount(Document document);
+    unsigned long touchEndOrCancelEventHandlerCount(Document document);
     [RaisesException] LayerRectList touchEventTargetLayerRects(Document document);
 
     [RaisesException] boolean executeCommand(Document document, DOMString name, DOMString value);
@@ -177,12 +177,11 @@
     // Flags for layerTreeAsText.
     // The values of these constants must be kept in sync with the values of LayerTreeFlags in GraphicsLayerClient.h.
     const unsigned short LAYER_TREE_INCLUDES_DEBUG_INFO = 1;
-    const unsigned short LAYER_TREE_INCLUDES_REPAINT_RECTS = 2;
+    const unsigned short LAYER_TREE_INCLUDES_PAINT_INVALIDATIONS = 2;
     const unsigned short LAYER_TREE_INCLUDES_PAINTING_PHASES = 4;
     const unsigned short LAYER_TREE_INCLUDES_ROOT_LAYER = 8;
     const unsigned short LAYER_TREE_INCLUDES_CLIP_AND_SCROLL_PARENTS = 16;
-    const unsigned short LAYER_TREE_INCLUDES_PAINT_INVALIDATION_OBJECTS = 32;
-    const unsigned short LAYER_TREE_INCLUDES_COMPOSITING_REASONS = 64;
+    const unsigned short LAYER_TREE_INCLUDES_COMPOSITING_REASONS = 32;
     [RaisesException] DOMString layerTreeAsText(Document document, optional unsigned short flags);
     [RaisesException] DOMString elementLayerTreeAsText(Element element, optional unsigned short flags);
 
@@ -208,13 +207,13 @@
     [RaisesException] DOMString pageProperty(DOMString propertyName, long pageNumber);
     [RaisesException] DOMString pageSizeAndMarginsInPixels(long pageIndex, long width, long height, long marginTop, long marginRight, long marginBottom, long marginLeft);
 
-    [RaisesException] void setDeviceScaleFactor(float scaleFactor);
     [RaisesException] void setPageScaleFactor(float scaleFactor);
     [RaisesException] void setPageScaleFactorLimits(float minScaleFactor, float maxScaleFactor);
 
     [RaisesException] void setIsCursorVisible(Document document, boolean isVisible);
 
     double effectiveMediaVolume(HTMLMediaElement mediaElement);
+    DOMString effectivePreload(HTMLMediaElement mediaElement);
     void mediaPlayerRemoteRouteAvailabilityChanged(HTMLMediaElement mediaElement, boolean available);
     void mediaPlayerPlayingRemotelyChanged(HTMLMediaElement mediaElement, boolean remote);
     void setAllowHiddenVolumeControls(HTMLMediaElement mediaElement, boolean allow);
@@ -336,6 +335,7 @@
     bool magnifyScaleAroundAnchor(float offset, float x, float y);
 
     boolean isUseCounted(Document document, long useCounterId);
+    boolean isCSSPropertyUseCounted(Document document, DOMString propertyName);
 
     iterable<long>;
 
@@ -345,7 +345,6 @@
     ClientRectList focusRingRects(Element element);
     ClientRectList outlineRects(Element element);
     void setCapsLockState(boolean enabled);
-    void setSelectionPaintingWithoutSelectionGapsEnabled(boolean enabled);
 
     // Returns whether the scrollbar was able to be shown or hidden; not all platforms
     // support overlay scrollbars.
@@ -358,4 +357,8 @@
 
     // TODO(liberato): remove once autoplay gesture override experiment concludes.
     void triggerAutoplayViewportCheck(HTMLMediaElement mediaElement);
+
+    DOMString getScrollAnimationState(Node node);
+
+    DOMString getProgrammaticScrollAnimationState(Node node);
 };

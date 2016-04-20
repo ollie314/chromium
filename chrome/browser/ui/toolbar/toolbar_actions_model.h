@@ -11,12 +11,12 @@
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
-#include "base/prefs/pref_change_registrar.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/component_migration_helper.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/extension.h"
@@ -156,7 +156,7 @@ class ToolbarActionsModel
   ScopedVector<ToolbarActionViewController> CreateActions(
       Browser* browser,
       ToolbarActionsBar* bar);
-  scoped_ptr<ToolbarActionViewController> CreateActionForItem(
+  std::unique_ptr<ToolbarActionViewController> CreateActionForItem(
       Browser* browser,
       ToolbarActionsBar* bar,
       const ToolbarItem& item);
@@ -165,11 +165,12 @@ class ToolbarActionsModel
     return is_highlighting() ? highlighted_items_ : toolbar_items_;
   }
 
+  extensions::ComponentMigrationHelper* component_migration_helper() {
+    return component_migration_helper_.get();
+  }
+
   bool is_highlighting() const { return highlight_type_ != HIGHLIGHT_NONE; }
   HighlightType highlight_type() const { return highlight_type_; }
-  bool highlighting_for_toolbar_redesign() const {
-    return highlighting_for_toolbar_redesign_;
-  }
 
   void SetActionVisibility(const std::string& action_id, bool visible);
 
@@ -284,7 +285,8 @@ class ToolbarActionsModel
   extensions::ExtensionActionManager* extension_action_manager_;
 
   // The ComponentMigrationHelper.
-  scoped_ptr<extensions::ComponentMigrationHelper> component_migration_helper_;
+  std::unique_ptr<extensions::ComponentMigrationHelper>
+      component_migration_helper_;
 
   // True if we've handled the initial EXTENSIONS_READY notification.
   bool actions_initialized_;
@@ -301,10 +303,6 @@ class ToolbarActionsModel
   // The current type of highlight (with HIGHLIGHT_NONE indicating no current
   // highlight).
   HighlightType highlight_type_;
-
-  // Whether or not the toolbar model is actively highlighting for the toolbar
-  // redesign.
-  bool highlighting_for_toolbar_redesign_;
 
   // A list of action ids ordered to correspond with their last known
   // positions.

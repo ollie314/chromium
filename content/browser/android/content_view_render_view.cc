@@ -4,12 +4,16 @@
 
 #include "content/browser/android/content_view_render_view.h"
 
+#include <android/bitmap.h>
+#include <android/native_window_jni.h>
+
+#include <memory>
+
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
 #include "base/lazy_instance.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "cc/layers/layer.h"
 #include "content/browser/android/content_view_core_impl.h"
@@ -18,9 +22,6 @@
 #include "jni/ContentViewRenderView_jni.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/geometry/size.h"
-
-#include <android/bitmap.h>
-#include <android/native_window_jni.h>
 
 using base::android::ScopedJavaLocalRef;
 
@@ -99,14 +100,7 @@ void ContentViewRenderView::SetOverlayVideoMode(
     const JavaParamRef<jobject>& obj,
     bool enabled) {
   compositor_->SetHasTransparentBackground(enabled);
-  SetNeedsComposite(env, obj);
-}
-
-void ContentViewRenderView::SetNeedsComposite(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  if (compositor_)
-    compositor_->SetNeedsComposite();
+  compositor_->SetNeedsComposite();
 }
 
 void ContentViewRenderView::UpdateLayerTreeHost() {
@@ -124,11 +118,4 @@ void ContentViewRenderView::InitCompositor() {
     compositor_.reset(Compositor::Create(this, root_window_));
 }
 
-jlong ContentViewRenderView::GetUIResourceProvider(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  if (!compositor_)
-    return 0;
-  return reinterpret_cast<intptr_t>(&compositor_->GetUIResourceProvider());
-}
 }  // namespace content

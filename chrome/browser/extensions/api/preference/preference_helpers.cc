@@ -7,11 +7,11 @@
 #include <utility>
 
 #include "base/json/json_writer.h"
-#include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/preference/preference_api.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "components/prefs/pref_service.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -127,8 +127,8 @@ void DispatchEventToExtensions(Profile* profile,
         }
       }
 
-      scoped_ptr<base::ListValue> args_copy(args->DeepCopy());
-      scoped_ptr<Event> event(
+      std::unique_ptr<base::ListValue> args_copy(args->DeepCopy());
+      std::unique_ptr<Event> event(
           new Event(histogram_value, event_name, std::move(args_copy)));
       event->restrict_to_browser_context = restrict_to_profile;
       router->DispatchEventToExtension(extension->id(), std::move(event));

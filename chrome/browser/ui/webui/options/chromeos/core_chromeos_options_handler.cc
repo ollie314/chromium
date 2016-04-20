@@ -12,7 +12,6 @@
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/prefs/pref_change_registrar.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -30,6 +29,7 @@
 #include "chrome/browser/ui/webui/options/chromeos/accounts_options_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
@@ -410,7 +410,7 @@ void CoreChromeOSOptionsHandler::OnPreferenceChanged(
 void CoreChromeOSOptionsHandler::NotifySettingsChanged(
     const std::string& setting_name) {
   DCHECK(CrosSettings::Get()->IsCrosSettings(setting_name));
-  scoped_ptr<base::Value> value(FetchPref(setting_name));
+  std::unique_ptr<base::Value> value(FetchPref(setting_name));
   if (!value.get())
     NOTREACHED();
   DispatchPrefChangeNotification(setting_name, std::move(value));
@@ -423,7 +423,7 @@ void CoreChromeOSOptionsHandler::NotifyProxyPrefsChanged() {
     proxy_cros_settings_parser::GetProxyPrefValue(
         proxy_config_service_, kProxySettings[i], &value);
     DCHECK(value);
-    scoped_ptr<base::Value> ptr(value);
+    std::unique_ptr<base::Value> ptr(value);
     DispatchPrefChangeNotification(kProxySettings[i], std::move(ptr));
   }
 }

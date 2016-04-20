@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//mojo/public/mojo_application.gni")
+import("//mojo/public/mojo_application_manifest.gni")
 
 source_set("lib") {
   sources = [
@@ -16,8 +17,8 @@ source_set("lib") {
     "//mojo/common:common_base",
     "//mojo/platform_handle",
     "//mojo/public/cpp/bindings",
-    "//mojo/services/tracing/public/cpp",
-    "//mojo/shell/public/cpp",
+    "//services/shell/public/cpp",
+    "//services/tracing/public/cpp",
   ]
 
   public_deps = [
@@ -36,6 +37,15 @@ mojo_native_application("font_service") {
     "//mojo/common",
     "//mojo/common:common_base",
     "//mojo/public/cpp/bindings:callback",
-    "//mojo/shell/public/cpp",
+    "//services/shell/public/cpp",
   ]
+
+  data_deps = [
+    ":manifest",
+  ]
+}
+
+mojo_application_manifest("manifest") {
+  application_name = "font_service"
+  source = "manifest.json"
 }

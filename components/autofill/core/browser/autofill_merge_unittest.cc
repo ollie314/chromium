@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "base/files/file_path.h"
@@ -15,6 +16,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/autofill_type.h"
+#include "components/autofill/core/browser/country_names.h"
 #include "components/autofill/core/browser/data_driven_test.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
@@ -157,6 +159,7 @@ class AutofillMergeTest : public testing::Test,
 };
 
 AutofillMergeTest::AutofillMergeTest() : DataDrivenTest(GetTestDataDir()) {
+  CountryNames::SetLocaleString("en-US");
   for (size_t i = NO_SERVER_DATA; i < MAX_VALID_FIELD_TYPE; ++i) {
     ServerFieldType field_type = static_cast<ServerFieldType>(i);
     string_to_field_type_map_[AutofillType(field_type).ToString()] = field_type;
@@ -206,6 +209,7 @@ void AutofillMergeTest::MergeProfiles(const std::string& profiles,
       field.name = field_type;
       field.value = value;
       field.form_control_type = "text";
+      field.is_focusable = true;
       form.fields.push_back(field);
     }
 
@@ -223,9 +227,10 @@ void AutofillMergeTest::MergeProfiles(const std::string& profiles,
             StringToFieldType(base::UTF16ToUTF8(field->name));
         field->set_heuristic_type(type);
       }
+      form_structure.IdentifySections(false);
 
       // Import the profile.
-      scoped_ptr<CreditCard> imported_credit_card;
+      std::unique_ptr<CreditCard> imported_credit_card;
       personal_data_.ImportFormData(form_structure, false,
                                     &imported_credit_card);
       EXPECT_FALSE(imported_credit_card);

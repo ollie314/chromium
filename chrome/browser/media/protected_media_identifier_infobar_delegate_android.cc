@@ -9,7 +9,6 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
-#include "components/url_formatter/elide_url.h"
 #include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -17,26 +16,23 @@
 infobars::InfoBar* ProtectedMediaIdentifierInfoBarDelegateAndroid::Create(
     InfoBarService* infobar_service,
     const GURL& requesting_frame,
-    const std::string& display_languages,
     const PermissionSetCallback& callback) {
-  return infobar_service->AddInfoBar(
-      infobar_service->CreateConfirmInfoBar(scoped_ptr<ConfirmInfoBarDelegate>(
-          new ProtectedMediaIdentifierInfoBarDelegateAndroid(
-              requesting_frame, display_languages, callback))));
+  return infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
+      std::unique_ptr<ConfirmInfoBarDelegate>(
+          new ProtectedMediaIdentifierInfoBarDelegateAndroid(requesting_frame,
+                                                             callback))));
 }
 
 ProtectedMediaIdentifierInfoBarDelegateAndroid::
     ProtectedMediaIdentifierInfoBarDelegateAndroid(
         const GURL& requesting_frame,
-        const std::string& display_languages,
         const PermissionSetCallback& callback)
     : PermissionInfobarDelegate(
           requesting_frame,
           content::PermissionType::PROTECTED_MEDIA_IDENTIFIER,
           CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER,
           callback),
-      requesting_frame_(requesting_frame),
-      display_languages_(display_languages) {}
+      requesting_frame_(requesting_frame) {}
 
 ProtectedMediaIdentifierInfoBarDelegateAndroid::
     ~ProtectedMediaIdentifierInfoBarDelegateAndroid() {}
@@ -50,12 +46,9 @@ int ProtectedMediaIdentifierInfoBarDelegateAndroid::GetIconId() const {
   return IDR_ANDROID_INFOBAR_PROTECTED_MEDIA_IDENTIFIER;
 }
 
-base::string16 ProtectedMediaIdentifierInfoBarDelegateAndroid::GetMessageText()
+int ProtectedMediaIdentifierInfoBarDelegateAndroid::GetMessageResourceId()
     const {
-  return l10n_util::GetStringFUTF16(
-      IDS_PROTECTED_MEDIA_IDENTIFIER_INFOBAR_QUESTION,
-      url_formatter::FormatUrlForSecurityDisplay(requesting_frame_,
-                                                 display_languages_));
+  return IDS_PROTECTED_MEDIA_IDENTIFIER_INFOBAR_QUESTION;
 }
 
 base::string16 ProtectedMediaIdentifierInfoBarDelegateAndroid::GetLinkText()

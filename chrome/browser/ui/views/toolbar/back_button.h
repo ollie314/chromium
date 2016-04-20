@@ -34,14 +34,11 @@ class BackButton : public ToolbarButton {
   // to make the focus rectangle centered.
   void SetLeadingMargin(int margin);
 
- protected:
-  // ToolbarButton:
-  gfx::Point CalculateInkDropCenter() const override;
-
  private:
   // ToolbarButton:
   const char* GetClassName() const override;
-  scoped_ptr<views::LabelButtonBorder> CreateDefaultBorder() const override;
+  std::unique_ptr<views::LabelButtonBorder> CreateDefaultBorder()
+      const override;
   gfx::Rect GetThemePaintRect() const override;
 
   // Any leading margin to be applied. Used when the back button is in

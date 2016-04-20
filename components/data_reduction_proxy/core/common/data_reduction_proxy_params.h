@@ -40,6 +40,13 @@ bool IsIncludedInPromoFieldTrial();
 // is in effect.
 bool IsIncludedInHoldbackFieldTrial();
 
+// Returns the name of the trusted SPDY/HTTP2 proxy field trial.
+std::string GetTrustedSpdyProxyFieldTrialName();
+
+// Returns true if this client is part of the enabled group of the trusted
+// SPDY/HTTP2 proxy field trial.
+bool IsIncludedInTrustedSpdyProxyFieldTrial();
+
 // Returns true if this client is part of the field trial that should display
 // a promotion for the data reduction proxy on Android One devices.
 bool IsIncludedInAndroidOnePromoFieldTrial(const char* build_fingerprint);
@@ -100,14 +107,7 @@ bool WarnIfNoDataReductionProxy();
 // proxy server as quic://proxy.googlezip.net.
 bool IsIncludedInQuicFieldTrial();
 
-// Returns true if dev rollout is enabled on this client either through command
-// line switch or as a part of field trial.
-bool IsDevRolloutEnabled();
-
 std::string GetQuicFieldTrialName();
-
-// Returns the name of the client config field trial.
-std::string GetClientConfigFieldTrialName();
 
 // Returns true if the Data Reduction Proxy config client should be used.
 bool IsConfigClientEnabled();
@@ -143,16 +143,15 @@ std::string GetServerExperimentsFieldTrialName();
 
 }  // namespace params
 
-// Contains information about a given proxy server. |proxies_for_http| and
-// |proxies_for_https| contain the configured data reduction proxy servers.
-// |is_fallback| and |is_ssl| note whether the given proxy is a fallback or a
-// proxy for ssl; these are not mutually exclusive.
+// Contains information about a given proxy server. |proxies_for_http| contains
+// the configured data reduction proxy servers. |is_fallback| notes whether the
+// given proxy is a fallback.
 struct DataReductionProxyTypeInfo {
   DataReductionProxyTypeInfo();
+  DataReductionProxyTypeInfo(const DataReductionProxyTypeInfo& other);
   ~DataReductionProxyTypeInfo();
   std::vector<net::ProxyServer> proxy_servers;
   bool is_fallback;
-  bool is_ssl;
 };
 
 // Provides initialization parameters. Proxy origins, and the secure proxy
@@ -168,14 +167,10 @@ class DataReductionProxyParams : public DataReductionProxyConfigValues {
   // holdback experiment.
   static const unsigned int kAllowed = (1 << 0);
   static const unsigned int kFallbackAllowed = (1 << 1);
-  // DEPRECATED. TODO(jeremyim): Remove once changes merged downstream.
-  static const unsigned int kAlternativeAllowed = (1 << 2);
-  // DEPRECATED. TODO(jeremyim): Remove once changes merged downstream.
-  static const unsigned int kAlternativeFallbackAllowed = (1 << 3);
   static const unsigned int kAllowAllProxyConfigurations =
       kAllowed | kFallbackAllowed;
-  static const unsigned int kPromoAllowed = (1 << 4);
-  static const unsigned int kHoldback = (1 << 5);
+  static const unsigned int kPromoAllowed = (1 << 2);
+  static const unsigned int kHoldback = (1 << 3);
 
   // Constructs configuration parameters. If |kAllowed|, then the standard
   // data reduction proxy configuration is allowed to be used. If
@@ -192,12 +187,7 @@ class DataReductionProxyParams : public DataReductionProxyConfigValues {
   // If true, uses QUIC instead of SPDY to connect to proxies that use TLS.
   void EnableQuic(bool enable);
 
-  // Overrides of |DataReductionProxyConfigValues|
-  bool UsingHTTPTunnel(const net::HostPortPair& proxy_server) const override;
-
   const std::vector<net::ProxyServer>& proxies_for_http() const override;
-
-  const std::vector<net::ProxyServer>& proxies_for_https() const override;
 
   const GURL& secure_proxy_check_url() const override;
 
@@ -210,11 +200,6 @@ class DataReductionProxyParams : public DataReductionProxyConfigValues {
   bool holdback() const override;
 
   bool quic_enabled() const { return quic_enabled_; }
-
-  // Returns the corresponding string from preprocessor constants if defined,
-  // and an empty string otherwise.
-  virtual std::string GetDefaultDevOrigin() const;
-  virtual std::string GetDefaultDevFallbackOrigin() const;
 
  protected:
   // Test constructor that optionally won't call Init();
@@ -234,17 +219,14 @@ class DataReductionProxyParams : public DataReductionProxyConfigValues {
   // and an empty string otherwise.
   virtual std::string GetDefaultOrigin() const;
   virtual std::string GetDefaultFallbackOrigin() const;
-  virtual std::string GetDefaultSSLOrigin() const;
   virtual std::string GetDefaultSecureProxyCheckURL() const;
   virtual std::string GetDefaultWarmupURL() const;
 
   std::vector<net::ProxyServer> proxies_for_http_;
-  std::vector<net::ProxyServer> proxies_for_https_;
 
  private:
   net::ProxyServer origin_;
   net::ProxyServer fallback_origin_;
-  net::ProxyServer ssl_origin_;
 
   GURL secure_proxy_check_url_;
   GURL warmup_url_;

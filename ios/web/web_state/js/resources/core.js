@@ -11,19 +11,24 @@
 goog.provide('__crWeb.core');
 
 goog.require('__crWeb.common');
-goog.require('__crWeb.coreDynamic');
 goog.require('__crWeb.message');
-
-/**
- * The Chrome object is populated in an anonymous object defined at
- * initialization to prevent polluting the global namespace.
- */
 
 /* Beginning of anonymous object. */
 (function() {
-  // TODO(jimblackler): use this namespace as a wrapper for all externally-
-  // visible functions, to be consistent with other JS scripts. crbug.com/380390
   __gCrWeb['core'] = {};
+
+  /**
+   * Handles document load completion tasks. Invoked from
+   * [WKNavigationDelegate webView:didFinishNavigation:], when document load is
+   * complete.
+   */
+  __gCrWeb.didFinishNavigation = function() {
+    // Send the favicons to the browser.
+    __gCrWeb.sendFaviconsToHost();
+    // Add placeholders for plugin content.
+    if (__gCrWeb.common.updatePluginPlaceholders())
+      __gCrWeb.message.invokeOnHost({'command': 'addPluginPlaceholders'});
+  }
 
   // JavaScript errors are logged on the main application side. The handler is
   // added ASAP to catch any errors in startup. Note this does not appear to
@@ -220,6 +225,16 @@ goog.require('__crWeb.message');
       }
     }
     return '{}';
+  };
+
+  // Suppresses the next click such that they are not handled by JS click
+  // event handlers.
+  __gCrWeb['suppressNextClick'] = function() {
+    var suppressNextClick = function(evt) {
+      evt.preventDefault();
+      document.removeEventListener('click', suppressNextClick, false);
+    };
+    document.addEventListener('click', suppressNextClick);
   };
 
   // Returns true if the top window or any frames inside contain an input
@@ -434,6 +449,11 @@ goog.require('__crWeb.message');
     return anchor.href;
   };
 
+  __gCrWeb['sendFaviconsToHost'] = function() {
+    __gCrWeb.message.invokeOnHost({'command': 'document.favicons',
+                                   'favicons': __gCrWeb.common.getFavicons()});
+  }
+
   // Tracks whether user is in the middle of scrolling/dragging. If user is
   // scrolling, ignore window.scrollTo() until user stops scrolling.
   var webViewScrollViewIsDragging_ = false;
@@ -447,16 +467,9 @@ goog.require('__crWeb.message');
     originalWindowScrollTo(x, y);
   };
 
-  // Intercept window.close calls.
-  window.close = function() {
-    invokeOnHost_({'command': 'window.close.self'});
-  };
-
   window.addEventListener('hashchange', function(evt) {
     invokeOnHost_({'command': 'window.hashchange'});
   });
-
-  __gCrWeb.core_dynamic.addEventListeners();
 
   // Returns if a frame with |name| is found in |currentWindow|.
   // Note frame.name is undefined for cross domain frames.
@@ -572,10 +585,10 @@ goog.require('__crWeb.message');
    * the window-level overrides can be applied as soon as possible.
    */
   __gCrWeb.core.documentInject = function() {
-    // Perform web view specific operations requiring document.body presence.
-    // If necessary returns and waits for document to be present.
-    if (!__gCrWeb.core_dynamic.documentInject())
-      return;
+    // Flush the message queue.
+    if (__gCrWeb.message) {
+      __gCrWeb.message.invokeQueues();
+    }
 
     document.addEventListener('click', function(evt) {
       var node = getTargetLink_(evt.target);
@@ -611,14 +624,6 @@ goog.require('__crWeb.message');
         return;
 
       if (isInternaLink_(node)) {
-        if (evt['defaultPrevented'])
-          return;
-        // Internal link. The web view will handle navigation, but register
-        // the anchor for UIWebView to start the progress indicator ASAP and
-        // notify web controller as soon as possible of impending navigation.
-        if (__gCrWeb.core_dynamic.handleInternalClickEvent) {
-          __gCrWeb.core_dynamic.handleInternalClickEvent(node);
-        }
         return;
       } else {
         // Resets the external request if it has been canceled, otherwise
@@ -652,10 +657,6 @@ goog.require('__crWeb.message');
     }, false);
 
     addFormEventListeners_();
-
-   // Handle or wait for and handle document load completion, if applicable.
-   if (__gCrWeb.core_dynamic.handleDocumentLoaded)
-     __gCrWeb.core_dynamic.handleDocumentLoaded();
 
     return true;
   };

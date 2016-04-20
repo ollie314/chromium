@@ -4,10 +4,12 @@
 
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 
+#include <memory>
+
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_state_aura.h"
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker_tester.h"
@@ -69,8 +71,8 @@ class Waiter : public content::NotificationObserver {
   // Wait until the two conditions are met.
   void Wait(bool locker_state, bool fullscreen) {
     running_ = true;
-    scoped_ptr<chromeos::test::ScreenLockerTester>
-        tester(chromeos::ScreenLocker::GetTester());
+    std::unique_ptr<chromeos::test::ScreenLockerTester> tester(
+        chromeos::ScreenLocker::GetTester());
     while (tester->IsLocked() != locker_state ||
            browser_->window()->IsFullscreen() != fullscreen) {
       content::RunMessageLoop();
@@ -123,7 +125,7 @@ class ScreenLockerTest : public InProcessBrowserTest {
   void SetUpInProcessBrowserTestFixture() override {
     fake_session_manager_client_ = new FakeSessionManagerClient;
     DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
-        scoped_ptr<SessionManagerClient>(fake_session_manager_client_));
+        std::unique_ptr<SessionManagerClient>(fake_session_manager_client_));
 
     InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
     zero_duration_mode_.reset(new ui::ScopedAnimationDurationScaleMode(
@@ -134,14 +136,14 @@ class ScreenLockerTest : public InProcessBrowserTest {
     command_line->AppendSwitchASCII(switches::kLoginProfile, "user");
   }
 
-  scoped_ptr<ui::ScopedAnimationDurationScaleMode> zero_duration_mode_;
+  std::unique_ptr<ui::ScopedAnimationDurationScaleMode> zero_duration_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenLockerTest);
 };
 
 IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestBasic) {
   ScreenLocker::Show();
-  scoped_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
+  std::unique_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
   tester->EmulateWindowManagerReady();
   content::WindowedNotificationObserver lock_state_observer(
       chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
@@ -189,7 +191,7 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestFullscreenExit) {
   // does not have all the pixels (e.g. the shelf is auto hidden instead of
   // hidden), locking the screen should not exit fullscreen. The shelf is
   // auto hidden when in immersive fullscreen.
-  scoped_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
+  std::unique_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
   BrowserWindow* browser_window = browser()->window();
   ash::wm::WindowState* window_state = ash::wm::GetWindowState(
       browser_window->GetNativeWindow());
@@ -276,7 +278,7 @@ void UnlockKeyPress(views::Widget* widget) {
 }
 
 IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestShowTwice) {
-  scoped_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
+  std::unique_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
   LockScreen(tester.get());
 
   // Calling Show again simply send LockCompleted signal.
@@ -297,7 +299,7 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestShowTwice) {
 // TODO(flackr): Find out why the RenderView isn't getting the escape press
 // and re-enable this test (currently this test is flaky).
 IN_PROC_BROWSER_TEST_F(ScreenLockerTest, DISABLED_TestEscape) {
-  scoped_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
+  std::unique_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
   LockScreen(tester.get());
 
   EXPECT_EQ(

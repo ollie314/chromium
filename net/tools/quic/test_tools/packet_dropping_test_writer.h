@@ -9,12 +9,13 @@
 #include <stdint.h>
 
 #include <list>
+#include <memory>
 #include <string>
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
+#include "net/base/ip_address.h"
 #include "net/quic/quic_alarm.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/tools/quic/quic_epoll_clock.h"
@@ -22,7 +23,6 @@
 #include "net/tools/quic/test_tools/quic_test_client.h"
 
 namespace net {
-namespace tools {
 namespace test {
 
 // Simulates a connection that drops packets a configured percentage of the time
@@ -50,8 +50,9 @@ class PacketDroppingTestWriter : public QuicPacketWriterWrapper {
   // QuicPacketWriter methods:
   WriteResult WritePacket(const char* buffer,
                           size_t buf_len,
-                          const IPAddressNumber& self_address,
-                          const IPEndPoint& peer_address) override;
+                          const IPAddress& self_address,
+                          const IPEndPoint& peer_address,
+                          PerPacketOptions* options) override;
 
   bool IsWriteBlocked() const override;
 
@@ -61,6 +62,9 @@ class PacketDroppingTestWriter : public QuicPacketWriterWrapper {
   // to the contained writer and returns the time
   // for the next delayed packet to be written.
   QuicTime ReleaseOldPackets();
+
+  // Sets |delay_alarm_| to fire at |new_deadline|.
+  void SetDelayAlarm(QuicTime new_deadline);
 
   void OnCanWrite();
 
@@ -126,23 +130,32 @@ class PacketDroppingTestWriter : public QuicPacketWriterWrapper {
    public:
     DelayedWrite(const char* buffer,
                  size_t buf_len,
-                 const IPAddressNumber& self_address,
+                 const IPAddress& self_address,
                  const IPEndPoint& peer_address,
+                 std::unique_ptr<PerPacketOptions> options,
                  QuicTime send_time);
+    // TODO(rtenneti): on windows RValue reference gives errors.
+    DelayedWrite(DelayedWrite&& other);
+    // TODO(rtenneti): on windows RValue reference gives errors.
+    //    DelayedWrite& operator=(DelayedWrite&& other);
     ~DelayedWrite();
 
     std::string buffer;
-    const IPAddressNumber self_address;
+    const IPAddress self_address;
     const IPEndPoint peer_address;
+    std::unique_ptr<PerPacketOptions> options;
     QuicTime send_time;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(DelayedWrite);
   };
 
   typedef std::list<DelayedWrite> DelayedPacketList;
 
   const QuicClock* clock_;
-  scoped_ptr<QuicAlarm> write_unblocked_alarm_;
-  scoped_ptr<QuicAlarm> delay_alarm_;
-  scoped_ptr<Delegate> on_can_write_;
+  std::unique_ptr<QuicAlarm> write_unblocked_alarm_;
+  std::unique_ptr<QuicAlarm> delay_alarm_;
+  std::unique_ptr<Delegate> on_can_write_;
   net::test::SimpleRandom simple_random_;
   // Stored packets delayed by fake packet delay or bandwidth restrictions.
   DelayedPacketList delayed_packets_;
@@ -162,7 +175,6 @@ class PacketDroppingTestWriter : public QuicPacketWriterWrapper {
 };
 
 }  // namespace test
-}  // namespace tools
 }  // namespace net
 
 #endif  // NET_TOOLS_QUIC_TEST_TOOLS_PACKET_DROPPING_TEST_WRITER_H_

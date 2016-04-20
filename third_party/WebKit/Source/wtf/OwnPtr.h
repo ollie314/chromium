@@ -22,6 +22,7 @@
 #ifndef WTF_OwnPtr_h
 #define WTF_OwnPtr_h
 
+#include "wtf/Allocator.h"
 #include "wtf/HashTableDeletedValueType.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/OwnPtrCommon.h"
@@ -33,6 +34,7 @@ namespace WTF {
 template <typename T> class PassOwnPtr;
 
 template <typename T> class OwnPtr {
+    USING_FAST_MALLOC(OwnPtr);
     WTF_MAKE_NONCOPYABLE(OwnPtr);
 public:
     typedef typename std::remove_extent<T>::type ValueType;
@@ -68,11 +70,7 @@ public:
     ValueType& operator[](std::ptrdiff_t i) const;
 
     bool operator!() const { return !m_ptr; }
-
-    // This conversion operator allows implicit conversion to bool but not to
-    // other integer types.
-    typedef PtrType OwnPtr::*UnspecifiedBoolType;
-    operator UnspecifiedBoolType() const { return m_ptr ? &OwnPtr::m_ptr : 0; }
+    explicit operator bool() const { return m_ptr; }
 
     OwnPtr& operator=(const PassOwnPtr<T>&);
     OwnPtr& operator=(std::nullptr_t) { clear(); return *this; }

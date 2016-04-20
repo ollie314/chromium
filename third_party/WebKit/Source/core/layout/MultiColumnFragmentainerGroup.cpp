@@ -10,7 +10,7 @@
 
 namespace blink {
 
-MultiColumnFragmentainerGroup::MultiColumnFragmentainerGroup(LayoutMultiColumnSet& columnSet)
+MultiColumnFragmentainerGroup::MultiColumnFragmentainerGroup(const LayoutMultiColumnSet& columnSet)
     : m_columnSet(columnSet)
 {
 }
@@ -35,7 +35,7 @@ LayoutSize MultiColumnFragmentainerGroup::offsetFromColumnSet() const
 
 LayoutUnit MultiColumnFragmentainerGroup::blockOffsetInEnclosingFragmentationContext() const
 {
-    return logicalTop() + m_columnSet.logicalTop() + m_columnSet.multiColumnFlowThread()->blockOffsetInEnclosingFragmentationContext();
+    return logicalTop() + m_columnSet.logicalTopFromMulticolContentEdge() + m_columnSet.multiColumnFlowThread()->blockOffsetInEnclosingFragmentationContext();
 }
 
 void MultiColumnFragmentainerGroup::resetColumnHeight()
@@ -57,7 +57,7 @@ void MultiColumnFragmentainerGroup::resetColumnHeight()
     }
 }
 
-bool MultiColumnFragmentainerGroup::recalculateColumnHeight()
+bool MultiColumnFragmentainerGroup::recalculateColumnHeight(LayoutMultiColumnSet& columnSet)
 {
     LayoutUnit oldColumnHeight = m_columnHeight;
 
@@ -66,18 +66,18 @@ bool MultiColumnFragmentainerGroup::recalculateColumnHeight()
     // Only the last row may have auto height, and thus be balanced. There are no good reasons to
     // balance the preceding rows, and that could potentially lead to an insane number of layout
     // passes as well.
-    if (isLastGroup() && m_columnSet.heightIsAuto()) {
+    if (isLastGroup() && columnSet.heightIsAuto()) {
         LayoutUnit newColumnHeight;
-        if (!m_columnSet.isInitialHeightCalculated()) {
+        if (!columnSet.isInitialHeightCalculated()) {
             // Initial balancing: Start with the lowest imaginable column height. Also calculate the
             // height of the tallest piece of unbreakable content. Columns should never get any
             // shorter than that (unless constrained by max-height). Propagate this to our
             // containing column set, in case there is an outer multicol container that also needs
             // to balance. After having calculated the initial column height, the multicol container
             // needs another layout pass with the column height that we just calculated.
-            InitialColumnHeightFinder initialHeightFinder(*this);
+            InitialColumnHeightFinder initialHeightFinder(columnSet, logicalTopInFlowThread(), logicalBottomInFlowThread());
             LayoutUnit tallestUnbreakableLogicalHeight = initialHeightFinder.tallestUnbreakableLogicalHeight();
-            m_columnSet.propagateTallestUnbreakableLogicalHeight(tallestUnbreakableLogicalHeight);
+            columnSet.propagateTallestUnbreakableLogicalHeight(tallestUnbreakableLogicalHeight);
             newColumnHeight = std::max(initialHeightFinder.initialMinimalBalancedHeight(), tallestUnbreakableLogicalHeight);
         } else {
             // Rebalancing: After having laid out again, we'll need to rebalance if the height
@@ -110,10 +110,11 @@ LayoutSize MultiColumnFragmentainerGroup::flowThreadTranslationAtOffset(LayoutUn
 
     LayoutSize enclosingTranslation;
     if (LayoutMultiColumnFlowThread* enclosingFlowThread = flowThread->enclosingFlowThread()) {
+        const MultiColumnFragmentainerGroup& firstRow = flowThread->firstMultiColumnSet()->firstFragmentainerGroup();
         // Translation that would map points in the coordinate space of the outermost flow thread to
         // visual points in the first column in the first fragmentainer group (row) in our multicol
         // container.
-        LayoutSize enclosingTranslationOrigin = enclosingFlowThread->flowThreadTranslationAtOffset(flowThread->blockOffsetInEnclosingFragmentationContext());
+        LayoutSize enclosingTranslationOrigin = enclosingFlowThread->flowThreadTranslationAtOffset(firstRow.blockOffsetInEnclosingFragmentationContext());
 
         // Translation that would map points in the coordinate space of the outermost flow thread to
         // visual points in the first column in this fragmentainer group.
@@ -292,35 +293,14 @@ unsigned MultiColumnFragmentainerGroup::actualColumnCount() const
 
 LayoutUnit MultiColumnFragmentainerGroup::heightAdjustedForRowOffset(LayoutUnit height) const
 {
-    // Adjust for the top offset within the content box of the multicol container (containing
-    // block), unless we're in the first set. We know that the top offset for the first set will be
-    // zero, but if the multicol container has non-zero top border or padding, the set's top offset
-    // (initially being 0 and relative to the border box) will be negative until it has been laid
-    // out. Had we used this bogus offset, we would calculate the wrong height, and risk performing
-    // a wasted layout iteration. Of course all other sets (if any) have this problem in the first
-    // layout pass too, but there's really nothing we can do there until the flow thread has been
-    // laid out anyway.
-    if (m_columnSet.previousSiblingMultiColumnSet()) {
-        LayoutBlockFlow* multicolBlock = m_columnSet.multiColumnBlockFlow();
-        LayoutUnit contentLogicalTop = m_columnSet.logicalTop() - multicolBlock->borderAndPaddingBefore();
-        height -= contentLogicalTop;
-    }
-    height -= logicalTop();
-    return max(height, LayoutUnit(1)); // Let's avoid zero height, as that would probably cause an infinite amount of columns to be created.
+    // Let's avoid zero height, as that would cause an infinite amount of columns to be created.
+    return std::max(height - logicalTop() - m_columnSet.logicalTopFromMulticolContentEdge(), LayoutUnit(1));
 }
 
 LayoutUnit MultiColumnFragmentainerGroup::calculateMaxColumnHeight() const
 {
-    LayoutBlockFlow* multicolBlock = m_columnSet.multiColumnBlockFlow();
-    const ComputedStyle& multicolStyle = multicolBlock->styleRef();
     LayoutMultiColumnFlowThread* flowThread = m_columnSet.multiColumnFlowThread();
-    LayoutUnit availableHeight = flowThread->columnHeightAvailable();
-    LayoutUnit maxColumnHeight = availableHeight ? availableHeight : LayoutUnit::max();
-    if (!multicolStyle.logicalMaxHeight().isMaxSizeNone()) {
-        LayoutUnit logicalMaxHeight = multicolBlock->computeContentLogicalHeight(MaxSize, multicolStyle.logicalMaxHeight(), -1);
-        if (logicalMaxHeight != -1 && maxColumnHeight > logicalMaxHeight)
-            maxColumnHeight = logicalMaxHeight;
-    }
+    LayoutUnit maxColumnHeight = flowThread->maxColumnLogicalHeight();
     LayoutUnit maxHeight = heightAdjustedForRowOffset(maxColumnHeight);
     if (FragmentationContext* enclosingFragmentationContext = flowThread->enclosingFragmentationContext()) {
         if (enclosingFragmentationContext->isFragmentainerLogicalHeightKnown()) {
@@ -356,7 +336,7 @@ LayoutUnit MultiColumnFragmentainerGroup::rebalanceColumnHeightIfNeeded() const
         return m_columnHeight;
     }
 
-    MinimumSpaceShortageFinder shortageFinder(*this);
+    MinimumSpaceShortageFinder shortageFinder(columnSet(), logicalTopInFlowThread(), logicalBottomInFlowThread());
 
     if (shortageFinder.forcedBreaksCount() + 1 >= m_columnSet.usedColumnCount()) {
         // Too many forced breaks to allow any implicit breaks. Initial balancing should already

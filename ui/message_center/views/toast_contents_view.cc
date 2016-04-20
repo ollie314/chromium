@@ -4,9 +4,10 @@
 
 #include "ui/message_center/views/toast_contents_view.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -250,7 +251,7 @@ void ToastContentsView::OnDisplayChanged() {
     return;
 
   collection_->OnDisplayMetricsChanged(
-      Screen::GetScreenFor(native_view)->GetDisplayNearestWindow(native_view));
+      Screen::GetScreen()->GetDisplayNearestWindow(native_view));
 }
 
 void ToastContentsView::OnWorkAreaChanged() {
@@ -263,7 +264,7 @@ void ToastContentsView::OnWorkAreaChanged() {
     return;
 
   collection_->OnDisplayMetricsChanged(
-      Screen::GetScreenFor(native_view)->GetDisplayNearestWindow(native_view));
+      Screen::GetScreen()->GetDisplayNearestWindow(native_view));
 }
 
 // views::View
@@ -313,9 +314,9 @@ void ToastContentsView::RemoveNotification(
     collection_->RemoveNotification(notification_id, by_user);
 }
 
-scoped_ptr<ui::MenuModel> ToastContentsView::CreateMenuModel(
-      const NotifierId& notifier_id,
-      const base::string16& display_source) {
+std::unique_ptr<ui::MenuModel> ToastContentsView::CreateMenuModel(
+    const NotifierId& notifier_id,
+    const base::string16& display_source) {
   // Should not reach, the context menu should be handled in
   // MessagePopupCollection.
   NOTREACHED();

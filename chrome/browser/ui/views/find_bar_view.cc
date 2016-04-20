@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -28,7 +29,7 @@
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/text_input_flags.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/material_design/material_design_controller.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/events/event.h"
@@ -152,7 +153,7 @@ FindBarView::FindBarView(FindBarHost* host)
     close_button_ = new views::ImageButton(this);
   }
 
-  find_previous_button_->set_tag(FIND_PREVIOUS_TAG);
+  find_previous_button_->set_id(VIEW_ID_FIND_IN_PAGE_PREVIOUS_BUTTON);
   find_previous_button_->SetFocusable(true);
   find_previous_button_->set_request_focus_on_press(false);
   find_previous_button_->SetTooltipText(
@@ -161,7 +162,7 @@ FindBarView::FindBarView(FindBarHost* host)
       l10n_util::GetStringUTF16(IDS_ACCNAME_PREVIOUS));
   AddChildView(find_previous_button_);
 
-  find_next_button_->set_tag(FIND_NEXT_TAG);
+  find_next_button_->set_id(VIEW_ID_FIND_IN_PAGE_NEXT_BUTTON);
   find_next_button_->SetFocusable(true);
   find_next_button_->set_request_focus_on_press(false);
   find_next_button_->SetTooltipText(
@@ -170,7 +171,7 @@ FindBarView::FindBarView(FindBarHost* host)
       l10n_util::GetStringUTF16(IDS_ACCNAME_NEXT));
   AddChildView(find_next_button_);
 
-  close_button_->set_tag(CLOSE_TAG);
+  close_button_->set_id(VIEW_ID_FIND_IN_PAGE_CLOSE_BUTTON);
   close_button_->SetFocusable(true);
   close_button_->set_request_focus_on_press(false);
   close_button_->SetTooltipText(
@@ -332,35 +333,30 @@ void FindBarView::Layout() {
     if (view_width && view_width < panel_width)
       panel_width = view_width;
 
-    // First we draw the close button on the far right.
-    gfx::Size sz = close_button_->GetPreferredSize();
-    close_button_->SetBounds(panel_width - sz.width() -
-                                 kMarginRightOfCloseButton,
-                             (height() - sz.height()) / 2,
-                             sz.width(),
-                             sz.height());
     // Set the color.
     OnThemeChanged();
 
-    // Next, the FindNext button to the left the close button.
-    sz = find_next_button_->GetPreferredSize();
-    find_next_button_->SetBounds(close_button_->x() -
-                                     find_next_button_->width() -
-                                     kMarginLeftOfCloseButton,
-                                 (height() - sz.height()) / 2,
-                                  sz.width(),
-                                  sz.height());
+    // First we position the close button on the far right.
+    close_button_->SizeToPreferredSize();
+    close_button_->SetPosition(gfx::Point(
+        panel_width - close_button_->width() - kMarginRightOfCloseButton,
+        (height() - close_button_->height()) / 2));
 
-    // Then, the FindPrevious button to the left the FindNext button.
-    sz = find_previous_button_->GetPreferredSize();
-    find_previous_button_->SetBounds(find_next_button_->x() -
-                                         find_previous_button_->width(),
-                                     (height() - sz.height()) / 2,
-                                     sz.width(),
-                                     sz.height());
+    // Then, the next button to the left of the close button.
+    find_next_button_->SizeToPreferredSize();
+    find_next_button_->SetPosition(
+        gfx::Point(close_button_->x() - find_next_button_->width() -
+                       kMarginLeftOfCloseButton,
+                   (height() - find_next_button_->height()) / 2));
+
+    // Then, the previous button to the left of the next button.
+    find_previous_button_->SizeToPreferredSize();
+    find_previous_button_->SetPosition(gfx::Point(
+        find_next_button_->x() - find_previous_button_->width(),
+        (height() - find_previous_button_->height()) / 2));
 
     // Then the label showing the match count number.
-    sz = match_count_text_->GetPreferredSize();
+    gfx::Size sz = match_count_text_->GetPreferredSize();
     // We extend the label bounds a bit to give the background highlighting a
     // bit of breathing room (margins around the text).
     sz.Enlarge(kMatchCountExtraWidth, 0);
@@ -422,26 +418,30 @@ gfx::Size FindBarView::GetPreferredSize() const {
 
 void FindBarView::ButtonPressed(
     views::Button* sender, const ui::Event& event) {
-  switch (sender->tag()) {
-    case FIND_PREVIOUS_TAG:
-    case FIND_NEXT_TAG:
+  switch (sender->id()) {
+    case VIEW_ID_FIND_IN_PAGE_PREVIOUS_BUTTON:
+    case VIEW_ID_FIND_IN_PAGE_NEXT_BUTTON:
       if (!find_text_->text().empty()) {
         FindTabHelper* find_tab_helper = FindTabHelper::FromWebContents(
             find_bar_host()->GetFindBarController()->web_contents());
-        find_tab_helper->StartFinding(find_text_->text(),
-                                      sender->tag() == FIND_NEXT_TAG,
-                                      false);  // Not case sensitive.
+        find_tab_helper->StartFinding(
+            find_text_->text(),
+            sender->id() == VIEW_ID_FIND_IN_PAGE_NEXT_BUTTON,
+            false);  // Not case sensitive.
       }
-      // Move focus to the find textfield.
-      find_text_->RequestFocus();
+
+      if (event.IsMouseEvent()) {
+        // Move focus to the find textfield.
+        find_text_->RequestFocus();
+      }
       break;
-    case CLOSE_TAG:
+    case VIEW_ID_FIND_IN_PAGE_CLOSE_BUTTON:
       find_bar_host()->GetFindBarController()->EndFindSession(
           FindBarController::kKeepSelectionOnPage,
           FindBarController::kKeepResultsInFindBox);
       break;
     default:
-      NOTREACHED() << L"Unknown button";
+      NOTREACHED() << "Unknown button";
       break;
   }
 }
@@ -541,13 +541,13 @@ void FindBarView::InitViewsForNonMaterial() {
 
 void FindBarView::InitViewsForMaterial() {
   // The background color is not used since there's no arrow.
-  SetBorder(make_scoped_ptr(new views::BubbleBorder(
+  SetBorder(base::WrapUnique(new views::BubbleBorder(
       views::BubbleBorder::NONE, views::BubbleBorder::SMALL_SHADOW,
       SK_ColorGREEN)));
 
   match_count_text_ = new MatchCountLabel();
   match_count_text_->SetEventTargeter(
-      make_scoped_ptr(new views::ViewTargeter(this)));
+      base::WrapUnique(new views::ViewTargeter(this)));
   AddChildViewAt(match_count_text_, 1);
 
   separator_ = new views::Separator(views::Separator::VERTICAL);

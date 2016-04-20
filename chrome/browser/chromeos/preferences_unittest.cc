@@ -8,7 +8,6 @@
 
 #include "base/json/json_string_value_serializer.h"
 #include "base/macros.h"
-#include "base/prefs/pref_member.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
@@ -22,6 +21,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/prefs/pref_member.h"
 #include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
@@ -115,7 +115,7 @@ class MyMockInputMethodManager : public MockInputMethodManager {
 
    private:
     MyMockInputMethodManager* const manager_;
-    scoped_ptr<InputMethodDescriptors> input_method_extensions_;
+    std::unique_ptr<InputMethodDescriptors> input_method_extensions_;
   };
 
   MyMockInputMethodManager(StringPrefMember* previous,
@@ -127,7 +127,8 @@ class MyMockInputMethodManager : public MockInputMethodManager {
 
   ~MyMockInputMethodManager() override {}
 
-  scoped_ptr<InputMethodDescriptors> GetSupportedInputMethods() const override {
+  std::unique_ptr<InputMethodDescriptors> GetSupportedInputMethods()
+      const override {
     return whitelist_.GetSupportedInputMethods();
   }
 
@@ -198,9 +199,9 @@ class PreferencesTest : public testing::Test {
   }
 
   content::TestBrowserThreadBundle thread_bundle_;
-  scoped_ptr<TestingProfileManager> profile_manager_;
-  scoped_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
-  scoped_ptr<Preferences> prefs_;
+  std::unique_ptr<TestingProfileManager> profile_manager_;
+  std::unique_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
+  std::unique_ptr<Preferences> prefs_;
   StringPrefMember previous_input_method_;
   StringPrefMember current_input_method_;
 
@@ -269,9 +270,10 @@ class InputMethodPreferencesTest : public PreferencesTest {
     mock_delegate->set_ime_list(CreateImeList());
 
     // Pass the mock delegate to a new ComponentExtensionIMEManager.
-    scoped_ptr<ComponentExtensionIMEManagerDelegate> delegate(mock_delegate);
-    scoped_ptr<ComponentExtensionIMEManager> component_extension_ime_manager(
-        new ComponentExtensionIMEManager);
+    std::unique_ptr<ComponentExtensionIMEManagerDelegate> delegate(
+        mock_delegate);
+    std::unique_ptr<ComponentExtensionIMEManager>
+        component_extension_ime_manager(new ComponentExtensionIMEManager);
     component_extension_ime_manager->Initialize(std::move(delegate));
 
     // Add the ComponentExtensionIMEManager to the mock InputMethodManager.
@@ -391,11 +393,10 @@ TEST_F(InputMethodPreferencesTest, TestOobeAndSync) {
   syncer::SyncableService* sync =
       pref_service_->GetSyncableService(
           syncer::PREFERENCES);
-  sync->MergeDataAndStartSyncing(syncer::PREFERENCES,
-                                 sync_data_list,
-                                 scoped_ptr<syncer::SyncChangeProcessor>(
+  sync->MergeDataAndStartSyncing(syncer::PREFERENCES, sync_data_list,
+                                 std::unique_ptr<syncer::SyncChangeProcessor>(
                                      new syncer::FakeSyncChangeProcessor),
-                                 scoped_ptr<syncer::SyncErrorFactory>(
+                                 std::unique_ptr<syncer::SyncErrorFactory>(
                                      new syncer::SyncErrorFactoryMock));
   content::RunAllBlockingPoolTasksUntilIdle();
 
@@ -484,11 +485,10 @@ TEST_F(InputMethodPreferencesTest, TestLogIn) {
   syncer::SyncableService* sync =
       pref_service_->GetSyncableService(
           syncer::PREFERENCES);
-  sync->MergeDataAndStartSyncing(syncer::PREFERENCES,
-                                 sync_data_list,
-                                 scoped_ptr<syncer::SyncChangeProcessor>(
+  sync->MergeDataAndStartSyncing(syncer::PREFERENCES, sync_data_list,
+                                 std::unique_ptr<syncer::SyncChangeProcessor>(
                                      new syncer::FakeSyncChangeProcessor),
-                                 scoped_ptr<syncer::SyncErrorFactory>(
+                                 std::unique_ptr<syncer::SyncErrorFactory>(
                                      new syncer::SyncErrorFactoryMock));
   content::RunAllBlockingPoolTasksUntilIdle();
   {
@@ -525,11 +525,10 @@ TEST_F(InputMethodPreferencesTest, TestLogInLegacy) {
   syncer::SyncableService* sync =
       pref_service_->GetSyncableService(
           syncer::PREFERENCES);
-  sync->MergeDataAndStartSyncing(syncer::PREFERENCES,
-                                 sync_data_list,
-                                 scoped_ptr<syncer::SyncChangeProcessor>(
+  sync->MergeDataAndStartSyncing(syncer::PREFERENCES, sync_data_list,
+                                 std::unique_ptr<syncer::SyncChangeProcessor>(
                                      new syncer::FakeSyncChangeProcessor),
-                                 scoped_ptr<syncer::SyncErrorFactory>(
+                                 std::unique_ptr<syncer::SyncErrorFactory>(
                                      new syncer::SyncErrorFactoryMock));
   content::RunAllBlockingPoolTasksUntilIdle();
   {
@@ -584,11 +583,10 @@ TEST_F(InputMethodPreferencesTest, MergeStressTest) {
   syncer::SyncableService* sync =
       pref_service_->GetSyncableService(
           syncer::PREFERENCES);
-  sync->MergeDataAndStartSyncing(syncer::PREFERENCES,
-                                 sync_data_list,
-                                 scoped_ptr<syncer::SyncChangeProcessor>(
+  sync->MergeDataAndStartSyncing(syncer::PREFERENCES, sync_data_list,
+                                 std::unique_ptr<syncer::SyncChangeProcessor>(
                                      new syncer::FakeSyncChangeProcessor),
-                                 scoped_ptr<syncer::SyncErrorFactory>(
+                                 std::unique_ptr<syncer::SyncErrorFactory>(
                                      new syncer::SyncErrorFactoryMock));
   content::RunAllBlockingPoolTasksUntilIdle();
   {
@@ -637,11 +635,10 @@ TEST_F(InputMethodPreferencesTest, MergeInvalidValues) {
   syncer::SyncableService* sync =
       pref_service_->GetSyncableService(
           syncer::PREFERENCES);
-  sync->MergeDataAndStartSyncing(syncer::PREFERENCES,
-                                 sync_data_list,
-                                 scoped_ptr<syncer::SyncChangeProcessor>(
+  sync->MergeDataAndStartSyncing(syncer::PREFERENCES, sync_data_list,
+                                 std::unique_ptr<syncer::SyncChangeProcessor>(
                                      new syncer::FakeSyncChangeProcessor),
-                                 scoped_ptr<syncer::SyncErrorFactory>(
+                                 std::unique_ptr<syncer::SyncErrorFactory>(
                                      new syncer::SyncErrorFactoryMock));
   content::RunAllBlockingPoolTasksUntilIdle();
   {
@@ -680,11 +677,10 @@ TEST_F(InputMethodPreferencesTest, MergeAfterSyncing) {
   syncer::SyncableService* sync =
       pref_service_->GetSyncableService(
           syncer::PREFERENCES);
-  sync->MergeDataAndStartSyncing(syncer::PREFERENCES,
-                                 sync_data_list,
-                                 scoped_ptr<syncer::SyncChangeProcessor>(
+  sync->MergeDataAndStartSyncing(syncer::PREFERENCES, sync_data_list,
+                                 std::unique_ptr<syncer::SyncChangeProcessor>(
                                      new syncer::FakeSyncChangeProcessor),
-                                 scoped_ptr<syncer::SyncErrorFactory>(
+                                 std::unique_ptr<syncer::SyncErrorFactory>(
                                      new syncer::SyncErrorFactoryMock));
   content::RunAllBlockingPoolTasksUntilIdle();
   InitPreferences();

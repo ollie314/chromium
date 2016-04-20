@@ -5,23 +5,32 @@
 package org.chromium.chrome.browser.media.ui;
 
 import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE;
-import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_PHONE;
 
+import android.app.Notification;
 import android.test.suitebuilder.annotation.SmallTest;
+import android.view.View;
+import android.widget.TextView;
 
 import org.chromium.base.ObserverList;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
+import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.chrome.test.util.browser.TabTitleObserver;
+import org.chromium.content.browser.test.util.Criteria;
+import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.JavaScriptUtils;
 import org.chromium.content_public.browser.WebContentsObserver;
+import org.chromium.content_public.common.MediaMetadata;
 
 /**
- * Test of media notifications to see whether the text updates when the tab title changes
+ * Test of media notifications to see whether the text updates when the tab title changes or the
+ * MediaMetadata gets updated.
  */
 public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private static final int NOTIFICATION_ID = R.id.media_playback_notification;
@@ -39,28 +48,38 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
         simulateUpdateTitle(mTab, "title1");
     }
 
-    @SmallTest
-    public void testSessionStatePlaying() throws InterruptedException {
+    private void testSessionStatePlayingInternal() throws InterruptedException {
         simulateMediaSessionStateChanged(mTab, true, false);
         assertTitleMatches("title1");
         simulateUpdateTitle(mTab, "title2");
         assertTitleMatches("title2");
     }
 
-    @SmallTest
-    public void testSessionStatePaused() {
+    private void testSessionStatePausedInternal() throws InterruptedException {
         simulateMediaSessionStateChanged(mTab, true, true);
         assertTitleMatches("title1");
         simulateUpdateTitle(mTab, "title2");
         assertTitleMatches("title2");
     }
 
-    @SmallTest
-    public void testSessionStateUncontrollable() {
+    private void testSessionStateUncontrollableInternal() throws InterruptedException {
         simulateMediaSessionStateChanged(mTab, true, false);
         assertTitleMatches("title1");
         simulateMediaSessionStateChanged(mTab, false, false);
         simulateUpdateTitle(mTab, "title2");
+    }
+
+    private void testMediaMetadataSetsTitleInternal() throws InterruptedException {
+        simulateMediaSessionStateChanged(mTab, true, false, new MediaMetadata("title2", "", ""));
+        assertTitleMatches("title2");
+    }
+
+    private void testMediaMetadataOverridesTitleInternal() throws InterruptedException {
+        simulateMediaSessionStateChanged(mTab, true, false, new MediaMetadata("title2", "", ""));
+        assertTitleMatches("title2");
+
+        simulateUpdateTitle(mTab, "title3");
+        assertTitleMatches("title2");
     }
 
     /**
@@ -72,9 +91,7 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
      *   4. change the title of newTab and then mTab to different names,
      *      the notification should have the title of newTab.
      */
-    @SmallTest
-    @Restriction({RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
-    public void testMultipleTabs() throws Throwable {
+    private void testMultipleTabsInternal() throws Throwable {
         simulateMediaSessionStateChanged(mTab, true, false);
         assertTitleMatches("title1");
         simulateMediaSessionStateChanged(mTab, false, false);
@@ -88,6 +105,82 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
         assertTitleMatches("title3");
     }
 
+    @SmallTest
+    @CommandLineFlags.Add("enable-features=MediaStyleNotification")
+    public void testSessionStatePlaying_MediaStyleNotification() throws InterruptedException {
+        testSessionStatePlayingInternal();
+    }
+
+    @SmallTest
+    @CommandLineFlags.Add("enable-features=MediaStyleNotification")
+    public void testSessionStatePaused_MediaStyleNotification() throws InterruptedException {
+        testSessionStatePausedInternal();
+    }
+
+    @SmallTest
+    @CommandLineFlags.Add("enable-features=MediaStyleNotification")
+    public void testSessionStateUncontrollable_MediaStyleNotification()
+            throws InterruptedException {
+        testSessionStateUncontrollableInternal();
+    }
+
+    @SmallTest
+    @CommandLineFlags.Add("enable-features=MediaStyleNotification")
+    public void testMediaMetadataSetsTitle_MediaStyleNotification() throws InterruptedException {
+        testMediaMetadataSetsTitleInternal();
+    }
+
+    @SmallTest
+    @CommandLineFlags.Add("enable-features=MediaStyleNotification")
+    public void testMediaMetadataOverridesTitle_MediaStyleNotification()
+            throws InterruptedException {
+        testMediaMetadataOverridesTitleInternal();
+    }
+
+    @SmallTest
+    @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
+    @CommandLineFlags.Add("enable-features=MediaStyleNotification")
+    public void testMultipleTabs_MediaStyleNotification() throws Throwable {
+        testMultipleTabsInternal();
+    }
+
+    @SmallTest
+    @CommandLineFlags.Add("disable-features=MediaStyleNotification")
+    public void testSessionStatePlaying_CustomNotification() throws InterruptedException {
+        testSessionStatePlayingInternal();
+    }
+
+    @SmallTest
+    @CommandLineFlags.Add("disable-features=MediaStyleNotification")
+    public void testSessionStatePaused_CustomNotification() throws InterruptedException {
+        testSessionStatePausedInternal();
+    }
+
+    @SmallTest
+    @CommandLineFlags.Add("disable-features=MediaStyleNotification")
+    public void testSessionStateUncontrollable_CustomNotification() throws InterruptedException {
+        testSessionStateUncontrollableInternal();
+    }
+
+    @SmallTest
+    @CommandLineFlags.Add("disable-features=MediaStyleNotification")
+    public void testMediaMetadataSetsTitle_CustomNotification() throws InterruptedException {
+        testMediaMetadataSetsTitleInternal();
+    }
+
+    @SmallTest
+    @CommandLineFlags.Add("disable-features=MediaStyleNotification")
+    public void testMediaMetadataOverridesTitle_CustomNotification() throws InterruptedException {
+        testMediaMetadataOverridesTitleInternal();
+    }
+
+    @SmallTest
+    @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
+    @CommandLineFlags.Add("disable-features=MediaStyleNotification")
+    public void testMultipleTabs_CustomNotification() throws Throwable {
+        testMultipleTabsInternal();
+    }
+
     @Override
     public void startMainActivity() throws InterruptedException {
         startMainActivityOnBlankPage();
@@ -95,6 +188,12 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
 
     private void simulateMediaSessionStateChanged(
             final Tab tab, final boolean isControllable, final boolean isSuspended) {
+        simulateMediaSessionStateChanged(
+                tab, isControllable, isSuspended, new MediaMetadata("", "", ""));
+    }
+
+    private void simulateMediaSessionStateChanged(final Tab tab, final boolean isControllable,
+            final boolean isSuspended, final MediaMetadata metadata) {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
                 @Override
                 public void run() {
@@ -102,7 +201,7 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
                             tab.getWebContents().getObserversForTesting();
                     while (observers.hasNext()) {
                         observers.next().mediaSessionStateChanged(
-                                isControllable, isSuspended);
+                                isControllable, isSuspended, metadata);
                     }
                 }
             });
@@ -120,12 +219,42 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
         }
     }
 
-    void assertTitleMatches(final String title) {
+    void assertTitleMatches(final String title) throws InterruptedException {
+        // The service might still not be created which delays the creation of the notification
+        // builder.
+        CriteriaHelper.pollUiThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                return MediaNotificationManager.getNotificationBuilderForTesting(NOTIFICATION_ID)
+                        != null;
+            }
+        });
+
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
                 @Override
                 public void run() {
-                    assertEquals(title, MediaNotificationManager
-                            .getNotificationInfoForTesting(NOTIFICATION_ID).title);
+                    Notification notification =
+                            MediaNotificationManager
+                                    .getNotificationBuilderForTesting(NOTIFICATION_ID)
+                                    .build();
+
+                    View contentView = notification.contentView.apply(
+                            getActivity().getApplicationContext(), null);
+                    String observedText = null;
+                    if (ChromeFeatureList.isEnabled(ChromeFeatureList.MEDIA_STYLE_NOTIFICATION)) {
+                        TextView view = (TextView) contentView.findViewById(android.R.id.title);
+                        if (view == null) {
+                            // Case where NotificationCompat does not use the native Notification.
+                            // The TextView id will be in Chrome's namespace.
+                            view = (TextView) contentView.findViewById(R.id.title);
+                        }
+                        observedText = view.getText().toString();
+                    } else {
+                        observedText = ((TextView) contentView.findViewById(R.id.title))
+                                               .getText()
+                                               .toString();
+                    }
+                    assertEquals(title, observedText);
                 }
             });
     }

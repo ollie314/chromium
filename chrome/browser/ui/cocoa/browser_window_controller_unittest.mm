@@ -4,10 +4,10 @@
 
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 
+#include <memory>
+
 #include "base/mac/mac_util.h"
 #import "base/mac/scoped_nsobject.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/prefs/pref_service.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -18,10 +18,10 @@
 #include "chrome/browser/ui/cocoa/run_loop_testing.h"
 #include "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
-#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -125,9 +125,8 @@ TEST_F(BrowserWindowControllerTest, TestNormal) {
 
   // And make sure a controller for a pop-up window is not normal.
   // popup_browser will be owned by its window.
-  Browser* popup_browser(new Browser(
-      Browser::CreateParams(Browser::TYPE_POPUP, profile(),
-                            chrome::GetActiveDesktop())));
+  Browser* popup_browser(
+      new Browser(Browser::CreateParams(Browser::TYPE_POPUP, profile())));
   NSWindow* cocoaWindow = popup_browser->window()->GetNativeWindow();
   BrowserWindowController* controller =
       static_cast<BrowserWindowController*>([cocoaWindow windowController]);
@@ -141,8 +140,7 @@ TEST_F(BrowserWindowControllerTest, TestNormal) {
 
 TEST_F(BrowserWindowControllerTest, TestSetBounds) {
   // Create a normal browser with bounds smaller than the minimum.
-  Browser::CreateParams params(Browser::TYPE_TABBED, profile(),
-                               chrome::GetActiveDesktop());
+  Browser::CreateParams params(Browser::TYPE_TABBED, profile());
   params.initial_bounds = gfx::Rect(0, 0, 50, 50);
   Browser* browser = new Browser(params);
   NSWindow* cocoaWindow = browser->window()->GetNativeWindow();
@@ -167,8 +165,7 @@ TEST_F(BrowserWindowControllerTest, TestSetBounds) {
 
 TEST_F(BrowserWindowControllerTest, TestSetBoundsPopup) {
   // Create a popup with bounds smaller than the minimum.
-  Browser::CreateParams params(Browser::TYPE_POPUP, profile(),
-                               chrome::GetActiveDesktop());
+  Browser::CreateParams params(Browser::TYPE_POPUP, profile());
   params.initial_bounds = gfx::Rect(0, 0, 50, 50);
   Browser* browser = new Browser(params);
   NSWindow* cocoaWindow = browser->window()->GetNativeWindow();
@@ -208,8 +205,7 @@ TEST_F(BrowserWindowControllerTest, BookmarkBarControllerIndirection) {
 }
 
 TEST_F(BrowserWindowControllerTest, BookmarkBarToggleRespectMinWindowHeight) {
-  Browser::CreateParams params(Browser::TYPE_TABBED, profile(),
-                               chrome::GetActiveDesktop());
+  Browser::CreateParams params(Browser::TYPE_TABBED, profile());
   params.initial_bounds = gfx::Rect(0, 0, 50, 280);
   Browser* browser = new Browser(params);
   NSWindow* cocoaWindow = browser->window()->GetNativeWindow();
@@ -233,11 +229,10 @@ TEST_F(BrowserWindowControllerTest, BookmarkBarToggleRespectMinWindowHeight) {
 // TODO(jrg): This crashes trying to create the BookmarkBarController, adding
 // an observer to the BookmarkModel.
 TEST_F(BrowserWindowControllerTest, TestIncognitoWidthSpace) {
-  scoped_ptr<TestingProfile> incognito_profile(new TestingProfile());
+  std::unique_ptr<TestingProfile> incognito_profile(new TestingProfile());
   incognito_profile->set_off_the_record(true);
-  scoped_ptr<Browser> browser(
-      new Browser(Browser::CreateParams(incognito_profile.get(),
-                                        chrome::GetActiveDesktop()));
+  std::unique_ptr<Browser> browser(
+      new Browser(Browser::CreateParams(incognito_profile.get())));
   controller_.reset([[BrowserWindowController alloc]
                               initWithBrowser:browser.get()
                                 takeOwnership:NO]);
@@ -798,10 +793,6 @@ TEST_F(BrowserWindowFullScreenControllerTest, TestActivate) {
   WaitForFullScreenTransition();
   [controller_ activate];
   chrome::testing::NSRunLoopRunAllPending();
-
-  // No fullscreen window on 10.7+.
-  if (base::mac::IsOSSnowLeopard())
-    EXPECT_TRUE(IsFrontWindow([controller_ createFullscreenWindow]));
 
   // We have to cleanup after ourselves by unfullscreening.
   [controller_ exitAnyFullscreen];

@@ -31,18 +31,15 @@
 #include "core/frame/DOMWindowProperty.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
 class ExceptionState;
 class LocalFrame;
 
-class ApplicationCache final : public RefCountedGarbageCollectedEventTargetWithInlineData<ApplicationCache>, public DOMWindowProperty {
+class ApplicationCache final : public EventTargetWithInlineData, public DOMWindowProperty {
     DEFINE_WRAPPERTYPEINFO();
-    REFCOUNTED_GARBAGE_COLLECTED_EVENT_TARGET(ApplicationCache);
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(ApplicationCache);
+    USING_GARBAGE_COLLECTED_MIXIN(ApplicationCache);
 public:
     static ApplicationCache* create(LocalFrame* frame)
     {
@@ -50,9 +47,6 @@ public:
     }
     ~ApplicationCache() override
     {
-#if !ENABLE(OILPAN)
-        ASSERT(!m_frame);
-#endif
     }
 
     void willDestroyGlobalObjectInFrame() override;
@@ -74,7 +68,7 @@ public:
     DEFINE_ATTRIBUTE_EVENT_LISTENER(obsolete);
 
     const AtomicString& interfaceName() const override;
-    ExecutionContext* executionContext() const override;
+    ExecutionContext* getExecutionContext() const override;
 
     static const AtomicString& toEventType(ApplicationCacheHost::EventID);
 
@@ -82,6 +76,8 @@ public:
 
 private:
     explicit ApplicationCache(LocalFrame*);
+
+    void recordAPIUseType() const;
 
     ApplicationCacheHost* applicationCacheHost() const;
 };

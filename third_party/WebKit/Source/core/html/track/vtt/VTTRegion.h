@@ -37,8 +37,6 @@
 #include "platform/Timer.h"
 #include "platform/geometry/FloatPoint.h"
 #include "platform/heap/Handle.h"
-#include "wtf/PassOwnPtr.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
@@ -89,9 +87,9 @@ public:
 
     bool isScrollingRegion() { return m_scroll; }
 
-    PassRefPtrWillBeRawPtr<HTMLDivElement> getDisplayTree(Document&);
+    HTMLDivElement* getDisplayTree(Document&);
 
-    void appendVTTCueBox(PassRefPtrWillBeRawPtr<VTTCueBox>);
+    void appendVTTCueBox(VTTCueBox*);
     void displayLastVTTCueBox();
     void willRemoveVTTCueBox(VTTCueBox*);
 
@@ -133,8 +131,8 @@ private:
 
     // The cue container is the container that is scrolled up to obtain the
     // effect of scrolling cues when this is enabled for the regions.
-    RefPtrWillBeMember<HTMLDivElement> m_cueContainer;
-    RefPtrWillBeMember<HTMLDivElement> m_regionDisplayTree;
+    Member<HTMLDivElement> m_cueContainer;
+    Member<HTMLDivElement> m_regionDisplayTree;
 
     // The member variable track can be a raw pointer as it will never
     // reference a destroyed TextTrack, as this member variable

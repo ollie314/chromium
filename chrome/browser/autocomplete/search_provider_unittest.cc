@@ -10,8 +10,8 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -44,6 +44,7 @@
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/omnibox_switches.h"
 #include "components/omnibox/browser/suggestion_answer.h"
+#include "components/prefs/pref_service.h"
 #include "components/search_engines/search_engine_type.h"
 #include "components/search_engines/search_engines_switches.h"
 #include "components/search_engines/search_terms_data.h"
@@ -167,7 +168,7 @@ class SearchProviderTest : public testing::Test,
 
  protected:
   // Needed for AutocompleteFieldTrial::ActivateStaticTrials();
-  scoped_ptr<base::FieldTrialList> field_trial_list_;
+  std::unique_ptr<base::FieldTrialList> field_trial_list_;
 
   // Default values used for testing.
   static const std::string kNotApplicable;
@@ -257,7 +258,7 @@ class SearchProviderTest : public testing::Test,
 
   net::TestURLFetcherFactory test_factory_;
   TestingProfile profile_;
-  scoped_ptr<ChromeAutocompleteProviderClient> client_;
+  std::unique_ptr<ChromeAutocompleteProviderClient> client_;
   scoped_refptr<SearchProviderForTest> provider_;
 
   // If non-NULL, OnProviderUpdate quits the current |run_loop_|.
@@ -549,10 +550,8 @@ void SearchProviderTest::ResetFieldTrialList() {
   field_trial_list_.reset(new base::FieldTrialList(
       new metrics::SHA1EntropyProvider("foo")));
   variations::testing::ClearAllVariationParams();
-  base::FieldTrial* trial = base::FieldTrialList::CreateFieldTrial(
-      "AutocompleteDynamicTrial_0", "DefaultGroup");
-  trial->group();
 }
+
 base::FieldTrial* SearchProviderTest::CreateFieldTrial(
     const char* field_trial_rule,
     bool enabled) {
@@ -1092,8 +1091,8 @@ TEST_F(SearchProviderTest, KeywordOrderingAndDescriptions) {
   profile_.BlockUntilHistoryProcessesPendingRequests();
 
   AutocompleteController controller(
-      make_scoped_ptr(new ChromeAutocompleteProviderClient(&profile_)), nullptr,
-      AutocompleteProvider::TYPE_SEARCH);
+      base::WrapUnique(new ChromeAutocompleteProviderClient(&profile_)),
+      nullptr, AutocompleteProvider::TYPE_SEARCH);
   controller.Start(AutocompleteInput(
       ASCIIToUTF16("k t"), base::string16::npos, std::string(), GURL(),
       metrics::OmniboxEventProto::INVALID_SPEC, false, false, true, true, false,
@@ -2550,6 +2549,10 @@ TEST_F(SearchProviderTest, DefaultProviderSuggestRelevanceScoringUrlInput) {
 
 // A basic test that verifies the field trial triggered parsing logic.
 TEST_F(SearchProviderTest, FieldTrialTriggeredParsing) {
+  base::FieldTrial* trial = base::FieldTrialList::CreateFieldTrial(
+      OmniboxFieldTrial::kBundledExperimentFieldTrialName, "DefaultGroup");
+  trial->group();
+
   QueryForInputAndWaitForFetcherResponses(
       ASCIIToUTF16("foo"), false,
       "[\"foo\",[\"foo bar\"],[\"\"],[],"
@@ -2573,7 +2576,7 @@ TEST_F(SearchProviderTest, FieldTrialTriggeredParsing) {
     ProvidersInfo providers_info;
     provider_->AddProviderInfo(&providers_info);
     ASSERT_EQ(1U, providers_info.size());
-    EXPECT_EQ(1, providers_info[0].field_trial_triggered_size());
+    EXPECT_EQ(0, providers_info[0].field_trial_triggered_size());
     EXPECT_EQ(0, providers_info[0].field_trial_triggered_in_session_size());
   }
 }
@@ -2747,7 +2750,7 @@ TEST_F(SearchProviderTest, NavigationInline) {
     SearchSuggestionParser::NavigationResult result(
         ChromeAutocompleteSchemeClassifier(&profile_), GURL(cases[i].url),
         AutocompleteMatchType::NAVSUGGEST, base::string16(), std::string(),
-        false, 0, false, ASCIIToUTF16(cases[i].input), std::string());
+        false, 0, false, ASCIIToUTF16(cases[i].input));
     result.set_received_after_last_keystroke(false);
     AutocompleteMatch match(provider_->NavigationToMatch(result));
     EXPECT_EQ(ASCIIToUTF16(cases[i].inline_autocompletion),
@@ -2761,7 +2764,7 @@ TEST_F(SearchProviderTest, NavigationInline) {
     SearchSuggestionParser::NavigationResult result_prevent_inline(
         ChromeAutocompleteSchemeClassifier(&profile_), GURL(cases[i].url),
         AutocompleteMatchType::NAVSUGGEST, base::string16(), std::string(),
-        false, 0, false, ASCIIToUTF16(cases[i].input), std::string());
+        false, 0, false, ASCIIToUTF16(cases[i].input));
     result_prevent_inline.set_received_after_last_keystroke(false);
     AutocompleteMatch match_prevent_inline(
         provider_->NavigationToMatch(result_prevent_inline));
@@ -2781,7 +2784,7 @@ TEST_F(SearchProviderTest, NavigationInlineSchemeSubstring) {
   SearchSuggestionParser::NavigationResult result(
       ChromeAutocompleteSchemeClassifier(&profile_), GURL(url),
       AutocompleteMatchType::NAVSUGGEST,
-      base::string16(), std::string(), false, 0, false, input, std::string());
+      base::string16(), std::string(), false, 0, false, input);
   result.set_received_after_last_keystroke(false);
 
   // Check the offset and strings when inline autocompletion is allowed.
@@ -2806,8 +2809,7 @@ TEST_F(SearchProviderTest, NavigationInlineDomainClassify) {
   SearchSuggestionParser::NavigationResult result(
       ChromeAutocompleteSchemeClassifier(&profile_),
       GURL("http://www.wow.com"), AutocompleteMatchType::NAVSUGGEST,
-      base::string16(), std::string(), false, 0, false, ASCIIToUTF16("w"),
-      std::string());
+      base::string16(), std::string(), false, 0, false, ASCIIToUTF16("w"));
   result.set_received_after_last_keystroke(false);
   AutocompleteMatch match(provider_->NavigationToMatch(result));
   EXPECT_EQ(ASCIIToUTF16("ow.com"), match.inline_autocompletion);

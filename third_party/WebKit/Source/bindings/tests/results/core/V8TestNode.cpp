@@ -9,11 +9,8 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
-#include "core/dom/ContextFeatures.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalDOMWindow.h"
-#include "platform/RuntimeEnabledFeatures.h"
-#include "platform/TraceEvent.h"
 #include "wtf/GetPtr.h"
 #include "wtf/RefPtr.h"
 
@@ -25,7 +22,7 @@ namespace blink {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo V8TestNode::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestNode::domTemplate, V8TestNode::refObject, V8TestNode::derefObject, V8TestNode::trace, 0, 0, V8TestNode::preparePrototypeAndInterfaceObject, V8TestNode::installConditionallyEnabledProperties, "TestNode", &V8Node::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::NodeClassId, WrapperTypeInfo::InheritFromEventTarget, WrapperTypeInfo::Dependent, WrapperTypeInfo::WillBeGarbageCollectedObject };
+const WrapperTypeInfo V8TestNode::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestNode::domTemplate, V8TestNode::trace, 0, 0, V8TestNode::preparePrototypeAndInterfaceObject, V8TestNode::installConditionallyEnabledProperties, "TestNode", &V8Node::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::NodeClassId, WrapperTypeInfo::InheritFromEventTarget, WrapperTypeInfo::Dependent };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
 #endif
@@ -46,9 +43,7 @@ static void hrefAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
 
 static void hrefAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestNodeV8Internal::hrefAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void hrefAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -64,9 +59,7 @@ static void hrefAttributeSetter(v8::Local<v8::Value> v8Value, const v8::Function
 static void hrefAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestNodeV8Internal::hrefAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void hrefThrowsAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -78,9 +71,7 @@ static void hrefThrowsAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>&
 
 static void hrefThrowsAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestNodeV8Internal::hrefThrowsAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void hrefThrowsAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -98,9 +89,7 @@ static void hrefThrowsAttributeSetter(v8::Local<v8::Value> v8Value, const v8::Fu
 static void hrefThrowsAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestNodeV8Internal::hrefThrowsAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void hrefCallWithAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -112,9 +101,7 @@ static void hrefCallWithAttributeGetter(const v8::FunctionCallbackInfo<v8::Value
 
 static void hrefCallWithAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestNodeV8Internal::hrefCallWithAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void hrefCallWithAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -125,15 +112,13 @@ static void hrefCallWithAttributeSetter(v8::Local<v8::Value> v8Value, const v8::
     if (!cppValue.prepare())
         return;
     ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
-    impl->setHrefCallWith(executionContext, callingDOMWindow(info.GetIsolate()), enteredDOMWindow(info.GetIsolate()), cppValue);
+    impl->setHrefCallWith(executionContext, currentDOMWindow(info.GetIsolate()), enteredDOMWindow(info.GetIsolate()), cppValue);
 }
 
 static void hrefCallWithAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestNodeV8Internal::hrefCallWithAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void hrefByteStringAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -145,9 +130,7 @@ static void hrefByteStringAttributeGetter(const v8::FunctionCallbackInfo<v8::Val
 
 static void hrefByteStringAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     TestNodeV8Internal::hrefByteStringAttributeGetter(info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void hrefByteStringAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -164,14 +147,12 @@ static void hrefByteStringAttributeSetter(v8::Local<v8::Value> v8Value, const v8
 static void hrefByteStringAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
-    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     TestNodeV8Internal::hrefByteStringAttributeSetter(v8Value, info);
-    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
 static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    RefPtrWillBeRawPtr<TestNode> impl = TestNode::create();
+    TestNode* impl = TestNode::create();
     v8::Local<v8::Object> wrapper = info.Holder();
     wrapper = impl->associateWithWrapper(info.GetIsolate(), &V8TestNode::wrapperTypeInfo, wrapper);
     v8SetReturnValue(info, wrapper);
@@ -188,7 +169,6 @@ const V8DOMConfiguration::AccessorConfiguration V8TestNodeAccessors[] = {
 
 void V8TestNode::constructorCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    TRACE_EVENT_SCOPED_SAMPLING_STATE("blink", "DOMConstructor");
     if (!info.IsConstructCall()) {
         V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::constructorNotCallableAsFunction("TestNode"));
         return;
@@ -202,26 +182,25 @@ void V8TestNode::constructorCallback(const v8::FunctionCallbackInfo<v8::Value>& 
     TestNodeV8Internal::constructor(info);
 }
 
-static void installV8TestNodeTemplate(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+static void installV8TestNodeTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world, v8::Local<v8::FunctionTemplate> interfaceTemplate)
 {
-    functionTemplate->ReadOnlyPrototype();
-
-    v8::Local<v8::Signature> defaultSignature;
-    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "TestNode", V8Node::domTemplate(isolate), V8TestNode::internalFieldCount,
-        0, 0,
-        V8TestNodeAccessors, WTF_ARRAY_LENGTH(V8TestNodeAccessors),
-        0, 0);
-    functionTemplate->SetCallHandler(V8TestNode::constructorCallback);
-    functionTemplate->SetLength(0);
-    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    // Initialize the interface object's template.
+    V8DOMConfiguration::initializeDOMInterfaceTemplate(isolate, interfaceTemplate, V8TestNode::wrapperTypeInfo.interfaceName, V8Node::domTemplate(isolate, world), V8TestNode::internalFieldCount);
+    interfaceTemplate->SetCallHandler(V8TestNode::constructorCallback);
+    interfaceTemplate->SetLength(0);
+    v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
+    ALLOW_UNUSED_LOCAL(signature);
+    v8::Local<v8::ObjectTemplate> instanceTemplate = interfaceTemplate->InstanceTemplate();
     ALLOW_UNUSED_LOCAL(instanceTemplate);
-    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = interfaceTemplate->PrototypeTemplate();
     ALLOW_UNUSED_LOCAL(prototypeTemplate);
+    // Register DOM constants, attributes and operations.
+    V8DOMConfiguration::installAccessors(isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate, signature, V8TestNodeAccessors, WTF_ARRAY_LENGTH(V8TestNodeAccessors));
 }
 
-v8::Local<v8::FunctionTemplate> V8TestNode::domTemplate(v8::Isolate* isolate)
+v8::Local<v8::FunctionTemplate> V8TestNode::domTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world)
 {
-    return V8DOMConfiguration::domClassTemplate(isolate, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestNodeTemplate);
+    return V8DOMConfiguration::domClassTemplate(isolate, world, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestNodeTemplate);
 }
 
 bool V8TestNode::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
@@ -237,20 +216,6 @@ v8::Local<v8::Object> V8TestNode::findInstanceInPrototypeChain(v8::Local<v8::Val
 TestNode* V8TestNode::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
     return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
-}
-
-void V8TestNode::refObject(ScriptWrappable* scriptWrappable)
-{
-#if !ENABLE(OILPAN)
-    scriptWrappable->toImpl<TestNode>()->ref();
-#endif
-}
-
-void V8TestNode::derefObject(ScriptWrappable* scriptWrappable)
-{
-#if !ENABLE(OILPAN)
-    scriptWrappable->toImpl<TestNode>()->deref();
-#endif
 }
 
 } // namespace blink

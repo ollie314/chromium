@@ -6,7 +6,7 @@
  * Other contributors:
  *   Robert O'Callahan <roc+@cs.cmu.edu>
  *   David Baron <dbaron@fas.harvard.edu>
- *   Christian Biesinger <cbiesinger@web.de>
+ *   Christian Biesinger <cbiesinger@gmail.com>
  *   Randall Jesup <rjesup@wgate.com>
  *   Roland Mainz <roland.mainz@informatik.med.uni-giessen.de>
  *   Josh Soref <timeless@mac.com>
@@ -54,6 +54,7 @@
 #include "core/frame/Settings.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/input/EventHandler.h"
+#include "core/layout/LayoutFlexibleBox.h"
 #include "core/layout/LayoutGeometryMap.h"
 #include "core/layout/LayoutPart.h"
 #include "core/layout/LayoutScrollbar.h"
@@ -70,12 +71,12 @@
 #include "core/paint/PaintLayerFragment.h"
 #include "platform/PlatformGestureEvent.h"
 #include "platform/PlatformMouseEvent.h"
+#include "platform/graphics/CompositorMutableProperties.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/scroll/ScrollAnimatorBase.h"
 #include "platform/scroll/ScrollbarTheme.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebCompositorMutableProperties.h"
 
 namespace blink {
 
@@ -89,9 +90,12 @@ PaintLayerScrollableArea::PaintLayerScrollableArea(PaintLayer& layer)
     , m_nextTopmostScrollChild(0)
     , m_topmostScrollChild(0)
     , m_needsCompositedScrolling(false)
+    , m_rebuildHorizontalScrollbarLayer(false)
+    , m_rebuildVerticalScrollbarLayer(false)
     , m_scrollbarManager(*this)
     , m_scrollCorner(nullptr)
     , m_resizer(nullptr)
+    , m_scrollAnchor(this)
 #if ENABLE(ASSERT)
     , m_hasBeenDisposed(false)
 #endif
@@ -153,6 +157,12 @@ void PaintLayerScrollableArea::dispose()
 
     clearScrollAnimators();
 
+    // Note: it is not safe to call ScrollAnchor::clear if the document is being destroyed,
+    // because LayoutObjectChildList::removeChildNode skips the call to willBeRemovedFromTree,
+    // leaving the ScrollAnchor with a stale LayoutObject pointer.
+    if (RuntimeEnabledFeatures::scrollAnchoringEnabled() && !box().documentBeingDestroyed())
+        m_scrollAnchor.clear();
+
 #if ENABLE(ASSERT)
     m_hasBeenDisposed = true;
 #endif
@@ -161,10 +171,11 @@ void PaintLayerScrollableArea::dispose()
 DEFINE_TRACE(PaintLayerScrollableArea)
 {
     visitor->trace(m_scrollbarManager);
+    visitor->trace(m_scrollAnchor);
     ScrollableArea::trace(visitor);
 }
 
-HostWindow* PaintLayerScrollableArea::hostWindow() const
+HostWindow* PaintLayerScrollableArea::getHostWindow() const
 {
     if (Page* page = box().frame()->page())
         return &page->chromeClient();
@@ -256,7 +267,6 @@ static IntRect cornerRect(const LayoutBox& box, const Scrollbar* horizontalScrol
         horizontalThickness, verticalThickness);
 }
 
-
 IntRect PaintLayerScrollableArea::scrollCornerRect() const
 {
     // We have a scrollbar corner when a scrollbar is visible and not filling the entire length of the box.
@@ -323,12 +333,7 @@ int PaintLayerScrollableArea::scrollSize(ScrollbarOrientation orientation) const
     return (orientation == HorizontalScrollbar) ? scrollDimensions.width() : scrollDimensions.height();
 }
 
-void PaintLayerScrollableArea::setScrollOffset(const IntPoint& newScrollOffset, ScrollType scrollType)
-{
-    setScrollOffset(DoublePoint(newScrollOffset), scrollType);
-}
-
-void PaintLayerScrollableArea::setScrollOffset(const DoublePoint& newScrollOffset, ScrollType)
+void PaintLayerScrollableArea::setScrollOffset(const DoublePoint& newScrollOffset, ScrollType scrollType)
 {
     if (scrollOffset() == toDoubleSize(newScrollOffset))
         return;
@@ -339,7 +344,7 @@ void PaintLayerScrollableArea::setScrollOffset(const DoublePoint& newScrollOffse
     LocalFrame* frame = box().frame();
     ASSERT(frame);
 
-    RefPtrWillBeRawPtr<FrameView> frameView = box().frameView();
+    FrameView* frameView = box().frameView();
 
     TRACE_EVENT1("devtools.timeline", "ScrollLayer", "data", InspectorScrollLayerEvent::data(&box()));
 
@@ -373,7 +378,6 @@ void PaintLayerScrollableArea::setScrollOffset(const DoublePoint& newScrollOffse
         bool onlyScrolledCompositedLayers = scrollsOverflow()
             && !layer()->hasVisibleNonLayerContent()
             && !layer()->hasNonCompositedChild()
-            && !layer()->hasBlockSelectionGapBounds()
             && box().style()->backgroundLayers().attachment() != LocalBackgroundAttachment;
 
         if (usesCompositedScrolling() || onlyScrolledCompositedLayers)
@@ -390,7 +394,6 @@ void PaintLayerScrollableArea::setScrollOffset(const DoublePoint& newScrollOffse
     // FIXME: This invalidation will be unnecessary in slimming paint phase 2.
     if (requiresPaintInvalidation) {
         box().setShouldDoFullPaintInvalidationIncludingNonCompositingDescendants();
-        frameView->setFrameTimingRequestsDirty(true);
     }
 
     // Schedule the scroll DOM event.
@@ -407,8 +410,12 @@ void PaintLayerScrollableArea::setScrollOffset(const DoublePoint& newScrollOffse
         frame->loader().client()->didChangeScrollOffset();
     }
 
-    // All scrolls clear the scroll anchor.
-    frameView->clearScrollAnchor();
+    // All scrolls clear the fragment anchor.
+    frameView->clearFragmentAnchor();
+
+    // Clear the scroll anchor, unless it is the reason for this scroll.
+    if (RuntimeEnabledFeatures::scrollAnchoringEnabled() && scrollType != AnchoringScroll)
+        scrollAnchor().clear();
 }
 
 IntPoint PaintLayerScrollableArea::scrollPosition() const
@@ -532,7 +539,7 @@ bool PaintLayerScrollableArea::userInputScrollable(ScrollbarOrientation orientat
 
     EOverflow overflowStyle = (orientation == HorizontalScrollbar) ?
         box().style()->overflowX() : box().style()->overflowY();
-    return (overflowStyle == OSCROLL || overflowStyle == OAUTO || overflowStyle == OOVERLAY);
+    return (overflowStyle == OverflowScroll || overflowStyle == OverflowAuto || overflowStyle == OverflowOverlay);
 }
 
 bool PaintLayerScrollableArea::shouldPlaceVerticalScrollbarOnLeft() const
@@ -599,9 +606,11 @@ void PaintLayerScrollableArea::scrollToPosition(const DoublePoint& scrollPositio
         ScrollableArea::setScrollPosition(newScrollPosition, scrollType, scrollBehavior);
 }
 
-void PaintLayerScrollableArea::updateScrollDimensions(DoubleSize& scrollOffset, bool& autoHorizontalScrollBarChanged, bool& autoVerticalScrollBarChanged)
+bool PaintLayerScrollableArea::updateAfterLayout(SubtreeLayoutScope* delayedLayoutScope)
 {
     ASSERT(box().hasOverflowClip());
+
+    bool didMarkForDelayedLayout = false;
 
     if (needsScrollbarReconstruction()) {
         m_scrollbarManager.setCanDetachScrollbars(false);
@@ -611,48 +620,19 @@ void PaintLayerScrollableArea::updateScrollDimensions(DoubleSize& scrollOffset, 
 
     m_scrollbarManager.setCanDetachScrollbars(true);
 
-    scrollOffset = adjustedScrollOffset();
+    IntPoint originalOrigin = scrollOrigin();
     computeScrollDimensions();
-    bool hasHorizontalOverflow = this->hasHorizontalOverflow();
-    bool hasVerticalOverflow = this->hasVerticalOverflow();
-    if (hasOverlayScrollbars()) {
-        if (!scrollSize(HorizontalScrollbar))
-            setHasHorizontalScrollbar(false);
-        if (!scrollSize(VerticalScrollbar))
-            setHasVerticalScrollbar(false);
-    }
-
-    // overflow:auto may need to lay out again if scrollbars got added/removed.
-    autoHorizontalScrollBarChanged |= (box().hasAutoHorizontalScrollbar() && (hasHorizontalScrollbar() != hasHorizontalOverflow)) || (box().style()->overflowX() == OSCROLL && !horizontalScrollbar());
-    autoVerticalScrollBarChanged |= (box().hasAutoVerticalScrollbar() && (hasVerticalScrollbar() != hasVerticalOverflow)) || (box().style()->overflowY() == OSCROLL && !verticalScrollbar());
-    if (!visualViewportSuppliesScrollbars() && (autoHorizontalScrollBarChanged || autoVerticalScrollBarChanged)) {
-        if (box().hasAutoHorizontalScrollbar())
-            setHasHorizontalScrollbar(hasHorizontalOverflow);
-        else if (box().style()->overflowX() == OSCROLL)
-            setHasHorizontalScrollbar(true);
-        if (box().hasAutoVerticalScrollbar())
-            setHasVerticalScrollbar(hasVerticalOverflow);
-        else if (box().style()->overflowY() == OSCROLL)
-            setHasVerticalScrollbar(true);
-        // If vertical scrollbar existence has changed, LTR blocks need to update scroll origin to account
-        // for left-hand vertical scrollbar width.
-        computeScrollDimensions();
-    }
-}
-
-void PaintLayerScrollableArea::finalizeScrollDimensions(const DoubleSize& originalScrollOffset, bool autoHorizontalScrollBarChanged, bool autoVerticalScrollBarChanged)
-{
-    ASSERT(box().hasOverflowClip());
 
     // Layout may cause us to be at an invalid scroll position. In this case we need
     // to pull our scroll offsets back to the max (or push them up to the min).
     DoublePoint clampedScrollPosition = clampScrollPosition(scrollPositionDouble());
-    if (clampedScrollPosition != scrollPositionDouble())
+    if (clampedScrollPosition != scrollPositionDouble()) {
         scrollToPosition(clampedScrollPosition);
-
-    if (originalScrollOffset != adjustedScrollOffset()) {
-        DoublePoint origin(scrollOrigin());
-        scrollPositionChanged(-origin + adjustedScrollOffset(), ProgrammaticScroll);
+    } else if (originalOrigin != scrollOrigin()) {
+        // TODO: We should be able to use scrollOriginChanged() here, but we can't because
+        // PaintLayerScrollableArea does not maintain that flag: it gets set, but it never
+        // gets unset.  We should unset the flag after layout.
+        scrollPositionChanged(scrollPositionDouble(), ProgrammaticScroll);
     }
 
     m_scrollbarManager.setCanDetachScrollbars(false);
@@ -665,13 +645,28 @@ void PaintLayerScrollableArea::finalizeScrollDimensions(const DoubleSize& origin
         DisableCompositingQueryAsserts disabler;
 
         // overflow:scroll should just enable/disable.
-        if (box().style()->overflowX() == OSCROLL && horizontalScrollbar())
+        if (box().style()->overflowX() == OverflowScroll && horizontalScrollbar())
             horizontalScrollbar()->setEnabled(hasHorizontalOverflow);
-        if (box().style()->overflowY() == OSCROLL && verticalScrollbar())
+        if (box().style()->overflowY() == OverflowScroll && verticalScrollbar())
             verticalScrollbar()->setEnabled(hasVerticalOverflow);
     }
 
-    if (!visualViewportSuppliesScrollbars() && (autoHorizontalScrollBarChanged || autoVerticalScrollBarChanged)) {
+    // We need to layout again if scrollbars are added or removed by overflow:auto,
+    // or by changing between native and custom.
+    bool horizontalScrollBarChanged = (box().hasAutoHorizontalScrollbar() && (hasHorizontalScrollbar() != hasHorizontalOverflow))
+        || (box().style()->overflowX() == OverflowScroll && !horizontalScrollbar());
+    bool verticalScrollBarChanged = (box().hasAutoVerticalScrollbar() && (hasVerticalScrollbar() != hasVerticalOverflow))
+        || (box().style()->overflowY() == OverflowScroll && !verticalScrollbar());
+    if (!visualViewportSuppliesScrollbars() && (horizontalScrollBarChanged || verticalScrollBarChanged)) {
+        if (box().hasAutoHorizontalScrollbar())
+            setHasHorizontalScrollbar(hasHorizontalOverflow);
+        else if (box().style()->overflowX() == OverflowScroll)
+            setHasHorizontalScrollbar(true);
+        if (box().hasAutoVerticalScrollbar())
+            setHasVerticalScrollbar(hasVerticalOverflow);
+        else if (box().style()->overflowY() == OverflowScroll)
+            setHasVerticalScrollbar(true);
+
         if (hasVerticalOverflow || hasHorizontalOverflow)
             updateScrollCornerStyle();
 
@@ -682,18 +677,28 @@ void PaintLayerScrollableArea::finalizeScrollDimensions(const DoubleSize& origin
             box().document().setAnnotatedRegionsDirty(true);
 
         // Our proprietary overflow: overlay value doesn't trigger a layout.
-        if ((autoHorizontalScrollBarChanged && box().style()->overflowX() != OOVERLAY) || (autoVerticalScrollBarChanged && box().style()->overflowY() != OOVERLAY)) {
+        if ((horizontalScrollBarChanged && box().style()->overflowX() != OverflowOverlay) || (verticalScrollBarChanged && box().style()->overflowY() != OverflowOverlay)) {
             if (!m_inOverflowRelayout) {
                 m_inOverflowRelayout = true;
-                SubtreeLayoutScope layoutScope(box());
-                layoutScope.setNeedsLayout(&box(), LayoutInvalidationReason::ScrollbarChanged);
-                if (box().isLayoutBlock()) {
-                    LayoutBlock& block = toLayoutBlock(box());
-                    block.scrollbarsChanged(autoHorizontalScrollBarChanged, autoVerticalScrollBarChanged);
-                    block.layoutBlock(true);
+                if (delayedLayoutScope) {
+                    if (box().isLayoutBlock())
+                        toLayoutBlock(box()).scrollbarsChanged(horizontalScrollBarChanged, verticalScrollBarChanged);
+                    delayedLayoutScope->setNeedsLayout(&box(), LayoutInvalidationReason::ScrollbarChanged);
+                    didMarkForDelayedLayout = true;
                 } else {
-                    box().layout();
+                    SubtreeLayoutScope layoutScope(box());
+                    layoutScope.setNeedsLayout(&box(), LayoutInvalidationReason::ScrollbarChanged);
+                    if (box().isLayoutBlock()) {
+                        LayoutBlock& block = toLayoutBlock(box());
+                        block.scrollbarsChanged(horizontalScrollBarChanged, verticalScrollBarChanged);
+                        block.layoutBlock(true);
+                    } else {
+                        box().layout();
+                    }
                 }
+                LayoutObject* parent = box().parent();
+                if (parent && parent->isFlexibleBox())
+                    toLayoutFlexibleBox(parent)->clearCachedMainSizeForChild(box());
                 m_inOverflowRelayout = false;
             }
         }
@@ -726,20 +731,13 @@ void PaintLayerScrollableArea::finalizeScrollDimensions(const DoubleSize& origin
 
     DisableCompositingQueryAsserts disabler;
     positionOverflowControls();
-}
 
-void PaintLayerScrollableArea::updateAfterLayout()
-{
-    DoubleSize originalScrollOffset;
-    bool autoHorizontalScrollBarChanged = false;
-    bool autoVerticalScrollBarChanged = false;
-    updateScrollDimensions(originalScrollOffset, autoHorizontalScrollBarChanged, autoVerticalScrollBarChanged);
-    finalizeScrollDimensions(originalScrollOffset, autoHorizontalScrollBarChanged, autoVerticalScrollBarChanged);
+    return didMarkForDelayedLayout;
 }
 
 ScrollBehavior PaintLayerScrollableArea::scrollBehaviorStyle() const
 {
-    return box().style()->scrollBehavior();
+    return box().style()->getScrollBehavior();
 }
 
 bool PaintLayerScrollableArea::hasHorizontalOverflow() const
@@ -764,12 +762,12 @@ bool PaintLayerScrollableArea::hasScrollableVerticalOverflow() const
 
 static bool overflowRequiresScrollbar(EOverflow overflow)
 {
-    return overflow == OSCROLL;
+    return overflow == OverflowScroll;
 }
 
 static bool overflowDefinesAutomaticScrollbar(EOverflow overflow)
 {
-    return overflow == OAUTO || overflow == OOVERLAY;
+    return overflow == OverflowAuto || overflow == OverflowOverlay;
 }
 
 // This function returns true if the given box requires overflow scrollbars (as
@@ -828,12 +826,12 @@ void PaintLayerScrollableArea::updateAfterStyleChange(const ComputedStyle* oldSt
 
     // With overflow: scroll, scrollbars are always visible but may be disabled.
     // When switching to another value, we need to re-enable them (see bug 11985).
-    if (needsHorizontalScrollbar && oldStyle && oldStyle->overflowX() == OSCROLL && overflowX != OSCROLL) {
+    if (needsHorizontalScrollbar && oldStyle && oldStyle->overflowX() == OverflowScroll && overflowX != OverflowScroll) {
         ASSERT(hasHorizontalScrollbar());
         horizontalScrollbar()->setEnabled(true);
     }
 
-    if (needsVerticalScrollbar && oldStyle && oldStyle->overflowY() == OSCROLL && overflowY != OSCROLL) {
+    if (needsVerticalScrollbar && oldStyle && oldStyle->overflowY() == OverflowScroll && overflowY != OverflowScroll) {
         ASSERT(hasVerticalScrollbar());
         verticalScrollbar()->setEnabled(true);
     }
@@ -847,6 +845,19 @@ void PaintLayerScrollableArea::updateAfterStyleChange(const ComputedStyle* oldSt
     updateScrollCornerStyle();
     updateResizerAreaSet();
     updateResizerStyle();
+
+    // Whenever background changes on the scrollable element, the scroll bar
+    // overlay style might need to be changed to have contrast against the
+    // background.
+    Color oldBackground;
+    if (oldStyle) {
+        oldBackground = oldStyle->visitedDependentColor(CSSPropertyBackgroundColor);
+    }
+    Color newBackground = box().style()->visitedDependentColor(CSSPropertyBackgroundColor);
+
+    if (newBackground != oldBackground) {
+        recalculateScrollbarOverlayStyle(newBackground);
+    }
 }
 
 bool PaintLayerScrollableArea::updateAfterCompositingChange()
@@ -904,14 +915,14 @@ IntRect PaintLayerScrollableArea::rectForVerticalScrollbar(const IntRect& border
         borderBoxRect.height() - (box().borderTop() + box().borderBottom()) - scrollCorner.height());
 }
 
-LayoutUnit PaintLayerScrollableArea::verticalScrollbarStart(int minX, int maxX) const
+int PaintLayerScrollableArea::verticalScrollbarStart(int minX, int maxX) const
 {
     if (box().shouldPlaceBlockDirectionScrollbarOnLogicalLeft())
         return minX + box().borderLeft();
     return maxX - box().borderRight() - verticalScrollbar()->width();
 }
 
-LayoutUnit PaintLayerScrollableArea::horizontalScrollbarStart(int minX) const
+int PaintLayerScrollableArea::horizontalScrollbarStart(int minX) const
 {
     int x = minX + box().borderLeft();
     if (box().shouldPlaceBlockDirectionScrollbarOnLogicalLeft())
@@ -943,21 +954,21 @@ static inline const LayoutObject& layoutObjectForScrollbar(const LayoutObject& l
 
             // Try the <body> element first as a scrollbar source.
             Element* body = doc.body();
-            if (body && body->layoutObject() && body->layoutObject()->style()->hasPseudoStyle(SCROLLBAR))
+            if (body && body->layoutObject() && body->layoutObject()->style()->hasPseudoStyle(PseudoIdScrollbar))
                 return *body->layoutObject();
 
             // If the <body> didn't have a custom style, then the root element might.
             Element* docElement = doc.documentElement();
-            if (docElement && docElement->layoutObject() && docElement->layoutObject()->style()->hasPseudoStyle(SCROLLBAR))
+            if (docElement && docElement->layoutObject() && docElement->layoutObject()->style()->hasPseudoStyle(PseudoIdScrollbar))
                 return *docElement->layoutObject();
 
             // If we have an owning ipage/LocalFrame element, then it can set the custom scrollbar also.
             LayoutPart* frameLayoutObject = node->document().frame()->ownerLayoutObject();
-            if (frameLayoutObject && frameLayoutObject->style()->hasPseudoStyle(SCROLLBAR))
+            if (frameLayoutObject && frameLayoutObject->style()->hasPseudoStyle(PseudoIdScrollbar))
                 return *frameLayoutObject;
         }
 
-        if (layoutObject.styleRef().hasPseudoStyle(SCROLLBAR))
+        if (layoutObject.styleRef().hasPseudoStyle(PseudoIdScrollbar))
             return layoutObject;
 
         if (ShadowRoot* shadowRoot = node->containingShadowRoot()) {
@@ -972,7 +983,7 @@ static inline const LayoutObject& layoutObjectForScrollbar(const LayoutObject& l
 bool PaintLayerScrollableArea::needsScrollbarReconstruction() const
 {
     const LayoutObject& actualLayoutObject = layoutObjectForScrollbar(box());
-    bool shouldUseCustom = actualLayoutObject.isBox() && actualLayoutObject.styleRef().hasPseudoStyle(SCROLLBAR);
+    bool shouldUseCustom = actualLayoutObject.isBox() && actualLayoutObject.styleRef().hasPseudoStyle(PseudoIdScrollbar);
     bool hasAnyScrollbar = hasScrollbar();
     bool hasCustom = (hasHorizontalScrollbar() && horizontalScrollbar()->isCustomScrollbar()) || (hasVerticalScrollbar() && verticalScrollbar()->isCustomScrollbar());
     bool didCustomScrollbarOwnerChanged = false;
@@ -1082,13 +1093,13 @@ void PaintLayerScrollableArea::updateScrollCornerStyle()
         return;
 
     const LayoutObject& actualLayoutObject = layoutObjectForScrollbar(box());
-    RefPtr<ComputedStyle> corner = box().hasOverflowClip() ? actualLayoutObject.getUncachedPseudoStyle(PseudoStyleRequest(SCROLLBAR_CORNER), actualLayoutObject.style()) : PassRefPtr<ComputedStyle>(nullptr);
+    RefPtr<ComputedStyle> corner = box().hasOverflowClip() ? actualLayoutObject.getUncachedPseudoStyle(PseudoStyleRequest(PseudoIdScrollbarCorner), actualLayoutObject.style()) : PassRefPtr<ComputedStyle>(nullptr);
     if (corner) {
         if (!m_scrollCorner) {
-            m_scrollCorner = LayoutScrollbarPart::createAnonymous(&box().document());
+            m_scrollCorner = LayoutScrollbarPart::createAnonymous(&box().document(), this);
             m_scrollCorner->setDangerousOneWayParent(&box());
         }
-        m_scrollCorner->setStyle(corner.release());
+        m_scrollCorner->setStyleWithWritingModeOfParent(corner.release());
     } else if (m_scrollCorner) {
         m_scrollCorner->destroy();
         m_scrollCorner = nullptr;
@@ -1110,7 +1121,7 @@ bool PaintLayerScrollableArea::hitTestOverflowControls(HitTestResult& result, co
     int resizeControlSize = max(resizeControlRect.height(), 0);
     if (hasVerticalScrollbar() && verticalScrollbar()->shouldParticipateInHitTesting()) {
         LayoutRect vBarRect(verticalScrollbarStart(0, box().size().width()),
-            box().borderTop(),
+            LayoutUnit(box().borderTop()),
             verticalScrollbar()->width(),
             box().size().height() - (box().borderTop() + box().borderBottom()) - (hasHorizontalScrollbar() ? horizontalScrollbar()->height() : resizeControlSize));
         if (vBarRect.contains(localPoint)) {
@@ -1121,7 +1132,7 @@ bool PaintLayerScrollableArea::hitTestOverflowControls(HitTestResult& result, co
 
     resizeControlSize = max(resizeControlRect.width(), 0);
     if (hasHorizontalScrollbar() && horizontalScrollbar()->shouldParticipateInHitTesting()) {
-        LayoutRect hBarRect(horizontalScrollbarStart(0),
+        LayoutRect hBarRect(horizontalScrollbarStart(LayoutUnit()),
             box().size().height() - box().borderBottom() - horizontalScrollbar()->height(),
             box().size().width() - (box().borderLeft() + box().borderRight()) - (hasVerticalScrollbar() ? verticalScrollbar()->width() : resizeControlSize),
             horizontalScrollbar()->height());
@@ -1210,16 +1221,36 @@ void PaintLayerScrollableArea::updateResizerStyle()
         return;
 
     const LayoutObject& actualLayoutObject = layoutObjectForScrollbar(box());
-    RefPtr<ComputedStyle> resizer = box().hasOverflowClip() ? actualLayoutObject.getUncachedPseudoStyle(PseudoStyleRequest(RESIZER), actualLayoutObject.style()) : PassRefPtr<ComputedStyle>(nullptr);
+    RefPtr<ComputedStyle> resizer = box().hasOverflowClip() ? actualLayoutObject.getUncachedPseudoStyle(PseudoStyleRequest(PseudoIdResizer), actualLayoutObject.style()) : PassRefPtr<ComputedStyle>(nullptr);
     if (resizer) {
         if (!m_resizer) {
-            m_resizer = LayoutScrollbarPart::createAnonymous(&box().document());
+            m_resizer = LayoutScrollbarPart::createAnonymous(&box().document(), this);
             m_resizer->setDangerousOneWayParent(&box());
         }
-        m_resizer->setStyle(resizer.release());
+        m_resizer->setStyleWithWritingModeOfParent(resizer.release());
     } else if (m_resizer) {
         m_resizer->destroy();
         m_resizer = nullptr;
+    }
+}
+
+void PaintLayerScrollableArea::invalidateAllStickyConstraints()
+{
+    if (PaintLayerScrollableAreaRareData* d = rareData()) {
+        for (PaintLayer* stickyLayer : d->m_stickyConstraintsMap.keys()) {
+            if (stickyLayer->layoutObject()->style()->position() == StickyPosition)
+                stickyLayer->setNeedsCompositingInputsUpdate();
+        }
+        d->m_stickyConstraintsMap.clear();
+    }
+}
+
+void PaintLayerScrollableArea::invalidateStickyConstraintsFor(PaintLayer* layer, bool needsCompositingUpdate)
+{
+    if (PaintLayerScrollableAreaRareData* d = rareData()) {
+        d->m_stickyConstraintsMap.remove(layer);
+        if (needsCompositingUpdate && layer->layoutObject()->style()->position() == StickyPosition)
+            layer->setNeedsCompositingInputsUpdate();
     }
 }
 
@@ -1284,7 +1315,7 @@ void PaintLayerScrollableArea::resize(const PlatformEvent& evt, const LayoutSize
 
     LayoutSize difference((currentSize + newOffset - adjustedOldOffset).expandedTo(minimumSize) - currentSize);
 
-    bool isBoxSizingBorder = box().style()->boxSizing() == BORDER_BOX;
+    bool isBoxSizingBorder = box().style()->boxSizing() == BoxSizingBorderBox;
 
     EResize resize = box().style()->resize();
     if (resize != RESIZE_VERTICAL && difference.width()) {
@@ -1294,7 +1325,7 @@ void PaintLayerScrollableArea::resize(const PlatformEvent& evt, const LayoutSize
             element->setInlineStyleProperty(CSSPropertyMarginRight, box().marginRight() / zoomFactor, CSSPrimitiveValue::UnitType::Pixels);
         }
         LayoutUnit baseWidth = box().size().width() - (isBoxSizingBorder ? LayoutUnit() : box().borderAndPaddingWidth());
-        baseWidth = baseWidth / zoomFactor;
+        baseWidth = LayoutUnit(baseWidth / zoomFactor);
         element->setInlineStyleProperty(CSSPropertyWidth, roundToInt(baseWidth + difference.width()), CSSPrimitiveValue::UnitType::Pixels);
     }
 
@@ -1305,7 +1336,7 @@ void PaintLayerScrollableArea::resize(const PlatformEvent& evt, const LayoutSize
             element->setInlineStyleProperty(CSSPropertyMarginBottom, box().marginBottom() / zoomFactor, CSSPrimitiveValue::UnitType::Pixels);
         }
         LayoutUnit baseHeight = box().size().height() - (isBoxSizingBorder ? LayoutUnit() : box().borderAndPaddingHeight());
-        baseHeight = baseHeight / zoomFactor;
+        baseHeight = LayoutUnit(baseHeight / zoomFactor);
         element->setInlineStyleProperty(CSSPropertyHeight, roundToInt(baseHeight + difference.height()), CSSPrimitiveValue::UnitType::Pixels);
     }
 
@@ -1318,7 +1349,7 @@ LayoutRect PaintLayerScrollableArea::scrollIntoView(const LayoutRect& rect, cons
 {
     LayoutRect localExposeRect(box().absoluteToLocalQuad(FloatQuad(FloatRect(rect)), UseTransforms).boundingBox());
     localExposeRect.move(-box().borderLeft(), -box().borderTop());
-    LayoutRect layerBounds(0, 0, box().clientWidth(), box().clientHeight());
+    LayoutRect layerBounds(LayoutPoint(), LayoutSize(box().clientWidth(), box().clientHeight()));
     LayoutRect r = ScrollAlignment::getRectToExpose(layerBounds, localExposeRect, alignX, alignY);
 
     DoublePoint clampedScrollPosition = clampScrollPosition(scrollPositionDouble() + roundedIntSize(r.location()));
@@ -1386,13 +1417,24 @@ bool PaintLayerScrollableArea::usesCompositedScrolling() const
     return layer()->hasCompositedLayerMapping() && layer()->compositedLayerMapping()->scrollingLayer();
 }
 
+bool PaintLayerScrollableArea::shouldScrollOnMainThread() const
+{
+    if (LocalFrame* frame = box().frame()) {
+        if (Page* page = frame->page()) {
+            if (page->scrollingCoordinator()->shouldUpdateScrollLayerPositionOnMainThread())
+                return true;
+        }
+    }
+    return ScrollableArea::shouldScrollOnMainThread();
+}
+
 static bool layerNeedsCompositedScrolling(PaintLayerScrollableArea::LCDTextMode mode, const PaintLayer* layer)
 {
     if (!layer->scrollsOverflow())
         return false;
 
     Node* node = layer->enclosingNode();
-    if (node && node->isElementNode() && (toElement(node)->compositorMutableProperties() & (WebCompositorMutablePropertyScrollTop | WebCompositorMutablePropertyScrollLeft)))
+    if (node && node->isElementNode() && (toElement(node)->compositorMutableProperties() & (CompositorMutableProperty::kScrollTop | CompositorMutableProperty::kScrollLeft)))
         return true;
 
     if (mode == PaintLayerScrollableArea::ConsiderLCDText && !layer->compositor()->preferCompositingToLCDTextEnabled())
@@ -1430,12 +1472,27 @@ bool PaintLayerScrollableArea::visualViewportSuppliesScrollbars() const
     if (!frame || !frame->isMainFrame() || !frame->settings())
         return false;
 
-    return frame->settings()->viewportMetaEnabled();
+    return frame->settings()->viewportEnabled();
 }
 
-Widget* PaintLayerScrollableArea::widget()
+Widget* PaintLayerScrollableArea::getWidget()
 {
     return box().frame()->view();
+}
+
+void PaintLayerScrollableArea::resetRebuildScrollbarLayerFlags()
+{
+    m_rebuildHorizontalScrollbarLayer = false;
+    m_rebuildVerticalScrollbarLayer = false;
+}
+
+CompositorAnimationTimeline* PaintLayerScrollableArea::compositorAnimationTimeline() const
+{
+    if (LocalFrame* frame = box().frame()) {
+        if (Page* page = frame->page())
+            return page->scrollingCoordinator() ? page->scrollingCoordinator()->compositorAnimationTimeline() : nullptr;
+    }
+    return nullptr;
 }
 
 PaintLayerScrollableArea::ScrollbarManager::ScrollbarManager(PaintLayerScrollableArea& scrollableArea)
@@ -1472,9 +1529,15 @@ void PaintLayerScrollableArea::ScrollbarManager::setHasHorizontalScrollbar(bool 
         // This doesn't hit in any tests, but since the equivalent code in setHasVerticalScrollbar
         // does, presumably this code does as well.
         DisableCompositingQueryAsserts disabler;
-        if (!m_hBar)
+        if (!m_hBar) {
             m_hBar = createScrollbar(HorizontalScrollbar);
-        m_hBarIsAttached = 1;
+            m_hBarIsAttached = 1;
+            if (!m_hBar->isCustomScrollbar())
+                m_scrollableArea->didAddScrollbar(*m_hBar, HorizontalScrollbar);
+        } else {
+            m_hBarIsAttached = 1;
+        }
+
     } else {
         m_hBarIsAttached = 0;
         if (!m_canDetachScrollbars)
@@ -1486,9 +1549,15 @@ void PaintLayerScrollableArea::ScrollbarManager::setHasVerticalScrollbar(bool ha
 {
     if (hasScrollbar) {
         DisableCompositingQueryAsserts disabler;
-        if (!m_vBar)
+        if (!m_vBar) {
             m_vBar = createScrollbar(VerticalScrollbar);
-        m_vBarIsAttached = 1;
+            m_vBarIsAttached = 1;
+            if (!m_vBar->isCustomScrollbar())
+                m_scrollableArea->didAddScrollbar(*m_vBar, VerticalScrollbar);
+        } else {
+            m_vBarIsAttached = 1;
+        }
+
     } else {
         m_vBarIsAttached = 0;
         if (!m_canDetachScrollbars)
@@ -1496,12 +1565,12 @@ void PaintLayerScrollableArea::ScrollbarManager::setHasVerticalScrollbar(bool ha
     }
 }
 
-PassRefPtrWillBeRawPtr<Scrollbar> PaintLayerScrollableArea::ScrollbarManager::createScrollbar(ScrollbarOrientation orientation)
+Scrollbar* PaintLayerScrollableArea::ScrollbarManager::createScrollbar(ScrollbarOrientation orientation)
 {
     ASSERT(orientation == HorizontalScrollbar ? !m_hBarIsAttached : !m_vBarIsAttached);
-    RefPtrWillBeRawPtr<Scrollbar> scrollbar = nullptr;
+    Scrollbar* scrollbar = nullptr;
     const LayoutObject& actualLayoutObject = layoutObjectForScrollbar(m_scrollableArea->box());
-    bool hasCustomScrollbarStyle = actualLayoutObject.isBox() && actualLayoutObject.styleRef().hasPseudoStyle(SCROLLBAR);
+    bool hasCustomScrollbarStyle = actualLayoutObject.isBox() && actualLayoutObject.styleRef().hasPseudoStyle(PseudoIdScrollbar);
     if (hasCustomScrollbarStyle) {
         scrollbar = LayoutScrollbar::createCustomScrollbar(m_scrollableArea.get(), orientation, actualLayoutObject.node());
     } else {
@@ -1509,23 +1578,23 @@ PassRefPtrWillBeRawPtr<Scrollbar> PaintLayerScrollableArea::ScrollbarManager::cr
         if (actualLayoutObject.styleRef().hasAppearance())
             scrollbarSize = LayoutTheme::theme().scrollbarControlSizeForPart(actualLayoutObject.styleRef().appearance());
         scrollbar = Scrollbar::create(m_scrollableArea.get(), orientation, scrollbarSize, &m_scrollableArea->box().frame()->page()->chromeClient());
-        if (orientation == HorizontalScrollbar)
-            m_scrollableArea->didAddScrollbar(*scrollbar, HorizontalScrollbar);
-        else
-            m_scrollableArea->didAddScrollbar(*scrollbar, VerticalScrollbar);
     }
-    m_scrollableArea->box().document().view()->addChild(scrollbar.get());
-    return scrollbar.release();
+    m_scrollableArea->box().document().view()->addChild(scrollbar);
+    return scrollbar;
 }
 
 void PaintLayerScrollableArea::ScrollbarManager::destroyScrollbar(ScrollbarOrientation orientation)
 {
-    RefPtrWillBeMember<Scrollbar>& scrollbar = orientation == HorizontalScrollbar ? m_hBar : m_vBar;
+    Member<Scrollbar>& scrollbar = orientation == HorizontalScrollbar ? m_hBar : m_vBar;
     ASSERT(orientation == HorizontalScrollbar ? !m_hBarIsAttached: !m_vBarIsAttached);
     if (!scrollbar)
         return;
 
     m_scrollableArea->setScrollbarNeedsPaintInvalidation(orientation);
+    if (orientation == HorizontalScrollbar)
+        m_scrollableArea->m_rebuildHorizontalScrollbarLayer = true;
+    else
+        m_scrollableArea->m_rebuildVerticalScrollbarLayer = true;
 
     if (!scrollbar->isCustomScrollbar())
         m_scrollableArea->willRemoveScrollbar(*scrollbar, orientation);

@@ -125,11 +125,11 @@ AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
 void BaseSearchProvider::DeleteMatch(const AutocompleteMatch& match) {
   DCHECK(match.deletable);
   if (!match.GetAdditionalInfo(BaseSearchProvider::kDeletionUrlKey).empty()) {
-    deletion_handlers_.push_back(new SuggestionDeletionHandler(
+    deletion_handlers_.push_back(make_scoped_ptr(new SuggestionDeletionHandler(
         match.GetAdditionalInfo(BaseSearchProvider::kDeletionUrlKey),
         client_->GetRequestContext(),
         base::Bind(&BaseSearchProvider::OnDeletionComplete,
-                   base::Unretained(this))));
+                   base::Unretained(this)))));
   }
 
   TemplateURL* template_url =
@@ -452,8 +452,7 @@ bool BaseSearchProvider::ParseSuggestResults(
     SearchSuggestionParser::Results* results) {
   if (!SearchSuggestionParser::ParseSuggestResults(
           root_val, GetInput(is_keyword_result), client_->GetSchemeClassifier(),
-          default_result_relevance, client_->GetAcceptLanguages(),
-          is_keyword_result, results))
+          default_result_relevance, is_keyword_result, results))
     return false;
 
   for (const GURL& url : results->answers_image_urls)
@@ -482,8 +481,9 @@ void BaseSearchProvider::DeleteMatchFromMatches(
 void BaseSearchProvider::OnDeletionComplete(
     bool success, SuggestionDeletionHandler* handler) {
   RecordDeletionResult(success);
-  SuggestionDeletionHandlers::iterator it = std::find(
-      deletion_handlers_.begin(), deletion_handlers_.end(), handler);
-  DCHECK(it != deletion_handlers_.end());
-  deletion_handlers_.erase(it);
+  deletion_handlers_.erase(std::remove_if(
+      deletion_handlers_.begin(), deletion_handlers_.end(),
+      [handler](const scoped_ptr<SuggestionDeletionHandler>& elem) {
+          return elem.get() == handler;
+      }));
 }

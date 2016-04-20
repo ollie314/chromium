@@ -6,6 +6,7 @@
 
 #include "base/macros.h"
 #include "base/test/null_task_runner.h"
+#include "cc/animation/animation_player.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
@@ -37,6 +38,11 @@ class TestLayerAnimationObserver : public ImplicitAnimationObserver {
   DISALLOW_COPY_AND_ASSIGN(TestLayerAnimationObserver);
 };
 
+class LayerOwnerForTesting : public LayerOwner {
+ public:
+  void DestroyLayerForTesting() { DestroyLayer(); }
+};
+
 // Test fixture for LayerOwner tests that require a ui::Compositor.
 class LayerOwnerTestWithCompositor : public testing::Test {
  public:
@@ -50,7 +56,7 @@ class LayerOwnerTestWithCompositor : public testing::Test {
   ui::Compositor* compositor() { return compositor_.get(); }
 
  private:
-  scoped_ptr<ui::Compositor> compositor_;
+  std::unique_ptr<ui::Compositor> compositor_;
 
   DISALLOW_COPY_AND_ASSIGN(LayerOwnerTestWithCompositor);
 };
@@ -96,7 +102,7 @@ TEST(LayerOwnerTest, RecreateLayerHonorsAnimationTargets) {
   EXPECT_EQ(1.0f, layer->opacity());
   EXPECT_EQ(SK_ColorRED, layer->background_color());
 
-  scoped_ptr<Layer> old_layer(owner.RecreateLayer());
+  std::unique_ptr<Layer> old_layer(owner.RecreateLayer());
   EXPECT_FALSE(owner.layer()->visible());
   EXPECT_EQ(0.0f, owner.layer()->opacity());
   EXPECT_EQ(SK_ColorGREEN, owner.layer()->background_color());
@@ -120,7 +126,7 @@ TEST(LayerOwnerTest, RecreateLayerSolidColorWithChangedCCLayerHonorsTargets) {
   EXPECT_EQ(transparent, layer->background_color());
   EXPECT_EQ(transparent, layer->GetTargetColor());
 
-  scoped_ptr<Layer> old_layer(owner.RecreateLayer());
+  std::unique_ptr<Layer> old_layer(owner.RecreateLayer());
   EXPECT_FALSE(owner.layer()->fills_bounds_opaquely());
   EXPECT_EQ(transparent, owner.layer()->background_color());
   EXPECT_EQ(transparent, owner.layer()->GetTargetColor());
@@ -131,10 +137,49 @@ TEST(LayerOwnerTest, RecreateRootLayerWithNullCompositor) {
   Layer* layer = new Layer;
   owner.SetLayer(layer);
 
-  scoped_ptr<Layer> layer_copy = owner.RecreateLayer();
+  std::unique_ptr<Layer> layer_copy = owner.RecreateLayer();
 
   EXPECT_EQ(nullptr, owner.layer()->GetCompositor());
   EXPECT_EQ(nullptr, layer_copy->GetCompositor());
+}
+
+TEST(LayerOwnerTest, InvertPropertyRemainSameWithRecreateLayer) {
+  LayerOwner owner;
+  Layer* layer = new Layer;
+  owner.SetLayer(layer);
+
+  layer->SetLayerInverted(true);
+  std::unique_ptr<Layer> old_layer1 = owner.RecreateLayer();
+  EXPECT_EQ(old_layer1->layer_inverted(), owner.layer()->layer_inverted());
+
+  old_layer1->SetLayerInverted(false);
+  std::unique_ptr<Layer> old_layer2 = owner.RecreateLayer();
+  EXPECT_EQ(old_layer2->layer_inverted(), owner.layer()->layer_inverted());
+}
+
+TEST(LayerOwnerTest, RecreateLayerWithTransform) {
+  LayerOwner owner;
+  Layer* layer = new Layer;
+  owner.SetLayer(layer);
+
+  gfx::Transform transform;
+  transform.Scale(2, 1);
+  transform.Translate(10, 5);
+
+  layer->SetTransform(transform);
+
+  std::unique_ptr<Layer> old_layer1 = owner.RecreateLayer();
+  // Both new layer and original layer have the same transform.
+  EXPECT_EQ(transform, old_layer1->GetTargetTransform());
+  EXPECT_EQ(transform, owner.layer()->GetTargetTransform());
+
+  // But they're now separated, so changing the old layer's transform
+  // should not affect the owner's.
+  owner.layer()->SetTransform(gfx::Transform());
+  EXPECT_EQ(transform, old_layer1->GetTargetTransform());
+  std::unique_ptr<Layer> old_layer2 = owner.RecreateLayer();
+  EXPECT_TRUE(old_layer2->GetTargetTransform().IsIdentity());
+  EXPECT_TRUE(owner.layer()->GetTargetTransform().IsIdentity());
 }
 
 TEST_F(LayerOwnerTestWithCompositor, RecreateRootLayerWithCompositor) {
@@ -144,7 +189,7 @@ TEST_F(LayerOwnerTestWithCompositor, RecreateRootLayerWithCompositor) {
 
   compositor()->SetRootLayer(layer);
 
-  scoped_ptr<Layer> layer_copy = owner.RecreateLayer();
+  std::unique_ptr<Layer> layer_copy = owner.RecreateLayer();
 
   EXPECT_EQ(compositor(), owner.layer()->GetCompositor());
   EXPECT_EQ(owner.layer(), compositor()->root_layer());
@@ -160,15 +205,15 @@ TEST_F(LayerOwnerTestWithCompositor, RecreateRootLayerDuringAnimation) {
   owner.SetLayer(layer);
   compositor()->SetRootLayer(layer);
 
-  scoped_ptr<Layer> child(new Layer);
+  std::unique_ptr<Layer> child(new Layer);
   child->SetBounds(gfx::Rect(0, 0, 100, 100));
   layer->Add(child.get());
 
   // This observer checks that the compositor of |child| is not null upon
   // animation completion.
-  scoped_ptr<TestLayerAnimationObserver> observer(
+  std::unique_ptr<TestLayerAnimationObserver> observer(
       new TestLayerAnimationObserver(child.get()));
-  scoped_ptr<ui::ScopedAnimationDurationScaleMode> long_duration_animation(
+  std::unique_ptr<ui::ScopedAnimationDurationScaleMode> long_duration_animation(
       new ui::ScopedAnimationDurationScaleMode(
           ui::ScopedAnimationDurationScaleMode::SLOW_DURATION));
   {
@@ -180,14 +225,14 @@ TEST_F(LayerOwnerTestWithCompositor, RecreateRootLayerDuringAnimation) {
     child->SetTransform(transform);
   }
 
-  scoped_ptr<Layer> layer_copy = owner.RecreateLayer();
+  std::unique_ptr<Layer> layer_copy = owner.RecreateLayer();
 }
 
 // Tests that recreating a non-root layer, while one of its children is
 // animating, properly updates the compositor. So that compositor is not null
 // for observers of animations being cancelled.
 TEST_F(LayerOwnerTestWithCompositor, RecreateNonRootLayerDuringAnimation) {
-  scoped_ptr<Layer> root_layer(new Layer);
+  std::unique_ptr<Layer> root_layer(new Layer);
   compositor()->SetRootLayer(root_layer.get());
 
   LayerOwner owner;
@@ -195,15 +240,15 @@ TEST_F(LayerOwnerTestWithCompositor, RecreateNonRootLayerDuringAnimation) {
   owner.SetLayer(layer);
   root_layer->Add(layer);
 
-  scoped_ptr<Layer> child(new Layer);
+  std::unique_ptr<Layer> child(new Layer);
   child->SetBounds(gfx::Rect(0, 0, 100, 100));
   layer->Add(child.get());
 
   // This observer checks that the compositor of |child| is not null upon
   // animation completion.
-  scoped_ptr<TestLayerAnimationObserver> observer(
+  std::unique_ptr<TestLayerAnimationObserver> observer(
       new TestLayerAnimationObserver(child.get()));
-  scoped_ptr<ui::ScopedAnimationDurationScaleMode> long_duration_animation(
+  std::unique_ptr<ui::ScopedAnimationDurationScaleMode> long_duration_animation(
       new ui::ScopedAnimationDurationScaleMode(
           ui::ScopedAnimationDurationScaleMode::SLOW_DURATION));
   {
@@ -215,7 +260,49 @@ TEST_F(LayerOwnerTestWithCompositor, RecreateNonRootLayerDuringAnimation) {
     child->SetTransform(transform);
   }
 
-  scoped_ptr<Layer> layer_copy = owner.RecreateLayer();
+  std::unique_ptr<Layer> layer_copy = owner.RecreateLayer();
+}
+
+// Tests that if LayerOwner-derived class destroys layer, then
+// LayerAnimator's player becomes detached from compositor timeline.
+TEST_F(LayerOwnerTestWithCompositor, DetachTimelineOnAnimatorDeletion) {
+  std::unique_ptr<Layer> root_layer(new Layer);
+  compositor()->SetRootLayer(root_layer.get());
+
+  LayerOwnerForTesting owner;
+  Layer* layer = new Layer;
+  owner.SetLayer(layer);
+  layer->SetOpacity(0.5f);
+  root_layer->Add(layer);
+
+  scoped_refptr<cc::AnimationPlayer> player =
+      layer->GetAnimator()->GetAnimationPlayerForTesting();
+  EXPECT_TRUE(player);
+  EXPECT_TRUE(player->animation_timeline());
+
+  // Destroying layer/animator must detach animator's player from timeline.
+  owner.DestroyLayerForTesting();
+  EXPECT_FALSE(player->animation_timeline());
+}
+
+// Tests that if we run threaded opacity animation on already added layer
+// then LayerAnimator's player becomes attached to timeline.
+TEST_F(LayerOwnerTestWithCompositor,
+       AttachTimelineIfAnimatorCreatedAfterSetCompositor) {
+  std::unique_ptr<Layer> root_layer(new Layer);
+  compositor()->SetRootLayer(root_layer.get());
+
+  LayerOwner owner;
+  Layer* layer = new Layer;
+  owner.SetLayer(layer);
+  root_layer->Add(layer);
+
+  layer->SetOpacity(0.5f);
+
+  scoped_refptr<cc::AnimationPlayer> player =
+      layer->GetAnimator()->GetAnimationPlayerForTesting();
+  EXPECT_TRUE(player);
+  EXPECT_TRUE(player->animation_timeline());
 }
 
 }  // namespace ui

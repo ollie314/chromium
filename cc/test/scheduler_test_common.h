@@ -7,10 +7,11 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/time/time.h"
 #include "cc/scheduler/compositor_timing_history.h"
 #include "cc/scheduler/scheduler.h"
@@ -39,10 +40,11 @@ class FakeDelayBasedTimeSourceClient : public DelayBasedTimeSourceClient {
 
 class FakeDelayBasedTimeSource : public DelayBasedTimeSource {
  public:
-  static scoped_ptr<FakeDelayBasedTimeSource> Create(
+  static std::unique_ptr<FakeDelayBasedTimeSource> Create(
       base::TimeDelta interval,
       base::SingleThreadTaskRunner* task_runner) {
-    return make_scoped_ptr(new FakeDelayBasedTimeSource(interval, task_runner));
+    return base::WrapUnique(
+        new FakeDelayBasedTimeSource(interval, task_runner));
   }
 
   ~FakeDelayBasedTimeSource() override {}
@@ -63,11 +65,11 @@ class FakeDelayBasedTimeSource : public DelayBasedTimeSource {
 
 class TestDelayBasedTimeSource : public DelayBasedTimeSource {
  public:
-  static scoped_ptr<TestDelayBasedTimeSource> Create(
+  static std::unique_ptr<TestDelayBasedTimeSource> Create(
       base::SimpleTestTickClock* now_src,
       base::TimeDelta interval,
       OrderedSimpleTaskRunner* task_runner) {
-    return make_scoped_ptr(
+    return base::WrapUnique(
         new TestDelayBasedTimeSource(now_src, interval, task_runner));
   }
 
@@ -91,49 +93,38 @@ class TestDelayBasedTimeSource : public DelayBasedTimeSource {
 
 class FakeBeginFrameSource : public BeginFrameSourceBase {
  public:
-  FakeBeginFrameSource() : remaining_frames_(false) {}
-  ~FakeBeginFrameSource() override {}
+  FakeBeginFrameSource();
+  ~FakeBeginFrameSource() override;
 
-  BeginFrameObserver* GetObserver() { return observer_; }
-
-  BeginFrameArgs TestLastUsedBeginFrameArgs() {
-    if (observer_) {
-      return observer_->LastUsedBeginFrameArgs();
-    }
-    return BeginFrameArgs();
-  }
-
+  // TODO(sunnyps): Use using BeginFrameSourceBase::CallOnBeginFrame instead.
   void TestOnBeginFrame(const BeginFrameArgs& args) {
     return CallOnBeginFrame(args);
   }
 
+  BeginFrameArgs TestLastUsedBeginFrameArgs() {
+    if (!observers_.empty())
+      return (*observers_.begin())->LastUsedBeginFrameArgs();
+    return BeginFrameArgs();
+  }
+
+  bool has_observers() const { return !observers_.empty(); }
+
   // BeginFrameSource
-  void DidFinishFrame(size_t remaining_frames) override;
   void AsValueInto(base::trace_event::TracedValue* dict) const override;
 
   using BeginFrameSourceBase::SetBeginFrameSourcePaused;
 
  private:
-  bool remaining_frames_;
-
   DISALLOW_COPY_AND_ASSIGN(FakeBeginFrameSource);
 };
 
 class TestBackToBackBeginFrameSource : public BackToBackBeginFrameSource {
  public:
-  ~TestBackToBackBeginFrameSource() override;
-
-  static scoped_ptr<TestBackToBackBeginFrameSource> Create(
-      base::SimpleTestTickClock* now_src,
-      base::SingleThreadTaskRunner* task_runner) {
-    return make_scoped_ptr(
-        new TestBackToBackBeginFrameSource(now_src, task_runner));
-  }
-
- protected:
   TestBackToBackBeginFrameSource(base::SimpleTestTickClock* now_src,
                                  base::SingleThreadTaskRunner* task_runner);
+  ~TestBackToBackBeginFrameSource() override;
 
+ protected:
   base::TimeTicks Now() override;
   // Not owned.
   base::SimpleTestTickClock* now_src_;
@@ -144,22 +135,10 @@ class TestBackToBackBeginFrameSource : public BackToBackBeginFrameSource {
 
 class TestSyntheticBeginFrameSource : public SyntheticBeginFrameSource {
  public:
+  explicit TestSyntheticBeginFrameSource(base::SimpleTestTickClock* now_src,
+                                         OrderedSimpleTaskRunner* task_runner,
+                                         base::TimeDelta initial_interval);
   ~TestSyntheticBeginFrameSource() override;
-
-  static scoped_ptr<TestSyntheticBeginFrameSource> Create(
-      base::SimpleTestTickClock* now_src,
-      OrderedSimpleTaskRunner* task_runner,
-      base::TimeDelta initial_interval) {
-    scoped_ptr<TestDelayBasedTimeSource> time_source =
-        TestDelayBasedTimeSource::Create(now_src, initial_interval,
-                                         task_runner);
-    return make_scoped_ptr(
-        new TestSyntheticBeginFrameSource(std::move(time_source)));
-  }
-
- protected:
-  explicit TestSyntheticBeginFrameSource(
-      scoped_ptr<DelayBasedTimeSource> time_source);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestSyntheticBeginFrameSource);
@@ -167,7 +146,8 @@ class TestSyntheticBeginFrameSource : public SyntheticBeginFrameSource {
 
 class FakeCompositorTimingHistory : public CompositorTimingHistory {
  public:
-  static scoped_ptr<FakeCompositorTimingHistory> Create();
+  static std::unique_ptr<FakeCompositorTimingHistory> Create(
+      bool using_synchronous_renderer_compositor);
   ~FakeCompositorTimingHistory() override;
 
   void SetAllEstimatesTo(base::TimeDelta duration);
@@ -193,10 +173,11 @@ class FakeCompositorTimingHistory : public CompositorTimingHistory {
   base::TimeDelta DrawDurationEstimate() const override;
 
  protected:
-  FakeCompositorTimingHistory(scoped_ptr<RenderingStatsInstrumentation>
+  FakeCompositorTimingHistory(bool using_synchronous_renderer_compositor,
+                              std::unique_ptr<RenderingStatsInstrumentation>
                                   rendering_stats_instrumentation_owned);
 
-  scoped_ptr<RenderingStatsInstrumentation>
+  std::unique_ptr<RenderingStatsInstrumentation>
       rendering_stats_instrumentation_owned_;
 
   base::TimeDelta begin_main_frame_to_commit_duration_;
@@ -214,14 +195,14 @@ class FakeCompositorTimingHistory : public CompositorTimingHistory {
 
 class TestScheduler : public Scheduler {
  public:
-  static scoped_ptr<TestScheduler> Create(
+  TestScheduler(
       base::SimpleTestTickClock* now_src,
       SchedulerClient* client,
       const SchedulerSettings& scheduler_settings,
       int layer_tree_host_id,
       OrderedSimpleTaskRunner* task_runner,
-      BeginFrameSource* external_frame_source,
-      scoped_ptr<CompositorTimingHistory> compositor_timing_history);
+      BeginFrameSource* begin_frame_source,
+      std::unique_ptr<CompositorTimingHistory> compositor_timing_history);
 
   // Extra test helper functionality
   bool IsBeginRetroFrameArgsEmpty() const {
@@ -234,11 +215,14 @@ class TestScheduler : public Scheduler {
     return state_machine_.needs_begin_main_frame();
   }
 
-  BeginFrameSource& frame_source() { return *frame_source_; }
-  bool FrameProductionThrottled() { return throttle_frame_production_; }
+  BeginFrameSource& frame_source() { return *begin_frame_source_; }
 
   bool MainThreadMissedLastDeadline() const {
     return state_machine_.main_thread_missed_last_deadline();
+  }
+
+  bool begin_frames_expected() const {
+    return begin_frame_source_ && observing_begin_frame_source_;
   }
 
   ~TestScheduler() override;
@@ -260,17 +244,6 @@ class TestScheduler : public Scheduler {
   base::TimeTicks Now() const override;
 
  private:
-  TestScheduler(
-      base::SimpleTestTickClock* now_src,
-      SchedulerClient* client,
-      const SchedulerSettings& scheduler_settings,
-      int layer_tree_host_id,
-      OrderedSimpleTaskRunner* task_runner,
-      BeginFrameSource* external_frame_source,
-      scoped_ptr<TestSyntheticBeginFrameSource> synthetic_frame_source,
-      scoped_ptr<TestBackToBackBeginFrameSource> unthrottled_frame_source,
-      scoped_ptr<CompositorTimingHistory> compositor_timing_history);
-
   base::SimpleTestTickClock* now_src_;
 
   DISALLOW_COPY_AND_ASSIGN(TestScheduler);

@@ -13,7 +13,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
-#include "base/prefs/testing_pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chromeos/net/proxy_config_handler.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -29,6 +28,7 @@
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/onc/onc_utils.h"
 #include "components/pref_registry/testing_pref_service_syncable.h"
+#include "components/prefs/testing_pref_service.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/proxy/proxy_config.h"
@@ -249,7 +249,7 @@ class ProxyConfigServiceImplTest : public testing::Test {
         new ProxyConfigServiceImpl(profile_prefs, &pref_service_));
     proxy_config_service_ =
         config_service_impl_->CreateTrackingProxyConfigService(
-            scoped_ptr<net::ProxyConfigService>());
+            std::unique_ptr<net::ProxyConfigService>());
 
     // CreateTrackingProxyConfigService triggers update of initial prefs proxy
     // config by tracker to chrome proxy config service, so flush all pending
@@ -313,7 +313,7 @@ class ProxyConfigServiceImplTest : public testing::Test {
 
   void InitConfigWithTestInput(const Input& input,
                                base::DictionaryValue* result) {
-    scoped_ptr<base::DictionaryValue> new_config;
+    std::unique_ptr<base::DictionaryValue> new_config;
     switch (input.mode) {
       case MK_MODE(DIRECT):
         new_config.reset(ProxyConfigDictionary::CreateDirect());
@@ -363,8 +363,8 @@ class ProxyConfigServiceImplTest : public testing::Test {
   }
 
   base::MessageLoop loop_;
-  scoped_ptr<net::ProxyConfigService> proxy_config_service_;
-  scoped_ptr<ProxyConfigServiceImpl> config_service_impl_;
+  std::unique_ptr<net::ProxyConfigService> proxy_config_service_;
+  std::unique_ptr<ProxyConfigServiceImpl> config_service_impl_;
   TestingPrefServiceSimple pref_service_;
   user_prefs::TestingPrefServiceSyncable profile_prefs_;
 
@@ -508,10 +508,10 @@ TEST_F(ProxyConfigServiceImplTest, SharedEthernetAndUserPolicy) {
   SetUpSharedEthernet();
   SetUpProxyConfigService(&profile_prefs_);
 
-  scoped_ptr<base::DictionaryValue> ethernet_policy(
+  std::unique_ptr<base::DictionaryValue> ethernet_policy(
       chromeos::onc::ReadDictionaryFromJson(kEthernetPolicy));
 
-  scoped_ptr<base::ListValue> network_configs(new base::ListValue);
+  std::unique_ptr<base::ListValue> network_configs(new base::ListValue);
   network_configs->Append(ethernet_policy.release());
 
   profile_prefs_.SetUserPref(prefs::kUseSharedProxies,

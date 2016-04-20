@@ -30,7 +30,7 @@ namespace blink {
 
 class PLATFORM_EXPORT FEFlood final: public FilterEffect {
 public:
-    static PassRefPtrWillBeRawPtr<FEFlood> create(Filter*, const Color&, float);
+    static FEFlood* create(Filter*, const Color&, float);
 
     Color floodColor() const;
     bool setFloodColor(const Color &);
@@ -47,7 +47,7 @@ public:
 private:
     FEFlood(Filter*, const Color&, float);
 
-    PassRefPtr<SkImageFilter> createImageFilter(SkiaImageFilterBuilder&) override;
+    sk_sp<SkImageFilter> createImageFilter() override;
 
     Color m_floodColor;
     float m_floodOpacity;

@@ -4,6 +4,7 @@
 
 #include "content/browser/resolve_proxy_msg_helper.h"
 
+#include "base/memory/ptr_util.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/common/view_messages.h"
 #include "ipc/ipc_test_sink.h"
@@ -60,8 +61,8 @@ class ResolveProxyMsgHelperTest : public testing::Test, public IPC::Listener {
   ResolveProxyMsgHelperTest()
       : resolver_factory_(new net::MockAsyncProxyResolverFactory(false)),
         service_(
-            new net::ProxyService(make_scoped_ptr(new MockProxyConfigService),
-                                  make_scoped_ptr(resolver_factory_),
+            new net::ProxyService(base::WrapUnique(new MockProxyConfigService),
+                                  base::WrapUnique(resolver_factory_),
                                   NULL)),
         helper_(new TestResolveProxyMsgHelper(service_.get(), this)),
         io_thread_(BrowserThread::IO, &message_loop_) {
@@ -84,14 +85,13 @@ class ResolveProxyMsgHelperTest : public testing::Test, public IPC::Listener {
 
   net::MockAsyncProxyResolverFactory* resolver_factory_;
   net::MockAsyncProxyResolver resolver_;
-  scoped_ptr<net::ProxyService> service_;
+  std::unique_ptr<net::ProxyService> service_;
   scoped_refptr<ResolveProxyMsgHelper> helper_;
-  scoped_ptr<PendingResult> pending_result_;
+  std::unique_ptr<PendingResult> pending_result_;
 
  private:
   bool OnMessageReceived(const IPC::Message& msg) override {
-    base::TupleTypes<ViewHostMsg_ResolveProxy::ReplyParam>::ValueTuple
-        reply_data;
+    ViewHostMsg_ResolveProxy::ReplyParam reply_data;
     EXPECT_TRUE(ViewHostMsg_ResolveProxy::ReadReplyParam(&msg, &reply_data));
     DCHECK(!pending_result_.get());
     pending_result_.reset(

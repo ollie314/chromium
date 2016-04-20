@@ -7,10 +7,10 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
-#include "base/prefs/pref_member.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/settings/md_settings_ui.h"
+#include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
+#include "components/prefs/pref_member.h"
 
 namespace base {
 class ListValue;
@@ -33,8 +33,8 @@ class ClearBrowsingDataHandler : public SettingsPageUIHandler,
   void RegisterMessages() override;
 
  private:
-  // Javascript callback to start clearing data.
-  void HandleClearBrowserData(const base::ListValue* value);
+  // Clears browsing data, called by Javascript.
+  void HandleClearBrowsingData(const base::ListValue* value);
 
   // BrowsingDataRemover::Observer implementation.
   // Re-enables clear button once all requested data has been removed.
@@ -45,6 +45,10 @@ class ClearBrowsingDataHandler : public SettingsPageUIHandler,
 
   // If non-null it means removal is in progress.
   BrowsingDataRemover* remover_;
+
+  // The WebUI callback ID of the last performClearBrowserData request. There
+  // can only be one such request in-flight.
+  std::string webui_callback_id_;
 
   // Keeps track of whether clearing LSO data is supported.
   BooleanPrefMember clear_plugin_lso_data_enabled_;

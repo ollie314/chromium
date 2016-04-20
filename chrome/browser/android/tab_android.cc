@@ -9,6 +9,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/layers/layer.h"
@@ -121,7 +122,7 @@ void TabAndroid::AttachTabHelpers(content::WebContents* web_contents) {
 
 TabAndroid::TabAndroid(JNIEnv* env, jobject obj)
     : weak_java_tab_(env, obj),
-      content_layer_(cc::Layer::Create(content::Compositor::LayerSettings())),
+      content_layer_(cc::Layer::Create()),
       tab_content_manager_(NULL),
       synced_tab_delegate_(new browser_sync::SyncedTabDelegateAndroid(this)) {
   Java_Tab_setNativePtr(env, obj, reinterpret_cast<intptr_t>(this));
@@ -434,6 +435,19 @@ void TabAndroid::InitWebContents(
   content_layer_->InsertChild(content_view_core->GetLayer(), 0);
 }
 
+void TabAndroid::UpdateDelegates(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& jweb_contents_delegate,
+    const JavaParamRef<jobject>& jcontext_menu_populator) {
+  ContextMenuHelper::FromWebContents(web_contents())->SetPopulator(
+      jcontext_menu_populator);
+  web_contents_delegate_.reset(
+      new chrome::android::TabWebContentsDelegateAndroid(
+          env, jweb_contents_delegate));
+  web_contents()->SetDelegate(web_contents_delegate_.get());
+}
+
 void TabAndroid::DestroyWebContents(JNIEnv* env,
                                     const JavaParamRef<jobject>& obj,
                                     jboolean delete_native) {
@@ -514,6 +528,9 @@ TabAndroid::TabLoadStatus TabAndroid::LoadUrl(
     jlong intent_received_timestamp,
     jboolean has_user_gesture) {
   if (!web_contents())
+    return PAGE_LOAD_FAILED;
+
+  if (url.is_null())
     return PAGE_LOAD_FAILED;
 
   GURL gurl(base::android::ConvertJavaStringToUTF8(env, url));
@@ -740,10 +757,6 @@ void TabAndroid::LoadOriginalImage(JNIEnv* env,
 jlong TabAndroid::GetBookmarkId(JNIEnv* env,
                                 const JavaParamRef<jobject>& obj,
                                 jboolean only_editable) {
-  return GetBookmarkIdHelper(only_editable);
-}
-
-int64_t TabAndroid::GetBookmarkIdHelper(bool only_editable) const {
   GURL url = dom_distiller::url_utils::GetOriginalUrlFromDistillerUrl(
       web_contents()->GetURL());
   Profile* profile = GetProfile();
@@ -780,23 +793,9 @@ int64_t TabAndroid::GetBookmarkIdHelper(bool only_editable) const {
   return -1;
 }
 
-bool TabAndroid::HasOfflinePages() const {
-  return offline_pages::OfflinePageUtils::HasOfflinePages(GetProfile());
-}
-
 void TabAndroid::ShowOfflinePages() {
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_Tab_showOfflinePages(env, weak_java_tab_.get(env).obj());
-}
-
-void TabAndroid::LoadOfflineCopy(const GURL& url) {
-  GURL offline_url = offline_pages::OfflinePageUtils::GetOfflineURLForOnlineURL(
-      GetProfile(), url);
-  if (!offline_url.is_valid())
-    return;
-
-  content::NavigationController::LoadURLParams load_params(offline_url);
-  web_contents()->GetController().LoadURLWithParams(load_params);
 }
 
 void TabAndroid::OnLoFiResponseReceived(bool is_preview) {
@@ -868,7 +867,7 @@ void TabAndroid::SetInterceptNavigationDelegate(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   InterceptNavigationDelegate::Associate(
       web_contents(),
-      make_scoped_ptr(new ChromeInterceptNavigationDelegate(env, delegate)));
+      base::WrapUnique(new ChromeInterceptNavigationDelegate(env, delegate)));
 }
 
 void TabAndroid::AttachToTabContentManager(

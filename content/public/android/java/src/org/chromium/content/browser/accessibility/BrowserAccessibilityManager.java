@@ -41,6 +41,7 @@ public class BrowserAccessibilityManager {
     private static final int ACTION_SET_TEXT = 0x200000;
     private static final String ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE =
             "ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE";
+    private static final int WINDOW_CONTENT_CHANGED_DELAY_MS = 500;
 
     private final AccessibilityNodeProvider mAccessibilityNodeProvider;
     private ContentViewCore mContentViewCore;
@@ -50,7 +51,7 @@ public class BrowserAccessibilityManager {
     private Rect mAccessibilityFocusRect;
     private boolean mIsHovering;
     private int mLastHoverId = View.NO_ID;
-    private int mCurrentRootId;
+    protected int mCurrentRootId;
     private final int[] mTempLocation = new int[2];
     private final ViewGroup mView;
     private boolean mUserHasTouchExplored;
@@ -60,7 +61,7 @@ public class BrowserAccessibilityManager {
     private int mSelectionStartIndex;
     private int mSelectionEndIndex;
     protected int mAccessibilityFocusId;
-    protected boolean mVisible = true;
+    private Runnable mSendWindowContentChangedRunnable;
 
     /**
      * Create a BrowserAccessibilityManager object, which is owned by the C++
@@ -74,6 +75,9 @@ public class BrowserAccessibilityManager {
             ContentViewCore contentViewCore) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             return new LollipopBrowserAccessibilityManager(
+                    nativeBrowserAccessibilityManagerAndroid, contentViewCore);
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            return new KitKatBrowserAccessibilityManager(
                     nativeBrowserAccessibilityManagerAndroid, contentViewCore);
         } else {
             return new BrowserAccessibilityManager(
@@ -118,8 +122,13 @@ public class BrowserAccessibilityManager {
     }
 
     @CalledByNative
-    private void onNativeObjectDestroyed() {
-        if (mContentViewCore.getBrowserAccessibilityManager() == this) {
+    private void onNativeObjectDestroyed(long nativeBrowserAccessibilityManagerAndroid) {
+        // There are multiple native objects, one for each frame, but we only have a pointer
+        // to the native object for the root frame.
+        if (nativeBrowserAccessibilityManagerAndroid != mNativeObj) return;
+
+        if (mContentViewCore != null
+                && mContentViewCore.getBrowserAccessibilityManager() == this) {
             mContentViewCore.setBrowserAccessibilityManager(null);
         }
         mNativeObj = 0;
@@ -131,21 +140,6 @@ public class BrowserAccessibilityManager {
      */
     public AccessibilityNodeProvider getAccessibilityNodeProvider() {
         return mAccessibilityNodeProvider;
-    }
-
-    /**
-     * Set whether the web content made accessible by this class is currently visible.
-     * Set it to false if the web view is still on the screen but it's obscured by a
-     * dialog or overlay. This will make every virtual view in the web hierarchy report
-     * that it's not visible, and not accessibility focusable.
-     *
-     * @param visible Whether the web content is currently visible and not obscured.
-     */
-    public void setVisible(boolean visible) {
-        if (visible == mVisible) return;
-
-        mVisible = visible;
-        mView.sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
     }
 
     /**
@@ -234,8 +228,6 @@ public class BrowserAccessibilityManager {
                 return true;
             case AccessibilityNodeInfo.ACTION_CLICK:
                 nativeClick(mNativeObj, virtualViewId);
-                sendAccessibilityEvent(virtualViewId,
-                        AccessibilityEvent.TYPE_VIEW_CLICKED);
                 return true;
             case AccessibilityNodeInfo.ACTION_FOCUS:
                 nativeFocus(mNativeObj, virtualViewId);
@@ -325,6 +317,10 @@ public class BrowserAccessibilityManager {
 
         if (event.getAction() == MotionEvent.ACTION_HOVER_EXIT) {
             mIsHovering = false;
+            if (mLastHoverId != View.NO_ID) {
+                sendAccessibilityEvent(mLastHoverId, AccessibilityEvent.TYPE_VIEW_HOVER_EXIT);
+                mLastHoverId = View.NO_ID;
+            }
             if (mPendingScrollToMakeNodeVisible) {
                 nativeScrollToMakeNodeVisible(
                         mNativeObj, mAccessibilityFocusId);
@@ -360,7 +356,7 @@ public class BrowserAccessibilityManager {
 
         // Invalidate the container view, since the chrome accessibility tree is now
         // ready and listed as the child of the container view.
-        mView.sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+        sendWindowContentChangedOnView();
 
         // (Re-) focus focused element, since we weren't able to create an
         // AccessibilityNodeInfo for this element before.
@@ -410,6 +406,8 @@ public class BrowserAccessibilityManager {
     @CalledByNative
     private void finishGranularityMove(String text, boolean extendSelection,
             int itemStartIndex, int itemEndIndex, boolean forwards) {
+        if (mNativeObj == 0) return;
+
         // Prepare to send both a selection and a traversal event in sequence.
         AccessibilityEvent selectionEvent = buildAccessibilityEvent(mAccessibilityFocusId,
                 AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED);
@@ -515,6 +513,41 @@ public class BrowserAccessibilityManager {
         moveAccessibilityFocusToId(newAccessibilityFocusId);
     }
 
+    /**
+     * Send a WINDOW_CONTENT_CHANGED event after a short delay. This helps throttle such
+     * events from firing too quickly during animations, for example.
+     */
+    @CalledByNative
+    private void sendDelayedWindowContentChangedEvent() {
+        if (mNativeObj == 0) return;
+
+        if (mSendWindowContentChangedRunnable != null) return;
+
+        mSendWindowContentChangedRunnable = new Runnable() {
+            @Override
+            public void run() {
+                sendWindowContentChangedOnView();
+            }
+        };
+
+        mView.postDelayed(mSendWindowContentChangedRunnable, WINDOW_CONTENT_CHANGED_DELAY_MS);
+    }
+
+    private void sendWindowContentChangedOnView() {
+        // This can be called from a timeout, so we need to make sure we're still valid.
+        if (mNativeObj == 0 || mContentViewCore == null || mView == null) return;
+
+        if (mSendWindowContentChangedRunnable != null) {
+            mView.removeCallbacks(mSendWindowContentChangedRunnable);
+            mSendWindowContentChangedRunnable = null;
+        }
+        mView.sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+    }
+
+    private void sendWindowContentChangedOnVirtualView(int virtualViewId) {
+        sendAccessibilityEvent(virtualViewId, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+    }
+
     private void sendAccessibilityEvent(int virtualViewId, int eventType) {
         // The container view is indicated by a virtualViewId of NO_ID; post these events directly
         // since there's no web-specific information to attach.
@@ -584,7 +617,7 @@ public class BrowserAccessibilityManager {
         }
 
         // Populate the minimum required fields.
-        result.setVisibleToUser(source.isVisibleToUser() && mVisible);
+        result.setVisibleToUser(source.isVisibleToUser());
         result.setEnabled(source.isEnabled());
         result.setPackageName(source.getPackageName());
         result.setClassName(source.getClassName());
@@ -612,6 +645,7 @@ public class BrowserAccessibilityManager {
 
     @CalledByNative
     private void handlePageLoaded(int id) {
+        if (mNativeObj == 0) return;
         if (mUserHasTouchExplored) return;
 
         if (mContentViewCore.shouldSetAccessibilityFocusOnPageLoad()) {
@@ -621,67 +655,86 @@ public class BrowserAccessibilityManager {
 
     @CalledByNative
     private void handleFocusChanged(int id) {
+        if (mNativeObj == 0) return;
         sendAccessibilityEvent(id, AccessibilityEvent.TYPE_VIEW_FOCUSED);
         moveAccessibilityFocusToId(id);
     }
 
     @CalledByNative
     private void handleCheckStateChanged(int id) {
+        if (mNativeObj == 0) return;
+        sendAccessibilityEvent(id, AccessibilityEvent.TYPE_VIEW_CLICKED);
+    }
+
+    @CalledByNative
+    private void handleClicked(int id) {
+        if (mNativeObj == 0) return;
         sendAccessibilityEvent(id, AccessibilityEvent.TYPE_VIEW_CLICKED);
     }
 
     @CalledByNative
     private void handleTextSelectionChanged(int id) {
+        if (mNativeObj == 0) return;
         sendAccessibilityEvent(id, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED);
     }
 
     @CalledByNative
     private void handleEditableTextChanged(int id) {
+        if (mNativeObj == 0) return;
         sendAccessibilityEvent(id, AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED);
     }
 
     @CalledByNative
     private void handleSliderChanged(int id) {
+        if (mNativeObj == 0) return;
         sendAccessibilityEvent(id, AccessibilityEvent.TYPE_VIEW_SCROLLED);
     }
 
     @CalledByNative
     private void handleContentChanged(int id) {
+        if (mNativeObj == 0) return;
         int rootId = nativeGetRootId(mNativeObj);
         if (rootId != mCurrentRootId) {
             mCurrentRootId = rootId;
-            mView.sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+            sendWindowContentChangedOnView();
         } else {
-            sendAccessibilityEvent(id, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+            sendWindowContentChangedOnVirtualView(id);
         }
     }
 
     @CalledByNative
     private void handleNavigate() {
+        if (mNativeObj == 0) return;
         mAccessibilityFocusId = View.NO_ID;
         mAccessibilityFocusRect = null;
         mUserHasTouchExplored = false;
         // Invalidate the host, since its child is now gone.
-        mView.sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+        sendWindowContentChangedOnView();
     }
 
     @CalledByNative
     private void handleScrollPositionChanged(int id) {
+        if (mNativeObj == 0) return;
         sendAccessibilityEvent(id, AccessibilityEvent.TYPE_VIEW_SCROLLED);
     }
 
     @CalledByNative
     private void handleScrolledToAnchor(int id) {
+        if (mNativeObj == 0) return;
         moveAccessibilityFocusToId(id);
     }
 
     @CalledByNative
     private void handleHover(int id) {
+        if (mNativeObj == 0) return;
         if (mLastHoverId == id) return;
+        if (!mIsHovering) return;
 
         // Always send the ENTER and then the EXIT event, to match a standard Android View.
         sendAccessibilityEvent(id, AccessibilityEvent.TYPE_VIEW_HOVER_ENTER);
-        sendAccessibilityEvent(mLastHoverId, AccessibilityEvent.TYPE_VIEW_HOVER_EXIT);
+        if (mLastHoverId != View.NO_ID) {
+            sendAccessibilityEvent(mLastHoverId, AccessibilityEvent.TYPE_VIEW_HOVER_EXIT);
+        }
         mLastHoverId = id;
     }
 
@@ -715,7 +768,7 @@ public class BrowserAccessibilityManager {
         node.setPassword(password);
         node.setScrollable(scrollable);
         node.setSelected(selected);
-        node.setVisibleToUser(visibleToUser && mVisible);
+        node.setVisibleToUser(visibleToUser);
 
         node.setMovementGranularities(
                 AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER
@@ -724,7 +777,7 @@ public class BrowserAccessibilityManager {
 
         if (mAccessibilityFocusId == virtualViewId) {
             node.setAccessibilityFocused(true);
-        } else if (mVisible) {
+        } else {
             node.setAccessibilityFocused(false);
         }
     }
@@ -768,7 +821,7 @@ public class BrowserAccessibilityManager {
 
         if (mAccessibilityFocusId == virtualViewId) {
             node.addAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS);
-        } else if (mVisible) {
+        } else {
             node.addAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS);
         }
 
@@ -785,14 +838,20 @@ public class BrowserAccessibilityManager {
 
     @SuppressLint("NewApi")
     @CalledByNative
-    private void setAccessibilityNodeInfoContentDescription(
-            AccessibilityNodeInfo node, String contentDescription, boolean annotateAsLink) {
+    private void setAccessibilityNodeInfoText(
+            AccessibilityNodeInfo node, String text, boolean annotateAsLink,
+            boolean isEditableText) {
+        CharSequence charSequence = text;
         if (annotateAsLink) {
-            SpannableString spannable = new SpannableString(contentDescription);
+            SpannableString spannable = new SpannableString(text);
             spannable.setSpan(new URLSpan(""), 0, spannable.length(), 0);
-            node.setContentDescription(spannable);
+            charSequence = spannable;
+        }
+        if (isEditableText) {
+            node.setText(charSequence);
+            node.setEditable(true);
         } else {
-            node.setContentDescription(contentDescription);
+            node.setContentDescription(charSequence);
         }
     }
 
@@ -853,6 +912,12 @@ public class BrowserAccessibilityManager {
                 moveAccessibilityFocusToIdAndRefocusIfNeeded(virtualViewId);
             }
         }
+    }
+
+    @CalledByNative
+    protected void setAccessibilityNodeInfoKitKatAttributes(AccessibilityNodeInfo node,
+            boolean isRoot, String roleDescription) {
+        // Requires KitKat or higher.
     }
 
     @CalledByNative
@@ -1042,4 +1107,6 @@ public class BrowserAccessibilityManager {
             long nativeBrowserAccessibilityManagerAndroid, int id);
     private native boolean nativeScroll(
             long nativeBrowserAccessibilityManagerAndroid, int id, int direction);
+    protected native String nativeGetSupportedHtmlElementTypes(
+            long nativeBrowserAccessibilityManagerAndroid);
 }

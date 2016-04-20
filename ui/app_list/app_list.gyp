@@ -20,6 +20,7 @@
         '../base/ui_base.gyp:ui_base',
         '../base/ime/ui_base_ime.gyp:ui_base_ime',
         '../compositor/compositor.gyp:compositor',
+        '../display/display.gyp:display',
         '../events/events.gyp:events_base',
         '../gfx/gfx.gyp:gfx',
         '../gfx/gfx.gyp:gfx_geometry',
@@ -317,17 +318,6 @@
             ['exclude', 'cocoa/'],
           ],
         }],
-        # See http://crbug.com/162998#c4 for why this is needed.
-        ['OS=="linux" and use_allocator!="none"', {
-          'dependencies': [
-            '../../base/allocator/allocator.gyp:allocator',
-          ],
-        }],
-        ['OS=="win" and win_use_allocator_shim==1', {
-          'dependencies': [
-            '../../base/allocator/allocator.gyp:allocator',
-          ],
-        }],
       ],
       # Disable c4267 warnings until we fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, ],
@@ -368,11 +358,6 @@
               'dependencies': [
                 '../../sandbox/sandbox.gyp:sandbox',
                 '../../content/content.gyp:sandbox_helper_win',
-              ],
-            }],
-            ['OS=="win" and component!="shared_library" and win_use_allocator_shim==1', {
-              'dependencies': [
-                '<(DEPTH)/base/allocator/allocator.gyp:allocator',
               ],
             }],
           ],
